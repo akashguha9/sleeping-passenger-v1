@@ -1,58 +1,13 @@
-﻿# ENV & SECRETS
-.env
-.env.*
-*.env
-
-# KEYS & CERTS
-*.pem
-*.key
-*.crt
-
-# LOGS
+﻿.DS_Store
 *.log
-logs/
-*.out
-
-# DATA FILES
-*.csv
-*.xlsx
-*.parquet
-*.db
-*.sqlite
-
-# MODELS / HEAVY FILES
-models/
-checkpoints/
-*.pt
-*.pth
-*.h5
-
-# CACHE
-__pycache__/
 *.pyc
-.cache/
-.tmp/
-
-# NODE / FRONTEND
-node_modules/
-dist/
-build/
-
-# IDE
-.vscode/
-.idea/
-
-# OS
-.DS_Store
-Thumbs.db
-
-# INTERNAL STRUCTURE (CRITICAL)
+__pycache__/
+.env
 secrets/
-prod_config/
-backtests/
-internal_docs/
-
-# TEMP FILES
-*.zip
-*.tar.gz
-*.bak
+venv/
+node_modules/
+.idea/
+.vscode/
+state/
+logs/
+*.xlsx~

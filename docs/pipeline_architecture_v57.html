@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Geopolitical Signal Pipeline V5.7+ — Full Architecture</title>
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#070810;
+  --bg2:#0d0f1e;
+  --bg3:#111428;
+  --accent1:#e94560;
+  --accent2:#00b4d8;
+  --accent3:#ffd60a;
+  --accent4:#7b2fbe;
+  --accent5:#06d6a0;
+  --text:#e8eaf6;
+  --text2:#9091a4;
+  --text3:#565770;
+  --border:rgba(232,234,246,0.08);
+  --border2:rgba(232,234,246,0.15);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--text);font-family:'Syne',sans-serif;min-height:100vh;overflow-x:hidden}
+/* Animated background grid */
+body::before{
+  content:'';position:fixed;inset:0;
+  background-image:linear-gradient(var(--border) 1px,transparent 1px),linear-gradient(90deg,var(--border) 1px,transparent 1px);
+  background-size:40px 40px;pointer-events:none;z-index:0;
+}
+
+/* HEADER */
+.header{position:relative;z-index:10;padding:3rem 2rem 2rem;border-bottom:1px solid var(--border2);background:linear-gradient(180deg,rgba(233,69,96,0.06) 0%,transparent 100%)}
+.header-inner{max-width:1400px;margin:0 auto;display:flex;align-items:flex-end;justify-content:space-between;flex-wrap:wrap;gap:1.5rem}
+.score-block{display:flex;align-items:baseline;gap:1rem}
+.score-num{font-size:clamp(4rem,8vw,7rem);font-weight:800;color:var(--text);letter-spacing:-4px;line-height:1}
+.score-label{font-family:'Space Mono',monospace;font-size:12px;color:var(--text2);letter-spacing:2px;text-transform:uppercase}
+.header-title{text-align:right}
+.header-title h1{font-size:clamp(1.2rem,2.5vw,1.8rem);font-weight:700;letter-spacing:-0.5px;line-height:1.2}
+.header-title h1 span{color:var(--accent1)}
+.header-title p{font-family:'Space Mono',monospace;font-size:11px;color:var(--text2);margin-top:6px;letter-spacing:1px}
+
+/* STATUS BAR */
+.statusbar{position:relative;z-index:10;background:var(--bg2);border-bottom:1px solid var(--border);padding:12px 2rem;display:flex;gap:2rem;flex-wrap:wrap;align-items:center}
+.statusbar-inner{max-width:1400px;margin:0 auto;width:100%;display:flex;gap:1.5rem;flex-wrap:wrap;align-items:center}
+.stat{display:flex;flex-direction:column;gap:2px}
+.stat-label{font-family:'Space Mono',monospace;font-size:9px;color:var(--text3);letter-spacing:2px;text-transform:uppercase}
+.stat-value{font-family:'Space Mono',monospace;font-size:13px;font-weight:700}
+.stat-value.red{color:var(--accent1)}
+.stat-value.yellow{color:var(--accent3)}
+.stat-value.green{color:var(--accent5)}
+.stat-value.blue{color:var(--accent2)}
+.stat-divider{width:1px;height:28px;background:var(--border2);margin:0 4px}
+
+/* MASTER EQUATION BAR */
+.eq-bar{position:relative;z-index:10;padding:1rem 2rem;background:linear-gradient(90deg,rgba(123,47,190,0.15),rgba(0,180,216,0.08));border-bottom:1px solid var(--border);overflow-x:auto}
+.eq-inner{max-width:1400px;margin:0 auto;display:flex;gap:1.5rem;flex-wrap:wrap}
+.eq-item{font-family:'Space Mono',monospace;font-size:10px;color:var(--accent2);white-space:nowrap;padding:4px 10px;background:rgba(0,180,216,0.06);border:1px solid rgba(0,180,216,0.2);border-radius:4px}
+
+/* MAIN LAYOUT */
+.main{max-width:1400px;margin:0 auto;padding:2rem;position:relative;z-index:10}
+
+/* SECTION LABEL */
+.section-label{font-family:'Space Mono',monospace;font-size:10px;letter-spacing:3px;text-transform:uppercase;color:var(--text3);margin-bottom:1rem;display:flex;align-items:center;gap:8px}
+.section-label::after{content:'';flex:1;height:1px;background:var(--border)}
+
+/* PIPELINE FLOW */
+.pipeline{display:flex;flex-direction:column;gap:0}
+.layer{position:relative;margin-bottom:2px}
+.layer-connector{width:2px;height:20px;background:linear-gradient(180deg,var(--accent1),transparent);margin:0 auto;opacity:0.4}
+.layer-card{border:1px solid var(--border);border-radius:8px;overflow:hidden;transition:border-color 0.2s}
+.layer-card:hover{border-color:var(--border2)}
+.layer-header{display:flex;align-items:center;gap:1rem;padding:14px 18px;cursor:pointer;position:relative}
+.layer-num{font-family:'Space Mono',monospace;font-size:10px;color:var(--text3);min-width:28px}
+.layer-accent{width:3px;height:28px;border-radius:2px;flex-shrink:0}
+.layer-title{font-size:15px;font-weight:700;flex:1}
+.layer-desc{font-family:'Space Mono',monospace;font-size:10px;color:var(--text2);display:none}
+@media(min-width:700px){.layer-desc{display:block}}
+.layer-count{font-family:'Space Mono',monospace;font-size:10px;color:var(--text3);background:rgba(255,255,255,0.04);padding:2px 8px;border-radius:3px}
+.layer-modules{display:none;padding:0 18px 14px;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:6px}
+.layer-card.open .layer-modules{display:grid}
+.module-chip{background:rgba(255,255,255,0.03);border:1px solid var(--border);border-radius:5px;padding:6px 10px;font-family:'Space Mono',monospace;font-size:10px;color:var(--text2);transition:all 0.15s;cursor:default}
+.module-chip:hover{background:rgba(255,255,255,0.06);color:var(--text);border-color:var(--border2)}
+.toggle-btn{font-family:'Space Mono',monospace;font-size:9px;color:var(--text3);padding:3px 8px;border:1px solid var(--border);border-radius:3px;cursor:pointer;background:none;transition:all 0.15s;letter-spacing:1px}
+.toggle-btn:hover{border-color:var(--border2);color:var(--text2)}
+
+/* CEILING SECTION */
+.ceiling-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px;margin-bottom:2rem}
+.ceil-card{background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:12px 14px;position:relative;overflow:hidden}
+.ceil-card.at-ceil{border-color:rgba(6,214,160,0.3)}
+.ceil-card.critical{border-color:rgba(233,69,96,0.4)}
+.ceil-mod{font-family:'Space Mono',monospace;font-size:10px;color:var(--text2);letter-spacing:1px;margin-bottom:6px}
+.ceil-score{font-size:24px;font-weight:800;line-height:1;margin-bottom:2px}
+.ceil-bar{height:3px;border-radius:2px;background:rgba(255,255,255,0.06);margin:6px 0;overflow:hidden;position:relative}
+.ceil-fill-bg{position:absolute;left:0;top:0;height:100%;border-radius:2px;opacity:0.2}
+.ceil-fill{position:absolute;left:0;top:0;height:100%;border-radius:2px}
+.ceil-meta{font-family:'Space Mono',monospace;font-size:9px;color:var(--text3)}
+
+/* PROJECTION TABLE */
+.proj-table{width:100%;border-collapse:collapse;font-family:'Space Mono',monospace;font-size:11px;margin-bottom:2rem}
+.proj-table th{text-align:left;padding:8px 12px;color:var(--text3);border-bottom:1px solid var(--border);font-size:9px;letter-spacing:2px;text-transform:uppercase;font-weight:400}
+.proj-table td{padding:8px 12px;border-bottom:1px solid var(--border);vertical-align:top}
+.proj-table tr:last-child td{border-bottom:none}
+.proj-table tr:hover td{background:rgba(255,255,255,0.02)}
+
+/* BOTTOM CARDS */
+.bottom-grid{display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin-bottom:2rem}
+@media(max-width:700px){.bottom-grid{grid-template-columns:1fr}}
+.bottom-card{background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:18px}
+.bottom-card-title{font-family:'Space Mono',monospace;font-size:9px;letter-spacing:2px;text-transform:uppercase;color:var(--text3);margin-bottom:12px}
+.bottom-card p{font-size:12px;color:var(--text2);line-height:1.6;margin-bottom:8px}
+.bottom-card p:last-child{margin-bottom:0}
+.bottom-card strong{color:var(--accent1)}
+
+/* ONE-LINE TRUTHS */
+.truths{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:2rem}
+.truth{font-family:'Space Mono',monospace;font-size:9px;color:var(--text2);padding:4px 10px;border:1px solid var(--border);border-radius:3px;background:rgba(255,255,255,0.02)}
+
+/* FOOTER */
+.footer{position:relative;z-index:10;padding:1.5rem 2rem;border-top:1px solid var(--border);text-align:center;font-family:'Space Mono',monospace;font-size:9px;color:var(--text3);letter-spacing:2px}
+
+/* Glow effect on hover */
+.layer-card:hover .layer-accent{box-shadow:0 0 8px currentColor}
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="header-inner">
+    <div class="score-block">
+      <div>
+        <div class="score-num">9.57</div>
+        <div class="score-label">Pipeline Score / Ceiling 9.76</div>
+      </div>
+    </div>
+    <div class="header-title">
+      <h1>Geopolitical Signal Pipeline <span>V5.7+</span></h1>
+      <p>Full Architecture · April 11 2026 · Session ~1400 · T=6 · Gap 0.19</p>
+    </div>
+  </div>
+</div>
+
+<div class="statusbar">
+  <div class="statusbar-inner">
+    <div class="stat"><div class="stat-label">Score</div><div class="stat-value green">9.57</div></div>
+    <div class="stat-divider"></div>
+    <div class="stat"><div class="stat-label">Gap</div><div class="stat-value red">0.19</div></div>
+    <div class="stat-divider"></div>
+    <div class="stat"><div class="stat-label">T Closed</div><div class="stat-value red">6</div></div>
+    <div class="stat-divider"></div>
+    <div class="stat"><div class="stat-label">T Target</div><div class="stat-value yellow">10 (Apr 25)</div></div>
+    <div class="stat-divider"></div>
+    <div class="stat"><div class="stat-label">MW ε</div><div class="stat-value red">1.0</div></div>
+    <div class="stat-divider"></div>
+    <div class="stat"><div class="stat-label">E_operator</div><div class="stat-value red">0.30</div></div>
+    <div class="stat-divider"></div>
+    <div class="stat"><div class="stat-label">Mode</div><div class="stat-value yellow">PAPER / SNIPER</div></div>
+    <div class="stat-divider"></div>
+    <div class="stat"><div class="stat-label">Repo</div><div class="stat-value green">be6b069 frozen</div></div>
+    <div class="stat-divider"></div>
+    <div class="stat"><div class="stat-label">ATOM</div><div class="stat-value red">⚠ 95→35 PENDING</div></div>
+    <div class="stat-divider"></div>
+    <div class="stat"><div class="stat-label">Build Starts</div><div class="stat-value blue">May 13</div></div>
+    <div class="stat-divider"></div>
+    <div class="stat"><div class="stat-label">Real Capital</div><div class="stat-value blue">August</div></div>
+  </div>
+</div>
+
+<div class="eq-bar">
+  <div class="eq-inner" id="eqs"></div>
+</div>
+
+<div class="main">
+
+  <!-- PIPELINE LAYERS -->
+  <div class="section-label">Full Pipeline Architecture — click any layer to expand modules</div>
+  <div class="pipeline" id="pipeline"></div>
+
+  <!-- CEILING ANALYSIS -->
+  <div class="section-label" style="margin-top:2rem">Module Scores — Current vs Ceiling</div>
+  <div class="ceiling-grid" id="ceilgrid"></div>
+
+  <!-- SCORE PROJECTION -->
+  <div class="section-label">Score Projection to Ceiling</div>
+  <table class="proj-table" id="projtable"></table>
+
+  <!-- CLAUDE CODE ANSWER -->
+  <div class="section-label">Claude Code + One Day Build — Honest Assessment</div>
+  <div class="bottom-grid">
+    <div class="bottom-card">
+      <div class="bottom-card-title">What Claude Code actually is</div>
+      <p>Claude Code is a terminal-based agentic coding tool. You give it a task in natural language. It reads files, writes code, runs tests, installs packages, fixes errors, and iterates — all without you writing a line. It runs in your terminal, connects to your filesystem, and has web search. It's not a chatbot writing code. It's an agent executing a build.</p>
+      <p><strong>What it does well:</strong> scaffolding entire projects from a spec, wiring APIs with known documentation (Grok, Reddit, FinBERT all have clean docs), writing boilerplate, debugging, restructuring files, writing tests. It's genuinely extraordinary for getting from zero to working prototype.</p>
+      <p><strong>What it does poorly:</strong> novel architecture decisions requiring deep domain judgment, calibrating ML model weights, replacing the signal quality judgments that your 1400-session architecture represents. It builds the plumbing. You provide the decisions about what the plumbing should carry.</p>
+    </div>
+    <div class="bottom-card">
+      <div class="bottom-card-title">Can you build the full S9 stack in one day?</div>
+      <p><strong>Honest answer: Phase 1 core stack — yes, realistically 6-10 hours with Claude Code.</strong></p>
+      <p>feedparser + PRAW setup: 30 min. Grok API integration: 45 min. Basic signal scoring loop: 2 hours. FinBERT sentiment pipeline: 2 hours. APScheduler for cron jobs: 30 min. Basic Moltbook logging: 1 hour. Total: ~7 hours with Claude Code doing the heavy lifting and you reviewing output.</p>
+      <p><strong>What you can't vibe-code in one day:</strong> COMPOSITE_EDGE formula calibration (that's 1400 sessions of architecture), NARRATIVE_HALF_LIFE λ parameters (empirical, requires T=35+), MW weight initialization (that's the whole CAL gap), ATOM CORE_35 field definitions (you have to specify those 35 fields precisely).</p>
+      <p><strong>The honest frame:</strong> Claude Code builds the <strong>instrument</strong> in one day. The <strong>music</strong> — the pipeline's decision architecture — took 1400 sessions and cannot be prompted into existence. One day gets you to E_operator 0.35. The rest is still trades.</p>
+    </div>
+  </div>
+
+  <div class="bottom-grid">
+    <div class="bottom-card">
+      <div class="bottom-card-title">Recommended one-day Claude Code session plan</div>
+      <p><strong>Hour 1-2:</strong> Prompt Claude Code to scaffold the full repo structure: /ingestion, /scoring, /execution, /moltbook, /config. Have it set up virtual env, install all packages, create config.py with your 35 CORE fields.</p>
+      <p><strong>Hour 2-4:</strong> feedparser + PRAW ingestion. Give it your source list (RSS feeds, subreddits). Have it write the ingestion loop, store to SQLite. Test with live data.</p>
+      <p><strong>Hour 4-6:</strong> Grok API integration. Signal layer that calls Grok on ingested text, returns structured JSON matching your DISTILLATION_FRACTION layers. Have it write the distortion scoring.</p>
+      <p><strong>Hour 6-8:</strong> FinBERT sentiment pipeline. Claude Code installs transformers, wires FinBERT to text output, produces sentiment scores per signal. Basic COMPOSITE_EDGE stub that you fill with your actual formula.</p>
+      <p><strong>Hour 8-10:</strong> APScheduler to run the pipeline on a cron. Moltbook SQLite schema matching your trade logging format. Basic CLI to view current signals.</p>
+    </div>
+    <div class="bottom-card">
+      <div class="bottom-card-title">Critical path after the one-day build</div>
+      <p><strong>Day 1 (Claude Code):</strong> Running S9 prototype. Data flows. Signals generate. No calibration yet.</p>
+      <p><strong>Week 1-2:</strong> Paper trade alongside the automated signals. Compare manual COMPOSITE_EDGE with automated output. Identify discrepancies. Calibrate.</p>
+      <p><strong>T=10 (Apr 25):</strong> First MW direction signal fires. Can now start weighting signal sources empirically.</p>
+      <p><strong>T=35 (Copa América):</strong> MW recalibration cycle 1. First time the weights are meaningful. This is when the automated signal quality starts to be trusted for sizing decisions.</p>
+      <p><strong>The Amdahl insight:</strong> You are still the serial bottleneck. Claude Code removes the code-writing serial fraction. The decision-making serial fraction — that's still you. Automate the plumbing. Keep the judgment.</p>
+      <p><strong>Bottom line:</strong> Get Claude Code. Do the May 13 build. Expect 6-10 hours to Phase 1. Do not expect it to replace what 1400 sessions built. It builds the factory. You still run it.</p>
+    </div>
+  </div>
+
+  <!-- ONE-LINE TRUTHS -->
+  <div class="section-label">Pipeline One-Line Truths</div>
+  <div class="truths" id="truths"></div>
+
+</div>
+
+<div class="footer">GEOPOLITICAL SIGNAL PIPELINE V5.7+ · ARCHITECTURE DOCUMENT · APRIL 2026 · SCORE 9.57 / CEILING 9.76</div>
+
+<script>
+// Master equations
+const eqs=[
+  "Edge_t = (R·S·T·E) − C_t − F_t",
+  "Real_Edge = U − ΘS_m − L_total",
+  "Adjusted_Edge = CE × (1+α·GLS) × H_score",
+  "λ* = λ_base × (1+k/TTT) / (1+GLS) / (1+PPS) / m̂",
+  "TFI = H × A (GNH formula)",
+  "MVP_t = f(CPU,GPU,RAM,ROM) · g(Landa,Alex,Lalo,Chigurh) · (1+ε_t)",
+  "BeliefBias = k / (1+TimeToTruth)"
+];
+document.getElementById("eqs").innerHTML=eqs.map(e=>`<div class="eq-item">${e}</div>`).join('');
+
+// Pipeline layers
+const layers=[
+  {num:"00",title:"Pre-Pre Game — Total Archive Consultation",desc:"Before any signal evaluation. Full memory check.",accent:"#e94560",modules:["CLAUDIA Daily Scan","GLS_t Global Liquidity State ∈[−1,+1]","NARRATIVE_HALF_LIFE_ENGINE λ classes A-D","TIME_TO_TRUTH_ENGINE BeliefBias","AKASHIC_SCORE A1-A7 simultaneous","THESIS_FAILURE_INDEX H×A (GNH)","INTERPRETATION_DIVERGENCE_SCANNER","POWER_SUPPRESSION_GATE","RETROSYNTHESIS_GATE target→precursors","PONDERING_PROTOCOL pre-computed scenarios","CROSS_TEMPORAL_ANALOGUE structural twins","WRONG_PATH_REGISTER impurity taxonomy"]},
+  {num:"01",title:"Signal Intake — S0 Refinery",desc:"Fraction, distort, qualify, score.",accent:"#00b4d8",modules:["feedparser RSS ingestion (S9 build)","PRAW Reddit signals (S9 build)","Grok API Layer 1 native X data","DISTILLATION_FRACTION L1-L5","RSS_CORROBORATION_GATE","COORDINATION_BURST_DETECTOR","LLM_CURATION_BIAS_FLAG","BODY_RATIO_GATE commitment score","WICK_REJECTION_SCORE institutional zones","IB_COUNT_GATE consecutive inside bars","GAMMA_PIN_SCANNER options OI level","SOURCE_ISP_HIERARCHY phase-dependent"]},
+  {num:"02",title:"Belief State — S1 Engine",desc:"Mechanism, phase, tense, resistance.",accent:"#7b2fbe",modules:["TEMPORAL_GRAMMAR_CLASSIFIER Γ(X,t,ΔX,d)","REACTION_CLASSIFIER ψ_t SN1/SN2/E2/ARO","TRANSITION_ENGINE T_ij = P_i(t-1)·P_j(t)·Φ","INERTIA_TRACKER m̂ = h(ρ,τ,σ,flow)","SEQUENCE_STATE Probe→Shape→Pressure→Trap→Strike","CHAOS_SUBTYPE Theatrical/Controlled/Hidden/Structural","REFLEXIVITY_LOOP_DETECTOR R_index","SINGLE_NODE_DEPENDENCY_SCAN SND","ADOPTION_FRICTION_MODEL AF","INTERPRETATION_DIVERGENCE ΔPrice=Σ_k·ΔB_k","NARRATIVE_HALF_LIFE residue B_t","DORMANT_CAPACITY_DETECTOR"]},
+  {num:"03",title:"Regime Detection — S7 Engine",desc:"What environment is this signal entering.",accent:"#ffd60a",modules:["S7 HMM 8-state classifier","AVALANCHE_MATRIX W_ij × e^{−λd_ij}","HARMONIC_INTERFERENCE_SCORE H_score","CRITICAL_PERIOD_DETECTOR Plasticity(t)","DECAY_PHASE_CLASSIFIER 4 phases","GNH_SCORE multi-domain failure profile","ENVIRONMENTAL_FRAGILITY F_t","NARRATIVE_HALF_LIFE λ* modifiers","GLOBAL_LIQUIDITY_STATE GLS_t","TIME_TO_TRUTH_ENGINE TTT clock","BUBBLE_FRAGILITY Heat×Leverage/Support","GAMMA_SQUEEZE_CASCADE EXPIRY_FLAG"]},
+  {num:"04",title:"Decision Gate — S35",desc:"Full logical audit. a priori inviolable. LNC scan.",accent:"#06d6a0",modules:["UPSC_FUNNEL Prelims→Mains→Interview","APRIORI_INVIOLABLE_REGISTER Class I-III","LNC_CONTRADICTION_SCANNER ¬(P∧¬P)","SYNTHETIC_APRIORI_GATE SA1-SA5","ASPIRATION_WINDOW_SEARCH","ITERATIVE_DEEPENING D1→D2→D3","LEAKAGE_REGISTER L_time+exec+info+crowd","ENVELOPMENT_RISK_SCORE","KILLER_ACQUISITION_TEST KA_risk","PLATFORM_GOVERNANCE_GATE E_operator","AKASHIC_SCORE ≥ 6.5 / 10 required","leave_score ≥ 8.5 → FIRE_MODE"]},
+  {num:"05",title:"Operator Quality — S5",desc:"Is the generator of decisions fit to generate.",accent:"#e94560",modules:["OPERATOR_READINESS_ENGINE biometric z-scores","ACTIVATION_CLASSIFIER REDLINE/HOT/FLOW/FLAT/DRAINED","ATTENTION_ALLOCATION_SCORE Priority_i","EMOTIONAL_TAGGING_REGISTER λ·Emotional_Tag","BREATH_RESET_PROTOCOL SpiralRisk","DELTA_V_BUDGET session expenditure","IMPURITY_TYPE_CLASSIFIER C1-C4","ENERGY_RETURN_SCORE η = E_out/E_in","FORD_AUTHORIAL_RECUSAL pre-authored constraints","REHOBOAM_CHECK MW self-perpetuation audit","TARKIN_DOCTRINE Deterrence_Credibility","RUST_COHLE_CONSTRAINT operational suppression"]},
+  {num:"06",title:"Execution Layer — S4",desc:"Execute once. No hesitation. Pre-authored gates.",accent:"#00b4d8",modules:["FIRE_MODE SNIPER (QUARTER_UNIT until T=10)","MUSHIN min τ_cog after validation","SPLIT_STEP_TIMING t* = argmin|B(t)−P(t)|","STAGE_SEPARATION_GATE Q_sep score","GRADUATED_EXIT_PROTOCOL Modes I-VII","GONDOR_BEACON_PROTOCOL pre-arranged binary","HARD_STOP −10% a priori inviolable","OPERATIONAL_SUPPRESSION_PROTOCOL","THETA_ACCELERATION exit before Phase 3","SIGNAL_BEACON_CONDITIONS pre-lit","BODY_RATIO at entry > 0.65","WICK_REJECTION entry geometry check"]},
+  {num:"07",title:"Calibration Engine — CAL / Moltbook",desc:"Every closed trade updates the system. MW ε=1.0 → 0.56 at T=10.",accent:"#ffd60a",modules:["MOLTBOOK (signal,action,PQS,CLV,outcome)","MW recalibration T=6 ε=1.0 → T=10 ε=0.56","CROSS_TEMPORAL_ANALOGUE P(win|θ_t)","WRONG_PATH_REGISTER WPR impurity types","THESIS_FINGERPRINT Zobrist hash","ARCHITECTURAL_INVARIANCE Conservation_Score","REHOBOAM_CHECK UCB1 outlier preservation","ENERGY_RETURN_SCORE per trade history","GNH_SCORE retrospective on closed trades","CAL 5.37 → ~9.2 by August","MONDO_PROTOCOL: T is the +1cm","E_t_value ∝ T² compounding"]}
+];
+
+const pipelineEl=document.getElementById("pipeline");
+layers.forEach((l,i)=>{
+  const card=document.createElement("div");
+  card.className="layer";
+  if(i>0) card.innerHTML+='<div class="layer-connector"></div>';
+  const html=`
+    <div class="layer-card" id="layer${i}">
+      <div class="layer-header" onclick="toggleLayer(${i})">
+        <div class="layer-num">${l.num}</div>
+        <div class="layer-accent" style="background:${l.accent};box-shadow:0 0 6px ${l.accent}44"></div>
+        <div class="layer-title">${l.title}</div>
+        <div class="layer-desc">${l.desc}</div>
+        <div class="layer-count">${l.modules.length} modules</div>
+        <button class="toggle-btn" id="btn${i}">EXPAND</button>
+      </div>
+      <div class="layer-modules" id="modules${i}">
+        ${l.modules.map(m=>`<div class="module-chip">${m}</div>`).join('')}
+      </div>
+    </div>`;
+  card.innerHTML+=html;
+  pipelineEl.appendChild(card);
+});
+
+function toggleLayer(i){
+  const card=document.getElementById(`layer${i}`);
+  const btn=document.getElementById(`btn${i}`);
+  card.classList.toggle("open");
+  btn.textContent=card.classList.contains("open")?"CLOSE":"EXPAND";
+}
+
+// Ceiling module cards
+const modules=[
+  {c:"S0", cur:9.51,ceil:9.8, col:"#00b4d8",tag:"tooling"},
+  {c:"S1", cur:9.53,ceil:9.8, col:"#7b2fbe",tag:"empirical"},
+  {c:"S2", cur:9.80,ceil:9.8, col:"#06d6a0",tag:"ceiling"},
+  {c:"S3A",cur:9.14,ceil:9.2, col:"#ffd60a",tag:"structural"},
+  {c:"S3B",cur:8.95,ceil:9.8, col:"#00b4d8",tag:"tooling"},
+  {c:"S35",cur:9.80,ceil:9.8, col:"#06d6a0",tag:"ceiling"},
+  {c:"S4", cur:9.80,ceil:9.9, col:"#06d6a0",tag:"ceiling"},
+  {c:"ATOM",cur:8.90,ceil:9.8,col:"#e94560",tag:"RETIRE NOW"},
+  {c:"S5", cur:8.41,ceil:9.5, col:"#7b2fbe",tag:"empirical"},
+  {c:"S7", cur:9.65,ceil:9.8, col:"#ffd60a",tag:"empirical"},
+  {c:"S8", cur:9.80,ceil:9.9, col:"#06d6a0",tag:"ceiling"},
+  {c:"S9", cur:8.38,ceil:9.7, col:"#00b4d8",tag:"May 13 build"},
+  {c:"CAL",cur:5.37,ceil:10.0,col:"#e94560",tag:"T-dependent"},
+];
+
+const ceilGrid=document.getElementById("ceilgrid");
+modules.forEach(m=>{
+  const gap=(m.ceil-m.cur).toFixed(2);
+  const isCeil=m.tag==="ceiling";
+  const isCrit=m.c==="ATOM"||m.c==="CAL";
+  ceilGrid.innerHTML+=`
+    <div class="ceil-card${isCeil?" at-ceil":""}${isCrit?" critical":""}">
+      <div class="ceil-mod">${m.c} · ${m.tag}</div>
+      <div class="ceil-score" style="color:${m.col}">${m.cur.toFixed(2)}</div>
+      <div class="ceil-bar">
+        <div class="ceil-fill-bg" style="width:${m.ceil/10*100}%;background:${m.col}"></div>
+        <div class="ceil-fill" style="width:${m.cur/10*100}%;background:${m.col}"></div>
+      </div>
+      <div class="ceil-meta">ceil ${m.ceil} · gap ${gap}</div>
+    </div>`;
+});
+
+// Projection table
+const proj=[
+  {date:"Apr 25",score:"9.58",delta:"+0.01",driver:"T=10 closes · MW ε=0.56 fires · UNG/FCG stops likely"},
+  {date:"May 13",score:"9.58",delta:"—",    driver:"API install day · Score moves end of May when running"},
+  {date:"May 31",score:"9.62",delta:"+0.04",driver:"S9+0.80 · ATOM retired+0.50 · S0+0.15 · S3B+0.30"},
+  {date:"Jun 30",score:"9.65",delta:"+0.03",driver:"FinBERT+Poly live · first automated signal output · CAL ↑"},
+  {date:"Jul 31",score:"9.70",delta:"+0.05",driver:"IBKR paper · MW loop live · δ_exec improving · E_op ↑"},
+  {date:"August",score:"9.74",delta:"+0.04",driver:"Real capital · E_op>0.80 · Gap ~0.02"},
+  {date:"~2027", score:"9.76",delta:"+0.02",driver:"Ceiling: T=120+ · full MW convergence · irreducible gap ~0.02"},
+];
+const tbl=document.getElementById("projtable");
+tbl.innerHTML=`<thead><tr><th>Date</th><th>Score</th><th>Δ</th><th>Driver</th></tr></thead><tbody>`+
+  proj.map(r=>`<tr><td style="color:var(--text2)">${r.date}</td><td style="color:${r.score>='9.70'?'#06d6a0':r.score>='9.62'?'#ffd60a':'#00b4d8'};font-weight:700">${r.score}</td><td style="color:${r.delta==='—'?'var(--text3)':'#e94560'}">${r.delta}</td><td style="color:var(--text2)">${r.driver}</td></tr>`).join('')+`</tbody>`;
+
+// Truths
+const truths=["Capital moves before language.","Loud narrative without flow is weak truth.","Mispricing late is not edge — it is bait.","Every trade spends future freedom.","The gap IS the edge.","Survival funds asymmetry.","Price is not the present — it is reconciliation.","The record falls when the reps have earned it.","The capacity was always there. The default state was suppressing it.","Architecture is complete. Gap closes with T.","First identify the game, then play it.","The visible layer is often bait.","Simulate first, decide later.","The system may own its own rebels.","Endings can be cosmetic.","¬(P ∧ ¬P) — the pipeline cannot hold contradictions.","The HARD_STOP is a priori. No evidence can falsify it.","People come back for the sauce, not the sandwich.","T is the +1cm. Add trades, not sessions."];
+document.getElementById("truths").innerHTML=truths.map(t=>`<div class="truth">${t}</div>`).join('');
+</script>
+</body>
+</html>
