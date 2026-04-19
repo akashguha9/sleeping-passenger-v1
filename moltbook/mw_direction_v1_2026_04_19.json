@@ -1,0 +1,38 @@
+{
+  "signal_id": "MW_DIRECTION_V1_2026_04_19",
+  "unlocked_at_t_count": 10,
+  "epsilon_before": 1.0,
+  "epsilon_after": 0.56,
+  "calibration_data_points_n": 4,
+  "clean_pattern_observed": true,
+  "pattern": {
+    "high_ce_approved_executed": {
+      "trades": ["TLT +1.23%", "TIP +4.19%"],
+      "outcomes": "2W / 0L",
+      "mean_ce_at_entry": 0.65,
+      "mean_pnl_pct": 2.71,
+      "directional_bias": "POSITIVE"
+    },
+    "low_ce_chaos_executed": {
+      "trades": ["UNG -4.49%", "FCG -8.67%"],
+      "outcomes": "0W / 2L",
+      "mean_ce_at_entry": 0.325,
+      "mean_pnl_pct": -6.58,
+      "directional_bias": "NEGATIVE"
+    },
+    "ce_delta": 0.325,
+    "pnl_delta_pct": 9.29,
+    "mw_lift_per_ce_point": 28.58
+  },
+  "provisional_weights": {
+    "approved_full_pipeline_entries": "weight 1.0 at current sizing",
+    "chaos_override_entries": "weight 0.0 — veto enforced",
+    "near_threshold_entries": "weight scales with CE × BCP × SBC composite"
+  },
+  "next_milestones": {
+    "T_35": "logistic regression weights firmed",
+    "T_50": "full empirical MW direction signal",
+    "S9_build_may_13": "automate calibration per-trade"
+  },
+  "notes": "Small sample (n=4) but directional signal extremely clean. Pipeline-approved 2/2 wins, CHAOS 2/2 losses. CE delta of 0.325 mapped to pnl delta of 9.29 percentage points. This is the first empirical anchor for the MW direction signal. Will continue to firm with each additional closed trade logged with full mechanism attribution."
+}
