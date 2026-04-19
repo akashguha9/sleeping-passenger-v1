@@ -64,6 +64,14 @@ MW_PATTERN_KEYS = {
     "mw_lift_per_ce_point",
 }
 
+SUPPORTED_FILENAMES = {
+    "tlt_2026q2_close.json",
+    "tip_2026q2_close.json",
+    "ung_2026q2_close.json",
+    "fcg_2026q2_close.json",
+    "mw_direction_v1_2026_04_19.json",
+}
+
 
 @dataclass
 class MoltbookBundle:
@@ -187,6 +195,9 @@ def load_moltbook_bundle(directory: Path | None = None) -> MoltbookBundle:
     mw_signals: list[dict[str, Any]] = []
 
     for path in sorted(base.glob("*.json")):
+        if path.name not in SUPPORTED_FILENAMES:
+            continue
+
         payload = _read_json(path)
         context = path.name
 

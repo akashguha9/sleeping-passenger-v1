@@ -9,10 +9,6 @@
 # successfully converting into clean pipeline entries?
 #
 # SCM_rate = clean_SYSTEM_entries / total_signals_above_CE_threshold
-#
-# CEE detects overload (too much entering at once - April 4 CHAOS cluster).
-# SCM detects conversion failure (too little entering cleanly - T=6 vs 9.57 arch).
-# They are opposite failure modes. GSCE manages the balance between them.
 
 import json
 from pathlib import Path
@@ -31,6 +27,10 @@ DIAGNOSTIC_ROUTING_ORDER = [
     "TAT_PRESSURE_STATE",
     "REALM_BIS",
 ]
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+MOLTBOOK_DIR = REPO_ROOT / "moltbook"
+SIGNAL_LEDGER_PATH = MOLTBOOK_DIR / "signal_ledger.json"
 
 
 def compute_scm_rate(clean_system_entries, total_signals_above_threshold):
@@ -96,10 +96,46 @@ def derive_clean_entries_from_moltbook(moltbook_dir: Path | None = None) -> dict
     }
 
 
+def load_signal_ledger(signal_ledger_path: Path | None = None) -> list[dict]:
+    path = signal_ledger_path or SIGNAL_LEDGER_PATH
+    if not path.exists():
+        raise FileNotFoundError(f"Missing signal ledger: {path}")
+
+    raw = path.read_text(encoding="utf-8-sig")
+    payload = json.loads(raw)
+
+    if not isinstance(payload, list):
+        raise ValueError("signal_ledger.json must contain a top-level JSON array")
+
+    for i, item in enumerate(payload):
+        if not isinstance(item, dict):
+            raise ValueError(f"signal_ledger.json item {i} must be an object")
+        required = {"signal_id", "ticker", "ce_score", "above_ce_threshold", "status"}
+        missing = required - set(item.keys())
+        if missing:
+            raise ValueError(f"signal_ledger.json item {i} missing keys: {sorted(missing)}")
+        if not isinstance(item["above_ce_threshold"], bool):
+            raise ValueError(f"signal_ledger.json item {i} above_ce_threshold must be boolean")
+        if isinstance(item["ce_score"], bool) or not isinstance(item["ce_score"], (int, float)):
+            raise ValueError(f"signal_ledger.json item {i} ce_score must be numeric")
+
+    return payload
+
+
+def derive_total_signals_above_threshold(signal_ledger_path: Path | None = None) -> dict:
+    ledger = load_signal_ledger(signal_ledger_path)
+    qualifying = [item for item in ledger if item["above_ce_threshold"] is True]
+
+    return {
+        "signal_count_total": len(ledger),
+        "signals_above_ce_threshold": len(qualifying),
+        "qualifying_signal_ids": [item["signal_id"] for item in qualifying],
+    }
+
+
 if __name__ == "__main__":
     moltbook_summary = derive_clean_entries_from_moltbook()
-
-    total_signals_above_threshold = 12
+    signal_summary = derive_total_signals_above_threshold()
 
     gate_states = {
         "GSCE_PHASE_LOCK": False,
@@ -112,14 +148,15 @@ if __name__ == "__main__":
 
     review = scm_review(
         clean_entries=moltbook_summary["clean_entries"],
-        total_signals=total_signals_above_threshold,
+        total_signals=signal_summary["signals_above_ce_threshold"],
         gate_states=gate_states,
     )
 
     output = {
         "moltbook_summary": moltbook_summary,
+        "signal_summary": signal_summary,
         "scm_review": review,
-        "note": "SCM now consumes live Moltbook close data for numerator; denominator still manual until signal ledger exists."
+        "note": "SCM now consumes live Moltbook close data for numerator and signal_ledger.json for denominator."
     }
 
     print(json.dumps(output, indent=2))
