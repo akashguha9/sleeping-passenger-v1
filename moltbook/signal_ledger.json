@@ -1,0 +1,58 @@
+﻿[
+  {
+    "signal_id": "SIG_2026_04_01_001",
+    "ticker": "TLT",
+    "ce_score": 0.62,
+    "above_ce_threshold": true,
+    "status": "EXECUTED_CLEAN"
+  },
+  {
+    "signal_id": "SIG_2026_04_02_002",
+    "ticker": "TIP",
+    "ce_score": 0.68,
+    "above_ce_threshold": true,
+    "status": "EXECUTED_CLEAN"
+  },
+  {
+    "signal_id": "SIG_2026_04_03_003",
+    "ticker": "UNG",
+    "ce_score": 0.35,
+    "above_ce_threshold": true,
+    "status": "EXECUTED_CHAOS"
+  },
+  {
+    "signal_id": "SIG_2026_04_04_004",
+    "ticker": "FCG",
+    "ce_score": 0.30,
+    "above_ce_threshold": true,
+    "status": "EXECUTED_CHAOS"
+  },
+  {
+    "signal_id": "SIG_2026_04_05_005",
+    "ticker": "GLD",
+    "ce_score": 0.60,
+    "above_ce_threshold": true,
+    "status": "WATCHLIST"
+  },
+  {
+    "signal_id": "SIG_2026_04_06_006",
+    "ticker": "RTX",
+    "ce_score": 0.71,
+    "above_ce_threshold": true,
+    "status": "WATCHLIST"
+  },
+  {
+    "signal_id": "SIG_2026_04_07_007",
+    "ticker": "ZIM",
+    "ce_score": 0.66,
+    "above_ce_threshold": true,
+    "status": "WATCHLIST"
+  },
+  {
+    "signal_id": "SIG_2026_04_08_008",
+    "ticker": "CVX",
+    "ce_score": 0.20,
+    "above_ce_threshold": false,
+    "status": "REJECTED"
+  }
+]
