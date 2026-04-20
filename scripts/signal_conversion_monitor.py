@@ -125,26 +125,40 @@ def load_signal_ledger(signal_ledger_path: Path | None = None) -> list[dict]:
 def derive_total_signals_above_threshold(signal_ledger_path: Path | None = None) -> dict:
     ledger = load_signal_ledger(signal_ledger_path)
     qualifying = [item for item in ledger if item["above_ce_threshold"] is True]
+    status_counts_above_threshold: dict[str, int] = {}
+
+    for item in qualifying:
+        status = item["status"]
+        status_counts_above_threshold[status] = status_counts_above_threshold.get(status, 0) + 1
 
     return {
         "signal_count_total": len(ledger),
         "signals_above_ce_threshold": len(qualifying),
         "qualifying_signal_ids": [item["signal_id"] for item in qualifying],
+        "status_counts_above_threshold": status_counts_above_threshold,
+    }
+
+
+def derive_gate_states_from_live_data(moltbook_summary: dict, signal_summary: dict) -> dict:
+    status_counts = signal_summary.get("status_counts_above_threshold", {})
+
+    watchlist_count = status_counts.get("WATCHLIST", 0)
+    chaos_count = status_counts.get("EXECUTED_CHAOS", 0)
+
+    return {
+        "GSCE_PHASE_LOCK": watchlist_count > 0,
+        "CEE_OVERLOAD": False,
+        "MTL_TIMING": False,
+        "NAR_ARCHETYPE": False,
+        "TAT_PRESSURE_STATE": False,
+        "REALM_BIS": chaos_count > 0 and moltbook_summary.get("chaos_entries", 0) > 0,
     }
 
 
 if __name__ == "__main__":
     moltbook_summary = derive_clean_entries_from_moltbook()
     signal_summary = derive_total_signals_above_threshold()
-
-    gate_states = {
-        "GSCE_PHASE_LOCK": False,
-        "CEE_OVERLOAD": False,
-        "MTL_TIMING": False,
-        "NAR_ARCHETYPE": False,
-        "TAT_PRESSURE_STATE": False,
-        "REALM_BIS": False,
-    }
+    gate_states = derive_gate_states_from_live_data(moltbook_summary, signal_summary)
 
     review = scm_review(
         clean_entries=moltbook_summary["clean_entries"],
@@ -155,6 +169,7 @@ if __name__ == "__main__":
     output = {
         "moltbook_summary": moltbook_summary,
         "signal_summary": signal_summary,
+        "derived_gate_states": gate_states,
         "scm_review": review,
         "note": "SCM now consumes live Moltbook close data for numerator and signal_ledger.json for denominator."
     }
