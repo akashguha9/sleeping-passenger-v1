@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import json
 from dataclasses import dataclass
 from pathlib import Path
@@ -222,6 +223,48 @@ def summarize_moltbook(directory: Path | None = None) -> dict[str, Any]:
     }
 
 
+def format_moltbook_summary(summary: dict[str, Any]) -> str:
+    tickers = ", ".join(summary["tickers"]) or "none"
+    classifications = ", ".join(summary["classifications"]) or "none"
+    mw_signal_ids = ", ".join(summary["mw_signal_ids"]) or "none"
+    return "\n".join(
+        [
+            "Moltbook Summary",
+            f"trade_close_count={summary['trade_close_count']}",
+            f"mw_signal_count={summary['mw_signal_count']}",
+            f"tickers={tickers}",
+            f"classifications={classifications}",
+            f"mw_signal_ids={mw_signal_ids}",
+        ]
+    )
+
+
+def build_cli_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Load and validate curated Moltbook runtime files.")
+    parser.add_argument(
+        "--directory",
+        type=Path,
+        default=MOLTBOOK_DIR,
+        help="Override the Moltbook directory path.",
+    )
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--json", action="store_true", help="Emit machine-readable JSON.")
+    mode.add_argument("--summary", action="store_true", help="Emit a compact human-readable summary.")
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = build_cli_parser()
+    args = parser.parse_args(argv)
+
+    summary = summarize_moltbook(args.directory)
+    if args.summary:
+        print(format_moltbook_summary(summary))
+    else:
+        print(json.dumps(summary, indent=2))
+
+    return 0
+
+
 if __name__ == "__main__":
-    summary = summarize_moltbook()
-    print(json.dumps(summary, indent=2))
+    raise SystemExit(main())
