@@ -1,0 +1,166 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "narrative_intent/narrative_intent_report.schema.json",
+  "title": "NarrativeIntentReport",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "artifact_id",
+    "domain",
+    "primary_class",
+    "hook_score",
+    "distortion_score",
+    "trap_score",
+    "intent_score",
+    "narrative_intent_score",
+    "target_behavior",
+    "timing_score",
+    "beneficiary_confidence",
+    "summary"
+  ],
+  "properties": {
+    "artifact_id": {
+      "type": "string"
+    },
+    "domain": {
+      "type": "string",
+      "enum": [
+        "markets",
+        "social_media",
+        "football_messaging",
+        "interpersonal"
+      ]
+    },
+    "primary_class": {
+      "type": "string",
+      "enum": [
+        "pure_signal",
+        "noise",
+        "engineered_narrative",
+        "stabilizing",
+        "protective",
+        "exploitative",
+        "motivational",
+        "emergent",
+        "distribution",
+        "recruitment",
+        "confusion_masking"
+      ]
+    },
+    "secondary_class": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "pure_signal",
+        "noise",
+        "engineered_narrative",
+        "stabilizing",
+        "protective",
+        "exploitative",
+        "motivational",
+        "emergent",
+        "distribution",
+        "recruitment",
+        "confusion_masking",
+        null
+      ]
+    },
+    "hook_score": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 10
+    },
+    "distortion_score": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 10
+    },
+    "trap_score": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 10
+    },
+    "intent_score": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 10
+    },
+    "narrative_intent_score": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 10
+    },
+    "signal_conflict_score": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "minimum": 0,
+      "maximum": 10
+    },
+    "target_behavior": {
+      "type": "string",
+      "enum": [
+        "buy",
+        "sell",
+        "hold",
+        "wait",
+        "calm_down",
+        "comply",
+        "engage",
+        "avoid",
+        "defer_judgment",
+        "signal_alignment",
+        "unknown"
+      ]
+    },
+    "timing_score": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 10
+    },
+    "beneficiary_confidence": {
+      "type": "string",
+      "enum": [
+        "low",
+        "medium",
+        "high",
+        "diffuse"
+      ]
+    },
+    "likely_beneficiaries": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "summary": {
+      "type": "string"
+    },
+    "why_now_summary": {
+      "type": "string"
+    },
+    "risk_flags": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "overfit_risk",
+          "designed_vs_emergent_unclear",
+          "beneficiary_unclear",
+          "ambiguity_too_high",
+          "domain_adapter_required",
+          "insufficient_context"
+        ]
+      }
+    },
+    "notes": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  }
+}

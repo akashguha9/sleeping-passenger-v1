@@ -1,0 +1,76 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "narrative_intent/trap_report.schema.json",
+  "title": "TrapReport",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "artifact_id",
+    "domain",
+    "trap_score",
+    "ambiguity_score",
+    "closure_deficit",
+    "identity_instability_score",
+    "summary"
+  ],
+  "properties": {
+    "artifact_id": {
+      "type": "string"
+    },
+    "domain": {
+      "type": "string",
+      "enum": [
+        "markets",
+        "social_media",
+        "football_messaging",
+        "interpersonal"
+      ]
+    },
+    "trap_score": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 10
+    },
+    "ambiguity_score": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 10
+    },
+    "closure_deficit": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 10
+    },
+    "identity_instability_score": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 10
+    },
+    "forced_participation": {
+      "type": "boolean"
+    },
+    "summary": {
+      "type": "string"
+    },
+    "plausible_identity_labels": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "interpretability_band": {
+      "type": "string",
+      "enum": [
+        "low",
+        "productive",
+        "too_high"
+      ]
+    },
+    "notes": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  }
+}

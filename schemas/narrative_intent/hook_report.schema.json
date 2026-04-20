@@ -1,0 +1,92 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "narrative_intent/hook_report.schema.json",
+  "title": "HookReport",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "artifact_id",
+    "domain",
+    "hook_score",
+    "anchor_type",
+    "anchor_summary",
+    "components"
+  ],
+  "properties": {
+    "artifact_id": {
+      "type": "string"
+    },
+    "domain": {
+      "type": "string",
+      "enum": [
+        "markets",
+        "social_media",
+        "football_messaging",
+        "interpersonal"
+      ]
+    },
+    "hook_score": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 10
+    },
+    "anchor_type": {
+      "type": "string",
+      "enum": [
+        "visual_status",
+        "authority",
+        "consensus_narrative",
+        "social_familiarity",
+        "trust_frame",
+        "mixed"
+      ]
+    },
+    "anchor_summary": {
+      "type": "string"
+    },
+    "components": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "authority",
+        "familiarity",
+        "aesthetic_strength",
+        "status_signaling",
+        "trust_frame"
+      ],
+      "properties": {
+        "authority": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 10
+        },
+        "familiarity": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 10
+        },
+        "aesthetic_strength": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 10
+        },
+        "status_signaling": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 10
+        },
+        "trust_frame": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 10
+        }
+      }
+    },
+    "notes": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  }
+}
