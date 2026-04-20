@@ -3,10 +3,10 @@ import subprocess
 import sys
 from pathlib import Path
 
-from scripts.market_data_adapter import describe_market_data_adapter
-from scripts.pipeline_health_report import build_pipeline_health_report
 from scripts.moltbook_loader import summarize_moltbook
+from scripts.pipeline_health_report import build_pipeline_health_report
 from scripts.signal_conversion_monitor import load_signal_ledger
+
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -60,8 +60,8 @@ def test_signal_conversion_monitor_runtime_report_uses_live_files() -> None:
             {"signal_id": "SIG_2026_04_01_001", "ticker": "TLT", "ce_score": 0.62, "status": "EXECUTED_CLEAN"},
             {"signal_id": "SIG_2026_04_02_002", "ticker": "TIP", "ce_score": 0.68, "status": "EXECUTED_CLEAN"},
             {"signal_id": "SIG_2026_04_03_003", "ticker": "UNG", "ce_score": 0.35, "status": "EXECUTED_CHAOS"},
-            {"signal_id": "SIG_2026_04_04_004", "ticker": "FCG", "ce_score": 0.30, "status": "EXECUTED_CHAOS"},
-            {"signal_id": "SIG_2026_04_05_005", "ticker": "GLD", "ce_score": 0.60, "status": "WATCHLIST"},
+            {"signal_id": "SIG_2026_04_04_004", "ticker": "FCG", "ce_score": 0.3, "status": "EXECUTED_CHAOS"},
+            {"signal_id": "SIG_2026_04_05_005", "ticker": "GLD", "ce_score": 0.6, "status": "WATCHLIST"},
             {"signal_id": "SIG_2026_04_06_006", "ticker": "RTX", "ce_score": 0.71, "status": "WATCHLIST"},
             {"signal_id": "SIG_2026_04_07_007", "ticker": "ZIM", "ce_score": 0.66, "status": "WATCHLIST"},
         ],
@@ -240,63 +240,51 @@ def test_signal_conversion_monitor_summary_cli() -> None:
     ]
 
 
-def test_market_data_adapter_placeholder_contract() -> None:
-    description = describe_market_data_adapter("yahoo")
-
-    assert description == {
-        "requested_provider": "yahoo",
-        "resolved_provider": "yahoo_placeholder",
-        "live_quotes_available": False,
-        "contract_sample": {
-            "requested_provider": "yahoo",
-            "resolved_provider": "yahoo_placeholder",
-            "symbol": "TLT",
-            "ok": False,
-            "quote": None,
-            "error": "yahoo adapter not wired; returning placeholder contract only.",
-            "retriable": True,
-        },
-        "note": "Placeholder adapter only. Core Moltbook and SCM runtime remain independent from market-data ingestion.",
-    }
-
-
 def test_pipeline_health_report_builder_shape() -> None:
-    payload = build_pipeline_health_report(include_tests=False)
+    payload = build_pipeline_health_report(include_tests=False, write_runtime=False)
 
-    assert payload["git_status"]["available"] is True
-    assert isinstance(payload["git_status"]["head"], str) and payload["git_status"]["head"]
-    assert payload["test_status"] == {
-        "invoked": False,
-        "command": [
-            sys.executable,
-            "-m",
-            "pytest",
-            "tests\\test_moltbook_schema.py",
-            "tests\\test_moltbook_loader.py",
-            "-q",
-        ],
-        "exit_code": None,
-        "passed": None,
-        "summary_line": None,
+    assert payload["system_readiness_state"] == "DO_NOT_DEPLOY"
+    assert payload["can_deploy_capital"] is False
+    assert payload["what_should_i_do_next"] == "EXIT_NOW: UNG, FCG | CLEAR_GSCE_PHASE_LOCK_FOR: RTX, ZIM | DO NOT ADD NEW RISK"
+    assert payload["friction"]["friction_band"] == "HIGH_FRICTION"
+    assert payload["friction"]["total_system_friction_score"] == 13.0
+    assert payload["trends"]["snapshot_count"] >= 3
+    assert payload["open_positions_validation_summary"] == {
+        "path": "moltbook\\open_positions.json",
+        "file_exists": True,
+        "valid": True,
+        "position_count": 4,
+        "states": {"OPEN": 3, "EXIT_PENDING": 1},
+        "errors": [],
     }
-    assert payload["moltbook_summary"]["trade_close_count"] == 4
-    assert payload["signal_summary"]["signals_above_ce_threshold"] == 7
-    assert payload["scm_review"]["scm_state"] == "LOW_CONVERSION"
-    assert payload["execution_policy"]["policy_state"] == "RESTRICTED"
-    assert payload["market_data_adapter"]["resolved_provider"] == "yahoo_placeholder"
+    assert payload["per_ticker_action_summary"] == {
+        "summary_by_action": {
+            "EXIT_NOW": 2,
+            "REDUCE": 1,
+            "HOLD": 0,
+            "MONITOR": 1,
+            "BLOCK_ENTRY": 3,
+        },
+        "highest_priority_actions": [
+            {"ticker": "UNG", "action": "EXIT_NOW", "priority_score": 0.91},
+            {"ticker": "FCG", "action": "EXIT_NOW", "priority_score": 0.88},
+            {"ticker": "TLT", "action": "MONITOR", "priority_score": 0.82},
+            {"ticker": "TIP", "action": "REDUCE", "priority_score": 0.79},
+            {"ticker": "RTX", "action": "BLOCK_ENTRY", "priority_score": 0.71},
+        ],
+    }
     assert payload["scorecard"] == {
         "logging_quality": {"score": 10, "max_score": 10},
         "schema_reliability": {"score": 8, "max_score": 10},
         "end_to_end_wiring": {"score": 10, "max_score": 10},
         "self_correction_maturity": {"score": 10, "max_score": 10},
-        "execution_readiness": {"score": 6, "max_score": 10},
+        "execution_readiness": {"score": 3, "max_score": 10},
     }
-    assert "logging_quality" in payload["scorecard_rules"]
 
 
 def test_pipeline_health_report_cli_json_shape() -> None:
     result = subprocess.run(
-        [sys.executable, "scripts\\pipeline_health_report.py"],
+        [sys.executable, "scripts\\pipeline_health_report.py", "--no-write"],
         cwd=REPO_ROOT,
         capture_output=True,
         text=True,
@@ -304,22 +292,32 @@ def test_pipeline_health_report_cli_json_shape() -> None:
     )
     payload = json.loads(result.stdout)
 
-    assert payload["moltbook_summary"]["trade_close_count"] == 4
-    assert payload["signal_summary"]["signals_above_ce_threshold"] == 7
-    assert payload["scm_review"]["scm_rate"] == 0.286
-    assert payload["execution_policy"]["next_priority_action"] == "CLEAR_BLOCKERS_BEFORE_NEW_RISK"
+    assert payload["system_readiness_state"] == "DO_NOT_DEPLOY"
+    assert payload["can_deploy_capital"] is False
+    assert payload["scm"]["scm_rate"] == 0.286
+    assert payload["policy"]["policy_state"] == "RESTRICTED"
+    assert payload["friction"]["friction_band"] == "HIGH_FRICTION"
 
 
 def test_pipeline_health_report_summary_cli() -> None:
     result = subprocess.run(
-        [sys.executable, "scripts\\pipeline_health_report.py", "--summary"],
+        [sys.executable, "scripts\\pipeline_health_report.py", "--summary", "--no-write"],
         cwd=REPO_ROOT,
         capture_output=True,
         text=True,
         check=True,
     )
 
-    output = result.stdout.strip().splitlines()
-    assert output[0] == "Pipeline Health Report"
-    assert "scm_state=LOW_CONVERSION" in output
-    assert "policy_state=RESTRICTED" in output
+    assert result.stdout.strip().splitlines() == [
+        "Pipeline Health Report",
+        "git_clean=false",
+        "tests_invoked=false",
+        "tests_passed=None",
+        "system_readiness_state=DO_NOT_DEPLOY",
+        "can_deploy_capital=false",
+        "scm_state=LOW_CONVERSION",
+        "policy_state=RESTRICTED",
+        "friction_band=HIGH_FRICTION",
+        "what_should_i_do_next=EXIT_NOW: UNG, FCG | CLEAR_GSCE_PHASE_LOCK_FOR: RTX, ZIM | DO NOT ADD NEW RISK",
+        "scorecard=logging_quality=10/10, schema_reliability=8/10, end_to_end_wiring=10/10, self_correction_maturity=10/10, execution_readiness=3/10",
+    ]

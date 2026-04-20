@@ -1,15 +1,5 @@
 ﻿from __future__ import annotations
 
-# SIGNAL_CONVERSION_MONITOR (SCM)
-# Module: CAL - Calibration
-# Added: April 16 2026
-# Source: Railway campus / conversion failure session
-#
-# Meta-diagnostic: what fraction of the operator's identified edge is
-# successfully converting into clean pipeline entries?
-#
-# SCM_rate = clean_SYSTEM_entries / total_signals_above_CE_threshold
-
 import argparse
 import json
 from pathlib import Path
@@ -22,6 +12,7 @@ except ModuleNotFoundError:
 SCM_HIGH_CONVERSION = 0.60
 SCM_PARTIAL_CONVERSION = 0.30
 SCM_LOW_CONVERSION = 0.10
+WATCHLIST_PROMOTION_CE_THRESHOLD = 0.65
 
 SIGNAL_LEDGER_REQUIRED_KEYS = {
     "signal_id",
@@ -70,24 +61,23 @@ def _require_non_empty_text(value: object, context: str) -> None:
         raise ValueError(f"{context} must be a non-empty string")
 
 
-def compute_scm_rate(clean_system_entries, total_signals_above_threshold):
+def compute_scm_rate(clean_system_entries: int, total_signals_above_threshold: int) -> float:
     if total_signals_above_threshold == 0:
         return 0.0
     return clean_system_entries / total_signals_above_threshold
 
 
-def classify_scm_state(scm_rate):
+def classify_scm_state(scm_rate: float) -> str:
     if scm_rate >= SCM_HIGH_CONVERSION:
         return "HIGH_CONVERSION"
-    elif scm_rate >= SCM_PARTIAL_CONVERSION:
+    if scm_rate >= SCM_PARTIAL_CONVERSION:
         return "PARTIAL_CONVERSION"
-    elif scm_rate >= SCM_LOW_CONVERSION:
+    if scm_rate >= SCM_LOW_CONVERSION:
         return "LOW_CONVERSION"
-    else:
-        return "CONVERSION_FAILURE"
+    return "CONVERSION_FAILURE"
 
 
-def scm_diagnostic_route(scm_state, gate_states):
+def scm_diagnostic_route(scm_state: str, gate_states: dict[str, bool]) -> list[str] | None:
     if scm_state in ("HIGH_CONVERSION", "PARTIAL_CONVERSION"):
         return None
     blocking_gates = []
@@ -97,7 +87,7 @@ def scm_diagnostic_route(scm_state, gate_states):
     return blocking_gates if blocking_gates else ["UNKNOWN_BLOCKER"]
 
 
-def scm_review(clean_entries, total_signals, gate_states):
+def scm_review(clean_entries: int, total_signals: int, gate_states: dict[str, bool]) -> dict:
     rate = compute_scm_rate(clean_entries, total_signals)
     state = classify_scm_state(rate)
     diagnosis = scm_diagnostic_route(state, gate_states)
@@ -117,7 +107,6 @@ def derive_clean_entries_from_moltbook(moltbook_dir: Path | None = None) -> dict
         for item in bundle.trade_closes
         if item.get("classification") in {"GOOD_WIN", "MARGINAL_WIN"}
     )
-
     chaos_entries = sum(
         1
         for item in bundle.trade_closes
@@ -221,6 +210,50 @@ def derive_per_signal_attribution(signal_summary: dict) -> list[dict]:
     return attributions
 
 
+def derive_watchlist_diagnostics(per_signal_attribution: list[dict]) -> dict:
+    watchlist_signals: list[dict] = []
+    promotable_count = 0
+
+    for item in per_signal_attribution:
+        if item.get("status") != "WATCHLIST":
+            continue
+
+        ce_score = round(item["ce_score"], 3)
+        promotable_clean_candidate = ce_score >= WATCHLIST_PROMOTION_CE_THRESHOLD
+        if promotable_clean_candidate:
+            promotable_count += 1
+
+        watchlist_tier = "PROMOTABLE" if promotable_clean_candidate else "STANDARD"
+        if promotable_clean_candidate:
+            candidate_conversion_state = "PROMOTABLE_WATCHLIST"
+            if item["blocker_attribution"] == "GSCE_PHASE_LOCK":
+                pre_entry_state = "BLOCKED_PROMOTABLE_CLEAN_CANDIDATE"
+            else:
+                pre_entry_state = "CLEAN_READY_PENDING_TRIGGER"
+        else:
+            candidate_conversion_state = "NOT_EXECUTED"
+            pre_entry_state = "NONE"
+
+        watchlist_signals.append(
+            {
+                "signal_id": item["signal_id"],
+                "ticker": item["ticker"],
+                "ce_score": ce_score,
+                "blocker_attribution": item["blocker_attribution"],
+                "promotable_clean_candidate": promotable_clean_candidate,
+                "watchlist_tier": watchlist_tier,
+                "candidate_conversion_state": candidate_conversion_state,
+                "pre_entry_state": pre_entry_state,
+            }
+        )
+
+    return {
+        "promotion_threshold_ce_score": WATCHLIST_PROMOTION_CE_THRESHOLD,
+        "promotable_count": promotable_count,
+        "watchlist_signals": watchlist_signals,
+    }
+
+
 def derive_gate_states_from_live_data(per_signal_attribution: list[dict]) -> dict:
     blockers = {item["blocker_attribution"] for item in per_signal_attribution}
 
@@ -238,7 +271,7 @@ def derive_execution_policy_from_live_data(
     moltbook_summary: dict,
     signal_summary: dict,
     derived_gate_states: dict,
-    scm_review: dict,
+    scm_review_payload: dict,
 ) -> dict:
     status_counts = signal_summary.get("status_counts_above_threshold", {})
     watchlist_count = status_counts.get("WATCHLIST", 0)
@@ -263,7 +296,7 @@ def derive_execution_policy_from_live_data(
         "rationale": [],
     }
 
-    if scm_review.get("scm_state") in {"LOW_CONVERSION", "CONVERSION_FAILURE"}:
+    if scm_review_payload.get("scm_state") in {"LOW_CONVERSION", "CONVERSION_FAILURE"}:
         policy["policy_state"] = "RESTRICTED"
         policy["position_sizing_cap"] = "QUARTER_UNIT"
         policy["allow_new_risk"] = False
@@ -305,18 +338,17 @@ def derive_execution_policy_from_live_data(
             policy["minimum_conditions_to_improve"],
             "REALM_BIS clears by eliminating chaos conversions",
         )
-        policy["rationale"].append(f"{chaos_count} above-threshold signals converted into CHAOS entries")
+        policy["rationale"].append(
+            f"{chaos_count} above-threshold signals converted into CHAOS entries"
+        )
 
-    if (
-        derived_gate_states.get("GSCE_PHASE_LOCK", False)
-        and derived_gate_states.get("REALM_BIS", False)
-    ):
+    if derived_gate_states.get("GSCE_PHASE_LOCK", False) and derived_gate_states.get("REALM_BIS", False):
         policy["next_priority_action"] = "CLEAR_BLOCKERS_BEFORE_NEW_RISK"
     elif derived_gate_states.get("GSCE_PHASE_LOCK", False):
         policy["next_priority_action"] = "CLEAR_GSCE_PHASE_LOCK"
     elif derived_gate_states.get("REALM_BIS", False):
         policy["next_priority_action"] = "ELIMINATE_REALM_BIS"
-    elif scm_review.get("scm_state") in {"LOW_CONVERSION", "CONVERSION_FAILURE"}:
+    elif scm_review_payload.get("scm_state") in {"LOW_CONVERSION", "CONVERSION_FAILURE"}:
         policy["next_priority_action"] = "IMPROVE_CLEAN_CONVERSION"
 
     return policy
@@ -329,6 +361,7 @@ def build_signal_conversion_report(
     moltbook_summary = derive_clean_entries_from_moltbook(moltbook_dir)
     signal_summary = derive_total_signals_above_threshold(signal_ledger_path)
     per_signal_attribution = derive_per_signal_attribution(signal_summary)
+    watchlist_diagnostics = derive_watchlist_diagnostics(per_signal_attribution)
     gate_states = derive_gate_states_from_live_data(per_signal_attribution)
 
     review = scm_review(
@@ -340,13 +373,14 @@ def build_signal_conversion_report(
         moltbook_summary=moltbook_summary,
         signal_summary=signal_summary,
         derived_gate_states=gate_states,
-        scm_review=review,
+        scm_review_payload=review,
     )
 
     return {
         "moltbook_summary": moltbook_summary,
         "signal_summary": signal_summary,
         "per_signal_attribution": per_signal_attribution,
+        "watchlist_diagnostics": watchlist_diagnostics,
         "derived_gate_states": gate_states,
         "scm_review": review,
         "execution_policy": execution_policy,
@@ -355,17 +389,15 @@ def build_signal_conversion_report(
 
 
 def format_signal_conversion_summary(report: dict) -> str:
-    scm = report["scm_review"]
+    scm_payload = report["scm_review"]
     policy = report["execution_policy"]
     status_counts = report["signal_summary"]["status_counts_above_threshold"]
-    gates = [
-        gate for gate, is_active in report["derived_gate_states"].items() if is_active
-    ] or ["NONE"]
+    gates = [gate for gate, is_active in report["derived_gate_states"].items() if is_active] or ["NONE"]
     return "\n".join(
         [
             "Signal Conversion Monitor",
-            f"scm_state={scm['scm_state']}",
-            f"scm_rate={scm['scm_rate']}",
+            f"scm_state={scm_payload['scm_state']}",
+            f"scm_rate={scm_payload['scm_rate']}",
             f"clean_entries={report['moltbook_summary']['clean_entries']}",
             f"chaos_entries={report['moltbook_summary']['chaos_entries']}",
             f"watchlist_non_conversions={status_counts.get('WATCHLIST', 0)}",
@@ -409,7 +441,6 @@ def main(argv: list[str] | None = None) -> int:
         print(format_signal_conversion_summary(report))
     else:
         print(json.dumps(report, indent=2))
-
     return 0
 
 
