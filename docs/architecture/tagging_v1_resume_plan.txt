@@ -1,0 +1,61 @@
+# Tagging V1 Resume Plan
+
+## 1. Session Restatement
+
+- `feat/narrative-intent-analytics` is parked at a docs-only freeze milestone.
+- Latest known commits there are:
+  - `b364f5b` — `docs: freeze narrative intent system spec and addendum`
+  - `56848d3` — `docs: add narrative intent system spec and schemas`
+- That branch already has:
+  - `docs/architecture/narrative_intent_system_spec.md`
+  - `docs/architecture/narrative_intent_freeze_addendum.md`
+  - `docs/examples/narrative_intent_cross_domain_examples.md`
+  - `docs/research/narrative_intent_hook_distort_trap_reflection.md`
+  - `schemas/narrative_intent/hook_report.schema.json`
+  - `schemas/narrative_intent/distortion_report.schema.json`
+  - `schemas/narrative_intent/trap_report.schema.json`
+  - `schemas/narrative_intent/narrative_intent_report.schema.json`
+- That track is frozen enough for now and should remain separate from implementation work.
+
+- `feat/tagging-v1` is the active engineering track to resume.
+- Its known base point is:
+  - `889e699` — `diagnostics: add decision-grade entry and transition review packets`
+- Tagging-v1 already has:
+  - truthful readiness scoring
+  - scenario-separated transition logic
+  - transition persistence
+  - decision-grade packets
+  - scenario trend separation
+- The next layer on that branch is the frozen v1 operational-memory / tagging implementation.
+
+- Narrative Intent stays documentation-only for now.
+- Tagging-v1 is the main next move.
+
+---
+
+## 2. Safest Next Move
+
+The single safest next move is:
+
+**explicitly switch to `feat/tagging-v1`, verify branch and working tree state, and resume only the frozen tagging-v1 implementation plan.**
+
+Optional only:
+- if you want the Narrative Intent branch to feel fully finished later, add:
+  - `docs/examples/narrative_intent_contract_examples.md`
+- Do that only on `feat/narrative-intent-analytics`
+- Do not mix it into tagging work
+
+---
+
+## 3. First Commands To Run
+
+From `C:\Users\akash\pipeline-v5.7-core`:
+
+```powershell
+git status --short --branch
+git switch feat/tagging-v1
+git status --short --branch
+git log --oneline -1
+git ls-files --others --exclude-standard
+rg -n "transition_readiness_state|queue_pressure_state|blockage_severity|operator_state" scripts tests
+rg -n "candidate_conversion_state|pre_entry_state|_select_action|REVIEW_READY" scripts tests
