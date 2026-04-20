@@ -11,9 +11,11 @@ from typing import Any
 try:
     from scripts.action_engine import build_action_report
     from scripts.blocker_cost_engine import build_blocker_cost_report
+    from scripts.snapshot_logger import build_snapshot_row
     from scripts.runtime_common import (
         HEALTH_REPORT_PATH,
         SNAPSHOT_LOG_PATH,
+        build_runtime_state_from_scm_report_payload,
         load_open_positions,
         normalize_active_blockers,
         normalize_per_signal_rows,
@@ -25,9 +27,11 @@ try:
 except ModuleNotFoundError:
     from action_engine import build_action_report
     from blocker_cost_engine import build_blocker_cost_report
+    from snapshot_logger import build_snapshot_row
     from runtime_common import (
         HEALTH_REPORT_PATH,
         SNAPSHOT_LOG_PATH,
+        build_runtime_state_from_scm_report_payload,
         load_open_positions,
         normalize_active_blockers,
         normalize_per_signal_rows,
@@ -171,19 +175,7 @@ def _load_latest_snapshot_timestamp(path: Path | None = None) -> str | None:
 
 
 def build_runtime_state_from_scm_report(scm_report: dict[str, Any]) -> dict[str, Any]:
-    derived_gate_states = scm_report.get("derived_gate_states", {})
-    return {
-        "source": "scm_report",
-        "moltbook_summary": scm_report.get("moltbook_summary", {}),
-        "signal_summary": scm_report.get("signal_summary", {}),
-        "per_signal_attribution": normalize_per_signal_rows(scm_report),
-        "watchlist_diagnostics": scm_report.get("watchlist_diagnostics", {}),
-        "derived_gate_states": derived_gate_states,
-        "active_blockers": normalize_active_blockers(derived_gate_states),
-        "execution_policy": scm_report.get("execution_policy", {}),
-        "scm_review": scm_report.get("scm_review", {}),
-        "note": scm_report.get("note", ""),
-    }
+    return build_runtime_state_from_scm_report_payload(scm_report)
 
 
 def get_git_status(repo_root: Path | None = None) -> dict[str, Any]:
@@ -570,11 +562,24 @@ def derive_next_operational_action(
     blocked_names = [item["ticker"] for item in blocked_promotable_candidate_queue]
     if blocked_names:
         parts.append(f"CLEAR_GSCE_PHASE_LOCK_FOR: {', '.join(blocked_names)}")
-    elif execution_policy.get("next_priority_action"):
-        parts.append(str(execution_policy["next_priority_action"]))
+    else:
+        review_for_entry = [
+            row["ticker"]
+            for row in action_report["actions"]
+            if row["action"] == "REVIEW_FOR_ENTRY"
+        ]
+        if review_for_entry:
+            parts.append(f"REVIEW_FOR_ENTRY: {', '.join(review_for_entry)}")
+        elif execution_policy.get("next_priority_action"):
+            parts.append(str(execution_policy["next_priority_action"]))
 
     if not execution_policy.get("allow_new_risk", False):
         parts.append("DO NOT ADD NEW RISK")
+    elif (
+        execution_policy.get("next_priority_action")
+        and str(execution_policy["next_priority_action"]) not in parts
+    ):
+        parts.append(str(execution_policy["next_priority_action"]))
     elif not parts and execution_policy.get("next_priority_action"):
         parts.append(str(execution_policy["next_priority_action"]))
 
@@ -727,7 +732,7 @@ def derive_operator_state(
 
 
 def build_clean_ready_candidates_if_gsce_clears(
-    blocked_promotable_candidate_queue: list[dict[str, Any]],
+    gsce_clear_transition_preview: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
     return [
         {
@@ -735,13 +740,694 @@ def build_clean_ready_candidates_if_gsce_clears(
             "ticker": item["ticker"],
             "priority_score": item.get("priority_score"),
             "watchlist_tier": item.get("watchlist_tier"),
-            "candidate_conversion_state": item.get("candidate_conversion_state"),
-            "current_pre_entry_state": item.get("pre_entry_state"),
-            "next_pre_entry_state": "CLEAN_READY_PENDING_TRIGGER",
-            "gate_to_clear": "GSCE_PHASE_LOCK",
+            "current_pre_entry_state": item.get("current_pre_entry_state"),
+            "simulated_pre_entry_state": item.get("simulated_pre_entry_state"),
+            "gate_to_clear": item.get("gate_required_to_flip"),
         }
-        for item in blocked_promotable_candidate_queue
+        for item in gsce_clear_transition_preview
     ]
+
+
+def _build_transition_preview_candidates(
+    live_state: dict[str, Any],
+    scenario_state: dict[str, Any],
+    scenario_action_report: dict[str, Any],
+    live_queue: list[dict[str, Any]],
+    gate_required_to_flip: str,
+) -> list[dict[str, Any]]:
+    live_watchlist_rows = {
+        str(row.get("ticker") or "").upper(): row
+        for row in live_state.get("watchlist_diagnostics", {}).get("watchlist_signals", [])
+        if isinstance(row, dict) and str(row.get("ticker") or "").strip()
+    }
+    scenario_watchlist_rows = {
+        str(row.get("ticker") or "").upper(): row
+        for row in scenario_state.get("watchlist_diagnostics", {}).get("watchlist_signals", [])
+        if isinstance(row, dict) and str(row.get("ticker") or "").strip()
+    }
+    queue_rows = {
+        str(row.get("ticker") or "").upper(): row
+        for row in live_queue
+        if isinstance(row, dict) and str(row.get("ticker") or "").strip()
+    }
+    scenario_actions = {
+        str(row.get("ticker") or "").upper(): row
+        for row in scenario_action_report.get("actions", [])
+        if isinstance(row, dict) and str(row.get("ticker") or "").strip()
+    }
+
+    preview: list[dict[str, Any]] = []
+    for ticker in sorted(queue_rows):
+        live_row = live_watchlist_rows.get(ticker, {})
+        scenario_row = scenario_watchlist_rows.get(ticker, {})
+        queue_row = queue_rows[ticker]
+        scenario_action = scenario_actions.get(ticker, {})
+        preview.append(
+            {
+                "signal_id": str(
+                    live_row.get("signal_id")
+                    or scenario_row.get("signal_id")
+                    or queue_row.get("signal_id")
+                    or ""
+                ),
+                "ticker": ticker,
+                "priority_score": queue_row.get("priority_score"),
+                "watchlist_tier": str(
+                    scenario_row.get("watchlist_tier")
+                    or live_row.get("watchlist_tier")
+                    or queue_row.get("watchlist_tier")
+                    or ""
+                ).upper(),
+                "current_pre_entry_state": str(
+                    live_row.get("pre_entry_state")
+                    or queue_row.get("pre_entry_state")
+                    or "NONE"
+                ).upper(),
+                "simulated_pre_entry_state": str(
+                    scenario_row.get("pre_entry_state")
+                    or live_row.get("pre_entry_state")
+                    or "NONE"
+                ).upper(),
+                "current_candidate_conversion_state": str(
+                    live_row.get("candidate_conversion_state")
+                    or queue_row.get("candidate_conversion_state")
+                    or "UNKNOWN"
+                ).upper(),
+                "simulated_candidate_conversion_state": str(
+                    scenario_row.get("candidate_conversion_state")
+                    or live_row.get("candidate_conversion_state")
+                    or "UNKNOWN"
+                ).upper(),
+                "gate_required_to_flip": gate_required_to_flip,
+                "would_still_allow_new_risk": bool(
+                    scenario_state.get("execution_policy", {}).get("allow_new_risk", False)
+                ),
+                "policy_state": scenario_state.get("execution_policy", {}).get("policy_state"),
+                "active_blockers": list(scenario_state.get("active_blockers", [])),
+                "simulated_action": scenario_action.get("action"),
+                "simulated_action_reasons": scenario_action.get("reasons", []),
+            }
+        )
+    return preview
+
+
+def build_gate_resolution_preview(
+    live_state: dict[str, Any],
+    live_action_report: dict[str, Any],
+    live_queue: list[dict[str, Any]],
+    open_positions: list[dict[str, Any]],
+    open_positions_path: Path | None = None,
+) -> dict[str, Any]:
+    scenarios = {
+        "live": {},
+        "gsce_clear": {"simulate_gsce_clear": True},
+        "realm_bis_clear": {"simulate_realm_bis_clear": True},
+        "all_clear": {"simulate_all_clear": True},
+    }
+    gate_resolution_preview: dict[str, Any] = {}
+
+    for scenario_name, scenario_flags in scenarios.items():
+        if scenario_name == "live":
+            scenario_state = live_state
+            scenario_action_report = live_action_report
+            scenario_scm_report = {
+                "simulation_context": live_state.get("simulation_context", {}),
+            }
+        else:
+            scenario_scm_report = build_signal_conversion_report(**scenario_flags)
+            scenario_state = build_runtime_state_from_scm_report(scenario_scm_report)
+            scenario_action_report = build_action_report(
+                runtime_state=scenario_state,
+                write_runtime=False,
+                open_positions_path=open_positions_path,
+            )
+
+        scenario_transition_review_packets = build_transition_review_packets(
+            live_state=live_state,
+            scenario_state=scenario_state,
+            scenario_action_report=scenario_action_report,
+            open_positions=open_positions,
+        )
+        scenario_entry_review_packets = build_entry_review_packets(
+            live_state=live_state,
+            scenario_state=scenario_state,
+            scenario_action_report=scenario_action_report,
+            open_positions=open_positions,
+        )
+        decision_review_state = _derive_decision_review_state(
+            scenario_entry_review_packets,
+            scenario_transition_review_packets,
+        )
+
+        gate_resolution_preview[scenario_name] = {
+            "scenario": scenario_scm_report.get("simulation_context", {}).get(
+                "scenario",
+                "LIVE",
+            ),
+            "policy_state": scenario_state.get("execution_policy", {}).get("policy_state"),
+            "allow_new_risk": bool(
+                scenario_state.get("execution_policy", {}).get("allow_new_risk", False)
+            ),
+            "active_blockers": list(scenario_state.get("active_blockers", [])),
+            "what_should_i_do_next": derive_next_operational_action(
+                scenario_state.get("execution_policy", {}),
+                scenario_action_report,
+                blocked_promotable_candidate_queue=build_blocked_promotable_candidate_queue(
+                    scenario_state.get("watchlist_diagnostics", {}),
+                    per_signal_rows=scenario_state.get("per_signal_attribution", []),
+                ),
+            ),
+            "candidates": _build_transition_preview_candidates(
+                live_state=live_state,
+                scenario_state=scenario_state,
+                scenario_action_report=scenario_action_report,
+                live_queue=live_queue,
+                gate_required_to_flip=(
+                    "GSCE_PHASE_LOCK"
+                    if scenario_name != "all_clear"
+                    else "GSCE_PHASE_LOCK+REALM_BIS"
+                ),
+            ),
+            "packet_summary": _packet_summary(
+                scenario_entry_review_packets,
+                scenario_transition_review_packets,
+            ),
+            "decision_review_state": decision_review_state,
+            "entry_review_packets": scenario_entry_review_packets,
+            "transition_review_packets": scenario_transition_review_packets,
+        }
+
+    return gate_resolution_preview
+
+
+def build_next_state_if_all_clear(
+    gate_resolution_preview: dict[str, Any],
+) -> dict[str, Any]:
+    all_clear_preview = gate_resolution_preview.get("all_clear", {})
+    all_clear_candidates = all_clear_preview.get("candidates", [])
+    return {
+        "tickers": [item["ticker"] for item in all_clear_candidates],
+        "pre_entry_state": "CLEAN_ENTRY_ELIGIBLE",
+        "candidate_conversion_state": "CLEAN_ENTRY_ELIGIBLE",
+        "action": "REVIEW_FOR_ENTRY",
+        "policy_state": all_clear_preview.get("policy_state"),
+        "allow_new_risk": all_clear_preview.get("allow_new_risk"),
+        "active_blockers": all_clear_preview.get("active_blockers", []),
+    }
+
+
+def _watchlist_rows_by_ticker(state: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    return {
+        str(row.get("ticker") or "").upper(): row
+        for row in state.get("watchlist_diagnostics", {}).get("watchlist_signals", [])
+        if isinstance(row, dict) and str(row.get("ticker") or "").strip()
+    }
+
+
+def _action_rows_by_ticker(action_report: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    return {
+        str(row.get("ticker") or "").upper(): row
+        for row in action_report.get("actions", [])
+        if isinstance(row, dict) and str(row.get("ticker") or "").strip()
+    }
+
+
+def _position_is_open_like(position: dict[str, Any]) -> bool:
+    return str(position.get("state") or "").upper() in {"OPEN", "REDUCED", "EXIT_PENDING"}
+
+
+def _open_positions_by_ticker(open_positions: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
+    mapping: dict[str, list[dict[str, Any]]] = {}
+    for position in open_positions:
+        if not isinstance(position, dict):
+            continue
+        ticker = str(position.get("ticker") or "").upper()
+        if not ticker:
+            continue
+        mapping.setdefault(ticker, []).append(position)
+    return mapping
+
+
+def _required_blockers_for_target_state(target_pre_entry_state: str) -> list[str]:
+    normalized_target = str(target_pre_entry_state or "NONE").upper()
+    if normalized_target == "CLEAN_READY_PENDING_TRIGGER":
+        return ["GSCE_PHASE_LOCK"]
+    if normalized_target == "CLEAN_ENTRY_ELIGIBLE":
+        return ["GSCE_PHASE_LOCK", "REALM_BIS"]
+    return []
+
+
+def _signal_above_threshold(
+    state: dict[str, Any],
+    signal_id: str,
+    ticker: str,
+) -> bool:
+    qualifying_ids = {
+        str(item).strip()
+        for item in state.get("signal_summary", {}).get("qualifying_signal_ids", [])
+        if str(item).strip()
+    }
+    if signal_id and signal_id in qualifying_ids:
+        return True
+
+    qualifying_signals = state.get("signal_summary", {}).get("qualifying_signals", [])
+    for item in qualifying_signals:
+        if not isinstance(item, dict):
+            continue
+        if str(item.get("ticker") or "").upper() == str(ticker or "").upper():
+            return True
+    return False
+
+
+def _field_is_populated(value: Any) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, str):
+        return bool(value.strip())
+    return True
+
+
+def _build_blocker_clearance_path(
+    live_state: dict[str, Any],
+    scenario_state: dict[str, Any],
+    target_pre_entry_state: str,
+) -> dict[str, Any]:
+    tracked_blockers = ["GSCE_PHASE_LOCK", "REALM_BIS"]
+    required_for_target_state = _required_blockers_for_target_state(target_pre_entry_state)
+    live_active = set(live_state.get("active_blockers", []))
+    scenario_active = set(scenario_state.get("active_blockers", []))
+    return {
+        "required_for_target_state": required_for_target_state,
+        "cleared_for_target_state": [
+            blocker for blocker in required_for_target_state if blocker not in scenario_active
+        ],
+        "remaining_for_target_state": [
+            blocker for blocker in required_for_target_state if blocker in scenario_active
+        ],
+        "live_active_blockers": [
+            blocker for blocker in tracked_blockers if blocker in live_active
+        ],
+        "remaining_blockers": [
+            blocker for blocker in tracked_blockers if blocker in scenario_active
+        ],
+    }
+
+
+def _build_scm_context(
+    state: dict[str, Any],
+    signal_id: str,
+    ticker: str,
+) -> dict[str, Any]:
+    scm_review = state.get("scm_review", {})
+    return {
+        "scm_state": scm_review.get("scm_state"),
+        "scm_rate": scm_review.get("scm_rate"),
+        "diagnosis": list(scm_review.get("diagnosis", [])),
+        "signal_above_threshold": _signal_above_threshold(state, signal_id, ticker),
+    }
+
+
+def _build_execution_policy_context(policy: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "policy_state": policy.get("policy_state"),
+        "allow_new_risk": bool(policy.get("allow_new_risk", False)),
+        "position_sizing_cap": policy.get("position_sizing_cap"),
+        "required_clearance_gates": list(policy.get("required_clearance_gates", [])),
+        "next_priority_action": policy.get("next_priority_action"),
+    }
+
+
+def _build_review_checklist(
+    packet_type: str,
+    *,
+    watchlist_tier: str,
+    signal_above_threshold: bool,
+    open_position_conflict: bool,
+    existing_exposure_conflict: bool,
+    sizing_allowed_now: bool,
+    blocker_clearance_path: dict[str, Any],
+    packet_fields_populated: bool,
+) -> dict[str, Any]:
+    checklist_items = [
+        {
+            "name": "signal_still_promotable",
+            "passed": watchlist_tier == "PROMOTABLE",
+            "detail": (
+                "Watchlist row remains PROMOTABLE."
+                if watchlist_tier == "PROMOTABLE"
+                else f"Watchlist tier is {watchlist_tier or 'UNKNOWN'}."
+            ),
+        },
+        {
+            "name": "signal_above_threshold",
+            "passed": signal_above_threshold,
+            "detail": (
+                "Signal is still present in the above-threshold set."
+                if signal_above_threshold
+                else "Signal is no longer present in the above-threshold set."
+            ),
+        },
+        {
+            "name": "no_open_position_conflict",
+            "passed": not open_position_conflict,
+            "detail": (
+                "No same-ticker open position is live."
+                if not open_position_conflict
+                else "Same-ticker open position already exists."
+            ),
+        },
+        {
+            "name": "no_existing_exposure_conflict",
+            "passed": not existing_exposure_conflict,
+            "detail": (
+                "No same-ticker exposure conflict is active."
+                if not existing_exposure_conflict
+                else "Same-ticker exposure conflict is active."
+            ),
+        },
+        {
+            "name": "policy_allows_sizing_now",
+            "passed": sizing_allowed_now,
+            "detail": (
+                "Policy currently permits sizing."
+                if sizing_allowed_now
+                else "Policy does not currently permit sizing."
+            ),
+        },
+        {
+            "name": "required_blockers_cleared",
+            "passed": not blocker_clearance_path["remaining_for_target_state"],
+            "detail": (
+                "All blockers required for the target state are cleared."
+                if not blocker_clearance_path["remaining_for_target_state"]
+                else "Remaining blockers for target state: "
+                + ", ".join(blocker_clearance_path["remaining_for_target_state"])
+            ),
+        },
+        {
+            "name": "packet_fields_populated",
+            "passed": packet_fields_populated,
+            "detail": (
+                "All required packet fields are populated."
+                if packet_fields_populated
+                else "Packet has missing required fields."
+            ),
+        },
+    ]
+    review_checklist_missing_items = [
+        item["name"] for item in checklist_items if not item["passed"]
+    ]
+
+    if open_position_conflict or existing_exposure_conflict:
+        review_checklist_status = "BLOCKED"
+        operator_decision_state = "BLOCKED_BY_CONFLICT"
+    elif not review_checklist_missing_items:
+        review_checklist_status = "COMPLETE"
+        operator_decision_state = (
+            "READY_FOR_OPERATOR_DECISION"
+            if packet_type == "ENTRY"
+            else "NOT_REVIEWED"
+        )
+    else:
+        review_checklist_status = "INCOMPLETE"
+        operator_decision_state = "NEEDS_CHECKLIST"
+
+    return {
+        "checklist_items": checklist_items,
+        "review_checklist_status": review_checklist_status,
+        "review_checklist_missing_items": review_checklist_missing_items,
+        "operator_decision_state": operator_decision_state,
+    }
+
+
+def _derive_decision_review_state(
+    entry_review_packets: list[dict[str, Any]],
+    transition_review_packets: list[dict[str, Any]],
+) -> str:
+    packet_states = [
+        packet.get("operator_decision_state")
+        for packet in [*entry_review_packets, *transition_review_packets]
+        if isinstance(packet, dict)
+    ]
+    if "BLOCKED_BY_CONFLICT" in packet_states:
+        return "BLOCKED_BY_CONFLICT"
+    if entry_review_packets:
+        return "ENTRY_REVIEW_READY"
+    if transition_review_packets:
+        return "TRANSITION_REVIEW_READY"
+    return "NONE"
+
+
+def _packet_summary(
+    entry_review_packets: list[dict[str, Any]],
+    transition_review_packets: list[dict[str, Any]],
+) -> dict[str, Any]:
+    entry_names = [packet["ticker"] for packet in entry_review_packets]
+    transition_names = [packet["ticker"] for packet in transition_review_packets]
+    if entry_names:
+        packet_state = "ENTRY_REVIEW_READY"
+    elif transition_names:
+        packet_state = "TRANSITION_REVIEW_READY"
+    else:
+        packet_state = "NONE"
+    return {
+        "entry_review_candidate_count": len(entry_names),
+        "transition_review_candidate_count": len(transition_names),
+        "entry_review_candidate_names": entry_names,
+        "transition_review_candidate_names": transition_names,
+        "packet_state": packet_state,
+    }
+
+
+def build_entry_review_packets(
+    live_state: dict[str, Any],
+    scenario_state: dict[str, Any],
+    scenario_action_report: dict[str, Any],
+    open_positions: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    policy = scenario_state.get("execution_policy", {})
+    live_watchlist_rows = _watchlist_rows_by_ticker(live_state)
+    scenario_watchlist_rows = _watchlist_rows_by_ticker(scenario_state)
+    action_rows = _action_rows_by_ticker(scenario_action_report)
+    positions_by_ticker = _open_positions_by_ticker(open_positions)
+    tracked_blockers = {"GSCE_PHASE_LOCK", "REALM_BIS"}
+    live_active_blockers = tracked_blockers.intersection(live_state.get("active_blockers", []))
+    current_active_blockers = set(scenario_state.get("active_blockers", []))
+
+    packets: list[dict[str, Any]] = []
+    for ticker, scenario_watchlist_row in sorted(scenario_watchlist_rows.items()):
+        if str(scenario_watchlist_row.get("pre_entry_state") or "").upper() != "CLEAN_ENTRY_ELIGIBLE":
+            continue
+        action_row = action_rows.get(ticker, {})
+        if action_row.get("action") != "REVIEW_FOR_ENTRY":
+            continue
+        live_watchlist_row = live_watchlist_rows.get(ticker, {})
+        remaining_blockers = sorted(tracked_blockers.intersection(current_active_blockers))
+        open_position_conflict = any(
+            _position_is_open_like(position)
+            for position in positions_by_ticker.get(ticker, [])
+        )
+        existing_exposure_conflict = open_position_conflict
+        signal_id = str(
+            scenario_watchlist_row.get("signal_id")
+            or live_watchlist_row.get("signal_id")
+            or ""
+        )
+        watchlist_tier = str(scenario_watchlist_row.get("watchlist_tier") or "").upper()
+        blocker_clearance_path = _build_blocker_clearance_path(
+            live_state=live_state,
+            scenario_state=scenario_state,
+            target_pre_entry_state="CLEAN_ENTRY_ELIGIBLE",
+        )
+        scm_context = _build_scm_context(scenario_state, signal_id, ticker)
+        execution_policy_context = _build_execution_policy_context(policy)
+        sizing_allowed_now = bool(policy.get("allow_new_risk", False)) and not (
+            open_position_conflict or existing_exposure_conflict
+        )
+        sizing_cap_now = policy.get("position_sizing_cap") if sizing_allowed_now else "NONE"
+
+        packet = {
+            "ticker": ticker,
+            "signal_id": signal_id,
+            "priority_score": action_row.get("priority_score"),
+            "ce_score": float(scenario_watchlist_row.get("ce_score", 0.0)),
+            "watchlist_tier": watchlist_tier,
+            "current_pre_entry_state": str(
+                live_watchlist_row.get("pre_entry_state") or "NONE"
+            ).upper(),
+            "target_pre_entry_state": "CLEAN_ENTRY_ELIGIBLE",
+            "current_candidate_conversion_state": str(
+                live_watchlist_row.get("candidate_conversion_state") or "UNKNOWN"
+            ).upper(),
+            "target_candidate_conversion_state": str(
+                scenario_watchlist_row.get("candidate_conversion_state") or "UNKNOWN"
+            ).upper(),
+            "thesis_tag": "PROMOTABLE_CLEAN_CANDIDATE",
+            "why_eligible_now": "GSCE_PHASE_LOCK and REALM_BIS cleared; promotable candidate advanced to review-ready state.",
+            "blockers_cleared": sorted(live_active_blockers - current_active_blockers),
+            "remaining_blockers": remaining_blockers,
+            "blocker_clearance_path": blocker_clearance_path,
+            "scm_context": scm_context,
+            "execution_policy_context": execution_policy_context,
+            "policy_state": policy.get("policy_state"),
+            "allow_new_risk": bool(policy.get("allow_new_risk", False)),
+            "position_sizing_cap": policy.get("position_sizing_cap"),
+            "sizing_allowed_now": sizing_allowed_now,
+            "sizing_cap_now": sizing_cap_now,
+            "open_position_conflict": open_position_conflict,
+            "existing_exposure_conflict": existing_exposure_conflict,
+            "recommended_action": action_row.get("action"),
+            "action_reasons": action_row.get("reasons", []),
+        }
+        checklist = _build_review_checklist(
+            "ENTRY",
+            watchlist_tier=watchlist_tier,
+            signal_above_threshold=scm_context["signal_above_threshold"],
+            open_position_conflict=open_position_conflict,
+            existing_exposure_conflict=existing_exposure_conflict,
+            sizing_allowed_now=sizing_allowed_now,
+            blocker_clearance_path=blocker_clearance_path,
+            packet_fields_populated=all(
+                _field_is_populated(packet.get(field))
+                for field in (
+                    "ticker",
+                    "signal_id",
+                    "priority_score",
+                    "ce_score",
+                    "watchlist_tier",
+                    "current_pre_entry_state",
+                    "target_pre_entry_state",
+                    "current_candidate_conversion_state",
+                    "target_candidate_conversion_state",
+                    "recommended_action",
+                )
+            ),
+        )
+        packet.update(checklist)
+        packet["operator_note"] = (
+            "Existing open position or exposure conflict blocks operator review."
+            if packet["operator_decision_state"] == "BLOCKED_BY_CONFLICT"
+            else "Promotable clean candidate is fully gate-cleared and ready for operator entry review."
+        )
+
+        packets.append(packet)
+    return packets
+
+
+def build_transition_review_packets(
+    live_state: dict[str, Any],
+    scenario_state: dict[str, Any],
+    scenario_action_report: dict[str, Any],
+    open_positions: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    policy = scenario_state.get("execution_policy", {})
+    live_watchlist_rows = _watchlist_rows_by_ticker(live_state)
+    scenario_watchlist_rows = _watchlist_rows_by_ticker(scenario_state)
+    action_rows = _action_rows_by_ticker(scenario_action_report)
+    positions_by_ticker = _open_positions_by_ticker(open_positions)
+    tracked_blockers = {"GSCE_PHASE_LOCK", "REALM_BIS"}
+    current_active_blockers = set(scenario_state.get("active_blockers", []))
+
+    packets: list[dict[str, Any]] = []
+    for ticker, scenario_watchlist_row in sorted(scenario_watchlist_rows.items()):
+        if str(scenario_watchlist_row.get("pre_entry_state") or "").upper() != "CLEAN_READY_PENDING_TRIGGER":
+            continue
+        action_row = action_rows.get(ticker, {})
+        if action_row.get("action") != "MONITOR":
+            continue
+        live_watchlist_row = live_watchlist_rows.get(ticker, {})
+        remaining_blockers = sorted(tracked_blockers.intersection(current_active_blockers))
+        next_gate_to_clear = remaining_blockers[0] if remaining_blockers else None
+        open_position_conflict = any(
+            _position_is_open_like(position)
+            for position in positions_by_ticker.get(ticker, [])
+        )
+        existing_exposure_conflict = open_position_conflict
+        signal_id = str(
+            scenario_watchlist_row.get("signal_id")
+            or live_watchlist_row.get("signal_id")
+            or ""
+        )
+        watchlist_tier = str(scenario_watchlist_row.get("watchlist_tier") or "").upper()
+        blocker_clearance_path = _build_blocker_clearance_path(
+            live_state=live_state,
+            scenario_state=scenario_state,
+            target_pre_entry_state="CLEAN_READY_PENDING_TRIGGER",
+        )
+        scm_context = _build_scm_context(scenario_state, signal_id, ticker)
+        execution_policy_context = _build_execution_policy_context(policy)
+        sizing_allowed_now = bool(policy.get("allow_new_risk", False)) and not (
+            open_position_conflict or existing_exposure_conflict
+        )
+        sizing_cap_now = policy.get("position_sizing_cap") if sizing_allowed_now else "NONE"
+        blockers_cleared = blocker_clearance_path["cleared_for_target_state"]
+
+        packet = {
+            "ticker": ticker,
+            "signal_id": signal_id,
+            "priority_score": action_row.get("priority_score"),
+            "ce_score": float(scenario_watchlist_row.get("ce_score", 0.0)),
+            "watchlist_tier": watchlist_tier,
+            "current_pre_entry_state": str(
+                live_watchlist_row.get("pre_entry_state") or "NONE"
+            ).upper(),
+            "target_pre_entry_state": "CLEAN_READY_PENDING_TRIGGER",
+            "current_candidate_conversion_state": str(
+                live_watchlist_row.get("candidate_conversion_state") or "UNKNOWN"
+            ).upper(),
+            "target_candidate_conversion_state": str(
+                scenario_watchlist_row.get("candidate_conversion_state") or "UNKNOWN"
+            ).upper(),
+            "thesis_tag": "PROMOTABLE_CLEAN_CANDIDATE",
+            "advanced_because": "GSCE_PHASE_LOCK cleared and the promotable candidate advanced into the clean-ready pending path.",
+            "blockers_cleared": blockers_cleared,
+            "remaining_blockers": remaining_blockers,
+            "blocker_clearance_path": blocker_clearance_path,
+            "next_gate_to_clear": next_gate_to_clear,
+            "scm_context": scm_context,
+            "execution_policy_context": execution_policy_context,
+            "policy_state": policy.get("policy_state"),
+            "allow_new_risk": bool(policy.get("allow_new_risk", False)),
+            "sizing_allowed_now": sizing_allowed_now,
+            "sizing_cap_now": sizing_cap_now,
+            "open_position_conflict": open_position_conflict,
+            "existing_exposure_conflict": existing_exposure_conflict,
+            "recommended_action": action_row.get("action"),
+            "action_reasons": action_row.get("reasons", []),
+        }
+        checklist = _build_review_checklist(
+            "TRANSITION",
+            watchlist_tier=watchlist_tier,
+            signal_above_threshold=scm_context["signal_above_threshold"],
+            open_position_conflict=open_position_conflict,
+            existing_exposure_conflict=existing_exposure_conflict,
+            sizing_allowed_now=sizing_allowed_now,
+            blocker_clearance_path=blocker_clearance_path,
+            packet_fields_populated=all(
+                _field_is_populated(packet.get(field))
+                for field in (
+                    "ticker",
+                    "signal_id",
+                    "priority_score",
+                    "ce_score",
+                    "watchlist_tier",
+                    "current_pre_entry_state",
+                    "target_pre_entry_state",
+                    "current_candidate_conversion_state",
+                    "target_candidate_conversion_state",
+                    "recommended_action",
+                )
+            ),
+        )
+        packet.update(checklist)
+        packet["operator_note"] = (
+            "Existing open position or exposure conflict blocks transition review."
+            if packet["operator_decision_state"] == "BLOCKED_BY_CONFLICT"
+            else "Candidate advanced into CLEAN_READY_PENDING_TRIGGER but REALM_BIS still forbids new risk."
+        )
+
+        packets.append(packet)
+    return packets
 
 
 def build_health_scorecard(
@@ -816,29 +1502,51 @@ def build_pipeline_health_report(
     include_tests: bool = False,
     repo_root: Path | None = None,
     write_runtime: bool = True,
+    open_positions_path: Path | None = None,
     runtime_state: dict[str, Any] | None = None,
     action_report: dict[str, Any] | None = None,
     friction_report: dict[str, Any] | None = None,
     trend_report: dict[str, Any] | None = None,
     latest_snapshot_timestamp: str | None = None,
+    simulate_gsce_clear: bool = False,
+    simulate_realm_bis_clear: bool = False,
+    simulate_all_clear: bool = False,
 ) -> dict:
     base = repo_root or REPO_ROOT
     if runtime_state is None:
-        scm_report = build_signal_conversion_report()
+        scm_report = build_signal_conversion_report(
+            simulate_gsce_clear=simulate_gsce_clear,
+            simulate_realm_bis_clear=simulate_realm_bis_clear,
+            simulate_all_clear=simulate_all_clear,
+        )
         state = build_runtime_state_from_scm_report(scm_report)
     else:
         state = runtime_state
+    simulation_context = state.get("simulation_context", {})
+    effective_write_runtime = write_runtime and not simulation_context.get("is_simulated", False)
 
-    if write_runtime:
+    if effective_write_runtime:
         persist_current_runtime_state(state)
 
-    _, open_positions_summary = load_open_positions()
-    action_report = action_report or build_action_report(runtime_state=state, write_runtime=write_runtime)
+    open_positions, open_positions_summary = load_open_positions(open_positions_path)
+    current_snapshot_row = (
+        build_snapshot_row(runtime_state=state)
+        if simulation_context.get("is_simulated", False)
+        else None
+    )
+    action_report = action_report or build_action_report(
+        runtime_state=state,
+        open_positions_path=open_positions_path,
+        write_runtime=effective_write_runtime,
+    )
     friction_report = friction_report or build_blocker_cost_report(
         runtime_state=state,
-        write_runtime=write_runtime,
+        write_runtime=effective_write_runtime,
     )
-    trend_report = trend_report or build_trend_report(write_runtime=write_runtime)
+    trend_report = trend_report or build_trend_report(
+        write_runtime=effective_write_runtime,
+        current_snapshot_row=current_snapshot_row,
+    )
     test_status = (
         run_targeted_tests(base)
         if include_tests
@@ -856,6 +1564,26 @@ def build_pipeline_health_report(
         per_signal_rows=state["per_signal_attribution"],
         trend_report=trend_report,
     )
+    live_baseline_report = build_signal_conversion_report()
+    live_baseline_state = build_runtime_state_from_scm_report(live_baseline_report)
+    live_baseline_queue = build_blocked_promotable_candidate_queue(
+        live_baseline_state["watchlist_diagnostics"],
+        per_signal_rows=live_baseline_state["per_signal_attribution"],
+        trend_report=trend_report,
+    )
+    live_baseline_action_report = build_action_report(
+        runtime_state=live_baseline_state,
+        open_positions_path=open_positions_path,
+        write_runtime=False,
+    )
+    gate_resolution_preview = build_gate_resolution_preview(
+        live_state=live_baseline_state,
+        live_action_report=live_baseline_action_report,
+        live_queue=live_baseline_queue,
+        open_positions=open_positions,
+        open_positions_path=open_positions_path,
+    )
+    gsce_clear_transition_preview = gate_resolution_preview["gsce_clear"]["candidates"]
     queue_pressure_state = derive_queue_pressure_state(blocked_promotable_candidate_queue)
     operator_policy = build_operator_policy_view(
         state["execution_policy"],
@@ -910,9 +1638,13 @@ def build_pipeline_health_report(
     if not latest_trend_timestamp_or_window_end:
         latest_trend_timestamp_or_window_end = resolved_latest_snapshot_timestamp
 
-    queue_sync_state = derive_queue_sync_state(
-        blocked_promotable_candidate_queue,
-        trend_report=trend_report,
+    queue_sync_state = (
+        "UNKNOWN"
+        if simulation_context.get("is_simulated", False)
+        else derive_queue_sync_state(
+            blocked_promotable_candidate_queue,
+            trend_report=trend_report,
+        )
     )
     blockage_severity = derive_blockage_severity(
         blocked_promotable_candidate_queue,
@@ -925,14 +1657,33 @@ def build_pipeline_health_report(
         readiness_breakdown=execution_readiness_breakdown,
         readiness_context=readiness_context,
     )
-    clean_ready_candidates_if_gsce_clears = build_clean_ready_candidates_if_gsce_clears(
-        blocked_promotable_candidate_queue
+    preview_key_by_scenario = {
+        "LIVE": "live",
+        "GSCE_CLEAR": "gsce_clear",
+        "REALM_BIS_CLEAR": "realm_bis_clear",
+        "ALL_CLEAR": "all_clear",
+    }
+    current_preview_key = preview_key_by_scenario.get(
+        simulation_context.get("scenario", "LIVE"),
+        "live",
     )
+    current_scenario_preview = gate_resolution_preview[current_preview_key]
+    clean_ready_candidates_if_gsce_clears = build_clean_ready_candidates_if_gsce_clears(
+        gsce_clear_transition_preview
+    )
+    next_state_if_all_clear = build_next_state_if_all_clear(gate_resolution_preview)
+    entry_review_packets = current_scenario_preview["entry_review_packets"]
+    transition_review_packets = current_scenario_preview["transition_review_packets"]
+    packet_summary = current_scenario_preview["packet_summary"]
+    decision_review_state = current_scenario_preview["decision_review_state"]
 
     report = {
         "health_generated_at": _health_timestamp(),
         "latest_snapshot_timestamp": resolved_latest_snapshot_timestamp,
         "latest_trend_timestamp_or_window_end": latest_trend_timestamp_or_window_end,
+        "simulation_context": simulation_context,
+        "simulation_mode": simulation_context.get("scenario", "LIVE"),
+        "simulation_writes_runtime": effective_write_runtime,
         "queue_sync_state": queue_sync_state,
         "system_readiness_state": system_readiness_state,
         "can_deploy_capital": can_deploy_capital,
@@ -948,7 +1699,37 @@ def build_pipeline_health_report(
         "blockage_severity": blockage_severity,
         "operator_state": operator_state,
         "execution_readiness_breakdown": execution_readiness_breakdown,
+        "gate_resolution_preview": gate_resolution_preview,
+        "gsce_clear_transition_preview": gsce_clear_transition_preview,
+        "gsce_clear_action_preview": gate_resolution_preview["gsce_clear"],
         "clean_ready_candidates_if_gsce_clears": clean_ready_candidates_if_gsce_clears,
+        "next_state_if_all_clear": next_state_if_all_clear,
+        "blocked_promotable_transition_streak": trend_report.get(
+            "blocked_promotable_transition_streak",
+            {},
+        ),
+        "clean_ready_pending_transition_streak": trend_report.get(
+            "clean_ready_pending_transition_streak",
+            {},
+        ),
+        "clean_entry_eligible_transition_streak": trend_report.get(
+            "clean_entry_eligible_transition_streak",
+            {},
+        ),
+        "scenario_transition_trends": trend_report.get("scenario_transition_trends", {}),
+        "transition_pressure_state": trend_report.get("transition_pressure_state"),
+        "transition_readiness_state": trend_report.get("transition_readiness_state"),
+        "packet_transition_state": trend_report.get("packet_transition_state"),
+        "packet_entry_state": trend_report.get("packet_entry_state"),
+        "entry_review_candidate_streak": trend_report.get("entry_review_candidate_streak", {}),
+        "transition_review_candidate_streak": trend_report.get(
+            "transition_review_candidate_streak",
+            {},
+        ),
+        "decision_review_state": decision_review_state,
+        "entry_review_packets": entry_review_packets,
+        "transition_review_packets": transition_review_packets,
+        "packet_summary": packet_summary,
         "readiness_context": readiness_context,
         "per_ticker_action_summary": {
             "summary_by_action": action_report["summary_by_action"],
@@ -965,7 +1746,7 @@ def build_pipeline_health_report(
         "note": "Health report integrates authoritative SCM state, action policy, blocker cost, memory trends, and open positions validation.",
     }
 
-    if write_runtime:
+    if effective_write_runtime:
         write_json_atomic(HEALTH_REPORT_PATH, report)
 
     return report
@@ -975,9 +1756,11 @@ def format_pipeline_health_summary(report: dict[str, Any]) -> str:
     git_clean = report["git_status"]["is_clean"]
     tests_invoked = report["test_status"]["invoked"]
     tests_passed = report["test_status"]["passed"]
-    return "\n".join(
+    lines = ["Pipeline Health Report"]
+    if report.get("simulation_mode") and report.get("simulation_mode") != "LIVE":
+        lines.append(f"simulation_mode={report['simulation_mode']}")
+    lines.extend(
         [
-            "Pipeline Health Report",
             f"git_clean={str(git_clean).lower() if isinstance(git_clean, bool) else git_clean}",
             f"tests_invoked={str(tests_invoked).lower() if isinstance(tests_invoked, bool) else tests_invoked}",
             f"tests_passed={str(tests_passed).lower() if isinstance(tests_passed, bool) else tests_passed}",
@@ -997,6 +1780,20 @@ def format_pipeline_health_summary(report: dict[str, Any]) -> str:
             ),
         ]
     )
+    entry_review_names = report.get("packet_summary", {}).get("entry_review_candidate_names", [])
+    transition_review_names = report.get("packet_summary", {}).get(
+        "transition_review_candidate_names",
+        [],
+    )
+    if entry_review_names:
+        lines.append(f"entry_review_candidates={', '.join(entry_review_names)}")
+    if transition_review_names:
+        lines.append(f"transition_review_candidates={', '.join(transition_review_names)}")
+    if report.get("decision_review_state") and report.get("decision_review_state") != "NONE":
+        lines.append(f"decision_review_state={report['decision_review_state']}")
+    if report.get("simulation_mode") and report.get("simulation_mode") != "LIVE":
+        lines.append(f"transition_readiness_state={report['transition_readiness_state']}")
+    return "\n".join(lines)
 
 
 def build_cli_parser() -> argparse.ArgumentParser:
@@ -1011,6 +1808,22 @@ def build_cli_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Do not persist runtime/pipeline_health_report.json or dependent runtime files.",
     )
+    simulation = parser.add_mutually_exclusive_group()
+    simulation.add_argument(
+        "--simulate-gsce-clear",
+        action="store_true",
+        help="Preview health after GSCE_PHASE_LOCK clears without overwriting live runtime output.",
+    )
+    simulation.add_argument(
+        "--simulate-realm-bis-clear",
+        action="store_true",
+        help="Preview health after REALM_BIS clears without overwriting live runtime output.",
+    )
+    simulation.add_argument(
+        "--simulate-all-clear",
+        action="store_true",
+        help="Preview health after GSCE_PHASE_LOCK and REALM_BIS both clear without overwriting live runtime output.",
+    )
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--json", action="store_true", help="Emit machine-readable JSON.")
     mode.add_argument("--summary", action="store_true", help="Emit a compact human-readable summary.")
@@ -1024,6 +1837,9 @@ def main(argv: list[str] | None = None) -> int:
     report = build_pipeline_health_report(
         include_tests=args.include_tests,
         write_runtime=not args.no_write,
+        simulate_gsce_clear=args.simulate_gsce_clear,
+        simulate_realm_bis_clear=args.simulate_realm_bis_clear,
+        simulate_all_clear=args.simulate_all_clear,
     )
     if args.summary:
         print(format_pipeline_health_summary(report))

@@ -8,19 +8,24 @@ from typing import Any
 try:
     from scripts.runtime_common import (
         ACTION_REPORT_PATH,
+        build_runtime_state_from_scm_report_payload,
         load_current_pipeline_state,
         load_open_positions,
         write_json_atomic,
     )
+    from scripts.signal_conversion_monitor import build_signal_conversion_report
 except ModuleNotFoundError:
     from runtime_common import (
         ACTION_REPORT_PATH,
+        build_runtime_state_from_scm_report_payload,
         load_current_pipeline_state,
         load_open_positions,
         write_json_atomic,
     )
+    from signal_conversion_monitor import build_signal_conversion_report
 
 ACTION_ORDER = ["EXIT_NOW", "REDUCE", "HOLD", "MONITOR", "BLOCK_ENTRY"]
+OPTIONAL_ACTION_ORDER = ["REVIEW_FOR_ENTRY"]
 
 
 def _position_is_open(position: dict[str, Any] | None) -> bool:
@@ -90,6 +95,24 @@ def _select_action(
         )
         return "BLOCK_ENTRY", reasons
 
+    if (
+        pre_entry_state == "CLEAN_READY_PENDING_TRIGGER"
+        and not policy.get("allow_new_risk", False)
+    ):
+        reasons.append(
+            "Promotable clean candidate advanced to CLEAN_READY_PENDING_TRIGGER after GSCE_PHASE_LOCK cleared; policy still forbids new risk"
+        )
+        return "MONITOR", reasons
+
+    if (
+        pre_entry_state == "CLEAN_ENTRY_ELIGIBLE"
+        and policy.get("allow_new_risk", False)
+    ):
+        reasons.append(
+            "Promotable clean candidate is fully gate-cleared and ready for entry review"
+        )
+        return "REVIEW_FOR_ENTRY", reasons
+
     if signal_state == "WATCHLIST" and "GSCE_PHASE_LOCK" in active_blockers:
         reasons.append("Signal remains WATCHLIST while GSCE_PHASE_LOCK is active")
         return "BLOCK_ENTRY", reasons
@@ -107,8 +130,28 @@ def build_action_report(
     runtime_state: dict[str, Any] | None = None,
     open_positions_path: Path | None = None,
     write_runtime: bool = False,
+    simulate_gsce_clear: bool = False,
+    simulate_realm_bis_clear: bool = False,
+    simulate_all_clear: bool = False,
 ) -> dict[str, Any]:
-    state = runtime_state or load_current_pipeline_state()
+    simulation_requested = any(
+        [simulate_gsce_clear, simulate_realm_bis_clear, simulate_all_clear]
+    )
+    if simulation_requested and write_runtime:
+        raise ValueError("Simulated action reports cannot write runtime artifacts.")
+
+    if runtime_state is not None:
+        state = runtime_state
+    elif simulation_requested:
+        state = build_runtime_state_from_scm_report_payload(
+            build_signal_conversion_report(
+                simulate_gsce_clear=simulate_gsce_clear,
+                simulate_realm_bis_clear=simulate_realm_bis_clear,
+                simulate_all_clear=simulate_all_clear,
+            )
+        )
+    else:
+        state = load_current_pipeline_state()
     open_positions, validation = load_open_positions(open_positions_path)
     positions_by_ticker: dict[str, dict[str, Any]] = {}
     for position in open_positions:
@@ -132,6 +175,8 @@ def build_action_report(
             policy=policy,
             active_blockers=active_blockers,
         )
+        if action not in summary_by_action:
+            summary_by_action[action] = 0
         summary_by_action[action] += 1
         priority_score = 0.0
         if position is not None:
@@ -156,6 +201,7 @@ def build_action_report(
     report = {
         "policy_state": policy["policy_state"],
         "active_blockers": active_blockers,
+        "simulation_context": state.get("simulation_context", {}),
         "summary_by_action": summary_by_action,
         "actions": actions,
         "open_positions_validation": validation,
@@ -166,7 +212,11 @@ def build_action_report(
 
 
 def format_action_summary(report: dict[str, Any]) -> str:
-    parts = [f"{action}={report['summary_by_action'][action]}" for action in ACTION_ORDER]
+    action_order = list(ACTION_ORDER)
+    for action in OPTIONAL_ACTION_ORDER:
+        if report["summary_by_action"].get(action, 0) > 0:
+            action_order.append(action)
+    parts = [f"{action}={report['summary_by_action'][action]}" for action in action_order]
     return "\n".join(
         [
             "Action Engine",
@@ -190,6 +240,22 @@ def build_cli_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--write-runtime", action="store_true", help="Persist runtime/action_report.json."
     )
+    simulation = parser.add_mutually_exclusive_group()
+    simulation.add_argument(
+        "--simulate-gsce-clear",
+        action="store_true",
+        help="Preview actions after GSCE_PHASE_LOCK clears. Does not permit entries or write runtime output.",
+    )
+    simulation.add_argument(
+        "--simulate-realm-bis-clear",
+        action="store_true",
+        help="Preview actions after REALM_BIS clears. Does not permit entries or write runtime output.",
+    )
+    simulation.add_argument(
+        "--simulate-all-clear",
+        action="store_true",
+        help="Preview actions after GSCE_PHASE_LOCK and REALM_BIS both clear. Does not permit entries or write runtime output.",
+    )
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--json", action="store_true", help="Emit machine-readable JSON.")
     mode.add_argument(
@@ -201,9 +267,23 @@ def build_cli_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     parser = build_cli_parser()
     args = parser.parse_args(argv)
+    if (
+        any(
+            [
+                args.simulate_gsce_clear,
+                args.simulate_realm_bis_clear,
+                args.simulate_all_clear,
+            ]
+        )
+        and args.write_runtime
+    ):
+        parser.error("simulation flags cannot be combined with --write-runtime")
     report = build_action_report(
         open_positions_path=args.open_positions,
         write_runtime=args.write_runtime,
+        simulate_gsce_clear=args.simulate_gsce_clear,
+        simulate_realm_bis_clear=args.simulate_realm_bis_clear,
+        simulate_all_clear=args.simulate_all_clear,
     )
     if args.summary:
         print(format_action_summary(report))

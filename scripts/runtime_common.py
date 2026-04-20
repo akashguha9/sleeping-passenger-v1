@@ -56,11 +56,18 @@ POLICY_STATE_RANK = {
     "NOT_READY": 1,
     "LIMITED_DEPLOY": 2,
     "PARTIAL": 2,
+    "REVIEW_READY": 2,
     "NORMAL": 3,
     "UNRESTRICTED": 3,
     "READY": 3,
 }
-PERMISSIVE_POLICY_STATES = {"READY", "UNRESTRICTED", "NORMAL", "LIMITED_DEPLOY"}
+PERMISSIVE_POLICY_STATES = {
+    "READY",
+    "UNRESTRICTED",
+    "NORMAL",
+    "LIMITED_DEPLOY",
+    "REVIEW_READY",
+}
 
 
 def repo_relative(path: Path) -> str:
@@ -306,29 +313,47 @@ def normalize_per_signal_rows(payload: Any) -> list[dict[str, Any]]:
         blocker = _text(row.get("blocker_attribution"), "NONE").upper()
         signal_state = _infer_signal_state(row)
         entry_type = _infer_entry_type(row)
-        if blocker == "NONE" and signal_state == "WATCHLIST":
-            blocker = "GSCE_PHASE_LOCK"
-
         watchlist_diagnostics = (
             watchlist_diagnostics_map.get(signal_id)
             or watchlist_diagnostics_map.get(ticker)
             or {}
         )
+        explicit_watchlist_tier = _text(
+            row.get("watchlist_tier"),
+            _text(watchlist_diagnostics.get("watchlist_tier")),
+        ).upper()
+        explicit_candidate_conversion_state = _text(
+            row.get("candidate_conversion_state"),
+            _text(watchlist_diagnostics.get("candidate_conversion_state")),
+        ).upper()
+        explicit_pre_entry_state = _text(
+            row.get("pre_entry_state"),
+            _text(watchlist_diagnostics.get("pre_entry_state")),
+        ).upper()
+        if (
+            blocker == "NONE"
+            and signal_state == "WATCHLIST"
+            and not explicit_watchlist_tier
+            and not explicit_candidate_conversion_state
+            and not explicit_pre_entry_state
+        ):
+            blocker = "GSCE_PHASE_LOCK"
+
         promotable_clean_candidate = _coerce_bool(
             row.get("promotable_clean_candidate"),
             _coerce_bool(watchlist_diagnostics.get("promotable_clean_candidate"), False),
         )
         watchlist_tier = _text(
             row.get("watchlist_tier"),
-            _text(watchlist_diagnostics.get("watchlist_tier")),
+            explicit_watchlist_tier,
         ).upper()
         candidate_conversion_state = _text(
             row.get("candidate_conversion_state"),
-            _text(watchlist_diagnostics.get("candidate_conversion_state")),
+            explicit_candidate_conversion_state,
         ).upper()
         pre_entry_state = _text(
             row.get("pre_entry_state"),
-            _text(watchlist_diagnostics.get("pre_entry_state"), "NONE"),
+            explicit_pre_entry_state or "NONE",
         ).upper()
 
         if signal_state == "WATCHLIST":
@@ -582,6 +607,7 @@ def _build_state_from_live_report(report: dict[str, Any]) -> dict[str, Any]:
         "active_blockers": active_blockers,
         "execution_policy": normalize_execution_policy(report.get("execution_policy")),
         "scm_review": normalize_scm_review(report, active_blockers=active_blockers),
+        "simulation_context": report.get("simulation_context", {}),
         "note": report.get("note", ""),
     }
 
@@ -637,6 +663,7 @@ def _load_state_from_runtime_files() -> dict[str, Any]:
             execution_payload or scm_payload
         ),
         "scm_review": normalize_scm_review(scm_payload, active_blockers=active_blockers),
+        "simulation_context": scm_payload.get("simulation_context", {}),
         "note": _text(
             scm_payload.get("note"), "Loaded from normalized runtime files."
         ),
@@ -680,6 +707,23 @@ def load_current_pipeline_state(prefer_runtime_files: bool = False) -> dict[str,
     if live_report is not None:
         return _build_state_from_live_report(live_report)
     return _load_state_from_runtime_files()
+
+
+def build_runtime_state_from_scm_report_payload(scm_report: dict[str, Any]) -> dict[str, Any]:
+    derived_gate_states = scm_report.get("derived_gate_states", {})
+    return {
+        "source": "scm_report",
+        "moltbook_summary": scm_report.get("moltbook_summary", {}),
+        "signal_summary": scm_report.get("signal_summary", {}),
+        "per_signal_attribution": normalize_per_signal_rows(scm_report),
+        "watchlist_diagnostics": scm_report.get("watchlist_diagnostics", {}),
+        "derived_gate_states": derived_gate_states,
+        "active_blockers": normalize_active_blockers(derived_gate_states),
+        "execution_policy": scm_report.get("execution_policy", {}),
+        "scm_review": scm_report.get("scm_review", {}),
+        "simulation_context": scm_report.get("simulation_context", {}),
+        "note": scm_report.get("note", ""),
+    }
 
 
 def policy_state_score(policy_state: str) -> int:
