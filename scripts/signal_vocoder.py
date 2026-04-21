@@ -16,6 +16,7 @@ import re
 from typing import Any, Mapping, Sequence
 
 try:
+    from scripts.behavioral_forensics import build_behavioral_forensics_output
     from scripts.external_tool_integration_layer import (
         ETILSignal,
         etil_to_snc_input,
@@ -36,6 +37,7 @@ try:
         write_json_atomic,
     )
 except ModuleNotFoundError:
+    from behavioral_forensics import build_behavioral_forensics_output
     from external_tool_integration_layer import (
         ETILSignal,
         etil_to_snc_input,
@@ -1317,6 +1319,7 @@ def build_runtime_vocoder_artifact(
     etil_signals: Sequence[Mapping[str, Any]] | None = None,
     tool_payloads: Sequence[Mapping[str, Any]] | None = None,
     open_positions: Sequence[Mapping[str, Any]] | None = None,
+    include_behavioral_forensics: bool = True,
     now: datetime | None = None,
 ) -> dict[str, Any]:
     resolved_now = now or datetime.now(timezone.utc)
@@ -1364,6 +1367,7 @@ def build_runtime_vocoder_artifact(
                 ),
                 now=resolved_now,
             )
+        runtime_context = _runtime_vocoder_context(row, position, health_report)
         compressed_signal = build_signal_vocoder_output(
             entity_signals,
             runtime_state=runtime_state,
@@ -1371,15 +1375,20 @@ def build_runtime_vocoder_artifact(
             entity_id=entity_id,
             now=resolved_now,
         )
-        entities_payload.append(
-            {
-                "entity_id": entity_id,
-                "input_origin": input_origin,
-                "input_payload_count": len(entity_signals),
-                "runtime_context": _runtime_vocoder_context(row, position, health_report),
-                "compressed_signal": compressed_signal,
-            }
-        )
+        entity_payload = {
+            "entity_id": entity_id,
+            "input_origin": input_origin,
+            "input_payload_count": len(entity_signals),
+            "runtime_context": runtime_context,
+            "compressed_signal": compressed_signal,
+        }
+        if include_behavioral_forensics:
+            entity_payload["behavioral_forensics"] = build_behavioral_forensics_output(
+                entity_signals,
+                entity_id=entity_id,
+                runtime_context=runtime_context,
+            )
+        entities_payload.append(entity_payload)
 
     entities_payload.sort(key=lambda item: item["entity_id"])
     summary_rows = [item["compressed_signal"] for item in entities_payload]
@@ -1395,6 +1404,22 @@ def build_runtime_vocoder_artifact(
             "signal_grades": _count_values(summary_rows, "signal_grade"),
             "deployment_postures": _count_values(summary_rows, "deployment_posture"),
             "decision_signals": _count_values(summary_rows, "decision_signal"),
+            "behavioral_system_classes": _count_values(
+                [
+                    item.get("behavioral_forensics", {}).get("system_classification", {})
+                    for item in entities_payload
+                    if isinstance(item.get("behavioral_forensics"), Mapping)
+                ],
+                "label",
+            ),
+            "behavioral_objectives": _count_values(
+                [
+                    item.get("behavioral_forensics", {}).get("hidden_objective", {})
+                    for item in entities_payload
+                    if isinstance(item.get("behavioral_forensics"), Mapping)
+                ],
+                "label",
+            ),
             "blocked_entities": [
                 item["entity_id"]
                 for item in entities_payload

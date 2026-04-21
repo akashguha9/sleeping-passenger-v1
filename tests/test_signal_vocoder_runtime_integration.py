@@ -94,8 +94,31 @@ def test_build_runtime_vocoder_artifact_uses_synthetic_runtime_fallback() -> Non
     assert artifact["entity_count"] == 2
     assert [item["entity_id"] for item in artifact["entities"]] == ["RTX", "UNG"]
     assert artifact["entities"][0]["runtime_context"]["pre_entry_state"] == "BLOCKED_PROMOTABLE_CLEAN_CANDIDATE"
+    assert artifact["entities"][0]["behavioral_forensics"]["system_classification"]["label"] in {
+        "official_correctness_system",
+        "hybrid_system",
+    }
+    assert artifact["entities"][0]["behavioral_forensics"]["ambiguity_analysis"]["schema_version"] == "v1"
+    assert artifact["entities"][0]["behavioral_forensics"]["ambiguity_type"]["label"] == "low_ambiguity"
+    assert artifact["entities"][0]["behavioral_forensics"]["identity_mode"]["label"] == "epistemic"
     assert artifact["entities"][1]["runtime_context"]["has_open_position"] is True
     assert artifact["summary"]["blocked_entities"] == ["RTX", "UNG"]
+    assert "behavioral_system_classes" in artifact["summary"]
+    assert "behavioral_objectives" in artifact["summary"]
+
+
+def test_build_runtime_vocoder_artifact_can_disable_behavioral_forensics() -> None:
+    artifact = build_runtime_vocoder_artifact(
+        runtime_state=_sample_runtime_state(),
+        health_report=_sample_health_report(),
+        open_positions=_sample_open_positions(),
+        include_behavioral_forensics=False,
+        now=NOW,
+    )
+
+    assert "behavioral_forensics" not in artifact["entities"][0]
+    assert artifact["summary"]["behavioral_system_classes"] == {}
+    assert artifact["summary"]["behavioral_objectives"] == {}
 
 
 def test_run_diagnostics_pipeline_persists_vocoder_artifact_after_health_report(monkeypatch) -> None:
