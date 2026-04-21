@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
+import time
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -9,6 +12,113 @@ from typing import Any
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
+
+# ---------------------------------------------------------------------------
+# Runtime artifact coherence layer
+# ---------------------------------------------------------------------------
+# All runtime/*.json artifacts written in a single pipeline run share a common
+# run_id and source_mode. This prevents contradictions like one artifact
+# reporting LIVE_ETIL while another reports SYNTHETIC_RUNTIME_FALLBACK.
+#
+# Design:
+#   * RUN_ID is generated once per process. Child processes inherit via env.
+#   * _source_mode is a module global, defaulting to SYNTHETIC_RUNTIME_FALLBACK.
+#   * stamp_payload() stamps a dict with run_id/source_mode/timestamps.
+#   * write_json_atomic() auto-stamps dict payloads; non-dict payloads pass
+#     through unchanged (backwards compatible).
+#   * append_jsonl() auto-stamps each row.
+#
+# A downstream coherence test asserts every runtime/*.json shares run_id and
+# source_mode after a single pipeline run.
+
+VALID_SOURCE_MODES = {"LIVE_ETIL", "SYNTHETIC_RUNTIME_FALLBACK", "REPLAY"}
+
+# NOTE: source_mode and run_id are stored in os.environ rather than as simple
+# module globals because both `scripts.runtime_common` and `runtime_common`
+# can be loaded as distinct module instances in the same process (each has
+# its own globals) — see the dual-import fallback in action_engine.py et al.
+# Using env vars gives us ONE source of truth shared across all instances.
+
+RUN_ID: str = os.environ.get("PIPELINE_RUN_ID") or uuid.uuid4().hex[:12]
+os.environ["PIPELINE_RUN_ID"] = RUN_ID  # propagate to child processes
+
+RUN_STARTED_AT: str = os.environ.get("PIPELINE_RUN_STARTED_AT") or (
+    datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+)
+os.environ["PIPELINE_RUN_STARTED_AT"] = RUN_STARTED_AT
+
+# Initialize env source_mode if unset. Real value is established per-run by
+# resolve_source_mode().
+if os.environ.get("PIPELINE_SOURCE_MODE") not in VALID_SOURCE_MODES:
+    os.environ["PIPELINE_SOURCE_MODE"] = "SYNTHETIC_RUNTIME_FALLBACK"
+
+
+def set_source_mode(mode: str) -> None:
+    """Set the process-wide source_mode. Must be one of VALID_SOURCE_MODES."""
+    if mode not in VALID_SOURCE_MODES:
+        raise ValueError(
+            f"invalid source_mode {mode!r}; must be one of {sorted(VALID_SOURCE_MODES)}"
+        )
+    os.environ["PIPELINE_SOURCE_MODE"] = mode
+
+
+def get_source_mode() -> str:
+    mode = os.environ.get("PIPELINE_SOURCE_MODE", "SYNTHETIC_RUNTIME_FALLBACK")
+    if mode not in VALID_SOURCE_MODES:
+        mode = "SYNTHETIC_RUNTIME_FALLBACK"
+    return mode
+
+
+def get_run_id() -> str:
+    rid = os.environ.get("PIPELINE_RUN_ID")
+    return rid if rid else RUN_ID
+
+
+def get_run_started_at() -> str:
+    return os.environ.get("PIPELINE_RUN_STARTED_AT", RUN_STARTED_AT)
+
+
+def resolve_source_mode(
+    etil_input_path: Path | None = None,
+    freshness_seconds: int = 900,
+) -> str:
+    """Determine source_mode from presence/freshness of the ETIL input file.
+
+    LIVE_ETIL only when the file exists AND was modified within freshness_seconds.
+    Otherwise SYNTHETIC_RUNTIME_FALLBACK.
+    """
+    if etil_input_path is None:
+        etil_input_path = RUNTIME_DIR / "signal_vocoder_etil_inputs.json"
+    try:
+        if etil_input_path.exists():
+            age = time.time() - etil_input_path.stat().st_mtime
+            if age <= freshness_seconds:
+                mode = "LIVE_ETIL"
+            else:
+                mode = "SYNTHETIC_RUNTIME_FALLBACK"
+        else:
+            mode = "SYNTHETIC_RUNTIME_FALLBACK"
+    except OSError:
+        mode = "SYNTHETIC_RUNTIME_FALLBACK"
+    set_source_mode(mode)
+    return mode
+
+
+def stamp_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    """Stamp a runtime artifact payload with run_id/source_mode/timestamps.
+
+    Caller-supplied run_id/source_mode are overwritten — those are authoritative
+    from this process. Other keys are preserved. Reads run_id/source_mode from
+    os.environ so dual-imported module instances stay coherent.
+    """
+    stamped = dict(payload)
+    stamped["run_id"] = get_run_id()
+    stamped["source_mode"] = get_source_mode()
+    stamped.setdefault("run_started_at", get_run_started_at())
+    stamped["artifact_written_at"] = (
+        datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+    )
+    return stamped
 
 MOLTBOOK_DIR = REPO_ROOT / "moltbook"
 OPEN_POSITIONS_PATH = MOLTBOOK_DIR / "open_positions.json"
@@ -94,17 +204,44 @@ def load_json_file(path: Path, default: Any = None) -> Any:
     return json.loads(raw)
 
 
-def write_json_atomic(path: Path, payload: Any) -> None:
+def write_json_atomic(path: Path, payload: Any, stamp: bool = True) -> None:
+    """Write payload to path atomically.
+
+    When payload is a dict and stamp is True (default), run_id/source_mode/
+    timestamps are stamped onto it via stamp_payload() to enforce runtime
+    artifact coherence. Non-dict payloads are written as-is for backwards
+    compatibility.
+    """
     ensure_directory(path.parent)
+    effective_payload = (
+        stamp_payload(payload) if stamp and isinstance(payload, dict) else payload
+    )
     temp_path = path.with_suffix(path.suffix + ".tmp")
-    temp_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    temp_path.write_text(json.dumps(effective_payload, indent=2), encoding="utf-8")
     temp_path.replace(path)
 
 
-def append_jsonl(path: Path, row: dict[str, Any]) -> None:
+def write_runtime_artifact(path: Path, payload: dict[str, Any]) -> None:
+    """Preferred public API: atomic dict write with coherence stamping.
+
+    Thin wrapper around write_json_atomic(..., stamp=True) to make intent
+    explicit at call sites.
+    """
+    if not isinstance(payload, dict):
+        raise TypeError("write_runtime_artifact requires a dict payload")
+    write_json_atomic(path, payload, stamp=True)
+
+
+def append_jsonl(path: Path, row: dict[str, Any], stamp: bool = True) -> None:
+    """Append one JSON row to a .jsonl file.
+
+    When stamp is True (default), run_id/source_mode/timestamps are added to
+    the row so snapshot/log streams are coherent with other runtime artifacts.
+    """
     ensure_directory(path.parent)
+    effective_row = stamp_payload(row) if stamp and isinstance(row, dict) else row
     with path.open("a", encoding="utf-8", newline="\n") as handle:
-        handle.write(json.dumps(row, separators=(",", ":")) + "\n")
+        handle.write(json.dumps(effective_row, separators=(",", ":")) + "\n")
 
 
 def _coerce_number(value: Any, default: float = 0.0) -> float:

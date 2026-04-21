@@ -12,7 +12,11 @@ try:
         build_runtime_state_from_scm_report,
         format_pipeline_health_summary,
     )
-    from scripts.runtime_common import SNAPSHOT_LOG_PATH, persist_current_runtime_state
+    from scripts.runtime_common import (
+        SNAPSHOT_LOG_PATH,
+        persist_current_runtime_state,
+        resolve_source_mode,
+    )
     from scripts.signal_conversion_monitor import build_signal_conversion_report
     from scripts.snapshot_logger import build_snapshot_row, log_snapshot
     from scripts.trend_engine import build_trend_report
@@ -24,7 +28,11 @@ except ModuleNotFoundError:
         build_runtime_state_from_scm_report,
         format_pipeline_health_summary,
     )
-    from runtime_common import SNAPSHOT_LOG_PATH, persist_current_runtime_state
+    from runtime_common import (
+        SNAPSHOT_LOG_PATH,
+        persist_current_runtime_state,
+        resolve_source_mode,
+    )
     from signal_conversion_monitor import build_signal_conversion_report
     from snapshot_logger import build_snapshot_row, log_snapshot
     from trend_engine import build_trend_report
@@ -39,6 +47,13 @@ def run_diagnostics_pipeline(
     simulate_realm_bis_clear: bool = False,
     simulate_all_clear: bool = False,
 ) -> dict:
+    # Resolve source_mode once per pipeline run. All runtime/*.json artifacts
+    # written during this run will inherit this value via runtime_common's
+    # stamp_payload() hook in write_json_atomic(). This is what prevents the
+    # coherence drift described in the Windows audit (vocoder reporting
+    # SYNTHETIC_RUNTIME_FALLBACK while behavioral_review reports LIVE_ETIL).
+    resolve_source_mode()
+
     simulation_requested = any(
         [simulate_gsce_clear, simulate_realm_bis_clear, simulate_all_clear]
     )

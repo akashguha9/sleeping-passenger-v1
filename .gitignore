@@ -5,3 +5,13 @@ audit_bundle.zip
 __pycache__/
 *.pyc
 moltbook/open_positions.json
+
+# pytest (Windows-safe repo-local tmp + cache, per pytest.ini)
+logs/.pytest_cache/
+logs/.pytest_tmp/
+
+# chronology SQLite DB (written by scripts/chronology_store, not committed)
+logs/observation.db
+logs/observation.db-journal
+logs/observation.db-wal
+logs/observation.db-shm
