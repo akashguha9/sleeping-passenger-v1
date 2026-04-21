@@ -27,6 +27,7 @@ try:
         pe_price_action,
     )
     from scripts.runtime_common import policy_state_score
+    from scripts.runtime_common import SIGNAL_VOCODER_REPORT_PATH, load_open_positions, write_json_atomic
 except ModuleNotFoundError:
     from external_tool_integration_layer import (
         ETILSignal,
@@ -39,6 +40,7 @@ except ModuleNotFoundError:
         pe_price_action,
     )
     from runtime_common import policy_state_score
+    from runtime_common import SIGNAL_VOCODER_REPORT_PATH, load_open_positions, write_json_atomic
 
 
 TEXT_FIELDS = ("text", "title", "summary", "question")
@@ -1102,3 +1104,227 @@ def build_signal_vocoder_output(
         reasons=reasons,
     )
     return compressed.to_dict()
+
+
+def _runtime_vocoder_context(
+    row: Mapping[str, Any],
+    position: Mapping[str, Any] | None,
+    health_report: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    policy_payload = {}
+    if isinstance(health_report, Mapping):
+        policy_payload = health_report.get("policy") or health_report.get("execution_policy") or {}
+    policy_state = str((policy_payload or {}).get("policy_state") or "UNKNOWN").upper()
+    return {
+        "ticker": str(row.get("ticker") or "").upper(),
+        "signal_id": str(row.get("signal_id") or ""),
+        "signal_state": str(row.get("signal_state") or row.get("status") or "UNKNOWN").upper(),
+        "status": str(row.get("status") or "").upper(),
+        "watchlist_tier": str(row.get("watchlist_tier") or "NONE").upper(),
+        "candidate_conversion_state": str(row.get("candidate_conversion_state") or "NONE").upper(),
+        "pre_entry_state": str(row.get("pre_entry_state") or "NONE").upper(),
+        "blocker_attribution": str(row.get("blocker_attribution") or "NONE").upper(),
+        "policy_state": policy_state,
+        "has_open_position": position is not None,
+        "position_state": str((position or {}).get("state") or "NONE").upper(),
+        "entry_type": str((position or {}).get("entry_type") or row.get("entry_type") or "UNKNOWN").upper(),
+        "priority_score": round(_safe_float(row.get("priority_score")) or 0.0, 3),
+        "ce_score": round(_safe_float(row.get("ce_score")) or 0.0, 3),
+    }
+
+
+def _fallback_runtime_summary_text(
+    row: Mapping[str, Any],
+    position: Mapping[str, Any] | None,
+    health_report: Mapping[str, Any] | None,
+) -> str:
+    context = _runtime_vocoder_context(row, position, health_report)
+    parts = [
+        f"{context['ticker']} is {context['status'].lower()} under {context['policy_state'].lower()} policy",
+    ]
+    if context["watchlist_tier"] != "NONE":
+        parts.append(f"watchlist tier {context['watchlist_tier'].lower()}")
+    if context["candidate_conversion_state"] != "NONE":
+        parts.append(f"candidate conversion {context['candidate_conversion_state'].lower()}")
+    if context["pre_entry_state"] != "NONE":
+        parts.append(f"pre-entry state {context['pre_entry_state'].lower()}")
+    if context["blocker_attribution"] != "NONE":
+        parts.append(f"blocked by {context['blocker_attribution'].lower()}")
+    if position:
+        parts.append(
+            "open position "
+            f"{context['position_state'].lower()} "
+            f"{context['entry_type'].lower()} "
+            f"pnl {(_safe_float(position.get('pnl_pct')) or 0.0):+.3f}"
+        )
+    if isinstance(health_report, Mapping) and health_report.get("what_should_i_do_next"):
+        parts.append(str(health_report["what_should_i_do_next"]))
+    return ". ".join(parts)
+
+
+def _build_runtime_fallback_tool_payloads(
+    row: Mapping[str, Any],
+    *,
+    health_report: Mapping[str, Any] | None = None,
+    position: Mapping[str, Any] | None = None,
+    now: datetime,
+) -> list[dict[str, Any]]:
+    ticker = str(row.get("ticker") or "").upper()
+    status = str(row.get("status") or row.get("signal_state") or "UNKNOWN").upper()
+    policy_payload = {}
+    if isinstance(health_report, Mapping):
+        policy_payload = health_report.get("policy") or health_report.get("execution_policy") or {}
+    policy_state = str((policy_payload or {}).get("policy_state") or "UNKNOWN").upper()
+    summary_text = _fallback_runtime_summary_text(row, position, health_report)
+
+    payloads: list[dict[str, Any]] = [
+        {
+            "tool": "rss",
+            "timestamp": now.isoformat(),
+            "raw_output": {
+                "title": f"{ticker} {status} under {policy_state}",
+                "summary": summary_text,
+                "published": now.isoformat(),
+                "source": "runtime_state",
+                "link": f"runtime://{ticker.lower()}",
+            },
+        }
+    ]
+    if position is not None:
+        payloads.append(
+            {
+                "tool": "market_data",
+                "timestamp": now.isoformat(),
+                "raw_output": {
+                    "symbol": ticker,
+                    "price": _safe_float(position.get("current_price")),
+                    "price_change_pct": _safe_float(position.get("pnl_pct")),
+                    "volume_ratio": 1.0,
+                    "volatility": 0.35 if bool(position.get("chaos_flag")) else 0.15,
+                },
+            }
+        )
+    return payloads
+
+
+def _group_vocoder_signals_by_entity(
+    signals: Sequence[Mapping[str, Any]],
+) -> dict[str, list[dict[str, Any]]]:
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for signal in signals:
+        entities = _signal_entities(signal)
+        if not entities:
+            entities = ["BROAD"]
+        for entity in entities:
+            grouped.setdefault(entity, []).append(dict(signal))
+    return grouped
+
+
+def _count_values(rows: Sequence[Mapping[str, Any]], key: str) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for row in rows:
+        value = str(row.get(key) or "UNKNOWN")
+        counts[value] = counts.get(value, 0) + 1
+    return counts
+
+
+def build_runtime_vocoder_artifact(
+    *,
+    runtime_state: Mapping[str, Any],
+    health_report: Mapping[str, Any],
+    tool_payloads: Sequence[Mapping[str, Any]] | None = None,
+    open_positions: Sequence[Mapping[str, Any]] | None = None,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    resolved_now = now or datetime.now(timezone.utc)
+    scenario = str(
+        (health_report or {}).get("simulation_mode")
+        or (runtime_state or {}).get("simulation_context", {}).get("scenario")
+        or "LIVE"
+    ).upper()
+    runtime_rows = list((runtime_state or {}).get("per_signal_attribution") or [])
+    positions = list(open_positions) if open_positions is not None else load_open_positions()[0]
+    positions_by_ticker = {
+        str(position.get("ticker") or "").upper(): dict(position)
+        for position in positions
+        if str(position.get("ticker") or "").strip()
+    }
+    rows_by_ticker = {
+        str(row.get("ticker") or "").upper(): dict(row)
+        for row in runtime_rows
+        if str(row.get("ticker") or "").strip()
+    }
+
+    normalized_live_signals = (
+        normalise_vocoder_inputs(tool_payloads, now=resolved_now)
+        if tool_payloads
+        else []
+    )
+    live_groups = _group_vocoder_signals_by_entity(normalized_live_signals) if normalized_live_signals else {}
+    source_mode = "LIVE_ETIL" if live_groups else "SYNTHETIC_RUNTIME_FALLBACK"
+
+    entities_payload: list[dict[str, Any]] = []
+    entity_ids = sorted(set(rows_by_ticker) or set(live_groups))
+    for entity_id in entity_ids:
+        row = rows_by_ticker.get(entity_id, {"ticker": entity_id})
+        position = positions_by_ticker.get(entity_id)
+        entity_signals = live_groups.get(entity_id)
+        input_origin = "live_etil"
+        if not entity_signals:
+            input_origin = "synthetic_runtime_fallback"
+            entity_signals = normalise_vocoder_inputs(
+                _build_runtime_fallback_tool_payloads(
+                    row,
+                    health_report=health_report,
+                    position=position,
+                    now=resolved_now,
+                ),
+                now=resolved_now,
+            )
+        compressed_signal = build_signal_vocoder_output(
+            entity_signals,
+            runtime_state=runtime_state,
+            health_report=health_report,
+            entity_id=entity_id,
+            now=resolved_now,
+        )
+        entities_payload.append(
+            {
+                "entity_id": entity_id,
+                "input_origin": input_origin,
+                "input_payload_count": len(entity_signals),
+                "runtime_context": _runtime_vocoder_context(row, position, health_report),
+                "compressed_signal": compressed_signal,
+            }
+        )
+
+    entities_payload.sort(key=lambda item: item["entity_id"])
+    summary_rows = [item["compressed_signal"] for item in entities_payload]
+    return {
+        "artifact_kind": "signal_vocoder_runtime_artifact",
+        "schema_version": SIGNAL_VOCODER_SCHEMA_VERSION,
+        "generated_at": resolved_now.isoformat(),
+        "scenario": scenario,
+        "source_mode": source_mode,
+        "entity_count": len(entities_payload),
+        "summary": {
+            "dominant_modes": _count_values(summary_rows, "dominant_mode"),
+            "signal_grades": _count_values(summary_rows, "signal_grade"),
+            "deployment_postures": _count_values(summary_rows, "deployment_posture"),
+            "decision_signals": _count_values(summary_rows, "decision_signal"),
+            "blocked_entities": [
+                item["entity_id"]
+                for item in entities_payload
+                if str(item["compressed_signal"].get("deployment_posture") or "").upper() == "BLOCKED"
+            ],
+        },
+        "entities": entities_payload,
+    }
+
+
+def persist_runtime_vocoder_artifact(
+    artifact: Mapping[str, Any],
+    *,
+    path=None,
+) -> None:
+    write_json_atomic(path or SIGNAL_VOCODER_REPORT_PATH, dict(artifact))

@@ -13,6 +13,10 @@ try:
         format_pipeline_health_summary,
     )
     from scripts.runtime_common import SNAPSHOT_LOG_PATH, persist_current_runtime_state
+    from scripts.signal_vocoder import (
+        build_runtime_vocoder_artifact,
+        persist_runtime_vocoder_artifact,
+    )
     from scripts.signal_conversion_monitor import build_signal_conversion_report
     from scripts.snapshot_logger import build_snapshot_row, log_snapshot
     from scripts.trend_engine import build_trend_report
@@ -25,6 +29,10 @@ except ModuleNotFoundError:
         format_pipeline_health_summary,
     )
     from runtime_common import SNAPSHOT_LOG_PATH, persist_current_runtime_state
+    from signal_vocoder import (
+        build_runtime_vocoder_artifact,
+        persist_runtime_vocoder_artifact,
+    )
     from signal_conversion_monitor import build_signal_conversion_report
     from snapshot_logger import build_snapshot_row, log_snapshot
     from trend_engine import build_trend_report
@@ -94,6 +102,12 @@ def run_diagnostics_pipeline(
         simulate_realm_bis_clear=simulate_realm_bis_clear,
         simulate_all_clear=simulate_all_clear,
     )
+    vocoder_artifact = build_runtime_vocoder_artifact(
+        runtime_state=runtime_state,
+        health_report=report,
+    )
+    if effective_write_runtime:
+        persist_runtime_vocoder_artifact(vocoder_artifact)
     return report
 
 
