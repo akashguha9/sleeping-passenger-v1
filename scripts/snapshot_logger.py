@@ -2,20 +2,96 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from datetime import datetime, timedelta, timezone
 
 try:
     from scripts.runtime_common import (
+        LOG_DIR,
         SNAPSHOT_LOG_PATH,
         append_jsonl,
+        get_run_id,
         load_current_pipeline_state,
+    )
+    from scripts.chronology_store import (
+        get_connection as _chronology_get_connection,
+        init_schema as _chronology_init_schema,
+        log_observation as _chronology_log_observation,
+        log_snapshot as _chronology_log_snapshot,
     )
 except ModuleNotFoundError:
     from runtime_common import (
+        LOG_DIR,
         SNAPSHOT_LOG_PATH,
         append_jsonl,
+        get_run_id,
         load_current_pipeline_state,
     )
+    from chronology_store import (
+        get_connection as _chronology_get_connection,
+        init_schema as _chronology_init_schema,
+        log_observation as _chronology_log_observation,
+        log_snapshot as _chronology_log_snapshot,
+    )
+
+
+DEFAULT_CHRONOLOGY_DB_PATH = LOG_DIR / "observation.db"
+
+
+def _write_chronology_from_snapshot(row: dict, db_path=None) -> None:
+    """Passively persist a snapshot row to the chronology DB.
+
+    Writes two rows per snapshot:
+      * one row in the snapshots table holding the full snapshot payload
+      * one row in the observations table holding a compact metadata view
+        keyed by source='snapshot_logger'
+
+    Must never raise: chronology is a side observer of the runtime. If the
+    DB can't be opened or any write fails, we print one line to stderr and
+    return silently so the runtime continues.
+    """
+    target = db_path or DEFAULT_CHRONOLOGY_DB_PATH
+    try:
+        conn = _chronology_get_connection(target)
+    except Exception as exc:
+        print(
+            f"[snapshot_logger] chronology open failed ({target}): {exc}",
+            file=sys.stderr,
+        )
+        return
+    try:
+        _chronology_init_schema(conn)
+        run_id = get_run_id()
+        _chronology_log_snapshot(conn, run_id=run_id, snapshot=row)
+        observation_payload = {
+            "snapshot_ts": row.get("timestamp"),
+            "scenario": row.get("scenario"),
+            "scm_state": row.get("scm_state"),
+            "policy_state": row.get("policy_state"),
+            "active_blockers": row.get("blockers_active"),
+            "blocked_promotable_count": row.get(
+                "blocked_promotable_candidate_count"
+            ),
+        }
+        _chronology_log_observation(
+            conn,
+            {
+                "ts": str(row.get("timestamp", "")),
+                "source": "snapshot_logger",
+                "payload_json": json.dumps(observation_payload, sort_keys=True),
+                "run_id": run_id,
+            },
+        )
+    except Exception as exc:
+        print(
+            f"[snapshot_logger] chronology write skipped: {exc}",
+            file=sys.stderr,
+        )
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
 
 
 def _watchlist_names_by_pre_entry_state(state: dict, pre_entry_state: str) -> list[str]:
@@ -222,7 +298,12 @@ def build_snapshot_row(
     }
 
 
-def log_snapshot(path=SNAPSHOT_LOG_PATH, runtime_state: dict | None = None, health_report: dict | None = None) -> dict:
+def log_snapshot(
+    path=SNAPSHOT_LOG_PATH,
+    runtime_state: dict | None = None,
+    health_report: dict | None = None,
+    chronology_db_path=None,
+) -> dict:
     target_path = path or SNAPSHOT_LOG_PATH
     row = build_snapshot_row(
         runtime_state=runtime_state,
@@ -230,6 +311,8 @@ def log_snapshot(path=SNAPSHOT_LOG_PATH, runtime_state: dict | None = None, heal
         snapshot_path=target_path,
     )
     append_jsonl(target_path, row)
+    # Passive chronology hook. Never raises; see _write_chronology_from_snapshot.
+    _write_chronology_from_snapshot(row, db_path=chronology_db_path)
     return row
 
 
