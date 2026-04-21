@@ -6,8 +6,10 @@ from typing import Any, Mapping, Sequence
 
 try:
     from scripts.ambiguity_scorer import build_ambiguity_analysis
+    from scripts.identity_mode_scorer import build_identity_mode_assessment
 except ModuleNotFoundError:
     from ambiguity_scorer import build_ambiguity_analysis
+    from identity_mode_scorer import build_identity_mode_assessment
 
 TEXT_FIELDS = ("text", "title", "summary", "question")
 ANCHOR_SOURCES = {"kalshi", "polymarket", "market_data"}
@@ -264,34 +266,6 @@ def _classification_label(scores: Mapping[str, float]) -> tuple[str, float]:
     if unofficial >= 0.40 and unofficial >= official + 0.10:
         return "unofficial_engagement_system", unofficial
     return _dominant_label(scores)
-
-def _identity_mode(features: Mapping[str, float]) -> dict[str, Any]:
-    identity = float(features.get("identity_signal_score", 0.0))
-    validation = float(features.get("validation_score", 0.0))
-    engagement = float(features.get("engagement_feedback", 0.0))
-    information_ratio = float(features.get("information_ratio", 0.0))
-    consequence = float(features.get("consequence_coupling", 0.0))
-
-    if identity < 0.15 and max(validation, information_ratio, consequence) >= 0.35:
-        label = "epistemic"
-        confidence = _clamp(_average([max(validation, information_ratio), consequence or validation]))
-    elif identity >= 0.30 and engagement >= 0.35:
-        label = "identity_signaling"
-        confidence = _clamp(_average([identity, engagement]))
-    elif identity >= 0.18 and (validation >= 0.20 or engagement >= 0.25):
-        label = "mixed"
-        confidence = _clamp(_average([identity, max(validation, engagement)]))
-    else:
-        label = "unknown"
-        confidence = _clamp(max(identity, validation, engagement) * 0.75)
-
-    return {
-        "label": label,
-        "confidence": round(confidence, 3),
-        "score": round(identity, 3),
-    }
-
-
 @dataclass(frozen=True)
 class BehavioralForensicsOutput:
     schema_version: str
@@ -319,6 +293,7 @@ def build_behavioral_forensics_output(
     objective_scores = _objective_scores(classes, features)
     dominant_objective, objective_confidence = _dominant_label(objective_scores)
     ambiguity_analysis = dict(features["ambiguity_analysis"])
+    identity_mode_assessment = build_identity_mode_assessment(supporting_features=features)
 
     evidence: list[str] = []
     if features["validation_score"] >= 0.5:
@@ -348,7 +323,7 @@ def build_behavioral_forensics_output(
         },
         ambiguity_analysis=ambiguity_analysis,
         ambiguity_type=dict(ambiguity_analysis["ambiguity_type"]),
-        identity_mode=_identity_mode(features),
+        identity_mode=dict(identity_mode_assessment["identity_mode"]),
         supporting_signals={
             key: value for key, value in features.items() if key != "ambiguity_analysis"
         },
