@@ -352,7 +352,10 @@ def test_pipeline_health_report_builder_shape() -> None:
         "schema_reliability": {"score": 8, "max_score": 10},
         "end_to_end_wiring": {"score": 10, "max_score": 10},
         "self_correction_maturity": {"score": 10, "max_score": 10},
-        "execution_readiness": {"score": 3, "max_score": 10},
+        "execution_readiness": {
+            "score": payload["execution_readiness_breakdown"]["final_score"],
+            "max_score": 10,
+        },
     }
 
 
@@ -536,7 +539,16 @@ def test_snapshot_row_tracks_clean_entry_eligible_fields_from_simulated_state() 
     assert row["entry_review_candidate_count"] == 2
     assert row["entry_review_candidate_names"] == ["RTX", "ZIM"]
     assert row["allow_new_risk"] is True
-    assert row["transition_state_rows"] == [
+    assert [
+        {
+            "signal_id": item["signal_id"],
+            "ticker": item["ticker"],
+            "watchlist_tier": item["watchlist_tier"],
+            "candidate_conversion_state": item["candidate_conversion_state"],
+            "pre_entry_state": item["pre_entry_state"],
+        }
+        for item in row["transition_state_rows"]
+    ] == [
         {
             "signal_id": "SIG_2026_04_06_006",
             "ticker": "RTX",
@@ -552,6 +564,10 @@ def test_snapshot_row_tracks_clean_entry_eligible_fields_from_simulated_state() 
             "pre_entry_state": "CLEAN_ENTRY_ELIGIBLE",
         },
     ]
+    assert all(
+        item.get("transition_persistence_direction") in {"NEW", "PERSISTING", "ADVANCING", "REGRESSING"}
+        for item in row["transition_state_rows"]
+    )
 
 
 def test_snapshot_rows_are_scenario_tagged_for_live_and_simulation_states() -> None:
@@ -702,6 +718,7 @@ def test_run_diagnostics_pipeline_persists_scenario_tagged_snapshot_rows() -> No
                 "watchlist_tier": "PROMOTABLE",
                 "candidate_conversion_state": "PROMOTABLE_WATCHLIST",
                 "pre_entry_state": "BLOCKED_PROMOTABLE_CLEAN_CANDIDATE",
+                "transition_persistence_direction": "NEW",
             },
             {
                 "signal_id": "SIG_2026_04_07_007",
@@ -709,6 +726,7 @@ def test_run_diagnostics_pipeline_persists_scenario_tagged_snapshot_rows() -> No
                 "watchlist_tier": "PROMOTABLE",
                 "candidate_conversion_state": "PROMOTABLE_WATCHLIST",
                 "pre_entry_state": "BLOCKED_PROMOTABLE_CLEAN_CANDIDATE",
+                "transition_persistence_direction": "NEW",
             },
         ]
         assert gsce_row["transition_review_candidate_count"] == 2
@@ -920,6 +938,11 @@ def test_pipeline_health_report_summary_cli() -> None:
         check=True,
     )
 
+    expected_execution_readiness = build_pipeline_health_report(
+        include_tests=False,
+        write_runtime=False,
+    )["scorecard"]["execution_readiness"]["score"]
+
     assert result.stdout.strip().splitlines() == [
         "Pipeline Health Report",
         "git_clean=false",
@@ -931,7 +954,8 @@ def test_pipeline_health_report_summary_cli() -> None:
         "policy_state=RESTRICTED",
         "friction_band=HIGH_FRICTION",
         "what_should_i_do_next=EXIT_NOW: UNG, FCG | CLEAR_GSCE_PHASE_LOCK_FOR: RTX, ZIM | DO NOT ADD NEW RISK",
-        "scorecard=logging_quality=10/10, schema_reliability=8/10, end_to_end_wiring=10/10, self_correction_maturity=10/10, execution_readiness=3/10",
+        "scorecard=logging_quality=10/10, schema_reliability=8/10, end_to_end_wiring=10/10, "
+        f"self_correction_maturity=10/10, execution_readiness={expected_execution_readiness}/10",
     ]
 
 

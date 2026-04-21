@@ -1,0 +1,18 @@
+=== current branch ===
+feat/tagging-v1
+
+=== latest commit ===
+06f32f7 tagging-v1: add snapshot tags and local compatibility mapping
+
+=== working tree ===
+## feat/tagging-v1...origin/feat/tagging-v1
+?? logs/
+
+=== local branches ===
+  feat/narrative-intent-analytics
+* feat/tagging-v1
+  main
+
+=== remote branches ===
+  origin/feat/tagging-v1
+  origin/main
