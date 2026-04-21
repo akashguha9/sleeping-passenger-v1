@@ -1,0 +1,62 @@
+[
+  {
+    "ticker": "UNG",
+    "entry_price": 16.0,
+    "current_price": 12.5,
+    "pnl_pct": -21.9,
+    "position_size": "QUARTER_UNIT",
+    "state": "OPEN",
+    "chaos_flag": true,
+    "entry_type": "CHAOS",
+    "thesis_cluster": "natgas_inventory_draw_chaos",
+    "stop_loss": 13.0,
+    "take_profit": 20.0,
+    "time_in_trade": "5d",
+    "priority_score": 0.91
+  },
+  {
+    "ticker": "FCG",
+    "entry_price": 25.0,
+    "current_price": 24.0,
+    "pnl_pct": -4.0,
+    "position_size": "QUARTER_UNIT",
+    "state": "EXIT_PENDING",
+    "chaos_flag": true,
+    "entry_type": "CHAOS",
+    "thesis_cluster": "natgas_equity_chaos",
+    "stop_loss": 22.0,
+    "take_profit": 30.0,
+    "time_in_trade": "8d",
+    "priority_score": 0.88
+  },
+  {
+    "ticker": "TLT",
+    "entry_price": 95.0,
+    "current_price": 96.0,
+    "pnl_pct": 1.05,
+    "position_size": "QUARTER_UNIT",
+    "state": "OPEN",
+    "chaos_flag": false,
+    "entry_type": "CLEAN",
+    "thesis_cluster": "long_duration_rally",
+    "stop_loss": 90.0,
+    "take_profit": 105.0,
+    "time_in_trade": "12d",
+    "priority_score": 0.82
+  },
+  {
+    "ticker": "TIP",
+    "entry_price": 105.0,
+    "current_price": 112.0,
+    "pnl_pct": 6.67,
+    "position_size": "QUARTER_UNIT",
+    "state": "OPEN",
+    "chaos_flag": false,
+    "entry_type": "CLEAN",
+    "thesis_cluster": "breakeven_curve_rally",
+    "stop_loss": 100.0,
+    "take_profit": 110.0,
+    "time_in_trade": "10d",
+    "priority_score": 0.79
+  }
+]

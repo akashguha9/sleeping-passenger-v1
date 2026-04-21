@@ -47,7 +47,7 @@ def test_build_action_report_from_live_seed_state() -> None:
 
 def test_action_engine_cli_json_shape() -> None:
     result = subprocess.run(
-        [sys.executable, "scripts\\action_engine.py"],
+        [sys.executable, str(REPO_ROOT / "scripts" / "action_engine.py")],
         cwd=REPO_ROOT,
         capture_output=True,
         text=True,
@@ -61,7 +61,7 @@ def test_action_engine_cli_json_shape() -> None:
 
 def test_action_engine_summary_cli() -> None:
     result = subprocess.run(
-        [sys.executable, "scripts\\action_engine.py", "--summary"],
+        [sys.executable, str(REPO_ROOT / "scripts" / "action_engine.py"), "--summary"],
         cwd=REPO_ROOT,
         capture_output=True,
         text=True,

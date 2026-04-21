@@ -33,7 +33,7 @@ def test_blocker_cost_report_from_live_seed_state() -> None:
 
 def test_blocker_cost_engine_cli_json_shape() -> None:
     result = subprocess.run(
-        [sys.executable, "scripts\\blocker_cost_engine.py"],
+        [sys.executable, str(REPO_ROOT / "scripts" / "blocker_cost_engine.py")],
         cwd=REPO_ROOT,
         capture_output=True,
         text=True,
@@ -47,7 +47,7 @@ def test_blocker_cost_engine_cli_json_shape() -> None:
 
 def test_blocker_cost_engine_summary_cli() -> None:
     result = subprocess.run(
-        [sys.executable, "scripts\\blocker_cost_engine.py", "--summary"],
+        [sys.executable, str(REPO_ROOT / "scripts" / "blocker_cost_engine.py"), "--summary"],
         cwd=REPO_ROOT,
         capture_output=True,
         text=True,

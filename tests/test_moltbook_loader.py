@@ -32,7 +32,7 @@ def test_moltbook_loader_summary_smoke() -> None:
 
 def test_signal_conversion_monitor_runtime_report_uses_live_files() -> None:
     result = subprocess.run(
-        [sys.executable, "scripts\\signal_conversion_monitor.py"],
+        [sys.executable, str(REPO_ROOT / "scripts" / "signal_conversion_monitor.py")],
         cwd=REPO_ROOT,
         capture_output=True,
         text=True,
@@ -209,7 +209,7 @@ def test_signal_ledger_rejects_unknown_status() -> None:
 
 def test_moltbook_loader_summary_cli() -> None:
     result = subprocess.run(
-        [sys.executable, "scripts\\moltbook_loader.py", "--summary"],
+        [sys.executable, str(REPO_ROOT / "scripts" / "moltbook_loader.py"), "--summary"],
         cwd=REPO_ROOT,
         capture_output=True,
         text=True,
@@ -228,7 +228,7 @@ def test_moltbook_loader_summary_cli() -> None:
 
 def test_signal_conversion_monitor_summary_cli() -> None:
     result = subprocess.run(
-        [sys.executable, "scripts\\signal_conversion_monitor.py", "--summary"],
+        [sys.executable, str(REPO_ROOT / "scripts" / "signal_conversion_monitor.py"), "--summary"],
         cwd=REPO_ROOT,
         capture_output=True,
         text=True,
@@ -324,7 +324,7 @@ def test_pipeline_health_report_builder_shape() -> None:
     assert payload["friction"]["total_system_friction_score"] == 13.0
     assert payload["trends"]["snapshot_count"] >= 3
     assert payload["open_positions_validation_summary"] == {
-        "path": "moltbook\\open_positions.json",
+        "path": "moltbook/open_positions.json",
         "file_exists": True,
         "valid": True,
         "position_count": 4,
@@ -896,7 +896,7 @@ def test_entry_review_packet_with_missing_required_fields_needs_checklist() -> N
 
 def test_pipeline_health_report_cli_json_shape() -> None:
     result = subprocess.run(
-        [sys.executable, "scripts\\pipeline_health_report.py", "--no-write"],
+        [sys.executable, str(REPO_ROOT / "scripts" / "pipeline_health_report.py"), "--no-write"],
         cwd=REPO_ROOT,
         capture_output=True,
         text=True,
@@ -913,7 +913,7 @@ def test_pipeline_health_report_cli_json_shape() -> None:
 
 def test_pipeline_health_report_summary_cli() -> None:
     result = subprocess.run(
-        [sys.executable, "scripts\\pipeline_health_report.py", "--summary", "--no-write"],
+        [sys.executable, str(REPO_ROOT / "scripts" / "pipeline_health_report.py"), "--summary", "--no-write"],
         cwd=REPO_ROOT,
         capture_output=True,
         text=True,
@@ -939,7 +939,7 @@ def test_pipeline_health_report_summary_cli_gsce_clear_includes_transition_candi
     result = subprocess.run(
         [
             sys.executable,
-            "scripts\\pipeline_health_report.py",
+            str(REPO_ROOT / "scripts" / "pipeline_health_report.py"),
             "--summary",
             "--no-write",
             "--simulate-gsce-clear",
@@ -967,7 +967,7 @@ def test_pipeline_health_report_summary_cli_all_clear_includes_entry_candidates(
     result = subprocess.run(
         [
             sys.executable,
-            "scripts\\pipeline_health_report.py",
+            str(REPO_ROOT / "scripts" / "pipeline_health_report.py"),
             "--summary",
             "--no-write",
             "--simulate-all-clear",

@@ -49,7 +49,7 @@ def test_trend_report_from_scratch_log() -> None:
 
 def test_trend_engine_summary_cli() -> None:
     result = subprocess.run(
-        [sys.executable, "scripts\\trend_engine.py", "--summary", "--no-write"],
+        [sys.executable, str(REPO_ROOT / "scripts" / "trend_engine.py"), "--summary", "--no-write"],
         cwd=REPO_ROOT,
         capture_output=True,
         text=True,

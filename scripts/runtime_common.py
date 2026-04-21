@@ -181,10 +181,16 @@ PERMISSIVE_POLICY_STATES = {
 
 
 def repo_relative(path: Path) -> str:
+    """Return a repo-relative, POSIX-separator-normalized path string.
+
+    POSIX form (forward slashes) keeps runtime artifacts and diagnostic
+    messages byte-identical across Windows and Linux, so pytest assertions
+    and generated JSON don't need platform-specific branches.
+    """
     try:
-        return str(path.relative_to(REPO_ROOT))
+        return path.relative_to(REPO_ROOT).as_posix()
     except ValueError:
-        return str(path)
+        return Path(path).as_posix()
 
 
 def utc_timestamp() -> str:

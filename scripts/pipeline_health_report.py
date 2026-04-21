@@ -47,11 +47,11 @@ TARGET_TEST_COMMAND = [
     sys.executable,
     "-m",
     "pytest",
-    "tests\\test_moltbook_schema.py",
-    "tests\\test_moltbook_loader.py",
-    "tests\\test_action_engine.py",
-    "tests\\test_blocker_cost_engine.py",
-    "tests\\test_trend_engine.py",
+    str(Path("tests") / "test_moltbook_schema.py"),
+    str(Path("tests") / "test_moltbook_loader.py"),
+    str(Path("tests") / "test_action_engine.py"),
+    str(Path("tests") / "test_blocker_cost_engine.py"),
+    str(Path("tests") / "test_trend_engine.py"),
     "-q",
 ]
 

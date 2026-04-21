@@ -4,7 +4,7 @@ audit_bundle/
 audit_bundle.zip
 __pycache__/
 *.pyc
-moltbook/open_positions.json
+# moltbook/open_positions.json is a deterministic test fixture and is tracked.
 
 # logs/ contains runtime-generated artifacts only: pytest cache/tmp
 # (per pytest.ini), chronology SQLite DB, and snapshot jsonl streams.
