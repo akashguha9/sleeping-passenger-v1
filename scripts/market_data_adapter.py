@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+from datetime import datetime, timezone
 from typing import Protocol
 
 
@@ -45,10 +46,14 @@ class MarketDataAdapter(Protocol):
         ...
 
 
-class PlaceholderMarketDataAdapter:
+def _utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+class UnsupportedMarketDataAdapter:
     def __init__(self, requested_provider: str) -> None:
         self.requested_provider = requested_provider
-        self.provider = f"{requested_provider}_placeholder"
+        self.provider = f"{requested_provider}_unsupported"
 
     def fetch_latest_quote(self, symbol: str) -> MarketDataFetchResult:
         normalized_symbol = symbol.strip().upper()
@@ -61,14 +66,116 @@ class PlaceholderMarketDataAdapter:
             symbol=normalized_symbol,
             ok=False,
             quote=None,
-            error=f"{self.requested_provider} adapter not wired; returning placeholder contract only.",
-            retriable=True,
+            error=f"Unsupported provider: {self.requested_provider}",
+            retriable=False,
+        )
+
+
+class YahooFinanceMarketDataAdapter:
+    """
+    Thin live adapter with deterministic failure states.
+
+    V1 goals:
+    - preserve existing public interface
+    - avoid placeholder contamination
+    - support a basic cache path
+    - return structured failures instead of raising for upstream/import issues
+    """
+
+    def __init__(self, requested_provider: str = "yahoo") -> None:
+        self.requested_provider = requested_provider
+        self.provider = "yahoo_finance"
+        self._cache: dict[str, MarketDataFetchResult] = {}
+
+    def fetch_latest_quote(self, symbol: str) -> MarketDataFetchResult:
+        normalized_symbol = symbol.strip().upper()
+        if not normalized_symbol:
+            raise ValueError("symbol must be a non-empty string")
+
+        cached = self._cache.get(normalized_symbol)
+        if cached is not None:
+            return cached
+
+        try:
+            quote = self._download_quote(normalized_symbol)
+        except ImportError as exc:
+            result = MarketDataFetchResult(
+                requested_provider=self.requested_provider,
+                resolved_provider=self.provider,
+                symbol=normalized_symbol,
+                ok=False,
+                quote=None,
+                error=f"yfinance import unavailable: {exc}",
+                retriable=False,
+            )
+            self._cache[normalized_symbol] = result
+            return result
+        except Exception as exc:
+            result = MarketDataFetchResult(
+                requested_provider=self.requested_provider,
+                resolved_provider=self.provider,
+                symbol=normalized_symbol,
+                ok=False,
+                quote=None,
+                error=f"quote fetch failed: {type(exc).__name__}: {exc}",
+                retriable=True,
+            )
+            self._cache[normalized_symbol] = result
+            return result
+
+        result = MarketDataFetchResult(
+            requested_provider=self.requested_provider,
+            resolved_provider=self.provider,
+            symbol=normalized_symbol,
+            ok=True,
+            quote=quote,
+            error=None,
+            retriable=False,
+        )
+        self._cache[normalized_symbol] = result
+        return result
+
+    def _download_quote(self, symbol: str) -> MarketDataQuote:
+        import yfinance as yf  # type: ignore
+
+        ticker = yf.Ticker(symbol)
+        fast_info = getattr(ticker, "fast_info", None)
+
+        price = None
+        currency = "USD"
+
+        if fast_info:
+            price = (
+                fast_info.get("lastPrice")
+                or fast_info.get("regularMarketPrice")
+                or fast_info.get("previousClose")
+            )
+            currency = fast_info.get("currency") or currency
+
+        if price is None:
+            info = getattr(ticker, "info", {}) or {}
+            price = info.get("regularMarketPrice") or info.get("currentPrice")
+            currency = info.get("currency") or currency
+
+        if price is None:
+            raise RuntimeError(f"No quote available for symbol {symbol}")
+
+        return MarketDataQuote(
+            symbol=symbol,
+            price=float(price),
+            currency=str(currency),
+            source=self.provider,
+            as_of=_utc_now_iso(),
         )
 
 
 def create_market_data_adapter(provider: str | None = None) -> MarketDataAdapter:
     requested_provider = (provider or "yahoo").strip().lower()
-    return PlaceholderMarketDataAdapter(requested_provider=requested_provider)
+
+    if requested_provider in {"yahoo", "yfinance"}:
+        return YahooFinanceMarketDataAdapter(requested_provider=requested_provider)
+
+    return UnsupportedMarketDataAdapter(requested_provider=requested_provider)
 
 
 def describe_market_data_adapter(provider: str | None = None) -> dict:
@@ -77,7 +184,7 @@ def describe_market_data_adapter(provider: str | None = None) -> dict:
     return {
         "requested_provider": sample["requested_provider"],
         "resolved_provider": sample["resolved_provider"],
-        "live_quotes_available": False,
+        "live_quotes_available": sample["ok"],
         "contract_sample": sample,
-        "note": "Placeholder adapter only. Core Moltbook and SCM runtime remain independent from market-data ingestion.",
+        "note": "Live adapter returns structured failures when imports or upstream quotes are unavailable.",
     }
