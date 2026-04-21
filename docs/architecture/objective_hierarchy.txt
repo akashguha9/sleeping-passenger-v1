@@ -1,0 +1,22 @@
+OBJECTIVE FUNCTION HIERARCHY (LOCKED)
+
+1. CAPITAL PRESERVATION (PRIMARY)
+- Never deploy capital under ambiguity
+- Veto paths are sacred (BLOCK / DO_NOT_DEPLOY)
+
+2. DECISION QUALITY (SECONDARY)
+- Improve entry, exit, sizing, refusal
+- Only within allowed state
+
+3. LEARNING RATE (TERTIARY)
+- Improve calibration, pattern recognition, correction
+
+EXPLICIT NON-OBJECTIVES:
+- throughput
+- sophistication
+- backtest performance
+- confidence maximization
+- full market coverage
+
+SYSTEM RULE:
+No feature may improve #2 or #3 at the cost of #1
