@@ -91,6 +91,7 @@ def test_behavioral_forensics_classifies_official_correctness_system() -> None:
         supporting_features=payload["supporting_signals"]
     )["identity_mode"]
     assert payload["identity_mode"]["label"] == "epistemic"
+    assert payload["behavioral_heat"]["label"] == "low_heat"
     assert payload["supporting_signals"]["validation_score"] >= 0.5
     assert payload["supporting_signals"]["consequence_coupling"] >= 0.4
 
@@ -114,5 +115,6 @@ def test_behavioral_forensics_classifies_unofficial_engagement_system() -> None:
         supporting_features=payload["supporting_signals"]
     )["identity_mode"]
     assert payload["identity_mode"]["label"] in {"identity_signaling", "mixed"}
+    assert payload["behavioral_heat"]["label"] in {"high_heat", "extreme_heat"}
     assert payload["supporting_signals"]["engagement_feedback"] > 0.4
     assert payload["supporting_signals"]["ambiguity_score"] > 0.2

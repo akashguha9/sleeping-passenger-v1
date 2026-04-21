@@ -28,6 +28,7 @@ TREND_REPORT_PATH = RUNTIME_DIR / "trend_report.json"
 HEALTH_REPORT_PATH = RUNTIME_DIR / "pipeline_health_report.json"
 SIGNAL_VOCODER_REPORT_PATH = RUNTIME_DIR / "signal_vocoder_report.json"
 SIGNAL_VOCODER_ETIL_INPUT_PATH = RUNTIME_DIR / "signal_vocoder_etil_inputs.json"
+BEHAVIORAL_REVIEW_PRIORITY_REPORT_PATH = RUNTIME_DIR / "behavioral_review_priority_report.json"
 QUOTE_CACHE_DIR = RUNTIME_DIR / "quote_cache"
 
 CONFIG_DIR = REPO_ROOT / "config"

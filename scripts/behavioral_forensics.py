@@ -6,9 +6,11 @@ from typing import Any, Mapping, Sequence
 
 try:
     from scripts.ambiguity_scorer import build_ambiguity_analysis
+    from scripts.behavioral_heat_scorer import build_behavioral_heat_assessment
     from scripts.identity_mode_scorer import build_identity_mode_assessment
 except ModuleNotFoundError:
     from ambiguity_scorer import build_ambiguity_analysis
+    from behavioral_heat_scorer import build_behavioral_heat_assessment
     from identity_mode_scorer import build_identity_mode_assessment
 
 TEXT_FIELDS = ("text", "title", "summary", "question")
@@ -275,6 +277,7 @@ class BehavioralForensicsOutput:
     ambiguity_analysis: dict[str, Any]
     ambiguity_type: dict[str, Any]
     identity_mode: dict[str, Any]
+    behavioral_heat: dict[str, Any]
     supporting_signals: dict[str, Any]
 
     def to_dict(self) -> dict[str, Any]:
@@ -294,6 +297,12 @@ def build_behavioral_forensics_output(
     dominant_objective, objective_confidence = _dominant_label(objective_scores)
     ambiguity_analysis = dict(features["ambiguity_analysis"])
     identity_mode_assessment = build_identity_mode_assessment(supporting_features=features)
+    heat_features = {
+        **features,
+        "question_density": float(ambiguity_analysis["supporting_signals"].get("question_density", 0.0)),
+        "open_end_density": float(ambiguity_analysis["supporting_signals"].get("open_end_density", 0.0)),
+    }
+    behavioral_heat_assessment = build_behavioral_heat_assessment(supporting_features=heat_features)
 
     evidence: list[str] = []
     if features["validation_score"] >= 0.5:
@@ -324,6 +333,7 @@ def build_behavioral_forensics_output(
         ambiguity_analysis=ambiguity_analysis,
         ambiguity_type=dict(ambiguity_analysis["ambiguity_type"]),
         identity_mode=dict(identity_mode_assessment["identity_mode"]),
+        behavioral_heat=dict(behavioral_heat_assessment["behavioral_heat"]),
         supporting_signals={
             key: value for key, value in features.items() if key != "ambiguity_analysis"
         },

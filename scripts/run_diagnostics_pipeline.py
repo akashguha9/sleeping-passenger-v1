@@ -6,6 +6,10 @@ from pathlib import Path
 
 try:
     from scripts.action_engine import build_action_report
+    from scripts.behavioral_review_priority import (
+        build_behavioral_review_priority_artifact,
+        persist_behavioral_review_priority_artifact,
+    )
     from scripts.blocker_cost_engine import build_blocker_cost_report
     from scripts.pipeline_health_report import (
         build_pipeline_health_report,
@@ -23,6 +27,10 @@ try:
     from scripts.trend_engine import build_trend_report
 except ModuleNotFoundError:
     from action_engine import build_action_report
+    from behavioral_review_priority import (
+        build_behavioral_review_priority_artifact,
+        persist_behavioral_review_priority_artifact,
+    )
     from blocker_cost_engine import build_blocker_cost_report
     from pipeline_health_report import (
         build_pipeline_health_report,
@@ -110,8 +118,10 @@ def run_diagnostics_pipeline(
         health_report=report,
         etil_signals=etil_signals,
     )
+    behavioral_review_artifact = build_behavioral_review_priority_artifact(vocoder_artifact)
     if effective_write_runtime:
         persist_runtime_vocoder_artifact(vocoder_artifact)
+        persist_behavioral_review_priority_artifact(behavioral_review_artifact)
     return report
 
 

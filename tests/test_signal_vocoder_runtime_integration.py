@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 import scripts.run_diagnostics_pipeline as run_diagnostics_pipeline_module
+from scripts.behavioral_review_priority import build_behavioral_review_priority_artifact
 from scripts.signal_vocoder import build_runtime_vocoder_artifact
 
 
@@ -101,6 +102,7 @@ def test_build_runtime_vocoder_artifact_uses_synthetic_runtime_fallback() -> Non
     assert artifact["entities"][0]["behavioral_forensics"]["ambiguity_analysis"]["schema_version"] == "v1"
     assert artifact["entities"][0]["behavioral_forensics"]["ambiguity_type"]["label"] == "low_ambiguity"
     assert artifact["entities"][0]["behavioral_forensics"]["identity_mode"]["label"] == "epistemic"
+    assert artifact["entities"][0]["behavioral_forensics"]["behavioral_heat"]["label"] == "low_heat"
     assert artifact["entities"][1]["runtime_context"]["has_open_position"] is True
     assert artifact["summary"]["blocked_entities"] == ["RTX", "UNG"]
     assert "behavioral_system_classes" in artifact["summary"]
@@ -121,8 +123,27 @@ def test_build_runtime_vocoder_artifact_can_disable_behavioral_forensics() -> No
     assert artifact["summary"]["behavioral_objectives"] == {}
 
 
+def test_behavioral_review_priority_artifact_summarizes_runtime_forensics() -> None:
+    vocoder_artifact = build_runtime_vocoder_artifact(
+        runtime_state=_sample_runtime_state(),
+        health_report=_sample_health_report(),
+        open_positions=_sample_open_positions(),
+        now=NOW,
+    )
+
+    review_artifact = build_behavioral_review_priority_artifact(vocoder_artifact)
+
+    assert review_artifact["artifact_kind"] == "behavioral_review_priority_artifact"
+    assert review_artifact["source_artifact_kind"] == "signal_vocoder_runtime_artifact"
+    assert review_artifact["entity_count"] == 2
+    assert review_artifact["entities"][0]["entity_id"] in {"RTX", "UNG"}
+    assert "review_priority" in review_artifact["entities"][0]
+    assert "top_review_entities" in review_artifact["summary"]
+
+
 def test_run_diagnostics_pipeline_persists_vocoder_artifact_after_health_report(monkeypatch) -> None:
     persisted: list[dict] = []
+    review_persisted: list[dict] = []
 
     monkeypatch.setattr(
         run_diagnostics_pipeline_module,
@@ -169,10 +190,18 @@ def test_run_diagnostics_pipeline_persists_vocoder_artifact_after_health_report(
         "persist_runtime_vocoder_artifact",
         lambda artifact: persisted.append(artifact),
     )
+    monkeypatch.setattr(
+        run_diagnostics_pipeline_module,
+        "persist_behavioral_review_priority_artifact",
+        lambda artifact: review_persisted.append(artifact),
+    )
 
     payload = run_diagnostics_pipeline_module.run_diagnostics_pipeline(write_runtime=True)
 
     assert payload["system_readiness_state"] == "DO_NOT_DEPLOY"
     assert len(persisted) == 1
+    assert len(review_persisted) == 1
     assert persisted[0]["source_mode"] == "SYNTHETIC_RUNTIME_FALLBACK"
     assert persisted[0]["entity_count"] == 2
+    assert review_persisted[0]["source_artifact_kind"] == "signal_vocoder_runtime_artifact"
+    assert review_persisted[0]["entity_count"] == 2

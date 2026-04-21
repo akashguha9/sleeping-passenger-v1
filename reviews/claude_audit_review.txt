@@ -1,0 +1,161 @@
+# A. Overall Verdict
+
+Codex's output is **substantially better than I expected** and shows genuine repo inspection. It's roughly 70% right, 20% scope creep, and 10% invented or misleading. The core recommendation — build the Signal Chronology Logger as a parallel observation subsystem before touching the action engine — is correct and well-sequenced. The chronology-first framing matches everything I've told you over the last several turns. That's the good news.
+
+The concerning part is how much surface area Codex adds around that correct core: eight new detector modules, nine new test files, five new config files, three new constants, an SQLite schema, modifications to five existing files, and an external scheduler — all bundled as a single "V1" milestone. That's not a thin slice. That's a full re-architecture disguised as an observation shell, and the quantity will work against the capital-preservation objective if you try to ship it in one go.
+
+The discipline Codex applies at the strategic level (observation before execution, synthetic fallback forbidden, backfill stays coarse) is real. The discipline it applies at the implementation level (one module at a time, the minimum viable slice) is not.
+
+Follow the strategy. Cut the implementation in half.
+
+---
+
+# B. What Codex Got Right
+
+**Repo inspection is real, not hallucinated.** Codex named specific files with line-number references that match your actual tree: `run_diagnostics_pipeline.py:51`, `signal_conversion_monitor.py:165`, `action_engine.py:138`, `runtime_common.py:35`, `pipeline_health_report.py:1501`. It correctly identified that `config/` is missing despite being referenced, that `market_data_adapter.py:48` is a placeholder, that `source_signaling_discount.py:1` doesn't parse, and that `audit_bundle/market_data.py` is the only working quote scaffold. It noticed the synthetic fallback in `signal_vocoder.py:1350` and flagged it as a contamination risk for observation storage. These are not guesses.
+
+**The strategic framing is correct.** "Build observation as a parallel subsystem, not inside the current action path; nothing from chronology should gate allow_new_risk yet" is exactly right. "Treat signal_vocoder.py and the behavioral stack as annotation only" is exactly right. "Execution kept off until forward samples exist" is exactly right. "Backfill stays honest and coarse, forward-only chronology" is exactly right.
+
+**Signal Chronology Logger as highest-leverage addition — correct.** The classification of modules into MISSING_AND_SHOULD_BUILD_NOW vs PARTIALLY_PRESENT vs MISSING_BUT_DEFER is mostly right, especially deferring the Regime-Aware Lag Layer to V1.1.
+
+**SQLite instead of a JSONL extension — correct.** SQLite matches the repo's zero-dependency philosophy and is the right choice for chronology queries.
+
+**The 3/10 MVP score — harsh but honest.** The repo has a diagnostics shell, not a trading engine. 3/10 reflects that the core thesis is not yet implemented, which is true. Your previous scorecard from me was 7.1/10 — but that was scoring different dimensions (architectural discipline, kernel maturity, testing hygiene). Codex is scoring "is this actually a live trading engine yet" and the answer is no.
+
+**The one-sentence summary in section N is correct.** "Add the observation thin slice first: runtime/observation.db, scripts/chronology_store.py, and scripts/run_observation_cycle.py, with an explicit refusal to use synthetic fallback." That is the right next action. Everything else in the output is either elaboration on that core or scope creep away from it.
+
+**The anti-overengineering warnings in section L are good.** Each one is real. They should be read before doing anything else in the plan.
+
+---
+
+# C. What Codex Got Wrong
+
+**Section M proposes six numbered steps for the "next build order." That's not a next build order. That's a full-quarter roadmap.** You asked for a disciplined MVP and Codex returned a project plan. The correct next build order is three steps at most. Six is aspirational bloat.
+
+**The proposed config files conflate V1 with V2.** `config/observation_thresholds.json`, `config/asset_event_map.v1.json`, and `config/source_credibility.v1.json` are fine as concepts, but they're being created *before any detectors exist to consume them*. You'd be writing config files for modules that don't yet have a threshold to tune. Drop the `.v1` version suffixes (premature), build the first config when the first detector needs it, and don't pre-invent a source_credibility scoring scheme before you've observed whether source credibility is actually predictive in your data.
+
+**Eight new scripts in one milestone is wrong sequencing.** Codex lists `observation_schema.py`, `chronology_store.py`, `event_prior_detector.py`, `asset_attachment_detector.py`, `commitment_detector.py`, `market_confirmation_detector.py`, `pattern_classifier.py`, `hit_rate_surface.py`, `backfill_adapter.py`, `run_observation_cycle.py`. Each is proposed as "MVP now." None of them should be built before the previous one has been shipped, tested, and run for at least a few cycles against real data. Building all eight in one branch is exactly the "beautiful nonsense" the prompt warned against.
+
+**The test count check is wrong.** Codex says "keep the existing 95 tests green." Your verified count is 73. That's either a hallucination or a stale number Codex saw somewhere in your docs. Minor issue but it signals that Codex didn't run the tests — it inferred the count from documentation artifacts. Verify before trusting.
+
+**Section G says delete the root junk files "cripts .tests .pytest.ini and ics seam to runtime vocoder artifact".** That text is corrupted — "cripts" should be "scripts", "ics seam" is gibberish. Codex either fumbled a command or hallucinated filenames. Do not run deletion commands based on that line. Inspect the root yourself before deleting anything.
+
+**The observation_schema.py file is redundant.** If you're using SQLite with a chronology_store.py wrapper, the schema lives inside the store module. Creating a separate schema file for a three-table database is over-separation of concerns. One module, three tables, done.
+
+**The scheduler recommendation is right (OS-level, not APScheduler) but the framing is wrong.** Codex says "add run_observation_cycle.py with strict NO_SYNTHETIC_INPUTS behavior" as step 2 of 6. The scheduler should run the observation cycle manually for weeks before it gets automated. Automation is step 10, not step 2.
+
+**Regime-Aware Lag Layer is correctly deferred but the rationale is weak.** Codex says "pseudo-precision on tiny samples" — which is right — but doesn't note that your current 10-trade dataset can't even establish a base rate for one regime, let alone discriminate between regimes. This is a more important reason to defer than the phrasing Codex uses.
+
+**The proposed `chronology_completeness` field is overspecified.** Codex invents values like `BACKFILL_COARSE` for this field. You don't need an enum yet. A boolean `is_backfill` flag is enough for V1. Adding granular completeness tiers before you've seen the failure modes is premature.
+
+---
+
+# D. Where Codex Is Overengineering
+
+**The module count.** Eight new scripts + nine test files + five config files + SQLite + two constants + five file modifications. Even if every item is individually correct, the aggregate is a V2 not a V1. You are a solo operator. A milestone this size will take weeks and will not be testable as a unit until the final piece lands. That's the opposite of the observation-first discipline.
+
+**The table schema for chronology_events is too rich for V1.** Fields like `source_id`, `account_id`, `score`, `threshold`, `payload_ref`, `evidence_json` are all defensible in isolation, but together they create a data model that you'll have to populate correctly before you've observed what's actually needed. A three-column minimum — `candidate_id`, `stage`, `timestamp` — gets you 80% of the value. The rest can be added when you've logged your first 50 candidates and seen what's missing.
+
+**The signal_vocoder.py modification.** Codex says "modify signal_vocoder.py:1249 so observation mode cannot consume synthetic fallback." This is a defensive change to a file that's not in the observation path. If the observation branch doesn't import signal_vocoder, it can't accidentally consume synthetic fallback. The defense lives at the import boundary of the new subsystem, not by modifying the existing one. This is exactly the kind of "protect against a failure mode that can't occur" that bloats MVP work.
+
+**Observation freshness and sample counts in the health report.** Adding observation subsystem state into the health report output before the observation subsystem has produced any meaningful output is putting the read surface in front of the data. Build the subsystem, let it log for a month, and *then* decide what needs to surface in the health report. Pre-wiring the surface is speculative.
+
+**Nine new test files.** You do not need `test_asset_attachment_detector.py`, `test_commitment_detector.py`, `test_market_confirmation_detector.py`, `test_pattern_classifier.py`, `test_backfill_adapter.py`, and `test_run_observation_cycle.py` before any of those detectors exist. One integration test for the chronology store plus one null-case test is enough for the first slice. Each detector gets its own test when it's built, one at a time.
+
+**Pre-specifying five pattern classes (A, B, D, H_T3_ONLY, NULL_TIMEOUT).** This is fine as a future direction but premature as code. The pattern classifier in V1 should output a single string field — "the observed ordering as a tuple" — and let downstream analysis decide what to label it. Hardcoding pattern class enums before observing real data is exactly the sample-size trap Codex warns against in section L and then falls into in section D.
+
+**Pre-writing the Intent Reconstruction Engine classification taxonomy (observe, announce_position, persuade, warn, pump-risk).** Codex correctly flags Intent Reconstruction as PARTIALLY_PRESENT and says "use: LOG_ONLY," but then specifies the taxonomy up front. Don't. Log raw text with source metadata. Taxonomize later from real observations. Pre-specified taxonomies are how you end up with a tagging system that doesn't match what you actually see.
+
+---
+
+# E. What Must Be Built Now
+
+Three items. No more.
+
+**First, the chronology SQLite schema with a minimal store module.** Three tables (`signal_candidates`, `chronology_events`, `pattern_hit_rates`), minimum columns only, one file (`scripts/chronology_store.py`) containing both schema and CRUD. One test file (`tests/test_chronology_store.py`) with two tests: idempotent write, and null-case insertion.
+
+**Second, the backfill adapter for your existing 10 trades.** Read the moltbook JSON, create one `signal_candidates` row per trade with `is_backfill=true`, assign coarse class (`BF_CHAOS`, `BF_PIPELINE_APPROVED`, `BF_DISCRETIONARY`), log the trade outcome as a single T5 event. No forward chronology, no invented T1-T4 timestamps. One test file that verifies backfilled rows are excluded from forward pattern analysis.
+
+**Third, replace `market_data_adapter.py` with the working implementation from `audit_bundle/market_data.py`.** This is your T4 prerequisite and it doesn't require any new architecture — you already have a working version sitting in the audit bundle. Port it, wire it to a cache, and ensure it returns deterministic error states when the upstream fails.
+
+Those three items together are the "thin observation slice." They can ship as one commit boundary on `feat/chronology-observation-v1`. They produce zero forward signals — that's correct, that's observation mode — but they establish the data substrate and the market data ground truth. Everything else waits.
+
+---
+
+# F. What Must Wait
+
+**All six detector modules.** `event_prior_detector.py`, `asset_attachment_detector.py`, `commitment_detector.py`, `market_confirmation_detector.py`, `pattern_classifier.py`, `hit_rate_surface.py` — each is a separate future milestone. Build them one at a time, each as its own branch, each tested against real data before moving to the next.
+
+**The `run_observation_cycle.py` orchestrator.** Until you have at least the event prior detector and one other detector, there is nothing to orchestrate. Build the detectors first. The orchestrator emerges from running them in sequence manually for a few weeks, not from pre-specifying the pipeline.
+
+**The scheduled task automation.** Manual runs for at least a month before automation. You need to see failure modes before you trust a scheduler to run the pipeline unsupervised.
+
+**All modifications to `pipeline_health_report.py` and `run_diagnostics_pipeline.py` to surface observation state.** These are read-surface wiring. Wire them when the observation subsystem has data worth surfacing — probably after the first 30 forward candidates have been logged, not before.
+
+**Pre-built config files.** `observation_thresholds.json`, `asset_event_map.v1.json`, `source_credibility.v1.json` — create each one only when its consumer exists.
+
+**The signal_vocoder.py modification.** Not needed until the observation branch imports from it, and it shouldn't.
+
+**Intent Reconstruction Engine in any form.** LOG_ONLY or otherwise. Raw text storage is sufficient for V1. Taxonomy emerges from observation.
+
+**Protocol Detection Layer.** Source/community tagging is already available in ETIL metadata — you don't need a separate detection module for V1. Tag the source at ingestion and move on.
+
+**Commitment Veracity Filter.** Start with raw commitment detection only. Adding credibility weights before you've seen the false-positive distribution is premature optimization.
+
+**Regime-Aware Lag Layer.** Correctly deferred by Codex. Keep it deferred until you have at least 50 forward candidates across multiple regimes.
+
+**Observation Mode Scheduler.** Manual runs first. Automate later.
+
+---
+
+# G. Simplest Correct V1 Shape
+
+One branch. One commit. Three files created, one file replaced, two tests.
+
+**Created:**
+- `scripts/chronology_store.py` — SQLite schema + CRUD. Three tables, minimum columns.
+- `scripts/backfill_chronology.py` — one-shot script that reads `moltbook/*.json` and populates backfill rows.
+- `logs/observation.db` — the SQLite file itself, created on first run.
+
+**Replaced:**
+- `scripts/market_data_adapter.py` — ported from `audit_bundle/market_data.py`, cleaned up, tested.
+
+**Tests:**
+- `tests/test_chronology_store.py` — idempotent write + null case insertion.
+- `tests/test_market_data_adapter.py` — deterministic error state + cache hit path.
+
+That's it. No detectors, no orchestrator, no scheduler, no config files, no health report surfacing, no signal_vocoder changes, no pattern classes, no veracity filter, no Intent Engine.
+
+Ship this slice. Run it manually for a week. Then decide what the next slice looks like based on what you actually learned.
+
+The total line count for this V1 is probably under 800 lines across all files combined. That's the right size.
+
+---
+
+# H. Best Next 3 Steps
+
+**Step 1 — Land the chronology store and backfill.** Create `chronology_store.py` with three tables (`signal_candidates`, `chronology_events`, `pattern_hit_rates`) and minimum columns only. Write `backfill_chronology.py` that reads the 10 moltbook trades and populates backfill rows. One test for each. Do not touch any other file in the repo during this step. Ship as its own commit.
+
+**Step 2 — Replace the market data adapter with a working implementation.** Port `audit_bundle/market_data.py` to `scripts/market_data_adapter.py`. Wire up the cache. Test the deterministic-error path. Do not add new features beyond what the audit bundle version already does. Ship as its own commit, separately from step 1.
+
+**Step 3 — Build the event prior detector.** Just one detector. Read Polymarket/Kalshi snapshots, apply the threshold logic (2pp move, 2-sigma, minimum volume), emit T1 rows to the chronology store. No other detectors yet. Run it manually against real data for at least a week. See what it actually detects before building T2.
+
+After these three steps, stop and reassess. The right fourth step will be much clearer after you've seen a week of real T1 data than it is right now.
+
+---
+
+# I. Score Out of 10
+
+**6.5/10.**
+
+Solid but bloated. Codex did real work and the strategic framing is correct, which is more than most outputs at this stage earn. The observation-first discipline is preserved, the execution-gate-off discipline is preserved, and the backfill-is-coarse discipline is preserved. Those are the load-bearing principles and Codex got them all right.
+
+The score doesn't reach 8 because Codex dressed up the right strategy with too much implementation scaffolding. A sharper output would have said: "Build the chronology store, port the market adapter, build the event prior detector. Stop there. Come back in two weeks." Instead Codex said "here are six numbered steps, eight new modules, nine test files, and three config files." The strategic core is buried under the elaboration.
+
+The difference between 6.5 and 8 is the distinction between *having good ideas about the right direction* and *shipping a disciplined slice*. Codex has the first, not the second.
+
+---
+
+# J. One-Sentence Final Verdict
+
+Follow Codex's plan with aggressive cuts — keep the strategic direction (chronology store first, market adapter second, observation subsystem stays parallel to the action engine, synthetic fallback forbidden), cut the module count from eight to three, cut the test count from nine to two, and ship steps 1–3 from my section H as separate commits before building anything else.
