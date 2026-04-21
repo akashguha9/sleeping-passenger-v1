@@ -20,6 +20,7 @@ try:
         ETILSignal,
         etil_to_snc_input,
         normalise_tool_output,
+        resolve_tool_name,
     )
     from scripts.pendentive_engine import (
         pe_full_pipeline,
@@ -27,12 +28,19 @@ try:
         pe_price_action,
     )
     from scripts.runtime_common import policy_state_score
-    from scripts.runtime_common import SIGNAL_VOCODER_REPORT_PATH, load_open_positions, write_json_atomic
+    from scripts.runtime_common import (
+        SIGNAL_VOCODER_ETIL_INPUT_PATH,
+        SIGNAL_VOCODER_REPORT_PATH,
+        load_json_file,
+        load_open_positions,
+        write_json_atomic,
+    )
 except ModuleNotFoundError:
     from external_tool_integration_layer import (
         ETILSignal,
         etil_to_snc_input,
         normalise_tool_output,
+        resolve_tool_name,
     )
     from pendentive_engine import (
         pe_full_pipeline,
@@ -40,7 +48,13 @@ except ModuleNotFoundError:
         pe_price_action,
     )
     from runtime_common import policy_state_score
-    from runtime_common import SIGNAL_VOCODER_REPORT_PATH, load_open_positions, write_json_atomic
+    from runtime_common import (
+        SIGNAL_VOCODER_ETIL_INPUT_PATH,
+        SIGNAL_VOCODER_REPORT_PATH,
+        load_json_file,
+        load_open_positions,
+        write_json_atomic,
+    )
 
 
 TEXT_FIELDS = ("text", "title", "summary", "question")
@@ -152,6 +166,63 @@ def _to_plain_signal(signal: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+def _normalise_etil_signal(
+    signal: Mapping[str, Any],
+    *,
+    now: datetime,
+) -> dict[str, Any] | None:
+    if not isinstance(signal, Mapping):
+        return None
+
+    source_value = signal.get("source")
+    if source_value is None:
+        return None
+
+    try:
+        source = resolve_tool_name(str(source_value))
+    except ValueError:
+        return None
+
+    content = signal.get("content") if isinstance(signal.get("content"), Mapping) else {}
+    timestamp = str(signal.get("timestamp") or now.isoformat())
+    raw_output = signal.get("raw_output")
+    template = normalise_tool_output(
+        source,
+        dict(raw_output) if isinstance(raw_output, Mapping) else dict(content),
+        timestamp=timestamp,
+    )
+    plain = _to_plain_signal(template)
+    reliability_prior = _safe_float(signal.get("reliability_prior"))
+    freshness_remaining = _safe_float(signal.get("freshness_remaining"))
+    signal_type = str(signal.get("signal_type") or plain["signal_type"]).strip().upper()
+
+    plain["content"] = dict(content) if content else dict(plain["content"])
+    plain["signal_type"] = signal_type or plain["signal_type"]
+    plain["reliability_prior"] = (
+        reliability_prior if reliability_prior is not None else plain["reliability_prior"]
+    )
+    plain["freshness_remaining"] = (
+        freshness_remaining if freshness_remaining is not None else plain["freshness_remaining"]
+    )
+    plain["timestamp"] = timestamp
+    plain["raw_output"] = raw_output if raw_output is not None else signal.get("content")
+    return plain
+
+
+def normalise_vocoder_etil_signals(
+    etil_signals: Sequence[Mapping[str, Any]],
+    *,
+    now: datetime | None = None,
+) -> list[dict[str, Any]]:
+    resolved_now = now or datetime.now(timezone.utc)
+    signals: list[dict[str, Any]] = []
+    for signal in etil_signals:
+        normalised = _normalise_etil_signal(signal, now=resolved_now)
+        if normalised is not None:
+            signals.append(normalised)
+    return signals
+
+
 def normalise_vocoder_inputs(
     tool_payloads: Sequence[Mapping[str, Any]],
     *,
@@ -166,6 +237,17 @@ def normalise_vocoder_inputs(
         normalised = normalise_tool_output(tool_name, raw_output, timestamp=timestamp)
         signals.append(_to_plain_signal(normalised))
     return signals
+
+
+def load_runtime_vocoder_etil_signals(
+    *,
+    path=None,
+    now: datetime | None = None,
+) -> list[dict[str, Any]]:
+    payload = load_json_file(path or SIGNAL_VOCODER_ETIL_INPUT_PATH, default=[])
+    if not isinstance(payload, list):
+        return []
+    return normalise_vocoder_etil_signals(payload, now=now)
 
 
 def _canonical_signals(
@@ -1232,6 +1314,7 @@ def build_runtime_vocoder_artifact(
     *,
     runtime_state: Mapping[str, Any],
     health_report: Mapping[str, Any],
+    etil_signals: Sequence[Mapping[str, Any]] | None = None,
     tool_payloads: Sequence[Mapping[str, Any]] | None = None,
     open_positions: Sequence[Mapping[str, Any]] | None = None,
     now: datetime | None = None,
@@ -1255,11 +1338,11 @@ def build_runtime_vocoder_artifact(
         if str(row.get("ticker") or "").strip()
     }
 
-    normalized_live_signals = (
-        normalise_vocoder_inputs(tool_payloads, now=resolved_now)
-        if tool_payloads
-        else []
-    )
+    normalized_live_signals = []
+    if etil_signals:
+        normalized_live_signals = normalise_vocoder_etil_signals(etil_signals, now=resolved_now)
+    elif tool_payloads:
+        normalized_live_signals = normalise_vocoder_inputs(tool_payloads, now=resolved_now)
     live_groups = _group_vocoder_signals_by_entity(normalized_live_signals) if normalized_live_signals else {}
     source_mode = "LIVE_ETIL" if live_groups else "SYNTHETIC_RUNTIME_FALLBACK"
 

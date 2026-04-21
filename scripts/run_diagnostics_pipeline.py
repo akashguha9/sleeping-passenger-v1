@@ -15,6 +15,7 @@ try:
     from scripts.runtime_common import SNAPSHOT_LOG_PATH, persist_current_runtime_state
     from scripts.signal_vocoder import (
         build_runtime_vocoder_artifact,
+        load_runtime_vocoder_etil_signals,
         persist_runtime_vocoder_artifact,
     )
     from scripts.signal_conversion_monitor import build_signal_conversion_report
@@ -31,6 +32,7 @@ except ModuleNotFoundError:
     from runtime_common import SNAPSHOT_LOG_PATH, persist_current_runtime_state
     from signal_vocoder import (
         build_runtime_vocoder_artifact,
+        load_runtime_vocoder_etil_signals,
         persist_runtime_vocoder_artifact,
     )
     from signal_conversion_monitor import build_signal_conversion_report
@@ -102,9 +104,11 @@ def run_diagnostics_pipeline(
         simulate_realm_bis_clear=simulate_realm_bis_clear,
         simulate_all_clear=simulate_all_clear,
     )
+    etil_signals = load_runtime_vocoder_etil_signals()
     vocoder_artifact = build_runtime_vocoder_artifact(
         runtime_state=runtime_state,
         health_report=report,
+        etil_signals=etil_signals,
     )
     if effective_write_runtime:
         persist_runtime_vocoder_artifact(vocoder_artifact)

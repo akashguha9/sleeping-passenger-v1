@@ -27,6 +27,7 @@ BLOCKER_COST_REPORT_PATH = RUNTIME_DIR / "blocker_cost_report.json"
 TREND_REPORT_PATH = RUNTIME_DIR / "trend_report.json"
 HEALTH_REPORT_PATH = RUNTIME_DIR / "pipeline_health_report.json"
 SIGNAL_VOCODER_REPORT_PATH = RUNTIME_DIR / "signal_vocoder_report.json"
+SIGNAL_VOCODER_ETIL_INPUT_PATH = RUNTIME_DIR / "signal_vocoder_etil_inputs.json"
 QUOTE_CACHE_DIR = RUNTIME_DIR / "quote_cache"
 
 CONFIG_DIR = REPO_ROOT / "config"
