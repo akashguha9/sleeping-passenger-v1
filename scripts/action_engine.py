@@ -87,7 +87,16 @@ def _select_action(
     # Routes to BLOCK_ENTRY (same as generic watchlist path) but with richer
     # reason text surfacing the promotable classification. No count change.
     if (
-        pre_entry_state == "BLOCKED_PROMOTABLE_CLEAN_CANDIDATE"
+        (
+            pre_entry_state == "BLOCKED_PROMOTABLE_CLEAN_CANDIDATE"
+            or any(
+                isinstance(tag, dict)
+                and str(tag.get("tag_code") or "").upper()
+                == "BLOCKED_PROMOTABLE_CLEAN_CANDIDATE"
+                and str(tag.get("status") or "ACTIVE").upper() == "ACTIVE"
+                for tag in ((signal_row or {}).get("tags") or [])
+            )
+        )
         and "GSCE_PHASE_LOCK" in active_blockers
     ):
         reasons.append(
