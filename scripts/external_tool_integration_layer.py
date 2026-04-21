@@ -88,6 +88,16 @@ TOOL_SCHEMAS = {
         'freshness_decay_per_hr': 0.40,
         'output_fields': ['tweet_id', 'text', 'author', 'created_at', 'engagement'],
     },
+    'market_data': {
+        'snc_pre_classification': 'ANCHOR',
+        'reliability_prior':      0.92,
+        'freshness_decay_per_hr': 0.10,
+        'output_fields': [
+            'symbol', 'price', 'price_change_pct', 'velocity_z',
+            'volume', 'volume_ratio', 'volatility', 'event_time',
+            'implied_probability',
+        ],
+    },
     'newspaper3k': {
         'snc_pre_classification': 'SYSTEM',
         'reliability_prior':      0.65,
@@ -108,15 +118,32 @@ TOOL_SCHEMAS = {
     },
 }
 
+TOOL_ALIASES = {
+    'rss_feed': 'feedparser',
+    'rss': 'feedparser',
+    'reddit': 'praw_reddit',
+    'twitter_x': 'grok_x',
+    'x_api': 'grok_x',
+    'news_stream': 'newspaper3k',
+}
+
+
+def resolve_tool_name(tool_name: str) -> str:
+    canonical = str(tool_name or '').strip().lower()
+    if not canonical:
+        raise ValueError('tool_name must be a non-empty string')
+    return TOOL_ALIASES.get(canonical, canonical)
+
 def normalise_tool_output(tool_name: str, raw_output: dict,
                            timestamp: Optional[str] = None) -> ETILSignal:
-    if tool_name not in TOOL_SCHEMAS:
+    canonical_tool_name = resolve_tool_name(tool_name)
+    if canonical_tool_name not in TOOL_SCHEMAS:
         raise ValueError(f'Unknown tool: {tool_name}. Add to TOOL_SCHEMAS first.')
-    schema   = TOOL_SCHEMAS[tool_name]
+    schema   = TOOL_SCHEMAS[canonical_tool_name]
     ts       = timestamp or datetime.utcnow().isoformat()
     content  = {k: raw_output.get(k) for k in schema['output_fields']}
     return ETILSignal(
-        source               = tool_name,
+        source               = canonical_tool_name,
         signal_type          = schema['snc_pre_classification'],
         content              = content,
         reliability_prior    = schema['reliability_prior'],
