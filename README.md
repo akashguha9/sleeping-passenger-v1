@@ -118,6 +118,7 @@ The repo now has a first additive experience/readiness report for trainer/utilit
 - `runtime/experience_mode_report.json` summarizes trainer-mode metadata, visibility/lineage legibility, readiness scaffolding, degraded-mode flags, and premium-surface eligibility.
 - `runtime/complexity_ladder_controller.json` interprets that report into advisory surface exposure flags for trainer, utility, and premium operator views.
 - `runtime/environment_fit_report.json` adds advisory environment-fit, robustness-vs-precision, locality, dependency-fragility, and anti-overcustomization summaries.
+- That report now also includes a `truth_boundary_summary` block separating observed repo evidence, heuristic inference, placeholders, and items that still need real data or live APIs for full validation.
 - The current tree should still be interpreted as trainer / early-utility phase.
 - These experience/complexity reports are advisory only. They do not change decisioning or execution behavior.
 

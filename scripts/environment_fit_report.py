@@ -66,6 +66,29 @@ DEFAULT_CONFIG = {
 }
 
 
+def _wrap_advisory_component(
+    *,
+    payload: dict[str, Any],
+    observed_repo_evidence: dict[str, Any],
+    heuristic_inference: list[str] | None = None,
+    missing_real_data_for_calibration: list[str] | None = None,
+    requires_live_api_for_full_validation: bool = False,
+    assessment_state: str = "heuristic_from_repo_evidence",
+) -> dict[str, Any]:
+    component = dict(payload)
+    component["assessment_state"] = assessment_state
+    component["behavioral_effect"] = "advisory_only"
+    component["observed_repo_evidence"] = observed_repo_evidence
+    component["heuristic_inference"] = heuristic_inference or []
+    component["missing_real_data_for_calibration"] = (
+        missing_real_data_for_calibration or []
+    )
+    component["requires_live_api_for_full_validation"] = (
+        requires_live_api_for_full_validation
+    )
+    return component
+
+
 def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
     merged = dict(base)
     for key, value in override.items():
@@ -200,19 +223,38 @@ def build_environment_fit_scorer(
     if coherence_state == "legacy_polluted":
         reasons.append("legacy_artifact_pollution_reduces_fit_confidence")
 
-    return {
-        "environment_fit_score": round(score, 4),
-        "fit_state": fit_state,
-        "respect_where_you_are_flag": recommended_surface == "trainer",
-        "component_scores": {
-            "mode_truth_alignment": round(mode_truth_alignment, 4),
-            "visibility_legibility": round(visibility_legibility, 4),
-            "dependency_simplicity": round(dependency_simplicity, 4),
-            "resilience_honesty": round(resilience_honesty, 4),
-            "local_proximity": round(local_proximity, 4),
+    return _wrap_advisory_component(
+        payload={
+            "environment_fit_score": round(score, 4),
+            "fit_state": fit_state,
+            "respect_where_you_are_flag": recommended_surface == "trainer",
+            "component_scores": {
+                "mode_truth_alignment": round(mode_truth_alignment, 4),
+                "visibility_legibility": round(visibility_legibility, 4),
+                "dependency_simplicity": round(dependency_simplicity, 4),
+                "resilience_honesty": round(resilience_honesty, 4),
+                "local_proximity": round(local_proximity, 4),
+            },
+            "reasons": reasons,
         },
-        "reasons": reasons,
-    }
+        observed_repo_evidence={
+            "operating_mode": operating_mode,
+            "truth_origin": truth_origin,
+            "recommended_surface_profile": recommended_surface,
+            "visibility_legibility_score": round(visibility_legibility, 4),
+            "unresolved_data_gap_rate": round(unresolved_gap_rate, 4),
+            "degraded_mode_required": degraded_mode_required,
+            "premium_surface_eligible": bool(premium.get("premium_surface_eligible")),
+            "artifact_coherence_state": coherence_state,
+        },
+        heuristic_inference=[
+            "Weighted summary over observed mode, legibility, degraded-mode honesty, and chain simplicity inputs.",
+            "The numeric score is not outcome-calibrated yet.",
+        ],
+        missing_real_data_for_calibration=[
+            "Outcome buckets comparing fit score to reconciled paper performance by mode/environment.",
+        ],
+    )
 
 
 def build_robustness_precision_classifier(
@@ -255,12 +297,30 @@ def build_robustness_precision_classifier(
     if classification == "balanced_transition":
         reasons.append("neither_full_precision_nor_heavy_degradation_dominates")
 
-    return {
-        "classification": classification,
-        "precision_ready": precision_ready,
-        "degraded_mode_required": degraded_mode_required,
-        "reasons": reasons,
-    }
+    return _wrap_advisory_component(
+        payload={
+            "classification": classification,
+            "precision_ready": precision_ready,
+            "degraded_mode_required": degraded_mode_required,
+            "reasons": reasons,
+        },
+        observed_repo_evidence={
+            "operating_mode": operating_mode,
+            "jet_readiness": round(jet_readiness, 4),
+            "unresolved_data_gap_rate": round(unresolved_gap_rate, 4),
+            "degraded_mode_required": degraded_mode_required,
+            "premium_surface_eligible": bool(premium.get("premium_surface_eligible")),
+        },
+        heuristic_inference=[
+            "Classification uses current readiness and gap conditions as a posture heuristic.",
+            "It is not a measured regime model.",
+        ],
+        missing_real_data_for_calibration=[
+            "Observed performance under low-gap hybrid/live observation windows.",
+            "Measured false-positive and false-negative rates for precision vs robustness posture.",
+        ],
+        requires_live_api_for_full_validation=True,
+    )
 
 
 def build_local_signal_priority_engine(
@@ -287,11 +347,25 @@ def build_local_signal_priority_engine(
         score = 0.35
         reasons = ["local_priority_is_no_longer_dominant"]
 
-    return {
-        "local_signal_priority_state": state,
-        "local_signal_priority_score": round(score, 4),
-        "reasons": reasons,
-    }
+    return _wrap_advisory_component(
+        payload={
+            "local_signal_priority_state": state,
+            "local_signal_priority_score": round(score, 4),
+            "reasons": reasons,
+        },
+        observed_repo_evidence={
+            "operating_mode": operating_mode,
+            "truth_origin": truth_origin,
+        },
+        heuristic_inference=[
+            "State and score are derived from current operating mode and truth-origin posture.",
+            "No realized locality edge has been measured yet.",
+        ],
+        missing_real_data_for_calibration=[
+            "Outcome comparison between local-only, hybrid, and externally-assisted paper decisions.",
+        ],
+        requires_live_api_for_full_validation=True,
+    )
 
 
 def build_dependency_fragility_detector(
@@ -345,12 +419,26 @@ def build_dependency_fragility_detector(
     if coherence_state == "legacy_polluted":
         reasons.append("legacy_artifact_pollution_adds_structural_fragility")
 
-    return {
-        "short_chain_advantage_score": round(short_chain_advantage_score, 4),
-        "dependency_fragility_score": round(dependency_fragility_score, 4),
-        "dependency_fragility_state": fragility_state,
-        "reasons": reasons,
-    }
+    return _wrap_advisory_component(
+        payload={
+            "short_chain_advantage_score": round(short_chain_advantage_score, 4),
+            "dependency_fragility_score": round(dependency_fragility_score, 4),
+            "dependency_fragility_state": fragility_state,
+            "reasons": reasons,
+        },
+        observed_repo_evidence={
+            "operating_mode": operating_mode,
+            "artifact_coherence_state": coherence_state,
+            "unresolved_data_gap_rate": round(unresolved_gap_rate, 4),
+            "missing_mark_frequency": round(missing_mark_frequency, 4),
+        },
+        heuristic_inference=[
+            "Fragility score compresses current gap, missing-mark, and legacy-artifact signals into one advisory value.",
+        ],
+        missing_real_data_for_calibration=[
+            "Observed failure or recovery rates across longer paper/hybrid runs.",
+        ],
+    )
 
 
 def build_over_customization_guardrail(
@@ -377,11 +465,21 @@ def build_over_customization_guardrail(
         state = "low"
         reasons = ["active_runtime_spine_should_receive_additive_not_casual_refactors"]
 
-    return {
-        "casual_modification_risk_state": state,
-        "recommended_change_style": "additive_extensions_only",
-        "reasons": reasons,
-    }
+    return _wrap_advisory_component(
+        payload={
+            "casual_modification_risk_state": state,
+            "recommended_change_style": "additive_extensions_only",
+            "reasons": reasons,
+        },
+        observed_repo_evidence={
+            "operating_mode": operating_mode,
+            "recommended_surface_profile": recommended_surface,
+            "jet_readiness": round(jet_readiness, 4),
+        },
+        heuristic_inference=[
+            "Guardrail treats trainer/seeded mismatch and unearned premium posture as modification risks.",
+        ],
+    )
 
 
 def build_constraint_to_feature_mapper(
@@ -409,10 +507,19 @@ def build_constraint_to_feature_mapper(
                 "state": "active",
             }
         )
-    return {
-        "state": "advisory_mapping",
-        "mappings": mappings,
-    }
+    return _wrap_advisory_component(
+        payload={
+            "state": "advisory_mapping",
+            "mappings": mappings,
+        },
+        observed_repo_evidence={
+            "operating_mode": operating_mode_report.get("operating_mode"),
+            "degraded_mode_required": bool(utility.get("degraded_mode_required")),
+        },
+        heuristic_inference=[
+            "Mappings are architectural interpretations of current repo constraints, not learned effects.",
+        ],
+    )
 
 
 def build_strategy_family_selector(
@@ -420,26 +527,98 @@ def build_strategy_family_selector(
 ) -> dict[str, Any]:
     readiness = experience_mode_report.get("readiness_ladder", {})
     selected = str(readiness.get("recommended_surface_profile") or "trainer").lower()
-    return {
-        "state": "advisory_selector",
-        "available_families": ["trainer", "utility", "jet"],
-        "selected_family": selected,
-        "selection_basis": {
+    return _wrap_advisory_component(
+        payload={
+            "state": "advisory_selector",
+            "available_families": ["trainer", "utility", "jet"],
+            "selected_family": selected,
+            "selection_basis": {
+                "trainer_readiness": readiness.get("trainer_readiness"),
+                "utility_readiness": readiness.get("utility_readiness"),
+                "jet_readiness": readiness.get("jet_readiness"),
+            },
+        },
+        observed_repo_evidence={
+            "recommended_surface_profile": readiness.get("recommended_surface_profile"),
             "trainer_readiness": readiness.get("trainer_readiness"),
             "utility_readiness": readiness.get("utility_readiness"),
             "jet_readiness": readiness.get("jet_readiness"),
         },
-    }
+        heuristic_inference=[
+            "Family selection is a recommendation based on the current experience ladder, not an outcome-tested selector.",
+        ],
+        missing_real_data_for_calibration=[
+            "Outcome quality by selected family over larger paper samples.",
+        ],
+    )
 
 
 def build_identity_utility_stub() -> dict[str, Any]:
+    return _wrap_advisory_component(
+        payload={
+            "state": "concept_only",
+            "performance_utility_state": "measurable_via_existing_reconciliation_and_governance",
+            "identity_utility_state": "unmeasured",
+            "note": (
+                "The repo does not yet capture operator preference or identity telemetry. "
+                "Identity utility remains conceptual until human-review data is recorded."
+            ),
+        },
+        observed_repo_evidence={},
+        heuristic_inference=[],
+        missing_real_data_for_calibration=[
+            "Explicit operator preference and workflow telemetry.",
+            "Outcome-linked evidence showing when identity comfort helps or harms performance.",
+        ],
+        requires_live_api_for_full_validation=False,
+        assessment_state="placeholder_only",
+    )
+
+
+def build_truth_boundary_summary(report: dict[str, Any]) -> dict[str, Any]:
+    implemented_from_repo_evidence: list[str] = []
+    heuristic_outputs: list[str] = []
+    missing_real_data_for_meaningful_calibration: list[str] = []
+    requires_live_apis_for_full_validation: list[str] = []
+    placeholder_components: list[str] = []
+
+    component_names = [
+        "environment_fit_assessment",
+        "robustness_precision_assessment",
+        "local_signal_priority_assessment",
+        "dependency_fragility_assessment",
+        "modification_discipline_guardrail",
+        "constraint_feature_mapping",
+        "strategy_family_recommendation",
+        "identity_utility_placeholder",
+    ]
+    for name in component_names:
+        component = report.get(name, {})
+        if not isinstance(component, dict):
+            continue
+        state = str(component.get("assessment_state") or "").strip().lower()
+        if state == "placeholder_only":
+            placeholder_components.append(name)
+        else:
+            implemented_from_repo_evidence.append(name)
+        if component.get("heuristic_inference"):
+            heuristic_outputs.append(name)
+        if component.get("requires_live_api_for_full_validation"):
+            requires_live_apis_for_full_validation.append(name)
+        for item in component.get("missing_real_data_for_calibration", []):
+            text = str(item or "").strip()
+            if text and text not in missing_real_data_for_meaningful_calibration:
+                missing_real_data_for_meaningful_calibration.append(text)
+
     return {
-        "state": "concept_only",
-        "performance_utility_state": "measurable_via_existing_reconciliation_and_governance",
-        "identity_utility_state": "unmeasured",
+        "implemented_from_repo_evidence": implemented_from_repo_evidence,
+        "heuristic_outputs": heuristic_outputs,
+        "placeholder_components": placeholder_components,
+        "missing_real_data_for_meaningful_calibration": missing_real_data_for_meaningful_calibration,
+        "requires_live_apis_for_full_validation": requires_live_apis_for_full_validation,
         "note": (
-            "The repo does not yet capture operator preference or identity telemetry. "
-            "Identity utility remains conceptual until human-review data is recorded."
+            "Observed repo evidence and heuristic inference are separated explicitly. "
+            "No section in this report changes execution behavior."
         ),
     }
 
@@ -476,36 +655,36 @@ def build_environment_fit_report(
         {
             "artifact_kind": "environment_fit_report",
             "feature_flags": active_config.get("feature_flags", {}),
-            "environment_fit_scorer": build_environment_fit_scorer(
+            "environment_fit_assessment": build_environment_fit_scorer(
                 operating_mode_report=operating,
                 governance_status_report=governance,
                 experience_mode_report=experience,
                 config=active_config,
             ),
-            "robustness_precision_classifier": build_robustness_precision_classifier(
+            "robustness_precision_assessment": build_robustness_precision_classifier(
                 operating_mode_report=operating,
                 experience_mode_report=experience,
                 config=active_config,
             ),
-            "local_signal_priority_engine": build_local_signal_priority_engine(
+            "local_signal_priority_assessment": build_local_signal_priority_engine(
                 operating_mode_report=operating,
             ),
-            "dependency_fragility_detector": build_dependency_fragility_detector(
+            "dependency_fragility_assessment": build_dependency_fragility_detector(
                 operating_mode_report=operating,
                 governance_status_report=governance,
                 experience_mode_report=experience,
                 config=active_config,
             ),
-            "over_customization_guardrail": build_over_customization_guardrail(
+            "modification_discipline_guardrail": build_over_customization_guardrail(
                 operating_mode_report=operating,
                 experience_mode_report=experience,
             ),
-            "constraint_to_feature_mapper": build_constraint_to_feature_mapper(
+            "constraint_feature_mapping": build_constraint_to_feature_mapper(
                 operating_mode_report=operating,
                 experience_mode_report=experience,
             ),
-            "strategy_family_selector": build_strategy_family_selector(experience),
-            "identity_utility_layer": build_identity_utility_stub(),
+            "strategy_family_recommendation": build_strategy_family_selector(experience),
+            "identity_utility_placeholder": build_identity_utility_stub(),
             "source_artifacts": {
                 "operating_mode_report": "runtime-derived",
                 "governance_status_report": "runtime/governance_status.py",
@@ -520,17 +699,18 @@ def build_environment_fit_report(
         },
         runtime_state=state,
     )
+    report["truth_boundary_summary"] = build_truth_boundary_summary(report)
     if write_runtime:
         write_json_atomic(output_path or ENVIRONMENT_FIT_REPORT_PATH, report, stamp=False)
     return report
 
 
 def format_environment_fit_summary(report: dict[str, Any]) -> str:
-    fit = report.get("environment_fit_scorer", {})
-    robustness = report.get("robustness_precision_classifier", {})
-    locality = report.get("local_signal_priority_engine", {})
-    fragility = report.get("dependency_fragility_detector", {})
-    guardrail = report.get("over_customization_guardrail", {})
+    fit = report.get("environment_fit_assessment", {})
+    robustness = report.get("robustness_precision_assessment", {})
+    locality = report.get("local_signal_priority_assessment", {})
+    fragility = report.get("dependency_fragility_assessment", {})
+    guardrail = report.get("modification_discipline_guardrail", {})
     return "\n".join(
         [
             "Environment Fit Report",

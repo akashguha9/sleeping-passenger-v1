@@ -61,16 +61,26 @@ def test_environment_fit_report_seeded_local_alignment(
     )
 
     written = json.loads(output_path.read_text(encoding="utf-8"))
-    assert report["environment_fit_scorer"]["fit_state"] == "aligned"
-    assert report["environment_fit_scorer"]["respect_where_you_are_flag"] is True
+    assert report["environment_fit_assessment"]["fit_state"] == "aligned"
+    assert report["environment_fit_assessment"]["respect_where_you_are_flag"] is True
     assert (
-        report["robustness_precision_classifier"]["classification"]
+        report["environment_fit_assessment"]["assessment_state"]
+        == "heuristic_from_repo_evidence"
+    )
+    assert (
+        report["environment_fit_assessment"]["observed_repo_evidence"]["operating_mode"]
+        == "seeded"
+    )
+    assert (
+        report["robustness_precision_assessment"]["classification"]
         == "robustness_first"
     )
     assert (
-        report["local_signal_priority_engine"]["local_signal_priority_state"]
+        report["local_signal_priority_assessment"]["local_signal_priority_state"]
         == "local_primary"
     )
+    assert "environment_fit_assessment" in report["truth_boundary_summary"]["implemented_from_repo_evidence"]
+    assert "identity_utility_placeholder" in report["truth_boundary_summary"]["placeholder_components"]
     assert written["artifact_kind"] == "environment_fit_report"
 
 
@@ -115,9 +125,13 @@ def test_environment_fit_report_refuses_precision_without_earned_conditions() ->
         write_runtime=False,
     )
 
-    assert report["robustness_precision_classifier"]["classification"] == "balanced_transition"
-    assert report["robustness_precision_classifier"]["precision_ready"] is False
-    assert report["strategy_family_selector"]["selected_family"] == "utility"
+    assert report["robustness_precision_assessment"]["classification"] == "balanced_transition"
+    assert report["robustness_precision_assessment"]["precision_ready"] is False
+    assert report["strategy_family_recommendation"]["selected_family"] == "utility"
+    assert (
+        report["robustness_precision_assessment"]["requires_live_api_for_full_validation"]
+        is True
+    )
     summary = format_environment_fit_summary(report)
     assert "robustness_precision_classification=balanced_transition" in summary
 
@@ -144,6 +158,22 @@ def test_environment_fit_report_handles_sparse_inputs_safely() -> None:
         write_runtime=False,
     )
 
-    assert report["environment_fit_scorer"]["environment_fit_score"] >= 0.0
-    assert report["over_customization_guardrail"]["recommended_change_style"] == "additive_extensions_only"
-    assert report["identity_utility_layer"]["state"] == "concept_only"
+    assert report["environment_fit_assessment"]["environment_fit_score"] >= 0.0
+    assert report["modification_discipline_guardrail"]["recommended_change_style"] == "additive_extensions_only"
+    assert report["identity_utility_placeholder"]["state"] == "concept_only"
+    assert report["identity_utility_placeholder"]["assessment_state"] == "placeholder_only"
+    for key in [
+        "environment_fit_assessment",
+        "robustness_precision_assessment",
+        "local_signal_priority_assessment",
+        "dependency_fragility_assessment",
+        "modification_discipline_guardrail",
+        "constraint_feature_mapping",
+        "strategy_family_recommendation",
+        "identity_utility_placeholder",
+    ]:
+        assert report[key]["behavioral_effect"] == "advisory_only"
+    assert (
+        "Explicit operator preference and workflow telemetry."
+        in report["truth_boundary_summary"]["missing_real_data_for_meaningful_calibration"]
+    )
