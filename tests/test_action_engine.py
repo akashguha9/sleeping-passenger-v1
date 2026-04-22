@@ -11,6 +11,10 @@ from scripts.signal_conversion_monitor import build_signal_conversion_report
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
+def _write_json(path: Path, payload: dict) -> None:
+    path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+
 def test_build_action_report_from_live_seed_state() -> None:
     report = build_action_report(write_runtime=False)
 
@@ -43,6 +47,12 @@ def test_build_action_report_from_live_seed_state() -> None:
         "pass",
         "review_only",
         "insufficient_reasoning",
+    }
+    assert first["experience_mode_advisory"] == {
+        "recommendation_surface_profile": "trainer",
+        "degraded_mode_required": True,
+        "confidence_downgrade_required": True,
+        "advisory_reason": "surface=trainer; seeded_trainer_surface; premium_blocked_by_gaps; degraded_mode_required; confidence_downgraded",
     }
     assert report["actions"][1]["ticker"] == "FCG"
     assert report["actions"][1]["action"] == "EXIT_NOW"
@@ -116,3 +126,80 @@ def test_build_action_report_from_simulated_all_clear_state() -> None:
     ]
     assert rows["ZIM"]["action"] == "REVIEW_FOR_ENTRY"
     assert rows["GLD"]["action"] == "MONITOR"
+
+
+def test_action_report_adds_advisory_annotations_without_changing_decisions(
+    scratch_path: Path,
+) -> None:
+    runtime_state = build_runtime_state_from_scm_report_payload(build_signal_conversion_report())
+    experience_path = scratch_path / "experience_mode_report.json"
+    controller_path = scratch_path / "complexity_ladder_controller.json"
+
+    _write_json(
+        experience_path,
+        {
+            "trainer_mode_metadata": {
+                "trainer_mode_active": False,
+                "recommended_surface_profile": "utility",
+            },
+            "readiness_ladder": {
+                "recommended_surface_profile": "utility",
+            },
+            "utility_resilience_layer": {
+                "degraded_mode_required": True,
+                "confidence_downgrade_required": True,
+            },
+        },
+    )
+    _write_json(
+        controller_path,
+        {
+            "operator_surface_recommendation": "utility",
+            "degraded_mode_annotations_required": True,
+            "controller_reasoning": [
+                "jet_readiness_below_threshold",
+                "degraded_mode_annotations_required",
+            ],
+        },
+    )
+
+    baseline = build_action_report(runtime_state=runtime_state, write_runtime=False)
+    annotated = build_action_report(
+        runtime_state=runtime_state,
+        write_runtime=False,
+        experience_mode_report_path=experience_path,
+        complexity_ladder_controller_path=controller_path,
+    )
+
+    assert baseline["summary_by_action"] == annotated["summary_by_action"]
+    baseline_decisions = [
+        (row["ticker"], row["action"], row["reasons"], row["priority_score"])
+        for row in baseline["actions"]
+    ]
+    annotated_decisions = [
+        (row["ticker"], row["action"], row["reasons"], row["priority_score"])
+        for row in annotated["actions"]
+    ]
+    assert baseline_decisions == annotated_decisions
+    assert all("experience_mode_advisory" not in row for row in baseline["actions"])
+    assert all("experience_mode_advisory" in row for row in annotated["actions"])
+    assert annotated["actions"][0]["experience_mode_advisory"] == {
+        "recommendation_surface_profile": "utility",
+        "degraded_mode_required": True,
+        "confidence_downgrade_required": True,
+        "advisory_reason": "surface=utility; premium_not_ready; degraded_mode_required; confidence_downgraded",
+    }
+
+
+def test_action_report_omits_advisory_annotations_when_artifacts_missing(
+    scratch_path: Path,
+) -> None:
+    runtime_state = build_runtime_state_from_scm_report_payload(build_signal_conversion_report())
+    report = build_action_report(
+        runtime_state=runtime_state,
+        write_runtime=False,
+        experience_mode_report_path=scratch_path / "missing_experience_mode_report.json",
+        complexity_ladder_controller_path=scratch_path / "missing_complexity_ladder_controller.json",
+    )
+
+    assert all("experience_mode_advisory" not in row for row in report["actions"])

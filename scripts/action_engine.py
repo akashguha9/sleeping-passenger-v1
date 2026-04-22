@@ -12,8 +12,11 @@ try:
     )
     from scripts.runtime_common import (
         ACTION_REPORT_PATH,
+        COMPLEXITY_LADDER_CONTROLLER_PATH,
+        EXPERIENCE_MODE_REPORT_PATH,
         build_runtime_state_from_scm_report_payload,
         load_current_pipeline_state,
+        load_json_file,
         load_open_positions,
         write_json_atomic,
     )
@@ -22,8 +25,11 @@ except ModuleNotFoundError:
     from execution_governance import assess_action_governance, summarize_action_governance
     from runtime_common import (
         ACTION_REPORT_PATH,
+        COMPLEXITY_LADDER_CONTROLLER_PATH,
+        EXPERIENCE_MODE_REPORT_PATH,
         build_runtime_state_from_scm_report_payload,
         load_current_pipeline_state,
+        load_json_file,
         load_open_positions,
         write_json_atomic,
     )
@@ -31,6 +37,77 @@ except ModuleNotFoundError:
 
 ACTION_ORDER = ["EXIT_NOW", "REDUCE", "HOLD", "MONITOR", "BLOCK_ENTRY"]
 OPTIONAL_ACTION_ORDER = ["REVIEW_FOR_ENTRY"]
+
+
+def _load_optional_runtime_artifact(path: Path | None) -> dict[str, Any]:
+    if path is None:
+        return {}
+    payload = load_json_file(path, default={}) or {}
+    if not isinstance(payload, dict):
+        return {}
+    return payload
+
+
+def _normalize_surface_profile(value: Any) -> str:
+    text = str(value or "").strip().lower()
+    if text in {"trainer", "utility", "jet"}:
+        return text
+    return "trainer"
+
+
+def _build_experience_mode_advisory(
+    *,
+    experience_mode_report: dict[str, Any] | None,
+    complexity_ladder_controller: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    experience = experience_mode_report if isinstance(experience_mode_report, dict) else {}
+    controller = (
+        complexity_ladder_controller if isinstance(complexity_ladder_controller, dict) else {}
+    )
+    if not experience and not controller:
+        return None
+
+    utility_layer = experience.get("utility_resilience_layer", {})
+    trainer_metadata = experience.get("trainer_mode_metadata", {})
+    readiness_ladder = experience.get("readiness_ladder", {})
+
+    degraded_from_experience = utility_layer.get("degraded_mode_required")
+    degraded_from_controller = controller.get("degraded_mode_annotations_required")
+    confidence_downgrade = utility_layer.get("confidence_downgrade_required")
+    surface_profile = _normalize_surface_profile(
+        controller.get("operator_surface_recommendation")
+        or trainer_metadata.get("recommended_surface_profile")
+        or readiness_ladder.get("recommended_surface_profile")
+    )
+
+    advisory: dict[str, Any] = {
+        "recommendation_surface_profile": surface_profile,
+    }
+    if degraded_from_experience is not None:
+        advisory["degraded_mode_required"] = bool(degraded_from_experience)
+    elif degraded_from_controller is not None:
+        advisory["degraded_mode_required"] = bool(degraded_from_controller)
+    if confidence_downgrade is not None:
+        advisory["confidence_downgrade_required"] = bool(confidence_downgrade)
+
+    controller_reasoning = controller.get("controller_reasoning", [])
+    if not isinstance(controller_reasoning, list):
+        controller_reasoning = []
+
+    reason_parts: list[str] = [f"surface={surface_profile}"]
+    if "seeded_mode_forces_trainer_surface" in controller_reasoning:
+        reason_parts.append("seeded_trainer_surface")
+    if "unresolved_gap_breach_forces_no_premium" in controller_reasoning:
+        reason_parts.append("premium_blocked_by_gaps")
+    elif "jet_readiness_below_threshold" in controller_reasoning:
+        reason_parts.append("premium_not_ready")
+    if advisory.get("degraded_mode_required") is True:
+        reason_parts.append("degraded_mode_required")
+    if advisory.get("confidence_downgrade_required") is True:
+        reason_parts.append("confidence_downgraded")
+
+    advisory["advisory_reason"] = "; ".join(reason_parts)
+    return advisory
 
 
 def _lookup_launch_row(
@@ -181,6 +258,8 @@ def _select_action(
 def build_action_report(
     runtime_state: dict[str, Any] | None = None,
     open_positions_path: Path | None = None,
+    experience_mode_report_path: Path | None = None,
+    complexity_ladder_controller_path: Path | None = None,
     signal_refinery_report: dict[str, Any] | None = None,
     write_runtime: bool = False,
     simulate_gsce_clear: bool = False,
@@ -206,6 +285,30 @@ def build_action_report(
     else:
         state = load_current_pipeline_state()
     signal_refinery_report = signal_refinery_report or state.get("signal_refinery")
+    simulation_context = state.get("simulation_context", {})
+    use_default_advisory_artifacts = runtime_state is None and not simulation_requested
+    effective_experience_mode_path = (
+        experience_mode_report_path
+        if experience_mode_report_path is not None
+        else (
+            EXPERIENCE_MODE_REPORT_PATH if use_default_advisory_artifacts else None
+        )
+    )
+    effective_complexity_ladder_path = (
+        complexity_ladder_controller_path
+        if complexity_ladder_controller_path is not None
+        else (
+            COMPLEXITY_LADDER_CONTROLLER_PATH if use_default_advisory_artifacts else None
+        )
+    )
+    experience_mode_advisory = _build_experience_mode_advisory(
+        experience_mode_report=_load_optional_runtime_artifact(
+            effective_experience_mode_path
+        ),
+        complexity_ladder_controller=_load_optional_runtime_artifact(
+            effective_complexity_ladder_path
+        ),
+    )
     open_positions, validation = load_open_positions(open_positions_path)
     positions_by_ticker: dict[str, dict[str, Any]] = {}
     for position in open_positions:
@@ -261,12 +364,14 @@ def build_action_report(
             ),
             runtime_state=state,
         )
+        if experience_mode_advisory is not None:
+            action_row["experience_mode_advisory"] = dict(experience_mode_advisory)
         actions.append(action_row)
     actions.sort(key=lambda item: (-item["priority_score"], item["ticker"]))
     report = {
         "policy_state": policy["policy_state"],
         "active_blockers": active_blockers,
-        "simulation_context": state.get("simulation_context", {}),
+        "simulation_context": simulation_context,
         "summary_by_action": summary_by_action,
         "execution_governance_summary": summarize_action_governance(actions),
         "actions": actions,
