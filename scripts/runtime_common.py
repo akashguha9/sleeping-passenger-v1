@@ -306,6 +306,7 @@ def compute_config_fingerprint(config_paths: list[Path] | None = None) -> str:
         BLOCKER_WEIGHTS_PATH,
         EXECUTION_GOVERNANCE_CONFIG_PATH,
         EXPERIENCE_MODE_CONFIG_PATH,
+        ENVIRONMENT_FIT_CONFIG_PATH,
     ]
     digest = hashlib.sha256()
     for path in paths:
@@ -395,6 +396,7 @@ BLOCKER_COST_REPORT_PATH = RUNTIME_DIR / "blocker_cost_report.json"
 TREND_REPORT_PATH = RUNTIME_DIR / "trend_report.json"
 HEALTH_REPORT_PATH = RUNTIME_DIR / "pipeline_health_report.json"
 EXPERIENCE_MODE_REPORT_PATH = RUNTIME_DIR / "experience_mode_report.json"
+ENVIRONMENT_FIT_REPORT_PATH = RUNTIME_DIR / "environment_fit_report.json"
 COMPLEXITY_LADDER_CONTROLLER_PATH = RUNTIME_DIR / "complexity_ladder_controller.json"
 SIGNAL_REFINERY_REPORT_PATH = RUNTIME_DIR / "signal_refinery_report.json"
 PAPER_POSITIONS_PATH = RUNTIME_DIR / "paper_positions.json"
@@ -421,6 +423,7 @@ BLOCKER_WEIGHTS_PATH = CONFIG_DIR / "blocker_weights.json"
 SIGNAL_REFINERY_CONFIG_PATH = CONFIG_DIR / "signal_refinery_config.json"
 EXECUTION_GOVERNANCE_CONFIG_PATH = CONFIG_DIR / "execution_governance_config.json"
 EXPERIENCE_MODE_CONFIG_PATH = CONFIG_DIR / "experience_mode_config.json"
+ENVIRONMENT_FIT_CONFIG_PATH = CONFIG_DIR / "environment_fit_config.json"
 
 OPEN_POSITION_REQUIRED_KEYS = {
     "ticker",

@@ -1,0 +1,27 @@
+{
+  "schema_version": "ENVIRONMENT_FIT_CONFIG_V1",
+  "feature_flags": {
+    "enable_environment_fit_scorer": true,
+    "enable_robustness_precision_classifier": true,
+    "enable_local_signal_priority_engine": true,
+    "enable_dependency_fragility_detector": true,
+    "enable_over_customization_guardrail": true,
+    "enable_constraint_feature_mapper": true,
+    "enable_strategy_family_selector_stub": true,
+    "enable_identity_utility_stub": true
+  },
+  "weights": {
+    "mode_truth_alignment": 0.3,
+    "visibility_legibility": 0.2,
+    "dependency_simplicity": 0.2,
+    "resilience_honesty": 0.2,
+    "local_proximity": 0.1
+  },
+  "thresholds": {
+    "high_fit_min": 0.75,
+    "medium_fit_min": 0.55,
+    "precision_ready_jet_min": 0.8,
+    "premium_gap_max": 0.1,
+    "fragility_elevated_min": 0.6
+  }
+}

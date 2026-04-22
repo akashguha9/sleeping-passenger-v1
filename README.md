@@ -55,6 +55,7 @@ python -m pytest -q tests
 python scripts\repo_operating_mode.py --summary
 python scripts\pipeline_health_report.py --summary --no-write
 python scripts\experience_mode_report.py --summary
+python scripts\environment_fit_report.py --summary
 python scripts\complexity_ladder_controller.py --summary
 python scripts\governance_status.py --summary
 python scripts\governance_feedback_report.py --summary
@@ -116,6 +117,7 @@ The repo now has a first additive experience/readiness report for trainer/utilit
 
 - `runtime/experience_mode_report.json` summarizes trainer-mode metadata, visibility/lineage legibility, readiness scaffolding, degraded-mode flags, and premium-surface eligibility.
 - `runtime/complexity_ladder_controller.json` interprets that report into advisory surface exposure flags for trainer, utility, and premium operator views.
+- `runtime/environment_fit_report.json` adds advisory environment-fit, robustness-vs-precision, locality, dependency-fragility, and anti-overcustomization summaries.
 - The current tree should still be interpreted as trainer / early-utility phase.
 - These experience/complexity reports are advisory only. They do not change decisioning or execution behavior.
 
