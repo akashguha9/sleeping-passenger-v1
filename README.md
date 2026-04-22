@@ -6,6 +6,10 @@ This repo is a local decision shell for inspecting seeded signal state, blocker 
 
 - Local diagnostics run from checked-in Moltbook data and local signal ledger files.
 - Runtime artifacts are stamped with a shared `run_id`, `source_mode`, `operating_mode`, `truth_origin`, `commit_hash`, and `config_fingerprint`.
+- Execution remains governance-first and human-in-the-loop:
+  - action reports now carry first-principles / competence / structured-learning advisory fields
+  - paper entry sync stays suggestion-only unless explicit human approval is supplied
+  - operator overrides can be logged with explicit first-principles reasoning
 - The main repo-scoped test suite passes from `tests/`.
 - The system can classify its current operating mode from local runtime state and environment flags.
 - A first local paper-execution slice now exists:
@@ -50,9 +54,12 @@ This repo is a local decision shell for inspecting seeded signal state, blocker 
 python -m pytest -q tests
 python scripts\repo_operating_mode.py --summary
 python scripts\pipeline_health_report.py --summary --no-write
+python scripts\experience_mode_report.py --summary
 python scripts\governance_status.py --summary
+python scripts\governance_feedback_report.py --summary
 python scripts\artifact_coherence_check.py --summary
 python scripts\paper_execution.py sync --summary
+python scripts\operator_override_ledger.py --ticker RTX --override-action MONITOR --why-this-move "waiting for manual review" --trigger "review-ready candidate" --invalidation "cancel if validation weakens" --regime "review_ready" --why-now "blockers cleared this run" --summary
 python scripts\yahoo_market_data_adapter.py --tickers RTX,ZIM --summary
 python scripts\paper_trade_retirement.py --summary
 python scripts\paper_reconciliation.py --summary
@@ -64,6 +71,7 @@ python scripts\run_diagnostics_pipeline.py --summary --no-write
 The paper layer is now executable but still local-first and deterministic.
 
 - Default current runtime sync records decision candidates only.
+- Even with paper execution enabled, `paper_execution.py sync` does not open new paper entries unless you pass explicit human approval with `--approve-review-for-entry`.
 - New paper orders and fills are created only when `PIPELINE_ENABLE_PAPER_EXECUTION=true`.
 - Live execution remains blocked; the paper path refuses to run if live execution is enabled.
 - Deterministic fill prices are used unless you supply manual `TICKER=PRICE` overrides.
@@ -74,7 +82,10 @@ Example PowerShell flow:
 python scripts\paper_execution.py sync --summary
 $env:PIPELINE_ENABLE_PAPER_EXECUTION='true'
 $env:PIPELINE_ENABLE_LIVE_EXECUTION='false'
-python scripts\paper_execution.py sync --simulate-all-clear --fill-price RTX=101.5 --fill-price ZIM=44.25 --summary
+python scripts\paper_execution.py sync --simulate-all-clear --summary
+python scripts\paper_execution.py sync --simulate-all-clear --approve-review-for-entry --fill-price RTX=101.5 --fill-price ZIM=44.25 --summary
+python scripts\operator_override_ledger.py --ticker RTX --override-action MONITOR --why-this-move "waiting for manual review" --trigger "review-ready candidate" --invalidation "cancel if validation weakens" --regime "review_ready" --why-now "blockers cleared this run" --summary
+python scripts\governance_feedback_report.py --summary
 python scripts\paper_execution.py close --position-id PAPER_POSITION_ID --exit-price 104.0 --close-reason TARGET_REACHED --summary
 python scripts\yahoo_market_data_adapter.py --tickers RTX,ZIM,TLT --summary
 python scripts\paper_trade_retirement.py --summary
@@ -97,6 +108,14 @@ The repo now writes a cumulative paper reconciliation history and summary.
 - `runtime/paper_reconciliation_summary.json` tracks cumulative expectancy, win/loss, and data-gap metrics.
 - `runtime/paper_reconciliation_report.json` reports the latest reconciliation pass and merge counts.
 - This measures paper lineage quality and paper expectancy. It is still not economic proof of a live system.
+
+## Experience Ladder
+
+The repo now has a first additive experience/readiness report for trainer/utility/jet-style surfaces.
+
+- `runtime/experience_mode_report.json` summarizes trainer-mode metadata, visibility/lineage legibility, readiness scaffolding, degraded-mode flags, and premium-surface eligibility.
+- The current tree should still be interpreted as trainer / early-utility phase.
+- This report is advisory only. It does not change decisioning or execution behavior.
 
 ## Known Coherence Gap
 

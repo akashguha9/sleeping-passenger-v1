@@ -1,0 +1,23 @@
+{
+  "schema_version": "EXPERIENCE_MODE_CONFIG_V1",
+  "feature_flags": {
+    "enable_trainer_mode_metadata": true,
+    "enable_visibility_legibility_layer": true,
+    "enable_readiness_scaffold": true,
+    "enable_utility_resilience_flags": true,
+    "enable_premium_compression_placeholders": true,
+    "enable_design_dna_stub": true
+  },
+  "trainer_mode": {
+    "force_recommendation_for_seeded": true,
+    "force_recommendation_for_paper_prepared": true
+  },
+  "readiness": {
+    "feedback_density_target": 20,
+    "utility_unresolved_gap_max": 0.25,
+    "jet_unresolved_gap_max": 0.10,
+    "trainer_ready_min": 0.55,
+    "utility_ready_min": 0.60,
+    "jet_ready_min": 0.80
+  }
+}

@@ -301,7 +301,12 @@ def build_truth_context(payload: dict[str, Any] | None = None) -> dict[str, Any]
 
 
 def compute_config_fingerprint(config_paths: list[Path] | None = None) -> str:
-    paths = config_paths or [SIGNAL_REFINERY_CONFIG_PATH, BLOCKER_WEIGHTS_PATH]
+    paths = config_paths or [
+        SIGNAL_REFINERY_CONFIG_PATH,
+        BLOCKER_WEIGHTS_PATH,
+        EXECUTION_GOVERNANCE_CONFIG_PATH,
+        EXPERIENCE_MODE_CONFIG_PATH,
+    ]
     digest = hashlib.sha256()
     for path in paths:
         digest.update(repo_relative(path).encode("utf-8"))
@@ -385,9 +390,11 @@ DERIVED_GATE_STATES_PATH = RUNTIME_DIR / "derived_gate_states.json"
 EXECUTION_POLICY_PATH = RUNTIME_DIR / "execution_policy.json"
 PER_SIGNAL_ATTRIBUTION_PATH = RUNTIME_DIR / "per_signal_attribution.json"
 ACTION_REPORT_PATH = RUNTIME_DIR / "action_report.json"
+GOVERNANCE_FEEDBACK_REPORT_PATH = RUNTIME_DIR / "governance_feedback_report.json"
 BLOCKER_COST_REPORT_PATH = RUNTIME_DIR / "blocker_cost_report.json"
 TREND_REPORT_PATH = RUNTIME_DIR / "trend_report.json"
 HEALTH_REPORT_PATH = RUNTIME_DIR / "pipeline_health_report.json"
+EXPERIENCE_MODE_REPORT_PATH = RUNTIME_DIR / "experience_mode_report.json"
 SIGNAL_REFINERY_REPORT_PATH = RUNTIME_DIR / "signal_refinery_report.json"
 PAPER_POSITIONS_PATH = RUNTIME_DIR / "paper_positions.json"
 EXTERNAL_MARKS_PATH = RUNTIME_DIR / "external_market_marks.json"
@@ -401,12 +408,18 @@ PAPER_DECISION_LEDGER_PATH = LOG_DIR / "paper_decisions.jsonl"
 PAPER_ORDER_LEDGER_PATH = LOG_DIR / "paper_orders.jsonl"
 PAPER_FILL_LEDGER_PATH = LOG_DIR / "paper_fills.jsonl"
 PAPER_CLOSE_LEDGER_PATH = LOG_DIR / "paper_closes.jsonl"
+OPERATOR_OVERRIDE_LEDGER_PATH = LOG_DIR / "operator_overrides.jsonl"
+OPERATOR_FEEDBACK_LEDGER_PATH = LOG_DIR / "operator_quality_feedback.jsonl"
+MODEL_FEEDBACK_LEDGER_PATH = LOG_DIR / "model_quality_feedback.jsonl"
+INTERACTION_FEEDBACK_LEDGER_PATH = LOG_DIR / "interaction_quality_feedback.jsonl"
 POST_TRADE_FEEDBACK_PATH = LOG_DIR / "post_trade_feedback.jsonl"
 PAPER_RECONCILIATION_HISTORY_PATH = LOG_DIR / "paper_reconciliation_history.jsonl"
 
 CONFIG_DIR = REPO_ROOT / "config"
 BLOCKER_WEIGHTS_PATH = CONFIG_DIR / "blocker_weights.json"
 SIGNAL_REFINERY_CONFIG_PATH = CONFIG_DIR / "signal_refinery_config.json"
+EXECUTION_GOVERNANCE_CONFIG_PATH = CONFIG_DIR / "execution_governance_config.json"
+EXPERIENCE_MODE_CONFIG_PATH = CONFIG_DIR / "experience_mode_config.json"
 
 OPEN_POSITION_REQUIRED_KEYS = {
     "ticker",
