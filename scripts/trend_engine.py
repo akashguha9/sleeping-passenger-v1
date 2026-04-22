@@ -360,6 +360,11 @@ def build_trend_report(
             "chaos_trend": {"latest": 0.0, "slope": 0.0, "label": "FLAT"},
             "watchlist_conversion_trend": {"latest": 0.0, "slope": 0.0, "label": "FLAT"},
             "policy_improvement_trend": {"latest": 0, "slope": 0.0, "label": "FLAT"},
+            "horsepower_trend": {"latest": 0.0, "slope": 0.0, "label": "FLAT"},
+            "validation_quality_trend": {"latest": 0.0, "slope": 0.0, "label": "FLAT"},
+            "decision_grade_signal_trend": {"latest": 0.0, "slope": 0.0, "label": "FLAT"},
+            "time_to_valid_signal_trend": {"latest": None, "slope": 0.0, "label": "FLAT"},
+            "thermal_headroom_trend": {"latest": 0.0, "slope": 0.0, "label": "FLAT"},
             "promotable_queue_trend_label": "PROMOTABLE_QUEUE_FLAT",
             "blocked_promotable_queue_trend_label": "BLOCKED_PROMOTABLE_QUEUE_FLAT",
             "clean_ready_pending_trigger_trend_label": "CLEAN_READY_PENDING_TRIGGER_FLAT",
@@ -444,6 +449,17 @@ def build_trend_report(
     chaos_slope = linear_regression_slope(chaos_values)
     watchlist_slope = linear_regression_slope(watchlist_conversion_values)
     policy_slope = linear_regression_slope([float(value) for value in policy_values])
+    horsepower_values = _numeric_series(rows, "raw_signal_horsepower")
+    validation_quality_values = _numeric_series(rows, "average_validation_score")
+    decision_grade_values = _numeric_series(rows, "decision_grade_signal_count")
+    thermal_headroom_values = _numeric_series(rows, "thermal_headroom")
+    time_to_valid_values = _numeric_series(rows, "time_to_valid_signal_hours")
+
+    horsepower_slope = linear_regression_slope(horsepower_values)
+    validation_quality_slope = linear_regression_slope(validation_quality_values)
+    decision_grade_slope = linear_regression_slope(decision_grade_values)
+    thermal_headroom_slope = linear_regression_slope(thermal_headroom_values)
+    time_to_valid_slope = linear_regression_slope(time_to_valid_values)
 
     blocked_names = _string_list_from_row(rows[-1], "blocked_promotable_candidate_names")
     promotable_names = _string_list_from_row(rows[-1], "promotable_watchlist_names")
@@ -482,6 +498,51 @@ def build_trend_report(
             "latest": policy_values[-1],
             "slope": round(policy_slope, 6),
             "label": classify_trend(policy_slope, epsilon=0.01, positive_is_good=True),
+        },
+        "horsepower_trend": {
+            "latest": round(horsepower_values[-1], 3),
+            "slope": round(horsepower_slope, 6),
+            "label": classify_trend(horsepower_slope, epsilon=0.001, positive_is_good=True),
+        },
+        "validation_quality_trend": {
+            "latest": round(validation_quality_values[-1], 3),
+            "slope": round(validation_quality_slope, 6),
+            "label": classify_trend(
+                validation_quality_slope,
+                epsilon=0.001,
+                positive_is_good=True,
+            ),
+        },
+        "decision_grade_signal_trend": {
+            "latest": round(decision_grade_values[-1], 3),
+            "slope": round(decision_grade_slope, 6),
+            "label": classify_trend(
+                decision_grade_slope,
+                epsilon=0.05,
+                positive_is_good=True,
+            ),
+        },
+        "time_to_valid_signal_trend": {
+            "latest": (
+                round(time_to_valid_values[-1], 3)
+                if any(time_to_valid_values)
+                else None
+            ),
+            "slope": round(time_to_valid_slope, 6),
+            "label": classify_trend(
+                time_to_valid_slope,
+                epsilon=0.01,
+                positive_is_good=False,
+            ),
+        },
+        "thermal_headroom_trend": {
+            "latest": round(thermal_headroom_values[-1], 3),
+            "slope": round(thermal_headroom_slope, 6),
+            "label": classify_trend(
+                thermal_headroom_slope,
+                epsilon=0.05,
+                positive_is_good=True,
+            ),
         },
         "promotable_queue_trend_label": _queue_trend_label(
             rows,

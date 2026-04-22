@@ -28,6 +28,25 @@ ACTION_ORDER = ["EXIT_NOW", "REDUCE", "HOLD", "MONITOR", "BLOCK_ENTRY"]
 OPTIONAL_ACTION_ORDER = ["REVIEW_FOR_ENTRY"]
 
 
+def _lookup_launch_row(
+    ticker: str,
+    signal_refinery_report: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    if not isinstance(signal_refinery_report, dict):
+        return None
+    launch_control = signal_refinery_report.get("launch_control", {})
+    rows = launch_control.get("launch_rows", []) if isinstance(launch_control, dict) else []
+    if not isinstance(rows, list):
+        return None
+    target = str(ticker or "").upper()
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        if str(row.get("ticker") or "").upper() == target:
+            return row
+    return None
+
+
 def _position_is_open(position: dict[str, Any] | None) -> bool:
     if not position:
         return False
@@ -52,6 +71,7 @@ def _select_action(
     position: dict[str, Any] | None,
     policy: dict[str, Any],
     active_blockers: list[str],
+    signal_refinery_report: dict[str, Any] | None = None,
 ) -> tuple[str, list[str]]:
     reasons: list[str] = []
     signal_state = (signal_row or {}).get("signal_state", "UNKNOWN")
@@ -108,6 +128,14 @@ def _select_action(
         pre_entry_state == "CLEAN_ENTRY_ELIGIBLE"
         and policy.get("allow_new_risk", False)
     ):
+        launch_row = _lookup_launch_row(ticker, signal_refinery_report)
+        launch_state = str((launch_row or {}).get("launch_state") or "").upper()
+        if launch_state == "BLOCKED_CROWDING":
+            reasons.append("Launch control blocked review because repricing headroom is too low")
+            return "BLOCK_ENTRY", reasons
+        if launch_state in {"BLOCKED_VALIDATION", "BLOCKED_POLICY", "BLOCKED_THERMAL"}:
+            reasons.append(f"Launch control blocked review: {launch_state}")
+            return "MONITOR", reasons
         reasons.append(
             "Promotable clean candidate is fully gate-cleared and ready for entry review"
         )
@@ -129,6 +157,7 @@ def _select_action(
 def build_action_report(
     runtime_state: dict[str, Any] | None = None,
     open_positions_path: Path | None = None,
+    signal_refinery_report: dict[str, Any] | None = None,
     write_runtime: bool = False,
     simulate_gsce_clear: bool = False,
     simulate_realm_bis_clear: bool = False,
@@ -152,6 +181,7 @@ def build_action_report(
         )
     else:
         state = load_current_pipeline_state()
+    signal_refinery_report = signal_refinery_report or state.get("signal_refinery")
     open_positions, validation = load_open_positions(open_positions_path)
     positions_by_ticker: dict[str, dict[str, Any]] = {}
     for position in open_positions:
@@ -174,6 +204,7 @@ def build_action_report(
             position=position,
             policy=policy,
             active_blockers=active_blockers,
+            signal_refinery_report=signal_refinery_report,
         )
         if action not in summary_by_action:
             summary_by_action[action] = 0

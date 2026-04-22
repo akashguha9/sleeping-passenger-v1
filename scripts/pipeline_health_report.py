@@ -22,6 +22,7 @@ try:
         persist_current_runtime_state,
         write_json_atomic,
     )
+    from scripts.signal_refinery import build_signal_refinery_report
     from scripts.signal_conversion_monitor import build_signal_conversion_report
     from scripts.trend_engine import build_trend_report
 except ModuleNotFoundError:
@@ -38,6 +39,7 @@ except ModuleNotFoundError:
         persist_current_runtime_state,
         write_json_atomic,
     )
+    from signal_refinery import build_signal_refinery_report
     from signal_conversion_monitor import build_signal_conversion_report
     from trend_engine import build_trend_report
 
@@ -52,6 +54,7 @@ TARGET_TEST_COMMAND = [
     str(Path("tests") / "test_action_engine.py"),
     str(Path("tests") / "test_blocker_cost_engine.py"),
     str(Path("tests") / "test_trend_engine.py"),
+    str(Path("tests") / "test_signal_refinery.py"),
     "-q",
 ]
 
@@ -1507,6 +1510,7 @@ def build_pipeline_health_report(
     action_report: dict[str, Any] | None = None,
     friction_report: dict[str, Any] | None = None,
     trend_report: dict[str, Any] | None = None,
+    signal_refinery_report: dict[str, Any] | None = None,
     latest_snapshot_timestamp: str | None = None,
     simulate_gsce_clear: bool = False,
     simulate_realm_bis_clear: bool = False,
@@ -1531,13 +1535,8 @@ def build_pipeline_health_report(
     open_positions, open_positions_summary = load_open_positions(open_positions_path)
     current_snapshot_row = (
         build_snapshot_row(runtime_state=state)
-        if simulation_context.get("is_simulated", False)
+        if simulation_context.get("is_simulated", False) or not effective_write_runtime
         else None
-    )
-    action_report = action_report or build_action_report(
-        runtime_state=state,
-        open_positions_path=open_positions_path,
-        write_runtime=effective_write_runtime,
     )
     friction_report = friction_report or build_blocker_cost_report(
         runtime_state=state,
@@ -1546,6 +1545,19 @@ def build_pipeline_health_report(
     trend_report = trend_report or build_trend_report(
         write_runtime=effective_write_runtime,
         current_snapshot_row=current_snapshot_row,
+    )
+    signal_refinery_report = signal_refinery_report or build_signal_refinery_report(
+        runtime_state=state,
+        trend_report=trend_report,
+        open_positions_path=open_positions_path,
+        write_runtime=effective_write_runtime,
+    )
+    state["signal_refinery"] = signal_refinery_report
+    action_report = action_report or build_action_report(
+        runtime_state=state,
+        open_positions_path=open_positions_path,
+        signal_refinery_report=signal_refinery_report,
+        write_runtime=effective_write_runtime,
     )
     test_status = (
         run_targeted_tests(base)
@@ -1693,6 +1705,7 @@ def build_pipeline_health_report(
         "policy": operator_policy,
         "friction": friction_report,
         "trends": trend_report,
+        "signal_refinery": signal_refinery_report,
         "watchlist_intelligence": watchlist_intelligence,
         "blocked_promotable_candidate_queue": blocked_promotable_candidate_queue,
         "queue_pressure_state": queue_pressure_state,
@@ -1743,7 +1756,7 @@ def build_pipeline_health_report(
         "active_blockers": state["active_blockers"],
         "scorecard": scorecard,
         "scorecard_rules": SCORECARD_RULES,
-        "note": "Health report integrates authoritative SCM state, action policy, blocker cost, memory trends, and open positions validation.",
+        "note": "Health report integrates authoritative SCM state, signal refinery gating, action policy, blocker cost, memory trends, and open positions validation.",
     }
 
     if effective_write_runtime:

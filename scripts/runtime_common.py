@@ -136,10 +136,12 @@ ACTION_REPORT_PATH = RUNTIME_DIR / "action_report.json"
 BLOCKER_COST_REPORT_PATH = RUNTIME_DIR / "blocker_cost_report.json"
 TREND_REPORT_PATH = RUNTIME_DIR / "trend_report.json"
 HEALTH_REPORT_PATH = RUNTIME_DIR / "pipeline_health_report.json"
+SIGNAL_REFINERY_REPORT_PATH = RUNTIME_DIR / "signal_refinery_report.json"
 QUOTE_CACHE_DIR = RUNTIME_DIR / "quote_cache"
 
 CONFIG_DIR = REPO_ROOT / "config"
 BLOCKER_WEIGHTS_PATH = CONFIG_DIR / "blocker_weights.json"
+SIGNAL_REFINERY_CONFIG_PATH = CONFIG_DIR / "signal_refinery_config.json"
 
 OPEN_POSITION_REQUIRED_KEYS = {
     "ticker",
@@ -807,6 +809,7 @@ def _load_state_from_runtime_files() -> dict[str, Any]:
         ),
         "scm_review": normalize_scm_review(scm_payload, active_blockers=active_blockers),
         "simulation_context": scm_payload.get("simulation_context", {}),
+        "signal_refinery": load_json_file(SIGNAL_REFINERY_REPORT_PATH, default={}) or {},
         "note": _text(
             scm_payload.get("note"), "Loaded from normalized runtime files."
         ),
@@ -865,6 +868,7 @@ def build_runtime_state_from_scm_report_payload(scm_report: dict[str, Any]) -> d
         "execution_policy": scm_report.get("execution_policy", {}),
         "scm_review": scm_report.get("scm_review", {}),
         "simulation_context": scm_report.get("simulation_context", {}),
+        "signal_refinery": scm_report.get("signal_refinery", {}) or {},
         "note": scm_report.get("note", ""),
     }
 

@@ -52,8 +52,8 @@ def test_stamp_payload_contains_required_keys():
     assert isinstance(stamped["artifact_written_at"], str) and stamped["artifact_written_at"]
 
 
-def test_write_json_atomic_stamps_dict_payloads(tmp_path: Path):
-    target = tmp_path / "artifact.json"
+def test_write_json_atomic_stamps_dict_payloads(scratch_path: Path):
+    target = scratch_path / "artifact.json"
     write_json_atomic(target, {"k": "v"})
     payload = json.loads(target.read_text(encoding="utf-8"))
     assert payload["k"] == "v"
@@ -61,14 +61,14 @@ def test_write_json_atomic_stamps_dict_payloads(tmp_path: Path):
     assert payload["source_mode"] in VALID_SOURCE_MODES
 
 
-def test_write_json_atomic_does_not_mutate_non_dict(tmp_path: Path):
-    target = tmp_path / "list_artifact.json"
+def test_write_json_atomic_does_not_mutate_non_dict(scratch_path: Path):
+    target = scratch_path / "list_artifact.json"
     write_json_atomic(target, [1, 2, 3])
     assert json.loads(target.read_text(encoding="utf-8")) == [1, 2, 3]
 
 
-def test_write_json_atomic_stamp_false_is_raw(tmp_path: Path):
-    target = tmp_path / "raw.json"
+def test_write_json_atomic_stamp_false_is_raw(scratch_path: Path):
+    target = scratch_path / "raw.json"
     write_json_atomic(target, {"k": "v"}, stamp=False)
     payload = json.loads(target.read_text(encoding="utf-8"))
     assert payload == {"k": "v"}

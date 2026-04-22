@@ -72,6 +72,8 @@ def _write_chronology_from_snapshot(row: dict, db_path=None) -> None:
             "blocked_promotable_count": row.get(
                 "blocked_promotable_candidate_count"
             ),
+            "decision_grade_signal_count": row.get("decision_grade_signal_count"),
+            "thermal_state": row.get("thermal_state"),
         }
         _chronology_log_observation(
             conn,
@@ -266,6 +268,21 @@ def build_snapshot_row(
             else []
         )
     transition_state_rows = _transition_state_rows_from_state(state)
+    refinery = state.get("signal_refinery", {}) if isinstance(state, dict) else {}
+    horsepower = refinery.get("horsepower_monitor", {}) if isinstance(refinery, dict) else {}
+    validation_engine = (
+        refinery.get("validation_engine", {}) if isinstance(refinery, dict) else {}
+    )
+    launch_control = refinery.get("launch_control", {}) if isinstance(refinery, dict) else {}
+    thermal_manager = (
+        refinery.get("thermal_battery_manager", {}) if isinstance(refinery, dict) else {}
+    )
+    repeatability_tracker = (
+        refinery.get("repeatability_tracker", {}) if isinstance(refinery, dict) else {}
+    )
+    timing_kpi = (
+        refinery.get("time_to_valid_signal_kpi", {}) if isinstance(refinery, dict) else {}
+    )
 
     return {
         "timestamp": _unique_snapshot_timestamp(snapshot_target),
@@ -294,6 +311,18 @@ def build_snapshot_row(
         "transition_review_candidate_names": transition_review_candidate_names,
         "entry_review_candidate_count": len(entry_review_candidate_names),
         "entry_review_candidate_names": entry_review_candidate_names,
+        "raw_signal_horsepower": horsepower.get("horsepower_score", 0.0),
+        "average_validation_score": validation_engine.get("average_validation_score", 0.0),
+        "validated_signal_count": validation_engine.get("validated_signal_count", 0),
+        "decision_grade_signal_count": launch_control.get("decision_grade_signal_count", 0),
+        "deployable_signal_count": launch_control.get("deployable_signal_count", 0),
+        "launch_review_ready_count": launch_control.get("review_ready_count", 0),
+        "crowding_blocked_count": launch_control.get("blocked_crowding_count", 0),
+        "thermal_state": thermal_manager.get("thermal_state", "UNKNOWN"),
+        "thermal_headroom": thermal_manager.get("position_headroom", 0),
+        "rolling_expectancy_pct": repeatability_tracker.get("rolling_expectancy_pct", 0.0),
+        "false_positive_rate": repeatability_tracker.get("false_positive_rate", 0.0),
+        "time_to_valid_signal_hours": timing_kpi.get("median_time_to_valid_signal_hours"),
         "transition_state_rows": transition_state_rows,
     }
 

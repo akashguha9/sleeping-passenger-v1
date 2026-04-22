@@ -1,9 +1,8 @@
 """Tests for scripts/chronology_store.
 
-Uses pytest's tmp_path fixture exclusively so each test writes its DB into a
-pytest-managed temporary directory under logs/.pytest_tmp (configured in
-pytest.ini). This avoids the Windows %TEMP% permission failures seen with the
-prior version of this test.
+Uses the repo-local scratch_path fixture so each test writes its DB into a
+throwaway directory under ``~/.codex/memories/pipeline_pytest_scratch``. This
+avoids the Windows tmp_path cleanup failures seen on this checkout.
 """
 from __future__ import annotations
 
@@ -20,8 +19,8 @@ from scripts.chronology_store import (
 
 
 @pytest.fixture
-def conn(tmp_path: Path):
-    db_path = tmp_path / "observation.db"
+def conn(scratch_path: Path):
+    db_path = scratch_path / "observation.db"
     connection = get_connection(db_path)
     init_schema(connection)
     try:
@@ -30,8 +29,8 @@ def conn(tmp_path: Path):
         connection.close()
 
 
-def test_get_connection_creates_parent_dirs(tmp_path: Path):
-    db_path = tmp_path / "nested" / "sub" / "observation.db"
+def test_get_connection_creates_parent_dirs(scratch_path: Path):
+    db_path = scratch_path / "nested" / "sub" / "observation.db"
     connection = get_connection(db_path)
     try:
         assert db_path.parent.is_dir()

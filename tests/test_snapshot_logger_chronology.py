@@ -38,9 +38,9 @@ def _minimal_runtime_state() -> dict:
     }
 
 
-def test_log_snapshot_writes_observation_and_snapshot_rows(tmp_path: Path):
-    jsonl_path = tmp_path / "system_snapshots.jsonl"
-    db_path = tmp_path / "observation.db"
+def test_log_snapshot_writes_observation_and_snapshot_rows(scratch_path: Path):
+    jsonl_path = scratch_path / "system_snapshots.jsonl"
+    db_path = scratch_path / "observation.db"
 
     row = log_snapshot(
         path=jsonl_path,
@@ -79,12 +79,12 @@ def test_log_snapshot_writes_observation_and_snapshot_rows(tmp_path: Path):
 
 
 def test_log_snapshot_is_passive_when_chronology_db_path_is_invalid(
-    tmp_path: Path, capsys
+    scratch_path: Path, capsys
 ):
     """A broken DB path must not crash log_snapshot. The jsonl must still be written."""
-    jsonl_path = tmp_path / "system_snapshots.jsonl"
+    jsonl_path = scratch_path / "system_snapshots.jsonl"
     # point at a path that cannot be opened as a sqlite file (a directory)
-    bad_db_path = tmp_path / "not_a_db_dir"
+    bad_db_path = scratch_path / "not_a_db_dir"
     bad_db_path.mkdir()
 
     # must not raise

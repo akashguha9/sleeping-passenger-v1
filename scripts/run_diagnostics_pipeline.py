@@ -17,6 +17,7 @@ try:
         persist_current_runtime_state,
         resolve_source_mode,
     )
+    from scripts.signal_refinery import build_signal_refinery_report
     from scripts.signal_conversion_monitor import build_signal_conversion_report
     from scripts.snapshot_logger import build_snapshot_row, log_snapshot
     from scripts.trend_engine import build_trend_report
@@ -33,6 +34,7 @@ except ModuleNotFoundError:
         persist_current_runtime_state,
         resolve_source_mode,
     )
+    from signal_refinery import build_signal_refinery_report
     from signal_conversion_monitor import build_signal_conversion_report
     from snapshot_logger import build_snapshot_row, log_snapshot
     from trend_engine import build_trend_report
@@ -70,8 +72,21 @@ def run_diagnostics_pipeline(
     if effective_write_runtime:
         persist_current_runtime_state(runtime_state)
 
+    pre_snapshot_trend_report = build_trend_report(
+        log_path=resolved_snapshot_log_path,
+        write_runtime=False,
+        scenario_scope=scenario,
+    )
+    signal_refinery_report = build_signal_refinery_report(
+        runtime_state=runtime_state,
+        trend_report=pre_snapshot_trend_report,
+        write_runtime=effective_write_runtime,
+    )
+    runtime_state["signal_refinery"] = signal_refinery_report
+
     action_report = build_action_report(
         runtime_state=runtime_state,
+        signal_refinery_report=signal_refinery_report,
         write_runtime=effective_write_runtime,
     )
     friction_report = build_blocker_cost_report(
@@ -85,7 +100,7 @@ def run_diagnostics_pipeline(
     if should_write_snapshot:
         snapshot_row = log_snapshot(path=resolved_snapshot_log_path, runtime_state=runtime_state)
         latest_snapshot_timestamp = snapshot_row.get("timestamp")
-    elif simulation_requested:
+    else:
         current_snapshot_row = build_snapshot_row(
             runtime_state=runtime_state,
             snapshot_path=resolved_snapshot_log_path,
@@ -97,6 +112,12 @@ def run_diagnostics_pipeline(
         current_snapshot_row=current_snapshot_row,
         scenario_scope=scenario,
     )
+    final_signal_refinery_report = build_signal_refinery_report(
+        runtime_state=runtime_state,
+        trend_report=trend_report,
+        write_runtime=effective_write_runtime,
+    )
+    runtime_state["signal_refinery"] = final_signal_refinery_report
     report = build_pipeline_health_report(
         include_tests=include_tests,
         write_runtime=effective_write_runtime,
@@ -104,6 +125,7 @@ def run_diagnostics_pipeline(
         action_report=action_report,
         friction_report=friction_report,
         trend_report=trend_report,
+        signal_refinery_report=final_signal_refinery_report,
         latest_snapshot_timestamp=latest_snapshot_timestamp,
         simulate_gsce_clear=simulate_gsce_clear,
         simulate_realm_bis_clear=simulate_realm_bis_clear,

@@ -1,0 +1,42 @@
+{
+  "horsepower": {
+    "target_qualifying_signals": 8,
+    "freshness_decay_days": 21
+  },
+  "validation": {
+    "validated_signal_cutoff": 0.62,
+    "needs_confirmation_cutoff": 0.45,
+    "neutral_cross_source_confirmation_score": 0.5,
+    "neutral_source_quality_score": 0.55,
+    "weights": {
+      "ce_score": 0.3,
+      "state_quality": 0.18,
+      "blocker_clearance": 0.12,
+      "first_order": 0.1,
+      "cross_source_confirmation": 0.1,
+      "price_lead": 0.08,
+      "repricing_headroom": 0.08,
+      "source_quality": 0.02,
+      "novelty": 0.02
+    }
+  },
+  "launch_control": {
+    "max_entry_review_snapshots_before_crowding": 4,
+    "repricing_headroom_floor": 0.4
+  },
+  "thermal_battery": {
+    "max_open_positions": 6,
+    "max_positions_per_cluster": 2,
+    "max_chaos_positions": 0,
+    "daily_trade_cap": 2,
+    "cooldown_days_after_chaos_loss": 3,
+    "review_requires_deployment_clear": false
+  },
+  "repeatability": {
+    "false_positive_alert_rate": 0.4,
+    "fragile_expectancy_floor_pct": 0.0
+  },
+  "maintenance": {
+    "notes_excerpt_length": 160
+  }
+}
