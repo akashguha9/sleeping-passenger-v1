@@ -421,6 +421,18 @@ def _feedback_row(
     else:
         calibration_note = "limited_conviction_signal"
 
+    entry_visibility_context = {
+        "light_score": opening_decision.get("entry_light_score"),
+        "shadow_score": opening_decision.get("entry_shadow_score"),
+        "moon_phase": opening_decision.get("entry_moon_phase"),
+        "temporal_position": opening_decision.get("entry_temporal_position"),
+        "crowding_score": opening_decision.get("entry_crowding_score"),
+        "light_velocity": opening_decision.get("entry_light_velocity"),
+        "shadow_velocity": opening_decision.get("entry_shadow_velocity"),
+        "edge_context_score": opening_decision.get("entry_edge_context_score"),
+        "full_moon_trap_flag": opening_decision.get("entry_full_moon_trap_flag"),
+    }
+
     return stamp_payload(
         {
             "artifact_kind": "post_trade_feedback_entry",
@@ -439,6 +451,7 @@ def _feedback_row(
                 "qty": position_row.get("qty"),
                 "side": position_row.get("side"),
                 "opening_conviction_score": conviction_score,
+                **entry_visibility_context,
             },
             "exit_context": {
                 "exit_price": close_report.get("exit_price"),
@@ -450,6 +463,15 @@ def _feedback_row(
             "holding_period_days": evaluation.get("holding_period_days"),
             "realized_pnl": close_report.get("realized_pnl"),
             "realized_return_pct": realized_return_pct,
+            "entry_light_score": entry_visibility_context["light_score"],
+            "entry_shadow_score": entry_visibility_context["shadow_score"],
+            "entry_moon_phase": entry_visibility_context["moon_phase"],
+            "entry_temporal_position": entry_visibility_context["temporal_position"],
+            "entry_crowding_score": entry_visibility_context["crowding_score"],
+            "entry_light_velocity": entry_visibility_context["light_velocity"],
+            "entry_shadow_velocity": entry_visibility_context["shadow_velocity"],
+            "entry_edge_context_score": entry_visibility_context["edge_context_score"],
+            "entry_full_moon_trap_flag": entry_visibility_context["full_moon_trap_flag"],
             "thesis_state": evaluation.get("thesis_state"),
             "source_quality_notes": (
                 "Yahoo Finance external observation only; authority_bias_risk=medium, "

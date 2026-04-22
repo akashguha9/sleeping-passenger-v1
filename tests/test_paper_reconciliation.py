@@ -116,7 +116,18 @@ def test_build_reconciliation_row_with_missing_mark_and_gap_flags() -> None:
         "truth_origin": "external",
         "operating_mode": "hybrid",
     }
-    decisions = {"open_decision_1": {"decision_id": "open_decision_1"}}
+    decisions = {
+        "open_decision_1": {
+            "decision_id": "open_decision_1",
+            "entry_light_score": 0.54,
+            "entry_shadow_score": 0.46,
+            "entry_moon_phase": "quarter",
+            "entry_temporal_position": 0.42,
+            "entry_crowding_score": 0.31,
+            "entry_light_velocity": 0.04,
+            "entry_shadow_velocity": -0.04,
+        }
+    }
     orders = {"open_order_1": {"paper_order_id": "open_order_1", "side": "BUY", "requested_qty": 1.0}}
     fills = {"open_fill_1": {"paper_fill_id": "open_fill_1", "fill_price": 100.0, "fill_qty": 1.0, "filled_at": "2026-04-20T12:00:00+00:00"}}
 
@@ -136,6 +147,8 @@ def test_build_reconciliation_row_with_missing_mark_and_gap_flags() -> None:
     assert "missing_feedback" in row["data_gap_flags"]
     assert row["lineage_completeness_score"] < 1.0
     assert row["execution_context"] == "paper_simulated"
+    assert row["entry_light_score"] == 0.54
+    assert row["entry_moon_phase"] == "quarter"
 
 
 def test_classify_evidence_strength_thresholds() -> None:
@@ -165,8 +178,28 @@ def test_run_paper_reconciliation_creates_history_and_summary_without_duplicates
     _write_jsonl(
         decisions_path,
         [
-            {"decision_id": "open_decision_rtx", "conviction_score": 0.8},
-            {"decision_id": "open_decision_zim", "conviction_score": 0.7},
+            {
+                "decision_id": "open_decision_rtx",
+                "conviction_score": 0.8,
+                "entry_light_score": 0.63,
+                "entry_shadow_score": 0.37,
+                "entry_moon_phase": "gibbous",
+                "entry_temporal_position": 0.58,
+                "entry_crowding_score": 0.41,
+                "entry_light_velocity": 0.05,
+                "entry_shadow_velocity": -0.05,
+            },
+            {
+                "decision_id": "open_decision_zim",
+                "conviction_score": 0.7,
+                "entry_light_score": 0.82,
+                "entry_shadow_score": 0.18,
+                "entry_moon_phase": "full_moon",
+                "entry_temporal_position": 0.79,
+                "entry_crowding_score": 0.84,
+                "entry_light_velocity": 0.02,
+                "entry_shadow_velocity": -0.02,
+            },
         ],
     )
     _write_jsonl(
@@ -245,6 +278,13 @@ def test_run_paper_reconciliation_creates_history_and_summary_without_duplicates
                 "source_quality_notes": "Yahoo note",
                 "realized_return_pct": 4.0,
                 "holding_period_days": 2.0,
+                "entry_light_score": 0.63,
+                "entry_shadow_score": 0.37,
+                "entry_moon_phase": "gibbous",
+                "entry_temporal_position": 0.58,
+                "entry_crowding_score": 0.41,
+                "entry_light_velocity": 0.05,
+                "entry_shadow_velocity": -0.05,
                 "truth_origin": "external",
                 "operating_mode": "hybrid",
             },
@@ -256,6 +296,13 @@ def test_run_paper_reconciliation_creates_history_and_summary_without_duplicates
                 "source_quality_notes": "Yahoo note",
                 "realized_return_pct": -6.0,
                 "holding_period_days": 4.0,
+                "entry_light_score": 0.82,
+                "entry_shadow_score": 0.18,
+                "entry_moon_phase": "full_moon",
+                "entry_temporal_position": 0.79,
+                "entry_crowding_score": 0.84,
+                "entry_light_velocity": 0.02,
+                "entry_shadow_velocity": -0.02,
                 "truth_origin": "external",
                 "operating_mode": "hybrid",
             },
@@ -304,6 +351,11 @@ def test_run_paper_reconciliation_creates_history_and_summary_without_duplicates
     assert {row["close_id"] for row in history_rows} == {"close_rtx", "close_zim"}
     assert all(row["reconciliation_status"] == "fully_reconciled" for row in history_rows)
     assert all(row["parameter_change_note"] == "insufficient_evidence_for_parameter_change" for row in history_rows)
+    rtx_row = next(row for row in history_rows if row["close_id"] == "close_rtx")
+    assert rtx_row["entry_light_score"] == 0.63
+    assert rtx_row["entry_moon_phase"] == "gibbous"
+    assert rtx_row["entry_temporal_position"] == 0.58
+    assert rtx_row["entry_crowding_score"] == 0.41
 
     assert summary["total_closed_paper_trades"] == 2
     assert summary["win_rate"] == 0.5

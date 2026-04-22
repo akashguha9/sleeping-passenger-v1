@@ -57,6 +57,9 @@ def test_sync_records_decisions_even_when_paper_execution_disabled(
     assert decisions[0]["truth_origin"] == "seeded"
     assert decisions[0]["commit_hash"]
     assert decisions[0]["config_fingerprint"]
+    assert "entry_light_score" in decisions[0]
+    assert "entry_moon_phase" in decisions[0]
+    assert "entry_visibility_timing_method" in decisions[0]
 
 
 def test_sync_with_paper_enabled_creates_orders_fills_and_positions(
@@ -119,6 +122,17 @@ def test_sync_with_paper_enabled_creates_orders_fills_and_positions(
 
     decision_by_id = {row["decision_id"]: row for row in decisions}
     order_by_id = {row["paper_order_id"]: row for row in orders}
+    rtx_decision = next(row for row in decisions if row["ticker"] == "RTX")
+    assert 0.0 <= rtx_decision["entry_light_score"] <= 1.0
+    assert 0.0 <= rtx_decision["entry_shadow_score"] <= 1.0
+    assert rtx_decision["entry_moon_phase"] in {
+        "new_moon",
+        "crescent",
+        "quarter",
+        "gibbous",
+        "full_moon",
+        "waning",
+    }
     for fill in fills:
         order = order_by_id[fill["paper_order_id"]]
         assert fill["decision_id"] == order["decision_id"]

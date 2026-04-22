@@ -325,6 +325,9 @@ def test_pipeline_health_report_builder_shape() -> None:
     assert payload["friction"]["friction_band"] == "HIGH_FRICTION"
     assert payload["friction"]["total_system_friction_score"] == 13.0
     assert payload["trends"]["snapshot_count"] >= 3
+    assert "visibility_timing_context" in payload
+    assert 0.0 <= payload["visibility_timing_context"]["average_light_score"] <= 1.0
+    assert 0.0 <= payload["visibility_timing_context"]["average_shadow_score"] <= 1.0
     assert payload["open_positions_validation_summary"] == {
         "path": "moltbook/open_positions.json",
         "file_exists": True,

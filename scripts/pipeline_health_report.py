@@ -1716,6 +1716,10 @@ def build_pipeline_health_report(
         "friction": friction_report,
         "trends": trend_report,
         "signal_refinery": signal_refinery_report,
+        "visibility_timing_context": signal_refinery_report.get(
+            "visibility_timing_context",
+            {},
+        ),
         "watchlist_intelligence": watchlist_intelligence,
         "blocked_promotable_candidate_queue": blocked_promotable_candidate_queue,
         "queue_pressure_state": queue_pressure_state,

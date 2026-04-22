@@ -167,6 +167,23 @@ def _signal_lookup(runtime_state: dict[str, Any]) -> dict[str, dict[str, Any]]:
     return mapping
 
 
+def _signal_refinery_lookup(runtime_state: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    mapping: dict[str, dict[str, Any]] = {}
+    rows = runtime_state.get("signal_refinery", {}).get("validation_engine", {}).get("signals", [])
+    if not isinstance(rows, list):
+        return mapping
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        signal_id = str(row.get("signal_id") or "").strip()
+        ticker = str(row.get("ticker") or "").upper()
+        if signal_id:
+            mapping[signal_id] = row
+        if ticker and ticker not in mapping:
+            mapping[ticker] = row
+    return mapping
+
+
 def _position_lookup(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
     mapping: dict[str, dict[str, Any]] = {}
     for row in rows:
@@ -212,12 +229,14 @@ def _append_once(path: Path, row: dict[str, Any], key_name: str, existing_ids: s
 def _build_decision_row(
     action_row: dict[str, Any],
     signal_row: dict[str, Any] | None,
+    signal_context_row: dict[str, Any] | None,
     runtime_state: dict[str, Any],
     decision_type: str | None = None,
 ) -> dict[str, Any]:
     action_type = decision_type or str(action_row.get("action") or "UNKNOWN").upper()
     signal_id = str((signal_row or {}).get("signal_id") or action_row.get("signal_id") or "")
     ticker = str(action_row.get("ticker") or (signal_row or {}).get("ticker") or "").upper()
+    context_row = signal_context_row if isinstance(signal_context_row, dict) else {}
     decision_id = _stable_id(
         "paper_decision",
         get_run_id(),
@@ -236,6 +255,16 @@ def _build_decision_row(
             "confidence_score": round(priority, 3),
             "decision_reasons": list(action_row.get("reasons", [])),
             "decision_source": "action_engine",
+            "entry_light_score": context_row.get("light_score"),
+            "entry_shadow_score": context_row.get("shadow_score"),
+            "entry_moon_phase": context_row.get("moon_phase"),
+            "entry_temporal_position": context_row.get("temporal_position"),
+            "entry_light_velocity": context_row.get("light_velocity"),
+            "entry_shadow_velocity": context_row.get("shadow_velocity"),
+            "entry_crowding_score": context_row.get("crowding_score"),
+            "entry_full_moon_trap_flag": context_row.get("full_moon_trap_flag"),
+            "entry_edge_context_score": context_row.get("edge_context_score"),
+            "entry_visibility_timing_method": context_row.get("visibility_timing_method"),
             "decided_at": utc_timestamp(),
         },
         runtime_state=runtime_state,
@@ -460,9 +489,26 @@ def sync_paper_execution(
             for row in seeded_open_positions
         ]
     )
+    signal_refinery_state = state.get("signal_refinery")
+    if not isinstance(signal_refinery_state, dict) or not isinstance(
+        signal_refinery_state.get("validation_engine"),
+        dict,
+    ):
+        try:
+            from scripts.signal_refinery import build_signal_refinery_report
+            from scripts.trend_engine import build_trend_report
+        except ModuleNotFoundError:
+            from signal_refinery import build_signal_refinery_report
+            from trend_engine import build_trend_report
+        state["signal_refinery"] = build_signal_refinery_report(
+            runtime_state=state,
+            trend_report=build_trend_report(write_runtime=False),
+            write_runtime=False,
+        )
     paper_positions = _load_paper_positions(positions_path)
     paper_position_map = _position_lookup(paper_positions)
     signal_lookup = _signal_lookup(state)
+    signal_refinery_lookup = _signal_refinery_lookup(state)
 
     existing_decision_ids = _load_existing_ids(decisions_path, "decision_id")
     existing_order_ids = _load_existing_ids(orders_path, "paper_order_id")
@@ -476,7 +522,15 @@ def sync_paper_execution(
     for action_row in report.get("actions", []):
         ticker = str(action_row.get("ticker") or "").upper()
         signal_row = signal_lookup.get(ticker)
-        decision_row = _build_decision_row(action_row, signal_row, state)
+        signal_context_row = signal_refinery_lookup.get(
+            str((signal_row or {}).get("signal_id") or "").strip()
+        ) or signal_refinery_lookup.get(ticker)
+        decision_row = _build_decision_row(
+            action_row,
+            signal_row,
+            signal_context_row,
+            state,
+        )
         if _append_once(decisions_path, decision_row, "decision_id", existing_decision_ids):
             decisions_recorded += 1
 

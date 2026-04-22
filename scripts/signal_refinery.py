@@ -21,6 +21,10 @@ try:
         repo_relative,
         write_json_atomic,
     )
+    from scripts.visibility_timing_sync import (
+        build_visibility_timing_context,
+        summarize_visibility_timing_context,
+    )
 except ModuleNotFoundError:
     from moltbook_loader import MOLTBOOK_DIR, load_moltbook_bundle
     from runtime_common import (
@@ -33,6 +37,10 @@ except ModuleNotFoundError:
         load_open_positions,
         repo_relative,
         write_json_atomic,
+    )
+    from visibility_timing_sync import (
+        build_visibility_timing_context,
+        summarize_visibility_timing_context,
     )
 
 
@@ -76,6 +84,39 @@ DEFAULT_CONFIG: dict[str, Any] = {
     },
     "maintenance": {
         "notes_excerpt_length": 160,
+    },
+    "visibility_timing": {
+        "persistence_cap": 6,
+        "light_weights": {
+            "validation_score": 0.28,
+            "cross_source_confirmation": 0.12,
+            "source_quality": 0.08,
+            "price_lead": 0.12,
+            "narrative_visibility": 0.15,
+            "stage_visibility": 0.15,
+            "crowding_visibility": 0.10,
+        },
+        "phase_thresholds": {
+            "new_moon_max": 0.10,
+            "crescent_max": 0.30,
+            "quarter_max": 0.55,
+            "gibbous_max": 0.80,
+            "full_moon_max": 1.00,
+            "waning_decline_min": 0.05,
+            "waning_peak_min": 0.55,
+        },
+        "temporal": {
+            "age_days_cap": 30.0,
+            "persistence_cap": 6.0,
+            "age_weight": 0.45,
+            "stage_weight": 0.35,
+            "persistence_weight": 0.20,
+        },
+        "crowding": {
+            "full_moon_light_min": 0.80,
+            "late_temporal_min": 0.72,
+            "trap_score_min": 0.75,
+        },
     },
 }
 
@@ -213,6 +254,28 @@ def _candidate_streak_count(
             mapping[ticker] = int(row.get("consecutive_snapshots", 0))
         except (TypeError, ValueError):
             mapping[ticker] = 0
+    return mapping
+
+
+def _prior_visibility_context_by_signal(
+    path: Path | None = None,
+) -> dict[str, dict[str, Any]]:
+    payload = load_json_file(path or SIGNAL_REFINERY_REPORT_PATH, default={})
+    if not isinstance(payload, dict):
+        return {}
+    rows = payload.get("validation_engine", {}).get("signals", [])
+    if not isinstance(rows, list):
+        return {}
+    mapping: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        signal_id = str(row.get("signal_id") or "").strip()
+        ticker = str(row.get("ticker") or "").strip().upper()
+        if signal_id:
+            mapping[signal_id] = row
+        if ticker and ticker not in mapping:
+            mapping[ticker] = row
     return mapping
 
 
@@ -372,6 +435,7 @@ def _build_validation_engine(
     trend_report: dict[str, Any] | None,
     open_positions: list[dict[str, Any]],
     as_of: datetime,
+    prior_context_by_signal: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     validation_config = config["validation"]
     weights = validation_config["weights"]
@@ -390,6 +454,7 @@ def _build_validation_engine(
         "entry_review_candidate_streak",
         "clean_entry_eligible_transition_streak",
     )
+    prior_context_map = prior_context_by_signal if isinstance(prior_context_by_signal, dict) else {}
 
     rows: list[dict[str, Any]] = []
     validated_count = 0
@@ -459,6 +524,36 @@ def _build_validation_engine(
                 validation_completion_ts - event_emergence_ts
             ).total_seconds() / 3600.0
 
+        persistence_count = max(
+            int(persistence_map.get(ticker, 0)),
+            int(entry_review_streaks.get(ticker, 0)),
+        )
+        prior_context = prior_context_map.get(
+            str(row.get("signal_id") or "").strip()
+        ) or prior_context_map.get(ticker)
+        visibility_timing_context = build_visibility_timing_context(
+            signal_row=row,
+            validation_score=validation_score,
+            cross_source_confirmation_score=cross_source_confirmation_score,
+            source_quality_score=source_quality_score,
+            price_lead_score=price_lead_score,
+            novelty_score=novelty_score,
+            blocker_clearance_score=blocker_clearance_score,
+            crowding_state=crowding_state,
+            pre_entry_state=pre_entry_state,
+            status=str(row.get("status") or ""),
+            validation_state=validation_state,
+            event_emergence_ts=(
+                event_emergence_ts.isoformat(timespec="seconds")
+                if event_emergence_ts
+                else None
+            ),
+            persistence_count=persistence_count,
+            as_of=as_of,
+            previous_context=prior_context,
+            config=config.get("visibility_timing"),
+        )
+
         rows.append(
             {
                 "signal_id": row.get("signal_id"),
@@ -489,6 +584,7 @@ def _build_validation_engine(
                     else None
                 ),
                 "time_to_valid_signal_hours": _safe_round(time_to_valid_signal_hours, 2),
+                **visibility_timing_context,
             }
         )
 
@@ -1022,6 +1118,7 @@ def build_signal_refinery_report(
     run_started_at = _parse_iso_datetime(get_run_started_at()) or datetime.now(timezone.utc)
     open_positions, open_positions_summary = load_open_positions(open_positions_path or OPEN_POSITIONS_PATH)
     trade_bundle = load_moltbook_bundle(moltbook_dir or MOLTBOOK_DIR)
+    prior_context_by_signal = _prior_visibility_context_by_signal()
 
     horsepower_monitor = _build_horsepower_monitor(runtime_state, config, run_started_at)
     validation_engine = _build_validation_engine(
@@ -1030,6 +1127,10 @@ def build_signal_refinery_report(
         trend_report,
         open_positions,
         run_started_at,
+        prior_context_by_signal=prior_context_by_signal,
+    )
+    visibility_timing_context = summarize_visibility_timing_context(
+        validation_engine.get("signals", [])
     )
     thermal_battery_manager = _build_thermal_battery_manager(
         runtime_state,
@@ -1084,6 +1185,7 @@ def build_signal_refinery_report(
         "open_positions_validation_summary": open_positions_summary,
         "horsepower_monitor": horsepower_monitor,
         "validation_engine": validation_engine,
+        "visibility_timing_context": visibility_timing_context,
         "launch_control": launch_control,
         "thermal_battery_manager": thermal_battery_manager,
         "repeatability_tracker": repeatability_tracker,

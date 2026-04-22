@@ -36,6 +36,22 @@ def test_signal_refinery_live_seed_shape() -> None:
     assert report["maintenance_wear_log"]["veto_override_count"] == 2
     assert report["time_to_valid_signal_kpi"]["measurement_mode"] == "HEURISTIC_SIGNAL_ID_CLOCK"
     assert report["decision_engine_summary"]["current_operating_mode"] == "VALIDATED_BUT_DEPLOYMENT_BLOCKED"
+    assert "visibility_timing_context" in report
+    assert report["visibility_timing_context"]["context_scored_count"] == len(
+        report["validation_engine"]["signals"]
+    )
+    first_signal = report["validation_engine"]["signals"][0]
+    assert 0.0 <= first_signal["light_score"] <= 1.0
+    assert 0.0 <= first_signal["shadow_score"] <= 1.0
+    assert 0.0 <= first_signal["temporal_position"] <= 1.0
+    assert first_signal["moon_phase"] in {
+        "new_moon",
+        "crescent",
+        "quarter",
+        "gibbous",
+        "full_moon",
+        "waning",
+    }
 
 
 def test_signal_refinery_all_clear_reviews_candidates_but_blocks_deployment() -> None:
@@ -69,6 +85,26 @@ def test_snapshot_row_carries_signal_refinery_metrics() -> None:
     assert row["decision_grade_signal_count"] == 2
     assert row["thermal_state"] == "COOLING"
     assert row["rolling_expectancy_pct"] == -1.935
+
+
+def test_signal_refinery_visibility_timing_summary_is_bounded() -> None:
+    runtime_state = build_runtime_state_from_scm_report_payload(
+        build_signal_conversion_report()
+    )
+    trend_report = build_trend_report(log_path=SEED_SNAPSHOT_LOG, write_runtime=False)
+
+    report = build_signal_refinery_report(
+        runtime_state=runtime_state,
+        trend_report=trend_report,
+        write_runtime=False,
+    )
+
+    summary = report["visibility_timing_context"]
+    assert 0.0 <= summary["average_light_score"] <= 1.0
+    assert 0.0 <= summary["average_shadow_score"] <= 1.0
+    assert 0.0 <= summary["average_temporal_position"] <= 1.0
+    assert summary["context_scored_count"] == len(report["validation_engine"]["signals"])
+    assert summary["trap_flag_count"] <= summary["context_scored_count"]
 
 
 def test_run_diagnostics_pipeline_includes_signal_refinery() -> None:

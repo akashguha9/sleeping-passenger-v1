@@ -166,59 +166,12 @@ def _external_observation_state(
             "observed_at": observed_at.isoformat() if observed_at else explicit_fetched_at,
             "staleness_classification": "fresh" if observed_at else "unknown",
         }
-
-    marks_path = REPO_ROOT / "runtime" / "external_market_marks.json"
-    if not marks_path.exists():
-        return {
-            "active": False,
-            "provider": "yahoo",
-            "resolved_provider": "yahoo_placeholder",
-            "observed_at": None,
-            "staleness_classification": "missing",
-        }
-
-    try:
-        payload = json.loads(marks_path.read_text(encoding="utf-8-sig"))
-    except (OSError, json.JSONDecodeError):
-        return {
-            "active": False,
-            "provider": "yahoo",
-            "resolved_provider": "yahoo_placeholder",
-            "observed_at": None,
-            "staleness_classification": "invalid",
-        }
-
-    if not isinstance(payload, dict):
-        return {
-            "active": False,
-            "provider": "yahoo",
-            "resolved_provider": "yahoo_placeholder",
-            "observed_at": None,
-            "staleness_classification": "invalid",
-        }
-
-    success_count = int(payload.get("success_count") or 0)
-    fetched_at = _parse_iso_timestamp(
-        payload.get("fetched_at") or payload.get("artifact_written_at")
-    )
-    provider = str(payload.get("source_name") or "yahoo_finance").strip() or "yahoo_finance"
-    if fetched_at is None or success_count <= 0:
-        return {
-            "active": False,
-            "provider": provider,
-            "resolved_provider": provider,
-            "observed_at": None,
-            "staleness_classification": "unknown",
-        }
-
-    age_seconds = (datetime.now(timezone.utc) - fetched_at.astimezone(timezone.utc)).total_seconds()
-    is_fresh = age_seconds <= EXTERNAL_OBSERVATION_FRESHNESS_SECONDS
     return {
-        "active": is_fresh,
-        "provider": provider,
-        "resolved_provider": provider,
-        "observed_at": fetched_at.isoformat(),
-        "staleness_classification": "fresh" if is_fresh else "stale",
+        "active": False,
+        "provider": "yahoo",
+        "resolved_provider": "yahoo_placeholder",
+        "observed_at": None,
+        "staleness_classification": "inactive_until_explicit_runtime_attachment",
     }
 
 

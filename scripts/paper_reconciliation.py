@@ -347,6 +347,33 @@ def build_reconciliation_row(
         or (mark_row or {}).get("staleness_classification")
         or ""
     ).strip()
+    entry_light_score = feedback_row.get("entry_light_score")
+    if entry_light_score is None:
+        entry_light_score = opening_decision.get("entry_light_score")
+    entry_shadow_score = feedback_row.get("entry_shadow_score")
+    if entry_shadow_score is None:
+        entry_shadow_score = opening_decision.get("entry_shadow_score")
+    entry_moon_phase = feedback_row.get("entry_moon_phase") or opening_decision.get(
+        "entry_moon_phase"
+    )
+    entry_temporal_position = feedback_row.get("entry_temporal_position")
+    if entry_temporal_position is None:
+        entry_temporal_position = opening_decision.get("entry_temporal_position")
+    entry_crowding_score = feedback_row.get("entry_crowding_score")
+    if entry_crowding_score is None:
+        entry_crowding_score = opening_decision.get("entry_crowding_score")
+    entry_light_velocity = feedback_row.get("entry_light_velocity")
+    if entry_light_velocity is None:
+        entry_light_velocity = opening_decision.get("entry_light_velocity")
+    entry_shadow_velocity = feedback_row.get("entry_shadow_velocity")
+    if entry_shadow_velocity is None:
+        entry_shadow_velocity = opening_decision.get("entry_shadow_velocity")
+    entry_edge_context_score = feedback_row.get("entry_edge_context_score")
+    if entry_edge_context_score is None:
+        entry_edge_context_score = opening_decision.get("entry_edge_context_score")
+    entry_full_moon_trap_flag = feedback_row.get("entry_full_moon_trap_flag")
+    if entry_full_moon_trap_flag is None:
+        entry_full_moon_trap_flag = opening_decision.get("entry_full_moon_trap_flag")
 
     data_gap_flags: list[str] = []
     unresolved_fields: list[str] = []
@@ -377,6 +404,14 @@ def build_reconciliation_row(
         unresolved_fields.append("exit_time")
     if not close_reason:
         unresolved_fields.append("close_reason")
+    if (
+        entry_light_score is None
+        and entry_shadow_score is None
+        and not str(entry_moon_phase or "").strip()
+        and entry_temporal_position is None
+        and entry_crowding_score is None
+    ):
+        data_gap_flags.append("missing_entry_context")
 
     reconciliation_status = assign_reconciliation_status(
         data_gap_flags=data_gap_flags,
@@ -425,6 +460,17 @@ def build_reconciliation_row(
         "holding_period_days": holding_period_days,
         "mfe": None,
         "mae": None,
+        "entry_light_score": _coerce_float(entry_light_score),
+        "entry_shadow_score": _coerce_float(entry_shadow_score),
+        "entry_moon_phase": str(entry_moon_phase).strip() or None,
+        "entry_temporal_position": _coerce_float(entry_temporal_position),
+        "entry_crowding_score": _coerce_float(entry_crowding_score),
+        "entry_light_velocity": _coerce_float(entry_light_velocity),
+        "entry_shadow_velocity": _coerce_float(entry_shadow_velocity),
+        "entry_edge_context_score": _coerce_float(entry_edge_context_score),
+        "entry_full_moon_trap_flag": bool(entry_full_moon_trap_flag)
+        if entry_full_moon_trap_flag is not None
+        else None,
         "signal_to_fill_drift_bps": None,
         "fill_to_close_move_pct": realized_return_pct,
         "mark_source": mark_source or None,
