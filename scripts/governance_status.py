@@ -11,9 +11,11 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 try:
+    from scripts.artifact_coherence_check import build_artifact_coherence_report
     from scripts.pipeline_health_report import build_pipeline_health_report
     from scripts.repo_operating_mode import build_operating_mode_report
 except ModuleNotFoundError:
+    from artifact_coherence_check import build_artifact_coherence_report
     from pipeline_health_report import build_pipeline_health_report
     from repo_operating_mode import build_operating_mode_report
 
@@ -44,8 +46,14 @@ def _deployment_permission_state(health_report: dict[str, Any], mode_report: dic
 def build_governance_status_report() -> dict[str, Any]:
     mode_report = build_operating_mode_report()
     health_report = build_pipeline_health_report(include_tests=False, write_runtime=False)
+    coherence_report = build_artifact_coherence_report()
     provenance_present = _has_basic_provenance(health_report)
-    artifact_coherence_state = "present" if provenance_present else "partial"
+    if coherence_report["coherent"]:
+        artifact_coherence_state = "coherent"
+    elif coherence_report["legacy_artifacts"]:
+        artifact_coherence_state = "legacy_polluted"
+    else:
+        artifact_coherence_state = "incoherent"
     provenance_state = "basic" if provenance_present else "partial"
 
     return {
@@ -60,7 +68,12 @@ def build_governance_status_report() -> dict[str, Any]:
         "controls": {
             "artifact_coherence": {
                 "state": artifact_coherence_state,
-                "note": "Runtime writers stamp shared run and truth metadata onto dict artifacts.",
+                "legacy_artifact_count": len(coherence_report["legacy_artifacts"]),
+                "legacy_artifacts": coherence_report["legacy_artifacts"],
+                "note": (
+                    "Current coherence state is derived from the standalone artifact check, "
+                    "not assumed from stamping support alone."
+                ),
             },
             "provenance": {
                 "state": provenance_state,

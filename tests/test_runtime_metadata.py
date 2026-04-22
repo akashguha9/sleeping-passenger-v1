@@ -3,8 +3,12 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 from scripts.market_data_adapter import describe_market_data_adapter
 from scripts.repo_operating_mode import build_operating_mode_report
+from scripts.runtime_common import build_runtime_state_from_scm_report_payload
+from scripts.signal_conversion_monitor import build_signal_conversion_report
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -63,3 +67,21 @@ def test_repo_operating_mode_json_cli_shape() -> None:
     assert payload["operating_mode"] == "seeded"
     assert payload["truth_origin"] == "seeded"
     assert payload["quote_provider_state"] == "placeholder"
+
+
+def test_operating_mode_promotes_to_hybrid_only_with_external_observation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("PIPELINE_ENABLE_PAPER_EXECUTION", "true")
+    monkeypatch.setenv("PIPELINE_ENABLE_LIVE_EXECUTION", "false")
+    runtime_state = build_runtime_state_from_scm_report_payload(
+        build_signal_conversion_report()
+    )
+    runtime_state["external_observation_active"] = True
+    runtime_state["external_observation_source"] = "yahoo_finance"
+    runtime_state["external_observation_fetched_at"] = "2026-04-22T12:00:00+00:00"
+
+    report = build_operating_mode_report(runtime_state=runtime_state)
+
+    assert report["operating_mode"] == "hybrid"
+    assert report["truth_origin"] == "external"

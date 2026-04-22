@@ -8,13 +8,25 @@ This repo is a local decision shell for inspecting seeded signal state, blocker 
 - Runtime artifacts are stamped with a shared `run_id`, `source_mode`, `operating_mode`, `truth_origin`, `commit_hash`, and `config_fingerprint`.
 - The main repo-scoped test suite passes from `tests/`.
 - The system can classify its current operating mode from local runtime state and environment flags.
+- A first local paper-execution slice now exists:
+  - decision ledger
+  - paper order ledger
+  - paper fill ledger
+  - open paper positions ledger
+  - paper close ledger
+- A first Yahoo-assisted paper-retirement loop now exists:
+  - external market mark artifact
+  - bounded paper-trade retirement report
+  - post-trade feedback ledger
+  - model-upgrade summary artifact
 
 ## Not Yet Live
 
 - No live quote adapter is wired.
-- No paper execution adapter is wired.
 - No live execution path is wired.
-- No reconciliation loop exists.
+- No broker-backed or market-backed paper fill path exists.
+- No broker-truth or venue-truth reconciliation loop exists.
+- Yahoo Finance observation does not count as broker execution or economic proof.
 - Local logic quality should not be confused with live readiness.
 
 ## Current Operating Stance
@@ -38,8 +50,59 @@ This repo is a local decision shell for inspecting seeded signal state, blocker 
 python -m pytest -q tests
 python scripts\repo_operating_mode.py --summary
 python scripts\pipeline_health_report.py --summary --no-write
+python scripts\governance_status.py --summary
+python scripts\artifact_coherence_check.py --summary
+python scripts\paper_execution.py sync --summary
+python scripts\yahoo_market_data_adapter.py --tickers RTX,ZIM --summary
+python scripts\paper_trade_retirement.py --summary
+python scripts\paper_reconciliation.py --summary
 python scripts\run_diagnostics_pipeline.py --summary --no-write
 ```
+
+## Paper Path
+
+The paper layer is now executable but still local-first and deterministic.
+
+- Default current runtime sync records decision candidates only.
+- New paper orders and fills are created only when `PIPELINE_ENABLE_PAPER_EXECUTION=true`.
+- Live execution remains blocked; the paper path refuses to run if live execution is enabled.
+- Deterministic fill prices are used unless you supply manual `TICKER=PRICE` overrides.
+
+Example PowerShell flow:
+
+```powershell
+python scripts\paper_execution.py sync --summary
+$env:PIPELINE_ENABLE_PAPER_EXECUTION='true'
+$env:PIPELINE_ENABLE_LIVE_EXECUTION='false'
+python scripts\paper_execution.py sync --simulate-all-clear --fill-price RTX=101.5 --fill-price ZIM=44.25 --summary
+python scripts\paper_execution.py close --position-id PAPER_POSITION_ID --exit-price 104.0 --close-reason TARGET_REACHED --summary
+python scripts\yahoo_market_data_adapter.py --tickers RTX,ZIM,TLT --summary
+python scripts\paper_trade_retirement.py --summary
+python scripts\paper_reconciliation.py --summary
+```
+
+## Yahoo-Assisted Retirement Limits
+
+- Yahoo Finance marks are external observation for paper workflows only.
+- Successful Yahoo fetches can truthfully move a paper run into `hybrid` mode because external observation is present.
+- Failed Yahoo fetches are persisted as failure states and do not imply hybrid readiness.
+- Paper retirements remain paper-simulated closes using external marks, not broker fills.
+- Small-sample feedback is recorded, but the repo still reports insufficient evidence for parameter changes unless enough retired trades accumulate.
+
+## Reconciliation Layer
+
+The repo now writes a cumulative paper reconciliation history and summary.
+
+- `logs/paper_reconciliation_history.jsonl` accumulates one reconciled row per closed paper trade.
+- `runtime/paper_reconciliation_summary.json` tracks cumulative expectancy, win/loss, and data-gap metrics.
+- `runtime/paper_reconciliation_report.json` reports the latest reconciliation pass and merge counts.
+- This measures paper lineage quality and paper expectancy. It is still not economic proof of a live system.
+
+## Known Coherence Gap
+
+- `runtime/signal_vocoder_report.json` is a legacy unmanaged artifact in the current tree.
+- It does not carry the repo's current runtime metadata contract.
+- Do not treat it as proof that all runtime outputs are coherent until its producer is either patched or retired.
 
 ## Environment Template
 

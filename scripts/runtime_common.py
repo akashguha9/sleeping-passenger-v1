@@ -51,6 +51,7 @@ TRUTH_ORIGIN_TAG_ORDER = (
     "external",
     "live_ready",
 )
+EXTERNAL_OBSERVATION_FRESHNESS_SECONDS = 6 * 60 * 60
 
 # NOTE: source_mode and run_id are stored in os.environ rather than as simple
 # module globals because both `scripts.runtime_common` and `runtime_common`
@@ -133,7 +134,106 @@ def get_git_commit_hash() -> str | None:
     return _GIT_COMMIT_HASH
 
 
-def _quote_provider_state() -> dict[str, Any]:
+def _parse_iso_timestamp(value: Any) -> datetime | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        return datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def _external_observation_state(
+    runtime_payload: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    payload = runtime_payload if isinstance(runtime_payload, dict) else {}
+    explicit_active = bool(payload.get("external_observation_active", False))
+    explicit_source = str(
+        payload.get("external_observation_source") or "yahoo_finance"
+    ).strip() or "yahoo_finance"
+    explicit_fetched_at = (
+        payload.get("external_observation_fetched_at")
+        or payload.get("fetched_at")
+        or payload.get("artifact_written_at")
+    )
+    if explicit_active:
+        observed_at = _parse_iso_timestamp(explicit_fetched_at)
+        return {
+            "active": True,
+            "provider": explicit_source,
+            "resolved_provider": explicit_source,
+            "observed_at": observed_at.isoformat() if observed_at else explicit_fetched_at,
+            "staleness_classification": "fresh" if observed_at else "unknown",
+        }
+
+    marks_path = REPO_ROOT / "runtime" / "external_market_marks.json"
+    if not marks_path.exists():
+        return {
+            "active": False,
+            "provider": "yahoo",
+            "resolved_provider": "yahoo_placeholder",
+            "observed_at": None,
+            "staleness_classification": "missing",
+        }
+
+    try:
+        payload = json.loads(marks_path.read_text(encoding="utf-8-sig"))
+    except (OSError, json.JSONDecodeError):
+        return {
+            "active": False,
+            "provider": "yahoo",
+            "resolved_provider": "yahoo_placeholder",
+            "observed_at": None,
+            "staleness_classification": "invalid",
+        }
+
+    if not isinstance(payload, dict):
+        return {
+            "active": False,
+            "provider": "yahoo",
+            "resolved_provider": "yahoo_placeholder",
+            "observed_at": None,
+            "staleness_classification": "invalid",
+        }
+
+    success_count = int(payload.get("success_count") or 0)
+    fetched_at = _parse_iso_timestamp(
+        payload.get("fetched_at") or payload.get("artifact_written_at")
+    )
+    provider = str(payload.get("source_name") or "yahoo_finance").strip() or "yahoo_finance"
+    if fetched_at is None or success_count <= 0:
+        return {
+            "active": False,
+            "provider": provider,
+            "resolved_provider": provider,
+            "observed_at": None,
+            "staleness_classification": "unknown",
+        }
+
+    age_seconds = (datetime.now(timezone.utc) - fetched_at.astimezone(timezone.utc)).total_seconds()
+    is_fresh = age_seconds <= EXTERNAL_OBSERVATION_FRESHNESS_SECONDS
+    return {
+        "active": is_fresh,
+        "provider": provider,
+        "resolved_provider": provider,
+        "observed_at": fetched_at.isoformat(),
+        "staleness_classification": "fresh" if is_fresh else "stale",
+    }
+
+
+def _quote_provider_state(runtime_payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    external_state = _external_observation_state(runtime_payload)
+    if external_state["active"]:
+        requested_provider = str(external_state["provider"]).strip().lower()
+        resolved_provider = str(external_state["resolved_provider"]).strip().lower()
+        return {
+            "requested_provider": requested_provider,
+            "resolved_provider": resolved_provider,
+            "live_quotes_available": True,
+            "contract_state": "external_observation",
+        }
+
     try:
         from scripts.market_data_adapter import describe_market_data_adapter
     except ModuleNotFoundError:
@@ -186,16 +286,16 @@ def build_deployment_permissions(payload: dict[str, Any] | None = None) -> dict[
 def classify_operating_mode(payload: dict[str, Any] | None = None) -> str:
     runtime_payload = payload if isinstance(payload, dict) else {}
     source_mode = str(runtime_payload.get("source_mode") or get_source_mode()).upper()
-    quote_state = _quote_provider_state()
+    quote_state = _quote_provider_state(runtime_payload)
     deployment = build_deployment_permissions(runtime_payload)
     external_observation_active = bool(quote_state["live_quotes_available"]) or source_mode == "LIVE_ETIL"
 
     if deployment["live_execution_enabled"] and external_observation_active:
         return "live_prepared"
-    if deployment["paper_execution_enabled"]:
-        return "paper_prepared"
     if external_observation_active:
         return "hybrid"
+    if deployment["paper_execution_enabled"]:
+        return "paper_prepared"
     return "seeded"
 
 
@@ -205,7 +305,7 @@ def build_truth_context(payload: dict[str, Any] | None = None) -> dict[str, Any]
     if not isinstance(simulation_context, dict):
         simulation_context = {}
     source_mode = str(runtime_payload.get("source_mode") or get_source_mode()).upper()
-    quote_state = _quote_provider_state()
+    quote_state = _quote_provider_state(runtime_payload)
     deployment = build_deployment_permissions(runtime_payload)
     operating_mode = classify_operating_mode(runtime_payload)
 
@@ -336,7 +436,20 @@ BLOCKER_COST_REPORT_PATH = RUNTIME_DIR / "blocker_cost_report.json"
 TREND_REPORT_PATH = RUNTIME_DIR / "trend_report.json"
 HEALTH_REPORT_PATH = RUNTIME_DIR / "pipeline_health_report.json"
 SIGNAL_REFINERY_REPORT_PATH = RUNTIME_DIR / "signal_refinery_report.json"
+PAPER_POSITIONS_PATH = RUNTIME_DIR / "paper_positions.json"
+EXTERNAL_MARKS_PATH = RUNTIME_DIR / "external_market_marks.json"
+PAPER_RETIREMENT_REPORT_PATH = RUNTIME_DIR / "paper_retirement_report.json"
+MODEL_UPGRADE_REPORT_PATH = RUNTIME_DIR / "model_upgrade_report.json"
+PAPER_RECONCILIATION_REPORT_PATH = RUNTIME_DIR / "paper_reconciliation_report.json"
+PAPER_RECONCILIATION_SUMMARY_PATH = RUNTIME_DIR / "paper_reconciliation_summary.json"
 QUOTE_CACHE_DIR = RUNTIME_DIR / "quote_cache"
+
+PAPER_DECISION_LEDGER_PATH = LOG_DIR / "paper_decisions.jsonl"
+PAPER_ORDER_LEDGER_PATH = LOG_DIR / "paper_orders.jsonl"
+PAPER_FILL_LEDGER_PATH = LOG_DIR / "paper_fills.jsonl"
+PAPER_CLOSE_LEDGER_PATH = LOG_DIR / "paper_closes.jsonl"
+POST_TRADE_FEEDBACK_PATH = LOG_DIR / "post_trade_feedback.jsonl"
+PAPER_RECONCILIATION_HISTORY_PATH = LOG_DIR / "paper_reconciliation_history.jsonl"
 
 CONFIG_DIR = REPO_ROOT / "config"
 BLOCKER_WEIGHTS_PATH = CONFIG_DIR / "blocker_weights.json"

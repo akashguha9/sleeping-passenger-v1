@@ -36,6 +36,17 @@ COMPARE_FIELDS = [
 ]
 
 
+def _classify_artifact_state(name: str, payload: dict[str, Any], missing: list[str]) -> str:
+    artifact_kind = str(payload.get("artifact_kind") or "").strip().lower()
+    if not missing:
+        return "managed"
+    if artifact_kind.endswith("_runtime_artifact") and len(missing) >= 4:
+        return "legacy_unmanaged"
+    if "run_id" in missing and "artifact_written_at" in missing:
+        return "legacy_unmanaged"
+    return "partial_metadata"
+
+
 def _load_json_payload(path: Path) -> dict[str, Any] | None:
     try:
         payload = json.loads(path.read_text(encoding="utf-8-sig"))
@@ -85,6 +96,7 @@ def build_artifact_coherence_report(
         artifacts.append(latest_snapshot)
 
     missing_fields: dict[str, list[str]] = {}
+    artifact_states: dict[str, str] = {}
     field_values: dict[str, set[str]] = {field: set() for field in COMPARE_FIELDS}
     reference_run_id = None
     reference_written_at = None
@@ -105,6 +117,7 @@ def build_artifact_coherence_report(
                 missing.append(field)
             elif field in COMPARE_FIELDS:
                 field_values[field].add(json.dumps(value, sort_keys=True))
+        artifact_states[name] = _classify_artifact_state(name, payload, missing)
         if missing:
             missing_fields[name] = missing
         if reference_run_id and payload.get("run_id") not in {None, reference_run_id}:
@@ -115,6 +128,9 @@ def build_artifact_coherence_report(
         for field, values in field_values.items()
         if len(values) > 1
     }
+    legacy_artifacts = sorted(
+        name for name, state in artifact_states.items() if state == "legacy_unmanaged"
+    )
     coherent = bool(artifacts) and not missing_fields and not mismatched_fields and not stale_artifacts
     return {
         "coherent": coherent,
@@ -123,12 +139,14 @@ def build_artifact_coherence_report(
         "reference_run_id": reference_run_id,
         "reference_written_at": reference_written_at,
         "missing_fields": missing_fields,
+        "artifact_states": artifact_states,
+        "legacy_artifacts": legacy_artifacts,
         "mismatched_fields": mismatched_fields,
         "stale_artifacts": sorted(set(stale_artifacts)),
         "artifacts_checked": [name for name, _ in artifacts],
         "note": (
-            "Flags mixed-run, mixed-mode, or partially stamped artifacts across runtime "
-            "JSON outputs and the latest snapshot row."
+            "Flags mixed-run, mixed-mode, partially stamped, and legacy unmanaged artifacts "
+            "across runtime JSON outputs and the latest snapshot row."
         ),
     }
 
@@ -140,6 +158,7 @@ def format_artifact_coherence_summary(report: dict[str, Any]) -> str:
             f"coherent={str(report['coherent']).lower()}",
             f"artifact_count={report['artifact_count']}",
             f"reference_run_id={report['reference_run_id']}",
+            f"legacy_artifact_count={len(report['legacy_artifacts'])}",
             f"stale_artifact_count={len(report['stale_artifacts'])}",
             f"mismatch_field_count={len(report['mismatched_fields'])}",
         ]

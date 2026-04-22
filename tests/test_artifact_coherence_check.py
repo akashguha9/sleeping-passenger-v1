@@ -47,6 +47,7 @@ def test_artifact_coherence_report_passes_for_consistent_artifacts(scratch_path:
     assert report["coherent"] is True
     assert report["artifact_count"] == 3
     assert report["missing_fields"] == {}
+    assert report["legacy_artifacts"] == []
     assert report["mismatched_fields"] == {}
     assert report["stale_artifacts"] == []
 
@@ -64,6 +65,26 @@ def test_artifact_coherence_report_flags_missing_metadata(scratch_path: Path) ->
 
     assert report["coherent"] is False
     assert "commit_hash" in report["missing_fields"][target.as_posix()]
+    assert report["artifact_states"][target.as_posix()] == "partial_metadata"
+
+
+def test_artifact_coherence_report_classifies_legacy_unmanaged_artifact(scratch_path: Path) -> None:
+    runtime_dir = scratch_path / "runtime"
+    runtime_dir.mkdir()
+
+    payload = {
+        "artifact_kind": "signal_vocoder_runtime_artifact",
+        "source_mode": "SYNTHETIC_RUNTIME_FALLBACK",
+        "generated_at": "2026-04-22T09:41:22+00:00",
+    }
+    target = runtime_dir / "legacy.json"
+    target.write_text(json.dumps(payload), encoding="utf-8")
+
+    report = build_artifact_coherence_report(runtime_dir=runtime_dir)
+
+    assert report["coherent"] is False
+    assert report["artifact_states"][target.as_posix()] == "legacy_unmanaged"
+    assert target.as_posix() in report["legacy_artifacts"]
 
 
 def test_artifact_coherence_check_cli_json_shape() -> None:
@@ -79,4 +100,5 @@ def test_artifact_coherence_check_cli_json_shape() -> None:
     assert "coherent" in payload
     assert "artifact_count" in payload
     assert "missing_fields" in payload
+    assert "legacy_artifacts" in payload
     assert "mismatched_fields" in payload
