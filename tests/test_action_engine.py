@@ -23,19 +23,26 @@ def test_build_action_report_from_live_seed_state() -> None:
         "MONITOR": 1,
         "BLOCK_ENTRY": 3,
     }
-    assert report["actions"][0] == {
-        "ticker": "UNG",
-        "action": "EXIT_NOW",
-        "reasons": [
-            "Current price breached stop_loss",
-        ],
-        "policy_state": "RESTRICTED",
-        "active_blockers": ["GSCE_PHASE_LOCK", "REALM_BIS"],
-        "has_open_position": True,
-        "position_state": "OPEN",
-        "entry_type": "CHAOS",
-        "signal_state": "ACTIVE",
-        "priority_score": 0.91,
+    assert report["execution_governance_summary"]["human_execution_required_count"] == 7
+    first = report["actions"][0]
+    assert first["ticker"] == "UNG"
+    assert first["signal_id"].startswith("SIG_")
+    assert first["action"] == "EXIT_NOW"
+    assert first["reasons"] == ["Current price breached stop_loss"]
+    assert first["policy_state"] == "RESTRICTED"
+    assert first["active_blockers"] == ["GSCE_PHASE_LOCK", "REALM_BIS"]
+    assert first["has_open_position"] is True
+    assert first["position_state"] == "OPEN"
+    assert first["entry_type"] == "CHAOS"
+    assert first["signal_state"] == "ACTIVE"
+    assert first["priority_score"] == 0.91
+    assert first["execution_governance"]["suggestion_only"] is True
+    assert first["execution_governance"]["human_execution_required"] is True
+    assert first["execution_governance"]["approval_state"] == "PENDING_HUMAN_APPROVAL"
+    assert first["execution_governance"]["fpeg"]["fpeg_state"] in {
+        "pass",
+        "review_only",
+        "insufficient_reasoning",
     }
     assert report["actions"][1]["ticker"] == "FCG"
     assert report["actions"][1]["action"] == "EXIT_NOW"

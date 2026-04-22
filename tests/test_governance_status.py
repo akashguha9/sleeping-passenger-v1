@@ -17,7 +17,7 @@ def test_governance_status_report_is_conservative() -> None:
     assert report["controls"]["artifact_coherence"]["state"] == "legacy_polluted"
     assert "runtime/signal_vocoder_report.json" in report["controls"]["artifact_coherence"]["legacy_artifacts"]
     assert report["controls"]["provenance"]["state"] == "basic"
-    assert report["controls"]["operator_integrity"]["state"] == "not_implemented"
+    assert report["controls"]["operator_integrity"]["state"] == "partial"
     assert report["controls"]["disclosure_discipline"]["state"] == "partial"
 
 
@@ -35,7 +35,7 @@ def test_governance_status_summary_cli() -> None:
     assert "operating_mode=seeded" in lines
     assert "truth_origin=seeded" in lines
     assert "artifact_coherence_state=legacy_polluted" in lines
-    assert "operator_integrity_state=not_implemented" in lines
+    assert "operator_integrity_state=partial" in lines
     assert "disclosure_discipline_state=partial" in lines
 
 
@@ -51,4 +51,4 @@ def test_governance_status_json_cli_shape() -> None:
 
     assert payload["operating_mode"] == "seeded"
     assert payload["truth_origin"] == "seeded"
-    assert payload["controls"]["operator_integrity"]["state"] == "not_implemented"
+    assert payload["controls"]["operator_integrity"]["state"] == "partial"

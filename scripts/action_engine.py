@@ -6,6 +6,10 @@ from pathlib import Path
 from typing import Any
 
 try:
+    from scripts.execution_governance import (
+        assess_action_governance,
+        summarize_action_governance,
+    )
     from scripts.runtime_common import (
         ACTION_REPORT_PATH,
         build_runtime_state_from_scm_report_payload,
@@ -15,6 +19,7 @@ try:
     )
     from scripts.signal_conversion_monitor import build_signal_conversion_report
 except ModuleNotFoundError:
+    from execution_governance import assess_action_governance, summarize_action_governance
     from runtime_common import (
         ACTION_REPORT_PATH,
         build_runtime_state_from_scm_report_payload,
@@ -36,6 +41,25 @@ def _lookup_launch_row(
         return None
     launch_control = signal_refinery_report.get("launch_control", {})
     rows = launch_control.get("launch_rows", []) if isinstance(launch_control, dict) else []
+    if not isinstance(rows, list):
+        return None
+    target = str(ticker or "").upper()
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        if str(row.get("ticker") or "").upper() == target:
+            return row
+    return None
+
+
+def _lookup_validation_row(
+    ticker: str,
+    signal_refinery_report: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    if not isinstance(signal_refinery_report, dict):
+        return None
+    validation_engine = signal_refinery_report.get("validation_engine", {})
+    rows = validation_engine.get("signals", []) if isinstance(validation_engine, dict) else []
     if not isinstance(rows, list):
         return None
     target = str(ticker or "").upper()
@@ -214,26 +238,37 @@ def build_action_report(
             priority_score = float(position["priority_score"])
         elif signal_row is not None:
             priority_score = float(signal_row["priority_score"])
-        actions.append(
-            {
-                "ticker": ticker,
-                "action": action,
-                "reasons": reasons,
-                "policy_state": policy["policy_state"],
-                "active_blockers": active_blockers,
-                "has_open_position": _position_is_open(position),
-                "position_state": (position or {}).get("state", "NONE"),
-                "entry_type": (position or signal_row or {}).get("entry_type", "UNKNOWN"),
-                "signal_state": (signal_row or {}).get("signal_state", "UNKNOWN"),
-                "priority_score": round(priority_score, 3),
-            }
+        action_row = {
+            "ticker": ticker,
+            "signal_id": (signal_row or {}).get("signal_id", ""),
+            "action": action,
+            "reasons": reasons,
+            "policy_state": policy["policy_state"],
+            "active_blockers": active_blockers,
+            "has_open_position": _position_is_open(position),
+            "position_state": (position or {}).get("state", "NONE"),
+            "entry_type": (position or signal_row or {}).get("entry_type", "UNKNOWN"),
+            "signal_state": (signal_row or {}).get("signal_state", "UNKNOWN"),
+            "priority_score": round(priority_score, 3),
+        }
+        action_row["execution_governance"] = assess_action_governance(
+            action_row=action_row,
+            signal_row=signal_row,
+            position_row=position,
+            signal_refinery_row=_lookup_validation_row(
+                ticker=ticker,
+                signal_refinery_report=signal_refinery_report,
+            ),
+            runtime_state=state,
         )
+        actions.append(action_row)
     actions.sort(key=lambda item: (-item["priority_score"], item["ticker"]))
     report = {
         "policy_state": policy["policy_state"],
         "active_blockers": active_blockers,
         "simulation_context": state.get("simulation_context", {}),
         "summary_by_action": summary_by_action,
+        "execution_governance_summary": summarize_action_governance(actions),
         "actions": actions,
         "open_positions_validation": validation,
     }

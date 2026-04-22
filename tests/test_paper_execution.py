@@ -87,9 +87,11 @@ def test_sync_with_paper_enabled_creates_orders_fills_and_positions(
         fill_ledger_path=fills_path,
         paper_positions_path=positions_path,
         fill_price_overrides={"RTX": 101.5, "ZIM": 44.25},
+        allow_entry_execution=True,
     )
 
     assert report["paper_execution_enabled"] is True
+    assert report["entry_execution_approved"] is True
     assert report["orders_created"] == 2
     assert report["fills_recorded"] == 2
     assert report["positions_opened"] == 2
@@ -133,10 +135,52 @@ def test_sync_with_paper_enabled_creates_orders_fills_and_positions(
         "full_moon",
         "waning",
     }
+    assert rtx_decision["approval_state"] == "APPROVED_BY_HUMAN_FOR_PAPER"
+    assert rtx_decision["human_execution_required"] is True
+    assert rtx_decision["delegation_permitted"] is False
     for fill in fills:
         order = order_by_id[fill["paper_order_id"]]
         assert fill["decision_id"] == order["decision_id"]
         assert order["decision_id"] in decision_by_id
+
+
+def test_sync_with_paper_enabled_stays_suggestion_only_without_approval(
+    scratch_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("PIPELINE_ENABLE_PAPER_EXECUTION", "true")
+    monkeypatch.setenv("PIPELINE_ENABLE_LIVE_EXECUTION", "false")
+
+    decisions_path = scratch_path / "paper_decisions.jsonl"
+    orders_path = scratch_path / "paper_orders.jsonl"
+    fills_path = scratch_path / "paper_fills.jsonl"
+    positions_path = scratch_path / "paper_positions.json"
+
+    runtime_state = build_runtime_state_from_scm_report_payload(
+        build_signal_conversion_report(simulate_all_clear=True)
+    )
+    action_report = build_action_report(runtime_state=runtime_state, write_runtime=False)
+
+    report = sync_paper_execution(
+        runtime_state=runtime_state,
+        action_report=action_report,
+        decision_ledger_path=decisions_path,
+        order_ledger_path=orders_path,
+        fill_ledger_path=fills_path,
+        paper_positions_path=positions_path,
+    )
+
+    decisions = _load_jsonl(decisions_path)
+    positions_payload = json.loads(positions_path.read_text(encoding="utf-8"))
+
+    assert report["paper_execution_enabled"] is True
+    assert report["entry_execution_approved"] is False
+    assert report["orders_created"] == 0
+    assert report["fills_recorded"] == 0
+    assert report["positions_opened"] == 0
+    assert report["governance_blocked_entries"] == 2
+    assert all(row["approval_state"] == "PENDING_HUMAN_APPROVAL" for row in decisions)
+    assert positions_payload["open_position_count"] == 0
 
 
 def test_close_position_records_lineage_and_removes_open_position(
@@ -164,6 +208,7 @@ def test_close_position_records_lineage_and_removes_open_position(
         fill_ledger_path=fills_path,
         paper_positions_path=positions_path,
         fill_price_overrides={"RTX": 100.0, "ZIM": 40.0},
+        allow_entry_execution=True,
     )
 
     positions_payload = json.loads(positions_path.read_text(encoding="utf-8"))
@@ -286,3 +331,4 @@ def test_paper_execution_cli_summary_smoke(
     lines = result.stdout.strip().splitlines()
     assert lines[0] == "Paper Execution Sync"
     assert "paper_execution_enabled=false" in lines
+    assert "entry_execution_approved=false" in lines

@@ -80,8 +80,12 @@ def build_governance_status_report() -> dict[str, Any]:
                 "note": "Artifacts carry run_id, source_mode, commit_hash, and config_fingerprint.",
             },
             "operator_integrity": {
-                "state": "not_implemented",
-                "note": "This tree has no dedicated operator-integrity gate or emotional-trigger block.",
+                "state": "partial",
+                "note": (
+                    "The tree now carries advisory first-principles governance fields and "
+                    "override/interaction ledgers, but it still lacks a hard operator-"
+                    "integrity block or emotional-trigger enforcement layer."
+                ),
             },
             "disclosure_discipline": {
                 "state": "partial",

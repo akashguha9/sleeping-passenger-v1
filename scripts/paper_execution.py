@@ -232,11 +232,20 @@ def _build_decision_row(
     signal_context_row: dict[str, Any] | None,
     runtime_state: dict[str, Any],
     decision_type: str | None = None,
+    approval_state: str = "PENDING_HUMAN_APPROVAL",
 ) -> dict[str, Any]:
     action_type = decision_type or str(action_row.get("action") or "UNKNOWN").upper()
     signal_id = str((signal_row or {}).get("signal_id") or action_row.get("signal_id") or "")
     ticker = str(action_row.get("ticker") or (signal_row or {}).get("ticker") or "").upper()
     context_row = signal_context_row if isinstance(signal_context_row, dict) else {}
+    governance = (
+        action_row.get("execution_governance", {})
+        if isinstance(action_row.get("execution_governance"), dict)
+        else {}
+    )
+    fpeg = governance.get("fpeg", {}) if isinstance(governance.get("fpeg"), dict) else {}
+    cvg = governance.get("cvg", {}) if isinstance(governance.get("cvg"), dict) else {}
+    slg = governance.get("slg", {}) if isinstance(governance.get("slg"), dict) else {}
     decision_id = _stable_id(
         "paper_decision",
         get_run_id(),
@@ -255,6 +264,17 @@ def _build_decision_row(
             "confidence_score": round(priority, 3),
             "decision_reasons": list(action_row.get("reasons", [])),
             "decision_source": "action_engine",
+            "approval_state": approval_state,
+            "suggestion_only": bool(governance.get("suggestion_only", True)),
+            "human_execution_required": bool(
+                governance.get("human_execution_required", True)
+            ),
+            "delegation_permitted": bool(governance.get("delegation_permitted", False)),
+            "governance_state": str(fpeg.get("fpeg_state") or "unassessed"),
+            "first_principles_gate_state": str(fpeg.get("fpeg_state") or "unassessed"),
+            "first_principles_gate_score": fpeg.get("fpeg_score"),
+            "competence_validation_state": str(cvg.get("cvg_state") or "unassessed"),
+            "structured_learning_gate_state": str(slg.get("slg_state") or "unassessed"),
             "entry_light_score": context_row.get("light_score"),
             "entry_shadow_score": context_row.get("shadow_score"),
             "entry_moon_phase": context_row.get("moon_phase"),
@@ -457,6 +477,7 @@ def sync_paper_execution(
     paper_positions_path: Path | None = None,
     fill_price_overrides: dict[str, float] | None = None,
     requested_qty: float = DEFAULT_ORDER_QTY,
+    allow_entry_execution: bool = False,
     simulate_gsce_clear: bool = False,
     simulate_realm_bis_clear: bool = False,
     simulate_all_clear: bool = False,
@@ -518,6 +539,7 @@ def sync_paper_execution(
     orders_created = 0
     fills_recorded = 0
     positions_opened = 0
+    governance_blocked_entries = 0
 
     for action_row in report.get("actions", []):
         ticker = str(action_row.get("ticker") or "").upper()
@@ -525,11 +547,30 @@ def sync_paper_execution(
         signal_context_row = signal_refinery_lookup.get(
             str((signal_row or {}).get("signal_id") or "").strip()
         ) or signal_refinery_lookup.get(ticker)
+        governance = (
+            action_row.get("execution_governance", {})
+            if isinstance(action_row.get("execution_governance"), dict)
+            else {}
+        )
+        fpeg_state = str(
+            (
+                governance.get("fpeg", {})
+                if isinstance(governance.get("fpeg"), dict)
+                else {}
+            ).get("fpeg_state")
+            or "unassessed"
+        )
+        approval_state = (
+            "APPROVED_BY_HUMAN_FOR_PAPER"
+            if allow_entry_execution and fpeg_state != "insufficient_reasoning"
+            else "PENDING_HUMAN_APPROVAL"
+        )
         decision_row = _build_decision_row(
             action_row,
             signal_row,
             signal_context_row,
             state,
+            approval_state=approval_state,
         )
         if _append_once(decisions_path, decision_row, "decision_id", existing_decision_ids):
             decisions_recorded += 1
@@ -539,6 +580,12 @@ def sync_paper_execution(
 
         side = _side_for_action(decision_row["action_type"])
         if side != "BUY":
+            continue
+        if not allow_entry_execution:
+            governance_blocked_entries += 1
+            continue
+        if fpeg_state == "insufficient_reasoning":
+            governance_blocked_entries += 1
             continue
         if ticker in paper_position_map:
             continue
@@ -582,12 +629,14 @@ def sync_paper_execution(
 
     return {
         "paper_execution_enabled": paper_enabled,
+        "entry_execution_approved": allow_entry_execution,
         "operating_mode": stamp_payload({}, runtime_state=state)["operating_mode"],
         "truth_origin": stamp_payload({}, runtime_state=state)["truth_origin"],
         "decisions_recorded": decisions_recorded,
         "orders_created": orders_created,
         "fills_recorded": fills_recorded,
         "positions_opened": positions_opened,
+        "governance_blocked_entries": governance_blocked_entries,
         "open_position_count": sum(
             1 for row in paper_positions if str(row.get("status") or "").upper() == "OPEN"
         ),
@@ -702,12 +751,14 @@ def format_sync_summary(report: dict[str, Any]) -> str:
         [
             "Paper Execution Sync",
             f"paper_execution_enabled={str(report['paper_execution_enabled']).lower()}",
+            f"entry_execution_approved={str(report['entry_execution_approved']).lower()}",
             f"operating_mode={report['operating_mode']}",
             f"truth_origin={report['truth_origin']}",
             f"decisions_recorded={report['decisions_recorded']}",
             f"orders_created={report['orders_created']}",
             f"fills_recorded={report['fills_recorded']}",
             f"positions_opened={report['positions_opened']}",
+            f"governance_blocked_entries={report['governance_blocked_entries']}",
             f"open_position_count={report['open_position_count']}",
         ]
     )
@@ -760,6 +811,14 @@ def build_cli_parser() -> argparse.ArgumentParser:
         default=[],
         help="Override deterministic fill price for a ticker, e.g. RTX=102.5. May be repeated.",
     )
+    sync_parser.add_argument(
+        "--approve-review-for-entry",
+        action="store_true",
+        help=(
+            "Explicit human approval required to convert REVIEW_FOR_ENTRY suggestions "
+            "into paper orders/fills. Without this flag, sync stays suggestion-only."
+        ),
+    )
     simulation = sync_parser.add_mutually_exclusive_group()
     simulation.add_argument(
         "--simulate-gsce-clear",
@@ -803,6 +862,7 @@ def main(argv: list[str] | None = None) -> int:
             report = sync_paper_execution(
                 requested_qty=float(args.requested_qty),
                 fill_price_overrides=_parse_fill_price_overrides(args.fill_price),
+                allow_entry_execution=bool(args.approve_review_for_entry),
                 simulate_gsce_clear=args.simulate_gsce_clear,
                 simulate_realm_bis_clear=args.simulate_realm_bis_clear,
                 simulate_all_clear=args.simulate_all_clear,

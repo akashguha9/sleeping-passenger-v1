@@ -1,0 +1,38 @@
+{
+  "fpeg": {
+    "pass_threshold": 0.8,
+    "review_threshold": 0.6,
+    "weights": {
+      "why_this_move": 0.25,
+      "trigger": 0.2,
+      "invalidation": 0.25,
+      "regime": 0.15,
+      "why_now": 0.15
+    },
+    "critical_requirements": [
+      "why_this_move",
+      "trigger",
+      "invalidation",
+      "regime",
+      "why_now"
+    ]
+  },
+  "cvg": {
+    "pass_threshold": 0.7,
+    "review_threshold": 0.55
+  },
+  "slg": {
+    "pass_threshold": 0.7,
+    "review_threshold": 0.55
+  },
+  "interaction": {
+    "good_threshold": 0.75,
+    "watch_threshold": 0.55
+  },
+  "automation_readiness": {
+    "minimum_reconciled_trades": 20,
+    "minimum_override_samples": 10,
+    "minimum_interaction_quality": 0.7,
+    "minimum_fpeg_pass_rate": 0.8
+  }
+}
