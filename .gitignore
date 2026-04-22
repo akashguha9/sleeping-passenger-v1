@@ -12,3 +12,7 @@ __pycache__/
 # creates logs/, logs/.pytest_tmp, logs/.pytest_cache on pytest startup
 # so fresh clones don't need the directory to be tracked.
 logs/
+.pytest_cache/
+tests/.pytest_tmp/
+tests/pytest-cache-files-*/
+tests/_tmp_runtime/
