@@ -1,0 +1,380 @@
+You are acting as a senior systems architect, quantitative research engineer, event-driven pipeline designer, and forensic refactoring operator for my MVP trading/signal pipeline.
+
+Your job is NOT to give me vague product ideas.
+
+Your job is to translate the following conceptual framework into a practical, implementation-ready architecture for my MVP.
+
+I want you to treat this as a system-design and codebase-extension task.
+
+==================================================
+CONTEXT
+==================================================
+
+My MVP already operates as a multi-stage signal pipeline. Conceptually it includes:
+
+- pre-pre game
+- pre game
+- in game
+- end game
+- feedback / Moltbook / self-correcting loop
+
+The latest reflection I want integrated is based on football/system analogies:
+
+1. Arteta-mode = control-first, precision-heavy, lower-chaos, risk of rigidity
+2. Alonso-mode = adaptive, phase-aware, distributed-risk, best target archetype
+3. Iraola-mode = aggression-first, trigger-fast, chaos-weaponizing, high variance
+
+Also:
+
+- player fit matters more than generic talent
+- systems should act on triggers, not continuously
+- structural repair often happens before visible reversal
+- first meaningful crack = signal injection
+- second widening event = acceleration
+- branching event = fork
+- post-fork second-order spread = floodgates / cascade
+- open state requires survival logic
+- closure needs its own architecture
+- some late outcomes are delayed kill, not luck
+- risk should be distributed by phase, not flattened
+- feedback should classify what kind of system episode occurred
+
+I want this mapped into the MVP as a live state-transition engine.
+
+==================================================
+YOUR TASK
+==================================================
+
+Perform a full design and implementation planning pass for how this framework should be added to the MVP.
+
+I want a rigorous answer with concrete structure.
+
+DO ALL OF THE FOLLOWING.
+
+==================================================
+1. ARCHITECTURAL MAPPING
+==================================================
+
+Map each conceptual component into an MVP pipeline layer.
+
+The components to map are:
+
+- Philosophy Classifier
+- Role-Fit Engine
+- Trigger Library
+- Structural Repair Detector
+- Signal Injection Detector
+- Acceleration Detector
+- Fork Detector
+- Floodgate Cascade Monitor
+- Open-State Risk Manager
+- Closure / Exit Engine
+- Delayed Kill Tracker
+- Distributed Risk Allocator
+- Feedback / Moltbook Event Classifier
+
+For each one, specify:
+
+- what it does
+- where it lives in the pipeline
+- what inputs it needs
+- what outputs it should emit
+- whether it should be synchronous, asynchronous, or derived post-event
+- whether it is scoring, gating, classification, detection, risk, or learning
+- its dependencies on upstream modules
+- its downstream effects
+
+==================================================
+2. CURRENT MVP FIT ANALYSIS
+==================================================
+
+Based on the architecture implied above, infer what likely already exists in my MVP in primitive or partial form and what is missing.
+
+I want you to classify every component into:
+
+- already exists
+- partially exists
+- missing
+- should not be built yet
+
+Then explain why.
+
+Be honest and conservative.
+
+==================================================
+3. PROPOSED FILE / MODULE STRUCTURE
+==================================================
+
+Design a clean file/module structure for implementing this in a Python-based MVP.
+
+Use practical naming.
+
+Example style only:
+- core/
+- detectors/
+- scoring/
+- risk/
+- feedback/
+- scripts/
+- runtime/
+- logs/
+- tests/
+
+Propose:
+
+- new files to create
+- existing files likely to modify
+- data contracts between modules
+- which modules should remain pure functions
+- which modules may read/write runtime artifacts
+- which modules should be isolated from live execution
+
+Very important:
+I do NOT want bloated architecture. Keep it minimal but extensible.
+
+==================================================
+4. EVENT / STATE MODEL
+==================================================
+
+Design a state model for this framework.
+
+I want a formal event/state taxonomy for at least these states:
+
+- baseline
+- structural_repair
+- signal_injection
+- acceleration
+- fork
+- floodgate
+- open_state
+- delayed_kill
+- closure
+- failed_closure
+- false_fork
+- premature_acceleration
+
+For each state define:
+
+- meaning
+- entry conditions
+- exit conditions
+- allowed transitions
+- forbidden transitions if any
+- evidence requirements
+- confidence scoring logic
+
+Then propose a compact JSON schema for storing state-transition events.
+
+==================================================
+5. SCORING SYSTEM DESIGN
+==================================================
+
+Design a scoring framework for:
+
+- philosophy mode classification
+- fit score
+- trigger strength
+- repair score
+- injection score
+- acceleration score
+- fork score
+- cascade score
+- delayed kill score
+- closure quality score
+- open-state survival score
+
+For each score specify:
+
+- scale
+- interpretation
+- how it should combine with other scores
+- whether it is additive, multiplicative, thresholded, or Bayesian-style
+- failure cases / score pathologies
+- what must be logged for auditability
+
+I strongly prefer clarity over fake mathematical complexity.
+
+==================================================
+6. RISK ARCHITECTURE
+==================================================
+
+Design a distributed risk model by phase.
+
+At minimum include risk behavior for:
+
+- pre-trigger
+- post-trigger but pre-fork
+- active fork
+- post-fork cascade
+- open volatility
+- closure phase
+
+For each phase specify:
+
+- recommended exposure behavior
+- downshift conditions
+- freeze conditions
+- hedge / trim conditions
+- evidence needed to increase conviction
+- capital protection rules
+
+The design must explicitly separate:
+- signal detection
+- position sizing
+- survival logic
+- exit logic
+
+==================================================
+7. FEEDBACK / MOLTBOOK INTEGRATION
+==================================================
+
+Design how the Moltbook / self-correcting loop should record and learn from this framework.
+
+I want post-run labels such as:
+
+- arteta_mode
+- alonso_mode
+- iraola_mode
+- fit_mismatch
+- structural_repair_found
+- structural_repair_missed
+- true_injection
+- false_injection
+- true_acceleration
+- false_acceleration
+- true_fork
+- false_fork
+- cascade_real
+- cascade_failed
+- delayed_kill_present
+- delayed_kill_absent
+- closure_clean
+- closure_leaky
+- closure_failed
+- survival_good
+- survival_poor
+- risk_placement_correct
+- risk_placement_wrong
+
+For each label specify:
+
+- trigger conditions
+- storage format
+- how it should update future priors or heuristics
+- what must remain human-reviewable
+
+==================================================
+8. MINIMAL IMPLEMENTATION ROADMAP
+==================================================
+
+I do NOT want a fantasy roadmap.
+
+I want a realistic phased build order:
+
+Phase 1 = must-have now
+Phase 2 = strong upgrade
+Phase 3 = advanced refinement
+Phase 4 = only after enough paper-trade evidence
+
+For each phase:
+- exact components
+- why this order is optimal
+- what dependencies must be satisfied first
+- how to avoid overengineering
+- what to postpone deliberately
+
+==================================================
+9. TESTING STRATEGY
+==================================================
+
+Design a testing plan for this architecture.
+
+Include:
+- unit tests
+- integration tests
+- state-transition tests
+- false positive / false negative tests
+- deterministic fixture tests
+- audit-log tests
+- failure-mode tests
+
+I want example test case names and what each test proves.
+
+Very important:
+The architecture should be testable without live trading enabled.
+
+==================================================
+10. SAFETY / BOUNDARY CONDITIONS
+==================================================
+
+Define guardrails so this framework does not become a hallucination machine.
+
+Include:
+- minimum evidence thresholds
+- anti-cascade-overread protections
+- false fork protections
+- confidence decay rules
+- stale signal handling
+- overfitting risks
+- human override boundaries
+- “do not act” conditions
+
+==================================================
+11. IMPLEMENTATION OUTPUTS
+==================================================
+
+At the end, give me all of the following:
+
+A. A concise architecture summary
+B. A module dependency map
+C. A proposed file tree
+D. A JSON event schema
+E. A staged roadmap
+F. A prioritized “build next” list
+G. A “do not build yet” list
+H. A list of likely bugs / failure modes if implemented poorly
+I. A final recommendation on whether my MVP should be architected closer to Arteta-mode, Alonso-mode, or Iraola-mode, and why
+
+==================================================
+IMPORTANT CONSTRAINTS
+==================================================
+
+- Be brutally concrete.
+- No motivational fluff.
+- No generic startup talk.
+- No vague “use ML” filler unless truly necessary.
+- Prefer deterministic first-pass architecture over premature ML.
+- Assume this MVP is still early and must remain lean.
+- Optimize for legibility, testability, auditability, and safe iteration.
+- Treat “Alonso-mode” as the likely target archetype unless the design itself proves otherwise.
+- Distinguish clearly between:
+  - concept
+  - module
+  - signal
+  - state
+  - risk
+  - feedback
+
+==================================================
+OUTPUT FORMAT
+==================================================
+
+Use the exact section structure below:
+
+1. Executive Read
+2. Concept-to-Pipeline Mapping
+3. Current MVP Coverage Assessment
+4. Proposed Module / File Architecture
+5. State Model and Transition Logic
+6. Scoring System Design
+7. Distributed Risk Architecture
+8. Feedback / Moltbook Integration
+9. Minimal Phased Roadmap
+10. Testing Strategy
+11. Safety and Guardrails
+12. Recommended Build Order
+13. Do Not Build Yet
+14. Likely Failure Modes
+15. Final Architectural Verdict
+
+Make it implementation-grade.
