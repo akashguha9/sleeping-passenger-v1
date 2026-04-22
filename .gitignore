@@ -8,5 +8,7 @@ __pycache__/
 
 # logs/ contains runtime-generated artifacts only: pytest cache/tmp
 # (per pytest.ini), chronology SQLite DB, and snapshot jsonl streams.
-# Nothing in logs/ is source-controlled.
+# Everything under logs/ is runtime-only — the root-level conftest.py
+# creates logs/, logs/.pytest_tmp, logs/.pytest_cache on pytest startup
+# so fresh clones don't need the directory to be tracked.
 logs/

@@ -79,6 +79,11 @@ def test_runtime_artifacts_share_run_id_and_source_mode():
     """Runs the diagnostics pipeline once and asserts every runtime/*.json
     written by that single run shares run_id and source_mode.
 
+    We only validate files whose mtime advanced during this run — orphan
+    JSONs left behind by deleted/renamed producers (e.g. a stale
+    behavioral_review_priority_report.json from an earlier local tree)
+    are ignored so they cannot pollute the coherence assertion.
+
     Skipped when the repo lacks the moltbook seed files needed for the
     pipeline to execute (e.g. trimmed review snapshot).
     """
@@ -91,6 +96,14 @@ def test_runtime_artifacts_share_run_id_and_source_mode():
     if not (moltbook / "signal_ledger.json").exists():
         pytest.skip("moltbook seed files not present in this checkout")
 
+    # Snapshot the mtime of every existing runtime file before the run so we
+    # can distinguish freshly-written artifacts from stale leftovers.
+    pre_run_mtimes: dict[Path, float] = {}
+    if RUNTIME_DIR.exists():
+        for p in RUNTIME_DIR.glob("*.json"):
+            if p.is_file():
+                pre_run_mtimes[p] = p.stat().st_mtime
+
     try:
         run_diagnostics_pipeline(include_tests=False, write_runtime=True)
     except Exception as exc:
@@ -100,8 +113,16 @@ def test_runtime_artifacts_share_run_id_and_source_mode():
     if not artifacts:
         pytest.skip("no runtime/*.json artifacts produced")
 
+    # Keep only files that were created or touched by this run.
+    fresh_artifacts = [
+        p for p in artifacts
+        if p not in pre_run_mtimes or p.stat().st_mtime > pre_run_mtimes[p]
+    ]
+    if not fresh_artifacts:
+        pytest.skip("no runtime/*.json artifacts were written by this run")
+
     stamped_payloads = []
-    for path in artifacts:
+    for path in fresh_artifacts:
         try:
             payload = json.loads(path.read_text(encoding="utf-8"))
         except json.JSONDecodeError:

@@ -7,10 +7,14 @@ from scripts.trend_engine import build_trend_report
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+SEED_SNAPSHOT_LOG = REPO_ROOT / "tests" / "fixtures" / "system_snapshots_seed.jsonl"
 
 
 def test_trend_report_from_seed_snapshot_log() -> None:
-    report = build_trend_report(write_runtime=False)
+    # Use the committed deterministic seed so the test never depends on
+    # whatever happens to be in the gitignored logs/system_snapshots.jsonl
+    # on the developer's machine.
+    report = build_trend_report(log_path=SEED_SNAPSHOT_LOG, write_runtime=False)
 
     assert report["snapshot_count"] >= 3
     assert report["scm_trend"]["label"] in {"DETERIORATING", "FLAT", "IMPROVING"}
@@ -48,8 +52,18 @@ def test_trend_report_from_scratch_log() -> None:
 
 
 def test_trend_engine_summary_cli() -> None:
+    # Point the CLI at the committed seed so the test passes even when
+    # logs/system_snapshots.jsonl is absent (fresh clone) or contains
+    # unrelated runtime history.
     result = subprocess.run(
-        [sys.executable, str(REPO_ROOT / "scripts" / "trend_engine.py"), "--summary", "--no-write"],
+        [
+            sys.executable,
+            str(REPO_ROOT / "scripts" / "trend_engine.py"),
+            "--summary",
+            "--no-write",
+            "--log-path",
+            str(SEED_SNAPSHOT_LOG),
+        ],
         cwd=REPO_ROOT,
         capture_output=True,
         text=True,
