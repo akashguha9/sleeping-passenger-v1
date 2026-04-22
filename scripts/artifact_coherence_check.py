@@ -1,0 +1,170 @@
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from pathlib import Path
+from typing import Any
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+try:
+    from scripts.runtime_common import RUNTIME_DIR, SNAPSHOT_LOG_PATH, repo_relative
+except ModuleNotFoundError:
+    from runtime_common import RUNTIME_DIR, SNAPSHOT_LOG_PATH, repo_relative
+
+
+REQUIRED_FIELDS = [
+    "run_id",
+    "source_mode",
+    "operating_mode",
+    "truth_origin",
+    "truth_origin_tags",
+    "artifact_written_at",
+    "commit_hash",
+    "config_fingerprint",
+]
+COMPARE_FIELDS = [
+    "run_id",
+    "source_mode",
+    "operating_mode",
+    "truth_origin",
+    "commit_hash",
+    "config_fingerprint",
+]
+
+
+def _load_json_payload(path: Path) -> dict[str, Any] | None:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8-sig"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    return payload
+
+
+def _latest_snapshot_row(path: Path) -> tuple[str, dict[str, Any]] | None:
+    if not path.exists():
+        return None
+    lines = [line for line in path.read_text(encoding="utf-8-sig").splitlines() if line.strip()]
+    if not lines:
+        return None
+    try:
+        payload = json.loads(lines[-1])
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    return (f"{repo_relative(path)}:last", payload)
+
+
+def _artifact_written_sort_key(payload: dict[str, Any]) -> str:
+    return str(payload.get("artifact_written_at") or payload.get("timestamp") or "")
+
+
+def build_artifact_coherence_report(
+    runtime_dir: Path | None = None,
+    snapshot_log_path: Path | None = None,
+) -> dict[str, Any]:
+    resolved_runtime_dir = runtime_dir or RUNTIME_DIR
+    resolved_snapshot_log_path = snapshot_log_path or SNAPSHOT_LOG_PATH
+
+    artifacts: list[tuple[str, dict[str, Any]]] = []
+    if resolved_runtime_dir.exists():
+        for path in sorted(resolved_runtime_dir.glob("*.json")):
+            payload = _load_json_payload(path)
+            if payload is None:
+                continue
+            artifacts.append((repo_relative(path), payload))
+
+    latest_snapshot = _latest_snapshot_row(resolved_snapshot_log_path)
+    if latest_snapshot is not None:
+        artifacts.append(latest_snapshot)
+
+    missing_fields: dict[str, list[str]] = {}
+    field_values: dict[str, set[str]] = {field: set() for field in COMPARE_FIELDS}
+    reference_run_id = None
+    reference_written_at = None
+    stale_artifacts: list[str] = []
+
+    if artifacts:
+        latest_name, latest_payload = max(artifacts, key=lambda item: _artifact_written_sort_key(item[1]))
+        reference_run_id = latest_payload.get("run_id")
+        reference_written_at = latest_payload.get("artifact_written_at") or latest_payload.get("timestamp")
+        if reference_run_id is None:
+            stale_artifacts.append(latest_name)
+
+    for name, payload in artifacts:
+        missing = []
+        for field in REQUIRED_FIELDS:
+            value = payload.get(field)
+            if value is None or value == "":
+                missing.append(field)
+            elif field in COMPARE_FIELDS:
+                field_values[field].add(json.dumps(value, sort_keys=True))
+        if missing:
+            missing_fields[name] = missing
+        if reference_run_id and payload.get("run_id") not in {None, reference_run_id}:
+            stale_artifacts.append(name)
+
+    mismatched_fields = {
+        field: sorted(values)
+        for field, values in field_values.items()
+        if len(values) > 1
+    }
+    coherent = bool(artifacts) and not missing_fields and not mismatched_fields and not stale_artifacts
+    return {
+        "coherent": coherent,
+        "artifact_count": len(artifacts),
+        "required_fields": REQUIRED_FIELDS,
+        "reference_run_id": reference_run_id,
+        "reference_written_at": reference_written_at,
+        "missing_fields": missing_fields,
+        "mismatched_fields": mismatched_fields,
+        "stale_artifacts": sorted(set(stale_artifacts)),
+        "artifacts_checked": [name for name, _ in artifacts],
+        "note": (
+            "Flags mixed-run, mixed-mode, or partially stamped artifacts across runtime "
+            "JSON outputs and the latest snapshot row."
+        ),
+    }
+
+
+def format_artifact_coherence_summary(report: dict[str, Any]) -> str:
+    return "\n".join(
+        [
+            "Artifact Coherence Check",
+            f"coherent={str(report['coherent']).lower()}",
+            f"artifact_count={report['artifact_count']}",
+            f"reference_run_id={report['reference_run_id']}",
+            f"stale_artifact_count={len(report['stale_artifacts'])}",
+            f"mismatch_field_count={len(report['mismatched_fields'])}",
+        ]
+    )
+
+
+def build_cli_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        description="Check whether current runtime artifacts share coherent run metadata."
+    )
+    parser.add_argument("--json", action="store_true", help="Emit machine-readable JSON.")
+    parser.add_argument("--summary", action="store_true", help="Emit a compact human-readable summary.")
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = build_cli_parser()
+    args = parser.parse_args(argv)
+    report = build_artifact_coherence_report()
+    if args.summary:
+        print(format_artifact_coherence_summary(report))
+    else:
+        print(json.dumps(report, indent=2))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
