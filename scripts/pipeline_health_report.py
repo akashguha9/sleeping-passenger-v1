@@ -13,11 +13,14 @@ try:
     from scripts.blocker_cost_engine import build_blocker_cost_report
     from scripts.snapshot_logger import build_snapshot_row
     from scripts.runtime_common import (
+        COMPLEXITY_LADDER_CONTROLLER_PATH,
+        EXPERIENCE_MODE_REPORT_PATH,
         HEALTH_REPORT_PATH,
         SNAPSHOT_LOG_PATH,
         build_runtime_state_from_scm_report_payload,
         build_truth_context,
         classify_operating_mode,
+        load_json_file,
         load_open_positions,
         normalize_active_blockers,
         normalize_per_signal_rows,
@@ -33,11 +36,14 @@ except ModuleNotFoundError:
     from blocker_cost_engine import build_blocker_cost_report
     from snapshot_logger import build_snapshot_row
     from runtime_common import (
+        COMPLEXITY_LADDER_CONTROLLER_PATH,
+        EXPERIENCE_MODE_REPORT_PATH,
         HEALTH_REPORT_PATH,
         SNAPSHOT_LOG_PATH,
         build_runtime_state_from_scm_report_payload,
         build_truth_context,
         classify_operating_mode,
+        load_json_file,
         load_open_positions,
         normalize_active_blockers,
         normalize_per_signal_rows,
@@ -123,6 +129,69 @@ def _coerce_optional_number(value: Any) -> float | None:
         return float(value)
     except (TypeError, ValueError):
         return None
+
+
+def _normalize_surface_recommendation(value: Any) -> str:
+    text = str(value or "").strip().lower()
+    if text in {"trainer", "utility", "jet"}:
+        return text
+    return "trainer"
+
+
+def _load_optional_runtime_artifact(path: Path | None, default_path: Path) -> dict[str, Any]:
+    payload = load_json_file(path or default_path, default={}) or {}
+    if not isinstance(payload, dict):
+        return {}
+    return payload
+
+
+def build_experience_mode_summary(
+    *,
+    experience_mode_report: dict[str, Any] | None = None,
+    complexity_ladder_controller: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    experience = experience_mode_report if isinstance(experience_mode_report, dict) else {}
+    controller = (
+        complexity_ladder_controller if isinstance(complexity_ladder_controller, dict) else {}
+    )
+
+    report_present = bool(experience)
+    controller_present = bool(controller)
+    trainer_metadata = experience.get("trainer_mode_metadata", {})
+    readiness = experience.get("readiness_ladder", {})
+    utility = experience.get("utility_resilience_layer", {})
+    premium = experience.get("premium_compression_layer", {})
+
+    recommended_surface_profile = _normalize_surface_recommendation(
+        controller.get("operator_surface_recommendation")
+        or trainer_metadata.get("recommended_surface_profile")
+        or readiness.get("recommended_surface_profile")
+    )
+    trainer_mode_active = (
+        recommended_surface_profile == "trainer"
+        or bool(trainer_metadata.get("trainer_mode_active"))
+    )
+    degraded_mode_required = bool(utility.get("degraded_mode_required"))
+    if controller_present:
+        degraded_mode_required = (
+            degraded_mode_required
+            or bool(controller.get("degraded_mode_annotations_required"))
+        )
+    elif not report_present:
+        degraded_mode_required = True
+
+    premium_surface_eligible = bool(premium.get("premium_surface_eligible"))
+    premium_surface_allowed = bool(controller.get("premium_surface_allowed")) if controller_present else False
+
+    return {
+        "experience_mode_report_present": report_present,
+        "complexity_ladder_controller_present": controller_present,
+        "recommended_surface_profile": recommended_surface_profile,
+        "trainer_mode_active": trainer_mode_active,
+        "degraded_mode_required": degraded_mode_required,
+        "premium_surface_eligible": premium_surface_eligible,
+        "premium_surface_allowed": premium_surface_allowed,
+    }
 
 
 def _health_timestamp() -> str:
@@ -1512,6 +1581,8 @@ def build_pipeline_health_report(
     repo_root: Path | None = None,
     write_runtime: bool = True,
     open_positions_path: Path | None = None,
+    experience_mode_report_path: Path | None = None,
+    complexity_ladder_controller_path: Path | None = None,
     runtime_state: dict[str, Any] | None = None,
     action_report: dict[str, Any] | None = None,
     friction_report: dict[str, Any] | None = None,
@@ -1695,6 +1766,18 @@ def build_pipeline_health_report(
     packet_summary = current_scenario_preview["packet_summary"]
     decision_review_state = current_scenario_preview["decision_review_state"]
     truth_context = build_truth_context(state)
+    experience_mode_report = _load_optional_runtime_artifact(
+        experience_mode_report_path,
+        EXPERIENCE_MODE_REPORT_PATH,
+    )
+    complexity_ladder_controller = _load_optional_runtime_artifact(
+        complexity_ladder_controller_path,
+        COMPLEXITY_LADDER_CONTROLLER_PATH,
+    )
+    experience_mode_summary = build_experience_mode_summary(
+        experience_mode_report=experience_mode_report,
+        complexity_ladder_controller=complexity_ladder_controller,
+    )
 
     report = {
         "health_generated_at": _health_timestamp(),
@@ -1709,6 +1792,7 @@ def build_pipeline_health_report(
         "queue_sync_state": queue_sync_state,
         "system_readiness_state": system_readiness_state,
         "can_deploy_capital": can_deploy_capital,
+        "experience_mode_summary": experience_mode_summary,
         "where_am_i_leaking_performance": where_am_i_leaking_performance,
         "what_should_i_do_next": what_should_i_do_next,
         "scm": state["scm_review"],
