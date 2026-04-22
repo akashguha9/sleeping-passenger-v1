@@ -4,6 +4,7 @@ After a single invocation of run_diagnostics_pipeline.main, every runtime/*.json
 written in that run must carry:
     * the same run_id
     * the same source_mode (from VALID_SOURCE_MODES)
+    * the same operating_mode and truth_origin
     * a run_started_at timestamp
     * an artifact_written_at timestamp
 
@@ -48,8 +49,12 @@ def test_stamp_payload_contains_required_keys():
     assert stamped["run_id"] == RUN_ID
     assert stamped["source_mode"] in VALID_SOURCE_MODES
     assert stamped["source_mode"] == get_source_mode()
+    assert stamped["operating_mode"] == "seeded"
+    assert stamped["truth_origin"] == "seeded"
+    assert stamped["truth_origin_tags"] == ["seeded", "placeholder"]
     assert isinstance(stamped["run_started_at"], str) and stamped["run_started_at"]
     assert isinstance(stamped["artifact_written_at"], str) and stamped["artifact_written_at"]
+    assert isinstance(stamped["config_fingerprint"], str) and stamped["config_fingerprint"]
 
 
 def test_write_json_atomic_stamps_dict_payloads(scratch_path: Path):
@@ -59,6 +64,8 @@ def test_write_json_atomic_stamps_dict_payloads(scratch_path: Path):
     assert payload["k"] == "v"
     assert payload["run_id"] == RUN_ID
     assert payload["source_mode"] in VALID_SOURCE_MODES
+    assert payload["operating_mode"] == "seeded"
+    assert payload["truth_origin"] == "seeded"
 
 
 def test_write_json_atomic_does_not_mutate_non_dict(scratch_path: Path):
@@ -140,7 +147,11 @@ def test_runtime_artifacts_share_run_id_and_source_mode():
     assert stamped_payloads, "expected at least one stamped dict artifact"
     run_ids = {p["run_id"] for _, p in stamped_payloads}
     modes = {p["source_mode"] for _, p in stamped_payloads}
+    operating_modes = {p["operating_mode"] for _, p in stamped_payloads}
+    truth_origins = {p["truth_origin"] for _, p in stamped_payloads}
 
     assert len(run_ids) == 1, f"run_id drifted across artifacts: {run_ids}"
     assert len(modes) == 1, f"source_mode drifted across artifacts: {modes}"
+    assert len(operating_modes) == 1, f"operating_mode drifted across artifacts: {operating_modes}"
+    assert len(truth_origins) == 1, f"truth_origin drifted across artifacts: {truth_origins}"
     assert next(iter(modes)) in VALID_SOURCE_MODES

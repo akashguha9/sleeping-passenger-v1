@@ -302,6 +302,8 @@ def test_signal_conversion_monitor_simulated_all_clear_transition() -> None:
 def test_pipeline_health_report_builder_shape() -> None:
     payload = build_pipeline_health_report(include_tests=False, write_runtime=False)
 
+    assert payload["operating_mode"] == "seeded"
+    assert payload["truth_origin"] == "seeded"
     assert payload["system_readiness_state"] == "DO_NOT_DEPLOY"
     assert payload["can_deploy_capital"] is False
     assert payload["what_should_i_do_next"] == "EXIT_NOW: UNG, FCG | CLEAR_GSCE_PHASE_LOCK_FOR: RTX, ZIM | DO NOT ADD NEW RISK"
@@ -922,8 +924,10 @@ def test_pipeline_health_report_summary_cli() -> None:
 
     lines = result.stdout.strip().splitlines()
     assert lines[0] == "Pipeline Health Report"
-    assert lines[1] in {"git_clean=true", "git_clean=false"}
-    assert lines[2:] == [
+    assert lines[1] == "operating_mode=seeded"
+    assert lines[2] == "truth_origin=seeded"
+    assert lines[3] in {"git_clean=true", "git_clean=false"}
+    assert lines[4:] == [
         "tests_invoked=false",
         "tests_passed=None",
         "system_readiness_state=DO_NOT_DEPLOY",
@@ -954,6 +958,8 @@ def test_pipeline_health_report_summary_cli_gsce_clear_includes_transition_candi
     lines = result.stdout.strip().splitlines()
     assert lines[0] == "Pipeline Health Report"
     assert "simulation_mode=GSCE_CLEAR" in lines
+    assert "operating_mode=seeded" in lines
+    assert "truth_origin=synthetic" in lines
     assert "system_readiness_state=DO_NOT_DEPLOY" in lines
     assert "can_deploy_capital=false" in lines
     assert "policy_state=RESTRICTED" in lines
@@ -982,6 +988,8 @@ def test_pipeline_health_report_summary_cli_all_clear_includes_entry_candidates(
     lines = result.stdout.strip().splitlines()
     assert lines[0] == "Pipeline Health Report"
     assert "simulation_mode=ALL_CLEAR" in lines
+    assert "operating_mode=seeded" in lines
+    assert "truth_origin=synthetic" in lines
     assert "system_readiness_state=LIMITED_DEPLOY" in lines
     assert "can_deploy_capital=false" in lines
     assert "policy_state=REVIEW_READY" in lines

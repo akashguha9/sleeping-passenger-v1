@@ -78,6 +78,8 @@ def describe_market_data_adapter(provider: str | None = None) -> dict:
         "requested_provider": sample["requested_provider"],
         "resolved_provider": sample["resolved_provider"],
         "live_quotes_available": False,
+        "contract_state": "placeholder",
+        "truth_origin_tags": ["placeholder"],
         "contract_sample": sample,
         "note": "Placeholder adapter only. Core Moltbook and SCM runtime remain independent from market-data ingestion.",
     }

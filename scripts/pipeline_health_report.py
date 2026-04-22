@@ -16,10 +16,13 @@ try:
         HEALTH_REPORT_PATH,
         SNAPSHOT_LOG_PATH,
         build_runtime_state_from_scm_report_payload,
+        build_truth_context,
+        classify_operating_mode,
         load_open_positions,
         normalize_active_blockers,
         normalize_per_signal_rows,
         persist_current_runtime_state,
+        stamp_payload,
         write_json_atomic,
     )
     from scripts.signal_refinery import build_signal_refinery_report
@@ -33,10 +36,13 @@ except ModuleNotFoundError:
         HEALTH_REPORT_PATH,
         SNAPSHOT_LOG_PATH,
         build_runtime_state_from_scm_report_payload,
+        build_truth_context,
+        classify_operating_mode,
         load_open_positions,
         normalize_active_blockers,
         normalize_per_signal_rows,
         persist_current_runtime_state,
+        stamp_payload,
         write_json_atomic,
     )
     from signal_refinery import build_signal_refinery_report
@@ -1688,6 +1694,7 @@ def build_pipeline_health_report(
     transition_review_packets = current_scenario_preview["transition_review_packets"]
     packet_summary = current_scenario_preview["packet_summary"]
     decision_review_state = current_scenario_preview["decision_review_state"]
+    truth_context = build_truth_context(state)
 
     report = {
         "health_generated_at": _health_timestamp(),
@@ -1696,6 +1703,9 @@ def build_pipeline_health_report(
         "simulation_context": simulation_context,
         "simulation_mode": simulation_context.get("scenario", "LIVE"),
         "simulation_writes_runtime": effective_write_runtime,
+        "operating_mode": classify_operating_mode(state),
+        "truth_origin": truth_context["truth_origin"],
+        "truth_origin_tags": truth_context["truth_origin_tags"],
         "queue_sync_state": queue_sync_state,
         "system_readiness_state": system_readiness_state,
         "can_deploy_capital": can_deploy_capital,
@@ -1756,11 +1766,16 @@ def build_pipeline_health_report(
         "active_blockers": state["active_blockers"],
         "scorecard": scorecard,
         "scorecard_rules": SCORECARD_RULES,
-        "note": "Health report integrates authoritative SCM state, signal refinery gating, action policy, blocker cost, memory trends, and open positions validation.",
+        "note": (
+            "Health report integrates the local SCM runtime, signal refinery gating, "
+            "action policy, blocker cost, memory trends, and open-position validation. "
+            "It is a local decision shell report, not a live execution report."
+        ),
     }
+    report = stamp_payload(report, runtime_state=state)
 
     if effective_write_runtime:
-        write_json_atomic(HEALTH_REPORT_PATH, report)
+        write_json_atomic(HEALTH_REPORT_PATH, report, stamp=False)
 
     return report
 
@@ -1774,6 +1789,8 @@ def format_pipeline_health_summary(report: dict[str, Any]) -> str:
         lines.append(f"simulation_mode={report['simulation_mode']}")
     lines.extend(
         [
+            f"operating_mode={report['operating_mode']}",
+            f"truth_origin={report['truth_origin']}",
             f"git_clean={str(git_clean).lower() if isinstance(git_clean, bool) else git_clean}",
             f"tests_invoked={str(tests_invoked).lower() if isinstance(tests_invoked, bool) else tests_invoked}",
             f"tests_passed={str(tests_passed).lower() if isinstance(tests_passed, bool) else tests_passed}",
@@ -1810,7 +1827,7 @@ def format_pipeline_health_summary(report: dict[str, Any]) -> str:
 
 
 def build_cli_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Generate a deterministic closed-loop pipeline health report.")
+    parser = argparse.ArgumentParser(description="Generate a deterministic local pipeline health report.")
     parser.add_argument(
         "--include-tests",
         action="store_true",

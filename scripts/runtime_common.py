@@ -5,6 +5,8 @@ import os
 import sys
 import time
 import uuid
+import hashlib
+import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -32,6 +34,23 @@ if str(REPO_ROOT) not in sys.path:
 # source_mode after a single pipeline run.
 
 VALID_SOURCE_MODES = {"LIVE_ETIL", "SYNTHETIC_RUNTIME_FALLBACK", "REPLAY"}
+VALID_OPERATING_MODES = {"seeded", "hybrid", "live_prepared", "paper_prepared"}
+VALID_TRUTH_ORIGIN_TAGS = {
+    "seeded",
+    "synthetic",
+    "placeholder",
+    "passive",
+    "external",
+    "live_ready",
+}
+TRUTH_ORIGIN_TAG_ORDER = (
+    "seeded",
+    "synthetic",
+    "placeholder",
+    "passive",
+    "external",
+    "live_ready",
+)
 
 # NOTE: source_mode and run_id are stored in os.environ rather than as simple
 # module globals because both `scripts.runtime_common` and `runtime_common`
@@ -78,6 +97,176 @@ def get_run_started_at() -> str:
     return os.environ.get("PIPELINE_RUN_STARTED_AT", RUN_STARTED_AT)
 
 
+def _env_flag(name: str, default: bool = False) -> bool:
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    lowered = value.strip().lower()
+    if lowered in {"1", "true", "yes", "on"}:
+        return True
+    if lowered in {"0", "false", "no", "off"}:
+        return False
+    return default
+
+
+def _detect_git_commit_hash() -> str | None:
+    try:
+        result = subprocess.run(
+            ["git", "--no-pager", "rev-parse", "--short", "HEAD"],
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except FileNotFoundError:
+        return None
+    if result.returncode != 0:
+        return None
+    value = result.stdout.strip()
+    return value or None
+
+
+_GIT_COMMIT_HASH = _detect_git_commit_hash()
+
+
+def get_git_commit_hash() -> str | None:
+    return _GIT_COMMIT_HASH
+
+
+def _quote_provider_state() -> dict[str, Any]:
+    try:
+        from scripts.market_data_adapter import describe_market_data_adapter
+    except ModuleNotFoundError:
+        try:
+            from market_data_adapter import describe_market_data_adapter
+        except ModuleNotFoundError:
+            describe_market_data_adapter = None
+
+    provider = os.environ.get("PIPELINE_QUOTE_PROVIDER")
+    if describe_market_data_adapter is None:
+        requested_provider = (provider or "yahoo").strip().lower()
+        return {
+            "requested_provider": requested_provider,
+            "resolved_provider": f"{requested_provider}_placeholder",
+            "live_quotes_available": False,
+            "contract_state": "placeholder",
+        }
+
+    description = describe_market_data_adapter(provider)
+    if not isinstance(description, dict):
+        description = {}
+    requested_provider = str(description.get("requested_provider") or provider or "yahoo").strip().lower()
+    resolved_provider = str(
+        description.get("resolved_provider") or f"{requested_provider}_placeholder"
+    ).strip()
+    live_quotes_available = bool(description.get("live_quotes_available", False))
+    contract_state = str(description.get("contract_state") or "").strip().lower()
+    if not contract_state:
+        contract_state = "live_ready" if live_quotes_available else "placeholder"
+    return {
+        "requested_provider": requested_provider,
+        "resolved_provider": resolved_provider,
+        "live_quotes_available": live_quotes_available,
+        "contract_state": contract_state,
+    }
+
+
+def build_deployment_permissions(payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    _ = payload
+    paper_execution_enabled = _env_flag("PIPELINE_ENABLE_PAPER_EXECUTION", default=False)
+    live_execution_enabled = _env_flag("PIPELINE_ENABLE_LIVE_EXECUTION", default=False)
+    return {
+        "paper_execution_enabled": paper_execution_enabled,
+        "live_execution_enabled": live_execution_enabled,
+        "can_emit_paper_actions": paper_execution_enabled,
+        "can_emit_live_actions": live_execution_enabled,
+    }
+
+
+def classify_operating_mode(payload: dict[str, Any] | None = None) -> str:
+    runtime_payload = payload if isinstance(payload, dict) else {}
+    source_mode = str(runtime_payload.get("source_mode") or get_source_mode()).upper()
+    quote_state = _quote_provider_state()
+    deployment = build_deployment_permissions(runtime_payload)
+    external_observation_active = bool(quote_state["live_quotes_available"]) or source_mode == "LIVE_ETIL"
+
+    if deployment["live_execution_enabled"] and external_observation_active:
+        return "live_prepared"
+    if deployment["paper_execution_enabled"]:
+        return "paper_prepared"
+    if external_observation_active:
+        return "hybrid"
+    return "seeded"
+
+
+def build_truth_context(payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    runtime_payload = payload if isinstance(payload, dict) else {}
+    simulation_context = runtime_payload.get("simulation_context", {})
+    if not isinstance(simulation_context, dict):
+        simulation_context = {}
+    source_mode = str(runtime_payload.get("source_mode") or get_source_mode()).upper()
+    quote_state = _quote_provider_state()
+    deployment = build_deployment_permissions(runtime_payload)
+    operating_mode = classify_operating_mode(runtime_payload)
+
+    tags: list[str] = []
+    truth_origin = "seeded"
+
+    if source_mode == "REPLAY" or str(runtime_payload.get("source") or "").lower() == "runtime_files":
+        tags.append("passive")
+    if simulation_context.get("is_simulated"):
+        truth_origin = "synthetic"
+        tags.append("synthetic")
+    elif deployment["live_execution_enabled"] and (
+        quote_state["live_quotes_available"] or source_mode == "LIVE_ETIL"
+    ):
+        truth_origin = "live_ready"
+        tags.extend(["external", "live_ready"])
+    elif quote_state["live_quotes_available"] or source_mode == "LIVE_ETIL":
+        truth_origin = "external"
+        tags.append("external")
+    else:
+        truth_origin = "seeded"
+        tags.append("seeded")
+
+    if quote_state["contract_state"] == "placeholder":
+        tags.append("placeholder")
+
+    ordered_tags = [
+        tag for tag in TRUTH_ORIGIN_TAG_ORDER
+        if tag in set(tags) and tag in VALID_TRUTH_ORIGIN_TAGS
+    ]
+    return {
+        "operating_mode": operating_mode,
+        "truth_origin": truth_origin,
+        "truth_origin_tags": ordered_tags,
+        "source_mode": source_mode,
+        "quote_provider": quote_state["requested_provider"],
+        "quote_provider_state": quote_state["contract_state"],
+        "live_quotes_available": quote_state["live_quotes_available"],
+    }
+
+
+def compute_config_fingerprint(config_paths: list[Path] | None = None) -> str:
+    paths = config_paths or [SIGNAL_REFINERY_CONFIG_PATH, BLOCKER_WEIGHTS_PATH]
+    digest = hashlib.sha256()
+    for path in paths:
+        digest.update(repo_relative(path).encode("utf-8"))
+        if path.exists():
+            digest.update(path.read_bytes())
+        else:
+            digest.update(b"<missing>")
+    for key in (
+        "PIPELINE_QUOTE_PROVIDER",
+        "PIPELINE_ENABLE_PAPER_EXECUTION",
+        "PIPELINE_ENABLE_LIVE_EXECUTION",
+    ):
+        digest.update(key.encode("utf-8"))
+        digest.update(b"=")
+        digest.update(os.environ.get(key, "").encode("utf-8"))
+    return digest.hexdigest()[:12]
+
+
 def resolve_source_mode(
     etil_input_path: Path | None = None,
     freshness_seconds: int = 900,
@@ -104,7 +293,10 @@ def resolve_source_mode(
     return mode
 
 
-def stamp_payload(payload: dict[str, Any]) -> dict[str, Any]:
+def stamp_payload(
+    payload: dict[str, Any],
+    runtime_state: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """Stamp a runtime artifact payload with run_id/source_mode/timestamps.
 
     Caller-supplied run_id/source_mode are overwritten — those are authoritative
@@ -112,12 +304,19 @@ def stamp_payload(payload: dict[str, Any]) -> dict[str, Any]:
     os.environ so dual-imported module instances stay coherent.
     """
     stamped = dict(payload)
+    metadata_context = runtime_state if isinstance(runtime_state, dict) else stamped
+    truth_context = build_truth_context(metadata_context)
     stamped["run_id"] = get_run_id()
     stamped["source_mode"] = get_source_mode()
     stamped.setdefault("run_started_at", get_run_started_at())
     stamped["artifact_written_at"] = (
         datetime.now(timezone.utc).replace(microsecond=0).isoformat()
     )
+    stamped["operating_mode"] = truth_context["operating_mode"]
+    stamped["truth_origin"] = truth_context["truth_origin"]
+    stamped["truth_origin_tags"] = truth_context["truth_origin_tags"]
+    stamped["commit_hash"] = get_git_commit_hash()
+    stamped["config_fingerprint"] = compute_config_fingerprint()
     return stamped
 
 MOLTBOOK_DIR = REPO_ROOT / "moltbook"
