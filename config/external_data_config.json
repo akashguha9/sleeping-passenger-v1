@@ -1,0 +1,63 @@
+{
+  "version": 1,
+  "mode": "read_only_advisory",
+  "request_defaults": {
+    "timeout_seconds": 12.0,
+    "user_agent": "pipeline-v5.7-core/external-data",
+    "max_sample_items": 3
+  },
+  "read_only_contract": {
+    "suggestion_only": true,
+    "paper_safe": true,
+    "live_execution_enabled": false,
+    "order_placement_supported": false,
+    "wallet_signing_supported": false,
+    "hardcoded_secrets_present": false
+  },
+  "providers": {
+    "polymarket_gamma": {
+      "env_base_url": "POLY_GAMMA_BASE_URL",
+      "report_path": "runtime/polymarket_gamma_report.json",
+      "markets_params": {
+        "limit": 5,
+        "closed": false
+      },
+      "events_params": {
+        "limit": 5,
+        "closed": false
+      },
+      "signal_ingestion": {
+        "enabled": true,
+        "max_signal_inputs": 1,
+        "min_signal_score": 0.58,
+        "ticker_prefix": "PM",
+        "max_ticker_length": 18,
+        "signal_output_path": "runtime/signal_vocoder_etil_inputs.json"
+      }
+    },
+    "polymarket_data": {
+      "env_base_url": "POLY_DATA_BASE_URL",
+      "report_path": "runtime/polymarket_data_report.json",
+      "trades_params": {
+        "limit": 10,
+        "offset": 0,
+        "takerOnly": true
+      },
+      "max_open_interest_markets": 3
+    },
+    "polymarket_clob": {
+      "env_base_url": "POLY_CLOB_BASE_URL",
+      "report_path": "runtime/polymarket_clob_report.json",
+      "history_interval": "1d",
+      "history_fidelity": 1440
+    },
+    "blockscout": {
+      "env_base_url": "BLOCKSCOUT_API_BASE_URL",
+      "env_api_key": "BLOCKSCOUT_API_KEY",
+      "env_chain_id": "BLOCKSCOUT_DEFAULT_CHAIN_ID",
+      "routing_mode": "auto",
+      "report_path": "runtime/blockscout_report.json",
+      "recent_blocks_limit": 5
+    }
+  }
+}

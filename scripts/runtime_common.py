@@ -309,6 +309,9 @@ def compute_config_fingerprint(config_paths: list[Path] | None = None) -> str:
         ENVIRONMENT_FIT_CONFIG_PATH,
         OPERATOR_CONTROL_CONFIG_PATH,
         STRUCTURAL_COVER_MAP_PATH,
+        ARCHETYPE_REGISTRY_PATH,
+        EXTERNAL_DATA_CONFIG_PATH,
+        LLM_PROVIDER_CONFIG_PATH,
     ]
     digest = hashlib.sha256()
     for path in paths:
@@ -334,16 +337,35 @@ def resolve_source_mode(
 ) -> str:
     """Determine source_mode from presence/freshness of the ETIL input file.
 
-    LIVE_ETIL only when the file exists AND was modified within freshness_seconds.
-    Otherwise SYNTHETIC_RUNTIME_FALLBACK.
+    LIVE_ETIL only when the file exists, is fresh, and contains at least one
+    signal input row. Empty ETIL payloads are treated as synthetic fallback so
+    stale/placeholder artifacts do not silently flip the repo into external mode.
     """
     if etil_input_path is None:
-        etil_input_path = RUNTIME_DIR / "signal_vocoder_etil_inputs.json"
+        etil_input_path = SIGNAL_VOCODER_ETIL_INPUTS_PATH
     try:
         if etil_input_path.exists():
             age = time.time() - etil_input_path.stat().st_mtime
             if age <= freshness_seconds:
-                mode = "LIVE_ETIL"
+                payload = load_json_file(etil_input_path, default={}) or {}
+                signal_rows = []
+                if isinstance(payload, dict):
+                    candidate_rows = payload.get("signal_inputs")
+                    if isinstance(candidate_rows, list):
+                        signal_rows = candidate_rows
+                elif isinstance(payload, list):
+                    signal_rows = payload
+                has_signal_rows = any(
+                    isinstance(row, dict)
+                    and str(
+                        row.get("ticker")
+                        or row.get("symbol")
+                        or row.get("signal_id")
+                        or ""
+                    ).strip()
+                    for row in signal_rows
+                )
+                mode = "LIVE_ETIL" if has_signal_rows else "SYNTHETIC_RUNTIME_FALLBACK"
             else:
                 mode = "SYNTHETIC_RUNTIME_FALLBACK"
         else:
@@ -414,6 +436,13 @@ PAPER_RETIREMENT_REPORT_PATH = RUNTIME_DIR / "paper_retirement_report.json"
 MODEL_UPGRADE_REPORT_PATH = RUNTIME_DIR / "model_upgrade_report.json"
 PAPER_RECONCILIATION_REPORT_PATH = RUNTIME_DIR / "paper_reconciliation_report.json"
 PAPER_RECONCILIATION_SUMMARY_PATH = RUNTIME_DIR / "paper_reconciliation_summary.json"
+POLYMARKET_GAMMA_REPORT_PATH = RUNTIME_DIR / "polymarket_gamma_report.json"
+POLYMARKET_DATA_REPORT_PATH = RUNTIME_DIR / "polymarket_data_report.json"
+POLYMARKET_CLOB_REPORT_PATH = RUNTIME_DIR / "polymarket_clob_report.json"
+BLOCKSCOUT_REPORT_PATH = RUNTIME_DIR / "blockscout_report.json"
+EXTERNAL_DATA_REPORT_PATH = RUNTIME_DIR / "external_data_report.json"
+GROK_XAI_REPORT_PATH = RUNTIME_DIR / "grok_xai_report.json"
+SIGNAL_VOCODER_ETIL_INPUTS_PATH = RUNTIME_DIR / "signal_vocoder_etil_inputs.json"
 QUOTE_CACHE_DIR = RUNTIME_DIR / "quote_cache"
 
 PAPER_DECISION_LEDGER_PATH = LOG_DIR / "paper_decisions.jsonl"
@@ -438,6 +467,8 @@ ENVIRONMENT_FIT_CONFIG_PATH = CONFIG_DIR / "environment_fit_config.json"
 OPERATOR_CONTROL_CONFIG_PATH = CONFIG_DIR / "operator_control_config.json"
 STRUCTURAL_COVER_MAP_PATH = CONFIG_DIR / "structural_cover_map.json"
 ARCHETYPE_REGISTRY_PATH = CONFIG_DIR / "archetype_registry.json"
+EXTERNAL_DATA_CONFIG_PATH = CONFIG_DIR / "external_data_config.json"
+LLM_PROVIDER_CONFIG_PATH = CONFIG_DIR / "llm_provider_config.json"
 
 OPEN_POSITION_REQUIRED_KEYS = {
     "ticker",
@@ -838,6 +869,11 @@ def normalize_per_signal_rows(payload: Any) -> list[dict[str, Any]]:
                 "watchlist_tier": watchlist_tier,
                 "candidate_conversion_state": candidate_conversion_state,
                 "pre_entry_state": pre_entry_state,
+                "source_name": _text(row.get("source_name") or row.get("source")),
+                "signal_origin": _text(row.get("signal_origin")),
+                "origin_label": _text(row.get("origin_label")),
+                "condition_id": _text(row.get("condition_id") or row.get("conditionId")),
+                "question": _text(row.get("question")),
             }
         )
     rows.sort(key=lambda item: (item["ticker"], -item["priority_score"], item["signal_id"]))

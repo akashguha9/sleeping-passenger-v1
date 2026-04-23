@@ -7,8 +7,14 @@ from typing import Any
 
 try:
     from scripts.moltbook_loader import load_moltbook_bundle
+    from scripts.runtime_common import (
+        SIGNAL_VOCODER_ETIL_INPUTS_PATH,
+        get_source_mode,
+        load_json_file,
+    )
 except ModuleNotFoundError:
     from moltbook_loader import load_moltbook_bundle
+    from runtime_common import SIGNAL_VOCODER_ETIL_INPUTS_PATH, get_source_mode, load_json_file
 
 SCM_HIGH_CONVERSION = 0.60
 SCM_PARTIAL_CONVERSION = 0.30
@@ -192,6 +198,153 @@ def load_signal_ledger(signal_ledger_path: Path | None = None) -> list[dict]:
             )
 
     return payload
+
+
+def load_external_signal_inputs(
+    external_signal_inputs_path: Path | None = None,
+) -> list[dict]:
+    payload = load_json_file(
+        external_signal_inputs_path or SIGNAL_VOCODER_ETIL_INPUTS_PATH,
+        default={},
+    )
+    if isinstance(payload, dict):
+        rows = payload.get("signal_inputs")
+    elif isinstance(payload, list):
+        rows = payload
+    else:
+        rows = []
+    if not isinstance(rows, list):
+        return []
+
+    external_rows: list[dict] = []
+    for item in rows:
+        if not isinstance(item, dict):
+            continue
+        ticker = str(item.get("ticker") or item.get("symbol") or "").strip().upper()
+        signal_id = str(item.get("signal_id") or "").strip()
+        if not ticker or not signal_id:
+            continue
+        status = str(item.get("status") or "WATCHLIST").strip().upper()
+        if status not in {"WATCHLIST", "EXECUTED_CLEAN", "EXECUTED_CHAOS"}:
+            status = "WATCHLIST"
+        ce_score = item.get("ce_score", item.get("priority_score", 0.0))
+        try:
+            normalized_ce_score = round(float(ce_score), 3)
+        except (TypeError, ValueError):
+            normalized_ce_score = 0.0
+        external_rows.append(
+            {
+                "signal_id": signal_id,
+                "ticker": ticker,
+                "ce_score": normalized_ce_score,
+                "status": status,
+                "conversion_state": str(
+                    item.get(
+                        "conversion_state",
+                        "NOT_EXECUTED" if status == "WATCHLIST" else status,
+                    )
+                )
+                .strip()
+                .upper(),
+                "blocker_attribution": str(item.get("blocker_attribution") or "NONE")
+                .strip()
+                .upper(),
+                "promotable_clean_candidate": bool(
+                    item.get("promotable_clean_candidate", False)
+                ),
+                "watchlist_tier": str(item.get("watchlist_tier") or "STANDARD")
+                .strip()
+                .upper(),
+                "candidate_conversion_state": str(
+                    item.get("candidate_conversion_state") or "NOT_EXECUTED"
+                )
+                .strip()
+                .upper(),
+                "pre_entry_state": str(item.get("pre_entry_state") or "NONE").strip().upper(),
+                "source_name": str(item.get("source_name") or item.get("source") or "polymarket_gamma")
+                .strip()
+                .lower(),
+                "signal_origin": str(item.get("signal_origin") or "external").strip().lower(),
+                "origin_label": str(
+                    item.get("origin_label") or "external_read_only_market_observation"
+                ).strip(),
+                "condition_id": str(item.get("condition_id") or item.get("conditionId") or "")
+                .strip(),
+                "question": str(item.get("question") or "").strip(),
+            }
+        )
+    return external_rows
+
+
+def merge_external_signal_rows(
+    signal_summary: dict[str, Any],
+    per_signal_attribution: list[dict],
+    external_signal_rows: list[dict],
+) -> tuple[dict[str, Any], list[dict]]:
+    merged_rows = _copy_rows(per_signal_attribution)
+    existing_keys = {
+        (
+            str(row.get("signal_id") or "").strip(),
+            str(row.get("ticker") or "").strip().upper(),
+        )
+        for row in merged_rows
+        if isinstance(row, dict)
+    }
+    merged_qualifying_signals = [
+        dict(item)
+        for item in signal_summary.get("qualifying_signals", [])
+        if isinstance(item, dict)
+    ]
+    qualifying_ids = [
+        str(value)
+        for value in signal_summary.get("qualifying_signal_ids", [])
+        if str(value).strip()
+    ]
+    added_count = 0
+
+    for row in external_signal_rows:
+        key = (
+            str(row.get("signal_id") or "").strip(),
+            str(row.get("ticker") or "").strip().upper(),
+        )
+        if not key[0] or not key[1] or key in existing_keys:
+            continue
+        existing_keys.add(key)
+        added_count += 1
+        merged_rows.append(dict(row))
+        merged_qualifying_signals.append(
+            {
+                "signal_id": row["signal_id"],
+                "ticker": row["ticker"],
+                "ce_score": row["ce_score"],
+                "status": row["status"],
+                "source_name": row.get("source_name"),
+                "signal_origin": row.get("signal_origin"),
+            }
+        )
+        qualifying_ids.append(row["signal_id"])
+
+    status_counts: dict[str, int] = {}
+    for row in merged_rows:
+        status = str(row.get("status") or "").upper()
+        if not status:
+            continue
+        status_counts[status] = status_counts.get(status, 0) + 1
+
+    merged_signal_summary = dict(signal_summary)
+    merged_signal_summary["signals_above_ce_threshold"] = len(merged_rows)
+    merged_signal_summary["signal_count_total"] = max(
+        int(signal_summary.get("signal_count_total", len(per_signal_attribution))) + added_count,
+        len(merged_rows),
+    )
+    merged_signal_summary["qualifying_signal_ids"] = qualifying_ids
+    merged_signal_summary["qualifying_signals"] = merged_qualifying_signals
+    merged_signal_summary["status_counts_above_threshold"] = {
+        status: status_counts[status]
+        for status in LEDGER_STATUS_ORDER
+        if status in status_counts
+    }
+    return merged_signal_summary, merged_rows
 
 
 def derive_total_signals_above_threshold(signal_ledger_path: Path | None = None) -> dict:
@@ -469,6 +622,9 @@ def build_signal_conversion_report(
     moltbook_dir: Path | None = None,
     signal_ledger_path: Path | None = None,
     gate_state_overrides: dict[str, bool] | None = None,
+    external_signal_inputs: list[dict] | None = None,
+    external_signal_inputs_path: Path | None = None,
+    include_external_signal_inputs: bool | None = None,
     simulate_gsce_clear: bool = False,
     simulate_realm_bis_clear: bool = False,
     simulate_all_clear: bool = False,
@@ -476,6 +632,26 @@ def build_signal_conversion_report(
     moltbook_summary = derive_clean_entries_from_moltbook(moltbook_dir)
     signal_summary = derive_total_signals_above_threshold(signal_ledger_path)
     base_per_signal_attribution = derive_per_signal_attribution(signal_summary)
+    should_include_external_signal_inputs = (
+        bool(include_external_signal_inputs)
+        if include_external_signal_inputs is not None
+        else get_source_mode() == "LIVE_ETIL"
+    )
+    resolved_external_signal_rows = (
+        _copy_rows(external_signal_inputs)
+        if external_signal_inputs is not None
+        else (
+            load_external_signal_inputs(external_signal_inputs_path)
+            if should_include_external_signal_inputs
+            else []
+        )
+    )
+    if resolved_external_signal_rows:
+        signal_summary, base_per_signal_attribution = merge_external_signal_rows(
+            signal_summary,
+            base_per_signal_attribution,
+            resolved_external_signal_rows,
+        )
     simulation_context = resolve_simulation_context(
         gate_state_overrides=gate_state_overrides,
         simulate_gsce_clear=simulate_gsce_clear,
@@ -517,7 +693,11 @@ def build_signal_conversion_report(
         "scm_review": review,
         "execution_policy": execution_policy,
         "simulation_context": simulation_context,
-        "note": "SCM now consumes live Moltbook close data for numerator and signal_ledger.json for denominator.",
+        "external_signal_inputs_count": len(resolved_external_signal_rows),
+        "note": (
+            "SCM consumes live Moltbook close data for numerator and signal_ledger.json "
+            "for denominator, with fresh ETIL external watchlist inputs merged when available."
+        ),
     }
 
 

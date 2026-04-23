@@ -13,6 +13,7 @@ try:
     from scripts.archetype_profile import build_archetype_profile_report
     from scripts.blocker_cost_engine import build_blocker_cost_report
     from scripts.closure_deficit_monitor import build_closure_deficit_report
+    from scripts.external_data_runtime_sync import apply_external_observation_report
     from scripts.governance_feedback_report import build_governance_feedback_report
     from scripts.operator_control import build_operator_control_report
     from scripts.snapshot_logger import build_snapshot_row
@@ -29,6 +30,7 @@ try:
         normalize_active_blockers,
         normalize_per_signal_rows,
         persist_current_runtime_state,
+        set_source_mode,
         stamp_payload,
         write_json_atomic,
     )
@@ -40,6 +42,7 @@ except ModuleNotFoundError:
     from archetype_profile import build_archetype_profile_report
     from blocker_cost_engine import build_blocker_cost_report
     from closure_deficit_monitor import build_closure_deficit_report
+    from external_data_runtime_sync import apply_external_observation_report
     from governance_feedback_report import build_governance_feedback_report
     from operator_control import build_operator_control_report
     from snapshot_logger import build_snapshot_row
@@ -56,6 +59,7 @@ except ModuleNotFoundError:
         normalize_active_blockers,
         normalize_per_signal_rows,
         persist_current_runtime_state,
+        set_source_mode,
         stamp_payload,
         write_json_atomic,
     )
@@ -199,6 +203,82 @@ def build_experience_mode_summary(
         "degraded_mode_required": degraded_mode_required,
         "premium_surface_eligible": premium_surface_eligible,
         "premium_surface_allowed": premium_surface_allowed,
+    }
+
+
+def build_external_data_summary(
+    external_data_report: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    report = external_data_report if isinstance(external_data_report, dict) else {}
+    active_sources = report.get("active_sources", [])
+    if not isinstance(active_sources, list):
+        active_sources = []
+    return {
+        "external_data_report_present": bool(report),
+        "external_observation_active": bool(report.get("external_observation_active")),
+        "active_sources": [str(value) for value in active_sources if str(value).strip()],
+        "success_source_count": int(report.get("success_source_count", 0)),
+        "failure_source_count": int(report.get("failure_source_count", 0)),
+        "note": report.get("note"),
+    }
+
+
+def build_signal_source_summary(
+    per_signal_rows: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    rows = per_signal_rows if isinstance(per_signal_rows, list) else []
+    summary = {
+        "total_signal_count": 0,
+        "seeded_signal_count": 0,
+        "external_signal_count": 0,
+        "unknown_signal_count": 0,
+        "source_counts": {},
+        "external_signal_tickers": [],
+    }
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        summary["total_signal_count"] += 1
+        ticker = str(row.get("ticker") or "").strip().upper()
+        source_name = str(row.get("source_name") or "signal_ledger").strip().lower() or "signal_ledger"
+        signal_origin = str(row.get("signal_origin") or "seeded_runtime").strip().lower()
+        summary["source_counts"][source_name] = summary["source_counts"].get(source_name, 0) + 1
+
+        is_external = source_name.startswith("polymarket") or signal_origin == "external"
+        is_seeded = source_name == "signal_ledger" or signal_origin in {
+            "seeded_runtime",
+            "seeded",
+            "synthetic_runtime_fallback",
+        }
+        if is_external:
+            summary["external_signal_count"] += 1
+            if ticker:
+                summary["external_signal_tickers"].append(ticker)
+        elif is_seeded:
+            summary["seeded_signal_count"] += 1
+        else:
+            summary["unknown_signal_count"] += 1
+    return summary
+
+
+def build_intelligence_summary(
+    grok_xai_report: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    report = grok_xai_report if isinstance(grok_xai_report, dict) else {}
+    extracted_output = report.get("extracted_output", {})
+    if not isinstance(extracted_output, dict):
+        extracted_output = {}
+    return {
+        "grok_report_present": bool(report),
+        "request_attempted": bool(report.get("request_attempted")),
+        "request_success": bool(report.get("request_success")),
+        "use_case": report.get("use_case"),
+        "model_used": report.get("model_used"),
+        "recommended_operator_action": extracted_output.get("recommended_operator_action"),
+        "operator_focus": extracted_output.get("operator_focus"),
+        "top_item": extracted_output.get("top_item"),
+        "error_kind": report.get("error_kind"),
+        "note": report.get("note"),
     }
 
 
@@ -1596,6 +1676,8 @@ def build_pipeline_health_report(
     friction_report: dict[str, Any] | None = None,
     trend_report: dict[str, Any] | None = None,
     signal_refinery_report: dict[str, Any] | None = None,
+    external_data_report: dict[str, Any] | None = None,
+    grok_xai_report: dict[str, Any] | None = None,
     latest_snapshot_timestamp: str | None = None,
     simulate_gsce_clear: bool = False,
     simulate_realm_bis_clear: bool = False,
@@ -1611,6 +1693,11 @@ def build_pipeline_health_report(
         state = build_runtime_state_from_scm_report(scm_report)
     else:
         state = runtime_state
+    loaded_external_data_report = (
+        external_data_report if isinstance(external_data_report, dict) else {}
+    )
+    if loaded_external_data_report.get("external_observation_active"):
+        state = apply_external_observation_report(state, loaded_external_data_report)
     simulation_context = state.get("simulation_context", {})
     effective_write_runtime = write_runtime and not simulation_context.get("is_simulated", False)
 
@@ -1786,6 +1873,9 @@ def build_pipeline_health_report(
         experience_mode_report=experience_mode_report,
         complexity_ladder_controller=complexity_ladder_controller,
     )
+    external_data_summary = build_external_data_summary(loaded_external_data_report)
+    signal_source_summary = build_signal_source_summary(state["per_signal_attribution"])
+    intelligence_summary = build_intelligence_summary(grok_xai_report)
     operator_control_report = build_operator_control_report(
         gate_summary=signal_refinery_report.get("signal_admission_gate", {}),
         test_status=test_status,
@@ -1836,6 +1926,9 @@ def build_pipeline_health_report(
         "system_readiness_state": system_readiness_state,
         "can_deploy_capital": can_deploy_capital,
         "experience_mode_summary": experience_mode_summary,
+        "external_data_summary": external_data_summary,
+        "signal_source_summary": signal_source_summary,
+        "intelligence_summary": intelligence_summary,
         "where_am_i_leaking_performance": where_am_i_leaking_performance,
         "what_should_i_do_next": what_should_i_do_next,
         "scm": state["scm_review"],
@@ -1957,6 +2050,36 @@ def format_pipeline_health_summary(report: dict[str, Any]) -> str:
         lines.append(f"entry_review_candidates={', '.join(entry_review_names)}")
     if transition_review_names:
         lines.append(f"transition_review_candidates={', '.join(transition_review_names)}")
+    external_summary = report.get("external_data_summary", {})
+    if external_summary.get("external_observation_active"):
+        lines.append(
+            "external_data_active="
+            f"{str(external_summary.get('external_observation_active')).lower()}"
+        )
+        if external_summary.get("active_sources"):
+            lines.append(
+                "external_data_sources="
+                + ", ".join(external_summary.get("active_sources", []))
+            )
+    signal_source_summary = report.get("signal_source_summary", {})
+    if int(signal_source_summary.get("external_signal_count", 0)) > 0:
+        lines.append(
+            "signal_sources="
+            f"seeded={int(signal_source_summary.get('seeded_signal_count', 0))}, "
+            f"external={int(signal_source_summary.get('external_signal_count', 0))}"
+        )
+    intelligence_summary = report.get("intelligence_summary", {})
+    if intelligence_summary.get("request_success"):
+        lines.append(
+            "intelligence_use_case="
+            f"{intelligence_summary.get('use_case')}"
+        )
+        operator_focus = (
+            intelligence_summary.get("recommended_operator_action")
+            or intelligence_summary.get("operator_focus")
+        )
+        if operator_focus:
+            lines.append(f"intelligence_focus={operator_focus}")
     if report.get("decision_review_state") and report.get("decision_review_state") != "NONE":
         lines.append(f"decision_review_state={report['decision_review_state']}")
     if report.get("simulation_mode") and report.get("simulation_mode") != "LIVE":
@@ -2001,6 +2124,7 @@ def build_cli_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     parser = build_cli_parser()
     args = parser.parse_args(argv)
+    set_source_mode("SYNTHETIC_RUNTIME_FALLBACK")
 
     report = build_pipeline_health_report(
         include_tests=args.include_tests,

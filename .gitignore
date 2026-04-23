@@ -16,3 +16,5 @@ logs/
 tests/.pytest_tmp/
 tests/pytest-cache-files-*/
 tests/_tmp_runtime/
+
+.env

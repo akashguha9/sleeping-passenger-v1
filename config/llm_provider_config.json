@@ -1,0 +1,43 @@
+{
+  "version": 1,
+  "mode": "read_only_advisory",
+  "read_only_contract": {
+    "suggestion_only": true,
+    "paper_safe": true,
+    "live_execution_enabled": false,
+    "order_placement_supported": false,
+    "wallet_signing_supported": false,
+    "autonomous_execution_supported": false,
+    "hardcoded_secrets_present": false,
+    "silent_model_fallback_allowed": false
+  },
+  "providers": {
+    "grok_xai": {
+      "env_api_key": "XAI_API_KEY",
+      "env_base_url": "XAI_API_BASE_URL",
+      "env_model": "XAI_MODEL",
+      "require_explicit_model_env": true,
+      "allow_model_fallback": false,
+      "endpoint_path": "/chat/completions",
+      "timeout_seconds": 20.0,
+      "user_agent": "pipeline-v5.7-core/grok-xai",
+      "report_path": "runtime/grok_xai_report.json",
+      "response_format_mode": "json_schema",
+      "default_use_case": "signal_ranking_interpreter",
+      "use_case_defaults": {
+        "polymarket_payload_interpreter": {
+          "temperature": 0.0,
+          "max_output_tokens": 500
+        },
+        "blockscout_payload_interpreter": {
+          "temperature": 0.0,
+          "max_output_tokens": 500
+        },
+        "signal_ranking_interpreter": {
+          "temperature": 0.0,
+          "max_output_tokens": 700
+        }
+      }
+    }
+  }
+}

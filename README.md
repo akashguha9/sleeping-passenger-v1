@@ -39,6 +39,9 @@ This repo is a local decision shell for inspecting seeded signal state, blocker 
 - Default truth origin is `seeded`.
 - Quote-provider handling is placeholder-only unless explicitly replaced later.
 - External connectivity is optional and currently absent from the verified path.
+- Optional read-only external ingestion is now available for Polymarket and Blockscout via explicit sync commands. It remains advisory and paper-safe.
+- A real Polymarket Gamma-origin signal only enters the full decision pipeline through `python scripts\run_diagnostics_pipeline.py --summary --include-external-data`. Standalone report CLIs remain seed-neutral unless the current run explicitly carries external data through.
+- A read-only Grok intelligence layer is now available for structured interpretation and signal ranking. It writes one stamped runtime artifact and remains execution-blind.
 
 ## Operator Control Layer
 
@@ -85,9 +88,16 @@ python scripts\operator_control.py report --summary
 python scripts\paper_execution.py sync --summary
 python scripts\operator_override_ledger.py --ticker RTX --override-action MONITOR --why-this-move "waiting for manual review" --trigger "review-ready candidate" --invalidation "cancel if validation weakens" --regime "review_ready" --why-now "blockers cleared this run" --summary
 python scripts\yahoo_market_data_adapter.py --tickers RTX,ZIM --summary
+python scripts\polymarket_gamma_adapter.py --summary
+python scripts\polymarket_data_adapter.py --summary
+python scripts\polymarket_clob_adapter.py --summary
+python scripts\blockscout_adapter.py --summary
+python scripts\external_data_runtime_sync.py --summary
+python scripts\grok_xai_adapter.py --summary
 python scripts\paper_trade_retirement.py --summary
 python scripts\paper_reconciliation.py --summary
 python scripts\run_diagnostics_pipeline.py --summary --no-write
+python scripts\run_diagnostics_pipeline.py --summary --include-external-data
 ```
 
 ## Paper Path
@@ -123,6 +133,20 @@ python scripts\paper_reconciliation.py --summary
 - Failed Yahoo fetches are persisted as failure states and do not imply hybrid readiness.
 - Paper retirements remain paper-simulated closes using external marks, not broker fills.
 - Small-sample feedback is recorded, but the repo still reports insufficient evidence for parameter changes unless enough retired trades accumulate.
+
+## External Data Limits
+
+- Polymarket Gamma, Data, and CLOB integrations are read-only observational adapters.
+- Blockscout integration is read-only explorer/API ingestion and may have partial endpoint coverage depending on whether you point it at a per-instance explorer or the multichain PRO API.
+- No order placement, wallet signing, live execution, or secret material is hardcoded.
+- External-data success can move a run into `hybrid` mode because external observation is present, but that still does not imply execution readiness or venue truth.
+
+## Grok Intelligence Limits
+
+- Grok is an intelligence-extraction layer, not an execution layer.
+- It can interpret payloads and rank current candidates, but it does not approve trades or alter governance.
+- It requires explicit `XAI_API_KEY`, `XAI_API_BASE_URL`, and `XAI_MODEL` configuration.
+- If the API call fails or the returned payload is not valid structured JSON, the repo persists that failure state explicitly in `runtime/grok_xai_report.json`.
 
 ## Reconciliation Layer
 
