@@ -1,0 +1,197 @@
+{
+  "schema_version": "ARCHETYPE_REGISTRY_V1",
+  "archetypes": {
+    "fischer": {
+      "label": "Fischer",
+      "module_name": "Signal Purity Engine",
+      "dimension_key": "purity_score",
+      "default_weight": 1.0,
+      "pipeline_stage": "signal_refinery.validation_engine",
+      "criticality": "scoring_critical",
+      "paper_mode_role": "Advisory scoring only; cannot bypass human approval or paper-only execution boundaries.",
+      "metrics": [
+        "signal_admission_gate.admitted",
+        "validation_score",
+        "blocker_clearance_score",
+        "cross_source_confirmation_score",
+        "source_quality_score"
+      ],
+      "regime_multipliers": {
+        "high_friction": 1.15,
+        "transition_pressure": 0.95,
+        "entry_window": 1.0,
+        "crowded_or_chaotic": 1.1,
+        "sparse_evidence": 1.0
+      }
+    },
+    "kasparov": {
+      "label": "Kasparov",
+      "module_name": "Pressure Scenario Expander",
+      "dimension_key": "pressure_score",
+      "default_weight": 0.9,
+      "pipeline_stage": "pipeline_health.gate_resolution_preview",
+      "criticality": "advisory",
+      "paper_mode_role": "Scenario expansion is advisory and does not auto-trigger execution.",
+      "metrics": [
+        "gate_resolution_preview",
+        "transition_pressure_state",
+        "blocked_promotable_candidate_queue"
+      ],
+      "regime_multipliers": {
+        "high_friction": 1.1,
+        "transition_pressure": 1.35,
+        "entry_window": 1.1,
+        "crowded_or_chaotic": 1.0,
+        "sparse_evidence": 1.0
+      }
+    },
+    "carlsen": {
+      "label": "Carlsen",
+      "module_name": "Error Extraction Tracker",
+      "dimension_key": "error_extraction_score",
+      "default_weight": 0.85,
+      "pipeline_stage": "paper_reconciliation + governance_feedback",
+      "criticality": "advisory",
+      "paper_mode_role": "Uses paper lineage and feedback only; no claim of live economic proof.",
+      "metrics": [
+        "paper_reconciliation_summary",
+        "paper_reconciliation_history",
+        "repeatability_tracker",
+        "closure_deficit_report"
+      ],
+      "regime_multipliers": {
+        "high_friction": 1.1,
+        "transition_pressure": 0.95,
+        "entry_window": 0.95,
+        "crowded_or_chaotic": 1.0,
+        "sparse_evidence": 1.25
+      }
+    },
+    "messi": {
+      "label": "Messi",
+      "module_name": "Optionality Preserver",
+      "dimension_key": "optionality_score",
+      "default_weight": 0.95,
+      "pipeline_stage": "watchlist diagnostics + scenario previews",
+      "criticality": "advisory",
+      "paper_mode_role": "Measures branch preservation from current watchlist and scenario-preview state only.",
+      "metrics": [
+        "watchlist_diagnostics",
+        "gate_resolution_preview",
+        "transition_review_packets",
+        "entry_review_packets"
+      ],
+      "regime_multipliers": {
+        "high_friction": 1.05,
+        "transition_pressure": 1.2,
+        "entry_window": 1.05,
+        "crowded_or_chaotic": 1.0,
+        "sparse_evidence": 1.0
+      }
+    },
+    "cristiano": {
+      "label": "Cristiano",
+      "module_name": "Objective Function Engine",
+      "dimension_key": "objective_alignment_score",
+      "default_weight": 1.05,
+      "pipeline_stage": "action_engine + execution_governance",
+      "criticality": "scoring_critical",
+      "paper_mode_role": "Makes output-first scoring explicit without changing manual approval requirements.",
+      "metrics": [
+        "action",
+        "priority_score",
+        "launch_state",
+        "validation_state",
+        "execution_governance.fpeg"
+      ],
+      "regime_multipliers": {
+        "high_friction": 0.95,
+        "transition_pressure": 1.05,
+        "entry_window": 1.35,
+        "crowded_or_chaotic": 0.95,
+        "sparse_evidence": 1.0
+      }
+    },
+    "neuer": {
+      "label": "Neuer",
+      "module_name": "Geometry Controller",
+      "dimension_key": "geometry_fit_score",
+      "default_weight": 0.9,
+      "pipeline_stage": "signal_refinery.thermal_battery_manager",
+      "criticality": "advisory",
+      "paper_mode_role": "Exposure geometry remains advisory because the repo does not hold live allocation control.",
+      "metrics": [
+        "thermal_state",
+        "position_headroom",
+        "cluster_concentration",
+        "open_position_conflict"
+      ],
+      "regime_multipliers": {
+        "high_friction": 1.1,
+        "transition_pressure": 1.0,
+        "entry_window": 1.05,
+        "crowded_or_chaotic": 1.25,
+        "sparse_evidence": 1.0
+      }
+    },
+    "neymar": {
+      "label": "Neymar",
+      "module_name": "Entropy Opportunity Tagger",
+      "dimension_key": "entropy_boundedness_score",
+      "default_weight": 0.75,
+      "pipeline_stage": "signal_refinery.visibility_timing_context",
+      "criticality": "advisory",
+      "paper_mode_role": "Tags bounded chaos versus unstable noise; does not authorize risk by itself.",
+      "metrics": [
+        "novelty_score",
+        "light_score",
+        "shadow_score",
+        "crowding_score",
+        "late_obviousness_flag",
+        "asymmetry_window_flag"
+      ],
+      "regime_multipliers": {
+        "high_friction": 1.0,
+        "transition_pressure": 1.0,
+        "entry_window": 1.05,
+        "crowded_or_chaotic": 1.2,
+        "sparse_evidence": 1.0
+      }
+    },
+    "hazard": {
+      "label": "Hazard",
+      "module_name": "Friction Detector",
+      "dimension_key": "friction_flow_score",
+      "default_weight": 0.95,
+      "pipeline_stage": "blocker_cost + governance_feedback + operator_control",
+      "criticality": "advisory",
+      "paper_mode_role": "Measures resistance inside the paper pipeline and operator loop; does not infer live slippage.",
+      "metrics": [
+        "blocker_cost_report",
+        "fpeg_gap_rate",
+        "override_summary",
+        "blocked_conflict_packets",
+        "unfinished_closure_count"
+      ],
+      "regime_multipliers": {
+        "high_friction": 1.3,
+        "transition_pressure": 1.1,
+        "entry_window": 0.95,
+        "crowded_or_chaotic": 1.1,
+        "sparse_evidence": 1.0
+      }
+    }
+  },
+  "meta_layers": {
+    "archetype_weighting_layer": {
+      "module_name": "Archetype Weighting Layer",
+      "criticality": "advisory",
+      "paper_mode_role": "Adjusts advisory emphasis by observable regime only."
+    },
+    "closure_deficit_monitor": {
+      "module_name": "Closure Deficit Monitor",
+      "criticality": "advisory",
+      "paper_mode_role": "Measures closure gaps from repo-visible logs only."
+    }
+  }
+}

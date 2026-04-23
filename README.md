@@ -78,6 +78,8 @@ python scripts\environment_fit_report.py --summary
 python scripts\complexity_ladder_controller.py --summary
 python scripts\governance_status.py --summary
 python scripts\governance_feedback_report.py --summary
+python scripts\closure_deficit_monitor.py --summary
+python scripts\archetype_profile.py --summary
 python scripts\artifact_coherence_check.py --summary
 python scripts\operator_control.py report --summary
 python scripts\paper_execution.py sync --summary

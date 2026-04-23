@@ -10,7 +10,10 @@ from typing import Any
 
 try:
     from scripts.action_engine import build_action_report
+    from scripts.archetype_profile import build_archetype_profile_report
     from scripts.blocker_cost_engine import build_blocker_cost_report
+    from scripts.closure_deficit_monitor import build_closure_deficit_report
+    from scripts.governance_feedback_report import build_governance_feedback_report
     from scripts.operator_control import build_operator_control_report
     from scripts.snapshot_logger import build_snapshot_row
     from scripts.runtime_common import (
@@ -34,7 +37,10 @@ try:
     from scripts.trend_engine import build_trend_report
 except ModuleNotFoundError:
     from action_engine import build_action_report
+    from archetype_profile import build_archetype_profile_report
     from blocker_cost_engine import build_blocker_cost_report
+    from closure_deficit_monitor import build_closure_deficit_report
+    from governance_feedback_report import build_governance_feedback_report
     from operator_control import build_operator_control_report
     from snapshot_logger import build_snapshot_row
     from runtime_common import (
@@ -1785,6 +1791,36 @@ def build_pipeline_health_report(
         test_status=test_status,
         write_runtime=effective_write_runtime,
     )
+    governance_feedback_report = build_governance_feedback_report(
+        runtime_state=state,
+        action_report=action_report,
+        write_runtime=effective_write_runtime,
+    )
+    closure_deficit_report = build_closure_deficit_report(
+        runtime_state=state,
+        action_report=action_report,
+        signal_refinery_report=signal_refinery_report,
+        packet_summary=packet_summary,
+        operator_control_report=operator_control_report,
+        write_runtime=effective_write_runtime,
+    )
+    archetype_profile_report = build_archetype_profile_report(
+        runtime_state=state,
+        action_report=action_report,
+        signal_refinery_report=signal_refinery_report,
+        friction_report=friction_report,
+        trend_report=trend_report,
+        governance_feedback_report=governance_feedback_report,
+        closure_deficit_report=closure_deficit_report,
+        operator_control_report=operator_control_report,
+        blocked_promotable_candidate_queue=blocked_promotable_candidate_queue,
+        gate_resolution_preview=gate_resolution_preview,
+        entry_review_packets=entry_review_packets,
+        transition_review_packets=transition_review_packets,
+        packet_summary=packet_summary,
+        open_positions_path=open_positions_path,
+        write_runtime=effective_write_runtime,
+    )
 
     report = {
         "health_generated_at": _health_timestamp(),
@@ -1805,6 +1841,9 @@ def build_pipeline_health_report(
         "scm": state["scm_review"],
         "policy": operator_policy,
         "friction": friction_report,
+        "governance_feedback": governance_feedback_report,
+        "closure_deficit": closure_deficit_report,
+        "archetype_profile": archetype_profile_report,
         "trends": trend_report,
         "signal_refinery": signal_refinery_report,
         "visibility_timing_context": signal_refinery_report.get(

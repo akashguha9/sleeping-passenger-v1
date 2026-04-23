@@ -397,6 +397,8 @@ GOVERNANCE_FEEDBACK_REPORT_PATH = RUNTIME_DIR / "governance_feedback_report.json
 BLOCKER_COST_REPORT_PATH = RUNTIME_DIR / "blocker_cost_report.json"
 TREND_REPORT_PATH = RUNTIME_DIR / "trend_report.json"
 HEALTH_REPORT_PATH = RUNTIME_DIR / "pipeline_health_report.json"
+ARCHETYPE_PROFILE_REPORT_PATH = RUNTIME_DIR / "archetype_profile_report.json"
+CLOSURE_DEFICIT_REPORT_PATH = RUNTIME_DIR / "closure_deficit_report.json"
 EXPERIENCE_MODE_REPORT_PATH = RUNTIME_DIR / "experience_mode_report.json"
 ENVIRONMENT_FIT_REPORT_PATH = RUNTIME_DIR / "environment_fit_report.json"
 COMPLEXITY_LADDER_CONTROLLER_PATH = RUNTIME_DIR / "complexity_ladder_controller.json"
@@ -435,6 +437,7 @@ EXPERIENCE_MODE_CONFIG_PATH = CONFIG_DIR / "experience_mode_config.json"
 ENVIRONMENT_FIT_CONFIG_PATH = CONFIG_DIR / "environment_fit_config.json"
 OPERATOR_CONTROL_CONFIG_PATH = CONFIG_DIR / "operator_control_config.json"
 STRUCTURAL_COVER_MAP_PATH = CONFIG_DIR / "structural_cover_map.json"
+ARCHETYPE_REGISTRY_PATH = CONFIG_DIR / "archetype_registry.json"
 
 OPEN_POSITION_REQUIRED_KEYS = {
     "ticker",
