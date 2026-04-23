@@ -41,6 +41,7 @@ def test_yahoo_market_marks_success_path_and_metadata(scratch_path: Path) -> Non
         runtime_state=runtime_state,
         fetcher=_success_fetcher,
         output_path=output_path,
+        fetched_at="2026-04-22T12:10:00+00:00",
     )
     payload = json.loads(output_path.read_text(encoding="utf-8"))
 

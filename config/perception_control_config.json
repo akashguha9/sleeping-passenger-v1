@@ -1,0 +1,43 @@
+{
+  "deprivation": {
+    "pass_threshold": 0.57,
+    "persistence_cap": 4,
+    "weights": {
+      "confidence": 0.24,
+      "persistence": 0.08,
+      "structural_relevance": 0.18,
+      "asset_attachment": 0.1,
+      "timing_usefulness": 0.14,
+      "readiness_compatibility": 0.14,
+      "source_quality": 0.06,
+      "blocker_interaction": 0.06
+    }
+  },
+  "injection": {
+    "resurfacing_threshold": 0.58,
+    "weights": {
+      "intensity": 0.22,
+      "validation": 0.18,
+      "visibility": 0.16,
+      "timing": 0.16,
+      "persistence": 0.08,
+      "source_quality": 0.08,
+      "phase_relevance": 0.12
+    }
+  },
+  "gravity": {
+    "survival_threshold": 0.64,
+    "timing_alignment_floor": 0.42,
+    "explainability_floor": 0.55,
+    "weights": {
+      "signal_lux": 0.32,
+      "explainability": 0.22,
+      "timing_alignment": 0.16,
+      "blocker_clearance": 0.14,
+      "structural_coherence": 0.16
+    }
+  },
+  "bias_proxy": {
+    "prior_dominance_gap_threshold": 0.08
+  }
+}

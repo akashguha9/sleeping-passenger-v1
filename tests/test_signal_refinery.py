@@ -3,6 +3,7 @@ import sys
 from pathlib import Path
 
 from scripts.run_diagnostics_pipeline import run_diagnostics_pipeline
+from scripts.perception_control import build_perception_control_report
 from scripts.runtime_common import build_runtime_state_from_scm_report_payload
 from scripts.signal_conversion_monitor import build_signal_conversion_report
 from scripts.signal_refinery import build_signal_refinery_report
@@ -80,6 +81,12 @@ def test_snapshot_row_carries_signal_refinery_metrics() -> None:
         trend_report=build_trend_report(log_path=SEED_SNAPSHOT_LOG, write_runtime=False),
         write_runtime=False,
     )
+    runtime_state["perception_control"] = build_perception_control_report(
+        runtime_state=runtime_state,
+        signal_refinery_report=runtime_state["signal_refinery"],
+        trend_report=build_trend_report(log_path=SEED_SNAPSHOT_LOG, write_runtime=False),
+        write_runtime=False,
+    )
 
     row = build_snapshot_row(runtime_state=runtime_state)
 
@@ -87,6 +94,9 @@ def test_snapshot_row_carries_signal_refinery_metrics() -> None:
     assert row["decision_grade_signal_count"] == 2
     assert row["thermal_state"] == "COOLING"
     assert row["rolling_expectancy_pct"] == -1.935
+    assert row["perception_control_state"] == "CONSTRAINED"
+    assert row["gravity_rejection_count"] == 2
+    assert row["dominant_spectrum_class"] == "structural"
 
 
 def test_signal_refinery_visibility_timing_summary_is_bounded() -> None:
@@ -114,6 +124,8 @@ def test_run_diagnostics_pipeline_includes_signal_refinery() -> None:
 
     assert payload["signal_refinery"]["validation_engine"]["validated_signal_count"] == 2
     assert payload["signal_refinery"]["launch_control"]["review_ready_count"] == 0
+    assert payload["perception_control"]["perception_control_state"] == "CONSTRAINED"
+    assert payload["perception_control"]["noise_suppression_ratio"] == 0.429
     assert payload["trends"]["validation_quality_trend"]["label"] in {
         "IMPROVING",
         "FLAT",

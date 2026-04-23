@@ -148,6 +148,24 @@ def _lookup_validation_row(
     return None
 
 
+def _lookup_perception_row(
+    ticker: str,
+    perception_control_report: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    if not isinstance(perception_control_report, dict):
+        return None
+    rows = perception_control_report.get("signals", [])
+    if not isinstance(rows, list):
+        return None
+    target = str(ticker or "").upper()
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        if str(row.get("ticker") or "").upper() == target:
+            return row
+    return None
+
+
 def _position_is_open(position: dict[str, Any] | None) -> bool:
     if not position:
         return False
@@ -173,6 +191,7 @@ def _select_action(
     policy: dict[str, Any],
     active_blockers: list[str],
     signal_refinery_report: dict[str, Any] | None = None,
+    perception_row: dict[str, Any] | None = None,
 ) -> tuple[str, list[str]]:
     reasons: list[str] = []
     signal_state = (signal_row or {}).get("signal_state", "UNKNOWN")
@@ -229,6 +248,11 @@ def _select_action(
         pre_entry_state == "CLEAN_ENTRY_ELIGIBLE"
         and policy.get("allow_new_risk", False)
     ):
+        if perception_row is not None and not bool(perception_row.get("gravity_pass", False)):
+            reasons.append(
+                "Perception control high-constraint evaluation did not survive review promotion"
+            )
+            return "MONITOR", reasons
         launch_row = _lookup_launch_row(ticker, signal_refinery_report)
         launch_state = str((launch_row or {}).get("launch_state") or "").upper()
         if launch_state == "BLOCKED_CROWDING":
@@ -261,6 +285,7 @@ def build_action_report(
     experience_mode_report_path: Path | None = None,
     complexity_ladder_controller_path: Path | None = None,
     signal_refinery_report: dict[str, Any] | None = None,
+    perception_control_report: dict[str, Any] | None = None,
     write_runtime: bool = False,
     simulate_gsce_clear: bool = False,
     simulate_realm_bis_clear: bool = False,
@@ -301,6 +326,7 @@ def build_action_report(
             COMPLEXITY_LADDER_CONTROLLER_PATH if use_default_advisory_artifacts else None
         )
     )
+    perception_control_report = perception_control_report or state.get("perception_control")
     experience_mode_advisory = _build_experience_mode_advisory(
         experience_mode_report=_load_optional_runtime_artifact(
             effective_experience_mode_path
@@ -332,6 +358,10 @@ def build_action_report(
             policy=policy,
             active_blockers=active_blockers,
             signal_refinery_report=signal_refinery_report,
+            perception_row=_lookup_perception_row(
+                ticker=ticker,
+                perception_control_report=perception_control_report,
+            ),
         )
         if action not in summary_by_action:
             summary_by_action[action] = 0
@@ -354,6 +384,25 @@ def build_action_report(
             "signal_state": (signal_row or {}).get("signal_state", "UNKNOWN"),
             "priority_score": round(priority_score, 3),
         }
+        perception_row = _lookup_perception_row(
+            ticker=ticker,
+            perception_control_report=perception_control_report,
+        )
+        if perception_row is not None:
+            action_row["perception_control_state"] = perception_row.get(
+                "perception_control_state",
+                "UNSCORED",
+            )
+            action_row["action_visibility_priority"] = perception_row.get(
+                "action_visibility_priority",
+                round(priority_score, 3),
+            )
+            action_row["signal_lux"] = perception_row.get("signal_lux")
+            action_row["gravity_pass"] = perception_row.get("gravity_pass")
+            action_row["exposure_timing_state"] = perception_row.get(
+                "exposure_timing_state",
+                "UNKNOWN",
+            )
         action_row["execution_governance"] = assess_action_governance(
             action_row=action_row,
             signal_row=signal_row,

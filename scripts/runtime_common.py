@@ -303,6 +303,7 @@ def build_truth_context(payload: dict[str, Any] | None = None) -> dict[str, Any]
 def compute_config_fingerprint(config_paths: list[Path] | None = None) -> str:
     paths = config_paths or [
         SIGNAL_REFINERY_CONFIG_PATH,
+        PERCEPTION_CONTROL_CONFIG_PATH,
         BLOCKER_WEIGHTS_PATH,
         EXECUTION_GOVERNANCE_CONFIG_PATH,
         EXPERIENCE_MODE_CONFIG_PATH,
@@ -425,6 +426,7 @@ EXPERIENCE_MODE_REPORT_PATH = RUNTIME_DIR / "experience_mode_report.json"
 ENVIRONMENT_FIT_REPORT_PATH = RUNTIME_DIR / "environment_fit_report.json"
 COMPLEXITY_LADDER_CONTROLLER_PATH = RUNTIME_DIR / "complexity_ladder_controller.json"
 SIGNAL_REFINERY_REPORT_PATH = RUNTIME_DIR / "signal_refinery_report.json"
+PERCEPTION_CONTROL_REPORT_PATH = RUNTIME_DIR / "perception_control_report.json"
 SIGNAL_GATE_SUMMARY_PATH = RUNTIME_DIR / "signal_gate_summary.json"
 OPERATOR_STATE_PATH = RUNTIME_DIR / "operator_state.json"
 ACTIVE_WORK_BLOCK_PATH = RUNTIME_DIR / "active_work_block.json"
@@ -461,6 +463,7 @@ OPERATOR_BLOCK_EVENTS_PATH = LOG_DIR / "operator_block_events.jsonl"
 CONFIG_DIR = REPO_ROOT / "config"
 BLOCKER_WEIGHTS_PATH = CONFIG_DIR / "blocker_weights.json"
 SIGNAL_REFINERY_CONFIG_PATH = CONFIG_DIR / "signal_refinery_config.json"
+PERCEPTION_CONTROL_CONFIG_PATH = CONFIG_DIR / "perception_control_config.json"
 EXECUTION_GOVERNANCE_CONFIG_PATH = CONFIG_DIR / "execution_governance_config.json"
 EXPERIENCE_MODE_CONFIG_PATH = CONFIG_DIR / "experience_mode_config.json"
 ENVIRONMENT_FIT_CONFIG_PATH = CONFIG_DIR / "environment_fit_config.json"
@@ -1142,6 +1145,7 @@ def _load_state_from_runtime_files() -> dict[str, Any]:
         "scm_review": normalize_scm_review(scm_payload, active_blockers=active_blockers),
         "simulation_context": scm_payload.get("simulation_context", {}),
         "signal_refinery": load_json_file(SIGNAL_REFINERY_REPORT_PATH, default={}) or {},
+        "perception_control": load_json_file(PERCEPTION_CONTROL_REPORT_PATH, default={}) or {},
         "note": _text(
             scm_payload.get("note"), "Loaded from normalized runtime files."
         ),
@@ -1201,6 +1205,7 @@ def build_runtime_state_from_scm_report_payload(scm_report: dict[str, Any]) -> d
         "scm_review": scm_report.get("scm_review", {}),
         "simulation_context": scm_report.get("simulation_context", {}),
         "signal_refinery": scm_report.get("signal_refinery", {}) or {},
+        "perception_control": scm_report.get("perception_control", {}) or {},
         "note": scm_report.get("note", ""),
     }
 

@@ -335,11 +335,13 @@ def write_external_market_marks_report(
     runtime_state: dict[str, Any] | None = None,
     fetcher: Callable[[str], dict[str, Any]] | None = None,
     output_path: Path | None = None,
+    fetched_at: str | None = None,
 ) -> dict[str, Any]:
     payload = build_external_market_marks_report(
         tickers=tickers,
         runtime_state=runtime_state,
         fetcher=fetcher,
+        fetched_at=fetched_at,
     )
     write_json_atomic(output_path or EXTERNAL_MARKS_PATH, payload, stamp=False)
     return payload

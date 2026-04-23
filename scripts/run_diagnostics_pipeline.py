@@ -17,6 +17,7 @@ try:
         build_runtime_state_from_scm_report,
         format_pipeline_health_summary,
     )
+    from scripts.perception_control import build_perception_control_report
     from scripts.runtime_common import (
         SNAPSHOT_LOG_PATH,
         persist_current_runtime_state,
@@ -40,6 +41,7 @@ except ModuleNotFoundError:
         build_runtime_state_from_scm_report,
         format_pipeline_health_summary,
     )
+    from perception_control import build_perception_control_report
     from runtime_common import (
         SNAPSHOT_LOG_PATH,
         persist_current_runtime_state,
@@ -105,12 +107,13 @@ def run_diagnostics_pipeline(
         write_runtime=False,
     )
     runtime_state["signal_refinery"] = signal_refinery_report
-
-    action_report = build_action_report(
+    perception_control_report = build_perception_control_report(
         runtime_state=runtime_state,
         signal_refinery_report=signal_refinery_report,
-        write_runtime=effective_write_runtime,
+        trend_report=pre_snapshot_trend_report,
+        write_runtime=False,
     )
+    runtime_state["perception_control"] = perception_control_report
     friction_report = build_blocker_cost_report(
         runtime_state=runtime_state,
         write_runtime=effective_write_runtime,
@@ -139,6 +142,19 @@ def run_diagnostics_pipeline(
         write_runtime=effective_write_runtime,
     )
     runtime_state["signal_refinery"] = final_signal_refinery_report
+    final_perception_control_report = build_perception_control_report(
+        runtime_state=runtime_state,
+        signal_refinery_report=final_signal_refinery_report,
+        trend_report=trend_report,
+        write_runtime=effective_write_runtime,
+    )
+    runtime_state["perception_control"] = final_perception_control_report
+    action_report = build_action_report(
+        runtime_state=runtime_state,
+        signal_refinery_report=final_signal_refinery_report,
+        perception_control_report=final_perception_control_report,
+        write_runtime=effective_write_runtime,
+    )
     report = build_pipeline_health_report(
         include_tests=include_tests,
         write_runtime=effective_write_runtime,
@@ -147,6 +163,7 @@ def run_diagnostics_pipeline(
         friction_report=friction_report,
         trend_report=trend_report,
         signal_refinery_report=final_signal_refinery_report,
+        perception_control_report=final_perception_control_report,
         external_data_report=external_data_report,
         latest_snapshot_timestamp=latest_snapshot_timestamp,
         simulate_gsce_clear=simulate_gsce_clear,

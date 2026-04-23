@@ -68,6 +68,7 @@ def _write_chronology_from_snapshot(row: dict, db_path=None) -> None:
             "scenario": row.get("scenario"),
             "scm_state": row.get("scm_state"),
             "policy_state": row.get("policy_state"),
+            "perception_control_state": row.get("perception_control_state"),
             "active_blockers": row.get("blockers_active"),
             "blocked_promotable_count": row.get(
                 "blocked_promotable_candidate_count"
@@ -283,6 +284,9 @@ def build_snapshot_row(
     timing_kpi = (
         refinery.get("time_to_valid_signal_kpi", {}) if isinstance(refinery, dict) else {}
     )
+    perception = state.get("perception_control", {}) if isinstance(state, dict) else {}
+    if not isinstance(perception, dict):
+        perception = {}
 
     return {
         "timestamp": _unique_snapshot_timestamp(snapshot_target),
@@ -323,6 +327,13 @@ def build_snapshot_row(
         "rolling_expectancy_pct": repeatability_tracker.get("rolling_expectancy_pct", 0.0),
         "false_positive_rate": repeatability_tracker.get("false_positive_rate", 0.0),
         "time_to_valid_signal_hours": timing_kpi.get("median_time_to_valid_signal_hours"),
+        "perception_control_state": perception.get("perception_control_state", "UNKNOWN"),
+        "noise_suppression_ratio": perception.get("noise_suppression_ratio"),
+        "signal_survival_rate": perception.get("signal_survival_rate"),
+        "average_signal_lux": perception.get("average_signal_lux"),
+        "gravity_rejection_count": perception.get("gravity_rejection_count", 0),
+        "resurfacing_candidate_count": perception.get("resurfacing_candidate_count", 0),
+        "dominant_spectrum_class": perception.get("dominant_spectrum_class", "unknown"),
         "transition_state_rows": transition_state_rows,
     }
 

@@ -938,8 +938,11 @@ def test_pipeline_health_report_summary_cli() -> None:
         "scm_state=LOW_CONVERSION",
         "policy_state=RESTRICTED",
         "friction_band=HIGH_FRICTION",
+        "perception_control_state=CONSTRAINED",
         "what_should_i_do_next=EXIT_NOW: UNG, FCG | CLEAR_GSCE_PHASE_LOCK_FOR: RTX, ZIM | DO NOT ADD NEW RISK",
         "scorecard=logging_quality=10/10, schema_reliability=8/10, end_to_end_wiring=10/10, self_correction_maturity=10/10, execution_readiness=3/10",
+        "perception_metrics=noise_suppression_ratio=0.429, signal_survival_rate=0.5, average_signal_lux=0.661",
+        "perception_advisory=AMPLIFICATION WITHOUT SURVIVAL - injected signals failing gravity",
     ]
 
 

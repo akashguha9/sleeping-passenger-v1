@@ -62,6 +62,17 @@ Mode honesty is preserved:
 - Closure is evaluated only from logged evidence. In the current repo default, any one of `output_exists`, `validation_exists`, or `report_exists` is enough, or the operator can explicitly mark a manual close.
 - Phase scores are transparent proxy blends, not psychological truth claims.
 
+## Perception Control Layer
+
+The repo now includes a perception-control layer between signal refinement context and downstream action selection.
+
+- `runtime/perception_control_report.json`: stamped runtime artifact for deprivation, injection, and high-constraint evaluation over current signal rows.
+- `config/perception_control_config.json`: explicit thresholds and weights for suppression, surfacing, and survival checks.
+- Deprivation suppresses low-value exposure before downstream ranking.
+- Injection computes timing-aware `signal_lux`, `resurfacing_priority`, and `spectrum_class` so visibility is deliberate rather than generic.
+- High-constraint evaluation applies structured promotion pressure before a candidate is surfaced as a stronger downstream review input.
+- The layer is advisory and paper-safe. It does not imply live execution or autonomous trading authority.
+
 ## Repo Layout
 
 - `scripts/`: runtime logic, diagnostics, adapters, and reports
@@ -79,6 +90,7 @@ python scripts\pipeline_health_report.py --summary --no-write
 python scripts\experience_mode_report.py --summary
 python scripts\environment_fit_report.py --summary
 python scripts\complexity_ladder_controller.py --summary
+python scripts\perception_control.py --summary
 python scripts\governance_status.py --summary
 python scripts\governance_feedback_report.py --summary
 python scripts\closure_deficit_monitor.py --summary

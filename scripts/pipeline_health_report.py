@@ -16,6 +16,7 @@ try:
     from scripts.external_data_runtime_sync import apply_external_observation_report
     from scripts.governance_feedback_report import build_governance_feedback_report
     from scripts.operator_control import build_operator_control_report
+    from scripts.perception_control import build_perception_control_report
     from scripts.snapshot_logger import build_snapshot_row
     from scripts.runtime_common import (
         COMPLEXITY_LADDER_CONTROLLER_PATH,
@@ -45,6 +46,7 @@ except ModuleNotFoundError:
     from external_data_runtime_sync import apply_external_observation_report
     from governance_feedback_report import build_governance_feedback_report
     from operator_control import build_operator_control_report
+    from perception_control import build_perception_control_report
     from snapshot_logger import build_snapshot_row
     from runtime_common import (
         COMPLEXITY_LADDER_CONTROLLER_PATH,
@@ -1022,8 +1024,22 @@ def build_gate_resolution_preview(
         else:
             scenario_scm_report = build_signal_conversion_report(**scenario_flags)
             scenario_state = build_runtime_state_from_scm_report(scenario_scm_report)
+            scenario_signal_refinery_report = build_signal_refinery_report(
+                runtime_state=scenario_state,
+                open_positions_path=open_positions_path,
+                write_runtime=False,
+            )
+            scenario_state["signal_refinery"] = scenario_signal_refinery_report
+            scenario_perception_control_report = build_perception_control_report(
+                runtime_state=scenario_state,
+                signal_refinery_report=scenario_signal_refinery_report,
+                write_runtime=False,
+            )
+            scenario_state["perception_control"] = scenario_perception_control_report
             scenario_action_report = build_action_report(
                 runtime_state=scenario_state,
+                signal_refinery_report=scenario_signal_refinery_report,
+                perception_control_report=scenario_perception_control_report,
                 write_runtime=False,
                 open_positions_path=open_positions_path,
             )
@@ -1676,6 +1692,7 @@ def build_pipeline_health_report(
     friction_report: dict[str, Any] | None = None,
     trend_report: dict[str, Any] | None = None,
     signal_refinery_report: dict[str, Any] | None = None,
+    perception_control_report: dict[str, Any] | None = None,
     external_data_report: dict[str, Any] | None = None,
     grok_xai_report: dict[str, Any] | None = None,
     latest_snapshot_timestamp: str | None = None,
@@ -1725,10 +1742,18 @@ def build_pipeline_health_report(
         write_runtime=effective_write_runtime,
     )
     state["signal_refinery"] = signal_refinery_report
+    perception_control_report = perception_control_report or build_perception_control_report(
+        runtime_state=state,
+        signal_refinery_report=signal_refinery_report,
+        trend_report=trend_report,
+        write_runtime=effective_write_runtime,
+    )
+    state["perception_control"] = perception_control_report
     action_report = action_report or build_action_report(
         runtime_state=state,
         open_positions_path=open_positions_path,
         signal_refinery_report=signal_refinery_report,
+        perception_control_report=perception_control_report,
         write_runtime=effective_write_runtime,
     )
     test_status = (
@@ -1939,6 +1964,23 @@ def build_pipeline_health_report(
         "archetype_profile": archetype_profile_report,
         "trends": trend_report,
         "signal_refinery": signal_refinery_report,
+        "perception_control": perception_control_report,
+        "perception_control_state": perception_control_report.get(
+            "perception_control_state",
+            "UNKNOWN",
+        ),
+        "gravity_pressure_state": perception_control_report.get(
+            "gravity_pressure_state",
+            "UNKNOWN",
+        ),
+        "resurfacing_load_state": perception_control_report.get(
+            "resurfacing_load_state",
+            "UNKNOWN",
+        ),
+        "dominant_spectrum_class": perception_control_report.get(
+            "dominant_spectrum_class",
+            "unknown",
+        ),
         "visibility_timing_context": signal_refinery_report.get(
             "visibility_timing_context",
             {},
@@ -2030,6 +2072,7 @@ def format_pipeline_health_summary(report: dict[str, Any]) -> str:
             f"scm_state={report['scm']['scm_state']}",
             f"policy_state={report['policy']['policy_state']}",
             f"friction_band={report['friction']['friction_band']}",
+            f"perception_control_state={report.get('perception_control_state', 'UNKNOWN')}",
             f"what_should_i_do_next={report['what_should_i_do_next']}",
             (
                 "scorecard="
@@ -2041,6 +2084,17 @@ def format_pipeline_health_summary(report: dict[str, Any]) -> str:
             ),
         ]
     )
+    perception_control = report.get("perception_control", {})
+    if isinstance(perception_control, dict):
+        lines.append(
+            "perception_metrics="
+            f"noise_suppression_ratio={perception_control.get('noise_suppression_ratio')}, "
+            f"signal_survival_rate={perception_control.get('signal_survival_rate')}, "
+            f"average_signal_lux={perception_control.get('average_signal_lux')}"
+        )
+        advisories = perception_control.get("advisories", [])
+        if isinstance(advisories, list) and advisories:
+            lines.append(f"perception_advisory={advisories[0]}")
     entry_review_names = report.get("packet_summary", {}).get("entry_review_candidate_names", [])
     transition_review_names = report.get("packet_summary", {}).get(
         "transition_review_candidate_names",
