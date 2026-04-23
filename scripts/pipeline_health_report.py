@@ -790,7 +790,7 @@ def derive_blockage_severity(
     return "LOW"
 
 
-def derive_operator_state(
+def derive_operator_pressure_state(
     system_readiness_state: str,
     queue_pressure_state: str,
     readiness_breakdown: dict[str, Any],
@@ -1742,7 +1742,7 @@ def build_pipeline_health_report(
         readiness_context=readiness_context,
         active_blockers=state["active_blockers"],
     )
-    operator_state = derive_operator_state(
+    operator_pressure_state = derive_operator_pressure_state(
         system_readiness_state=system_readiness_state,
         queue_pressure_state=queue_pressure_state,
         readiness_breakdown=execution_readiness_breakdown,
@@ -1816,7 +1816,10 @@ def build_pipeline_health_report(
         "blocked_promotable_candidate_queue": blocked_promotable_candidate_queue,
         "queue_pressure_state": queue_pressure_state,
         "blockage_severity": blockage_severity,
-        "operator_state": operator_state,
+        "operator_pressure_state": operator_pressure_state,
+        "operator_pressure_note": (
+            "This is a derived blockage/readiness pressure label, not an inferred psychological state."
+        ),
         "execution_readiness_breakdown": execution_readiness_breakdown,
         "gate_resolution_preview": gate_resolution_preview,
         "gsce_clear_transition_preview": gsce_clear_transition_preview,

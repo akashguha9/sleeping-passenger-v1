@@ -11,41 +11,18 @@
       "CLEAN_READY_PENDING_TRIGGER",
       "CLEAN_ENTRY_ELIGIBLE"
     ],
-    "allow_promotable_watchlist": true,
+    "allow_promotable_watchlist": false,
     "allow_standard_watchlist": false,
     "allow_chaos_active_signals": false
   },
   "closure_thresholds": {
-    "default": {
-      "requires_output": true,
-      "requires_validation": false,
-      "requires_report": false,
-      "allow_manual_close": true
-    },
-    "coding": {
-      "requires_output": true,
-      "requires_validation": true,
-      "requires_report": false,
-      "allow_manual_close": true
-    },
-    "feature": {
-      "requires_output": true,
-      "requires_validation": true,
-      "requires_report": false,
-      "allow_manual_close": true
-    },
-    "research": {
-      "requires_output": true,
-      "requires_validation": false,
-      "requires_report": true,
-      "allow_manual_close": true
-    },
-    "reconciliation": {
-      "requires_output": true,
-      "requires_validation": false,
-      "requires_report": true,
-      "allow_manual_close": true
-    }
+    "accepted_evidence": [
+      "output_exists",
+      "validation_exists",
+      "report_exists"
+    ],
+    "minimum_evidence_count": 1,
+    "allow_manual_close": true
   },
   "phase_balance": {
     "unfinished_closure_burden_cap": 5,

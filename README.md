@@ -50,12 +50,13 @@ The repo now includes an additive operator-control slice designed for truthful m
 - `runtime/active_work_block.json` and `logs/operator_block_events.jsonl`: manual/event-based selection, execution, context-switch, and closure logging.
 - `runtime/operator_phase_balance.json` and `runtime/operator_phase_report.json`: transparent proxy scores for Phase 1/2/3 using logged drift, closure, gate behavior, tests, and artifact coverage.
 - `config/structural_cover_map.json`: explicit mapping from exposed operator asymmetries to structural controls.
+- Operator-control reports expose `manual_operator_state`; the health report keeps its separate derived `operator_pressure_state` label clearly marked as non-psychological.
 
 Mode honesty is preserved:
 
 - The operator-control layer is manual or event-driven unless an explicit runtime source exists.
 - Timeliness is derived only from repo-visible signal identifiers when available.
-- Closure is evaluated only from logged evidence such as `output_exists`, `validation_exists`, and `report_exists`.
+- Closure is evaluated only from logged evidence. In the current repo default, any one of `output_exists`, `validation_exists`, or `report_exists` is enough, or the operator can explicitly mark a manual close.
 - Phase scores are transparent proxy blends, not psychological truth claims.
 
 ## Repo Layout
@@ -150,7 +151,7 @@ python scripts\operator_control.py state --active-objective "ship operator contr
 python scripts\operator_control.py start-block --objective "ship operator control MVP" --success-metric "tests green" --time-boundary "90m" --active-task "wire gate" --non-goal "rewrite paper flow" --block-type coding
 python scripts\operator_control.py log-event --event-type execution_started
 python scripts\operator_control.py log-event --event-type context_switch --reason "checked adjacent module before closing"
-python scripts\operator_control.py close-block --output-exists --validation-exists
+python scripts\operator_control.py close-block --output-exists
 python scripts\operator_control.py report --summary
 ```
 

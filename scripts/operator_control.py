@@ -57,41 +57,18 @@ DEFAULT_CONFIG: dict[str, Any] = {
             "CLEAN_READY_PENDING_TRIGGER",
             "CLEAN_ENTRY_ELIGIBLE",
         ],
-        "allow_promotable_watchlist": True,
+        "allow_promotable_watchlist": False,
         "allow_standard_watchlist": False,
         "allow_chaos_active_signals": False,
     },
     "closure_thresholds": {
-        "default": {
-            "requires_output": True,
-            "requires_validation": False,
-            "requires_report": False,
-            "allow_manual_close": True,
-        },
-        "coding": {
-            "requires_output": True,
-            "requires_validation": True,
-            "requires_report": False,
-            "allow_manual_close": True,
-        },
-        "feature": {
-            "requires_output": True,
-            "requires_validation": True,
-            "requires_report": False,
-            "allow_manual_close": True,
-        },
-        "research": {
-            "requires_output": True,
-            "requires_validation": False,
-            "requires_report": True,
-            "allow_manual_close": True,
-        },
-        "reconciliation": {
-            "requires_output": True,
-            "requires_validation": False,
-            "requires_report": True,
-            "allow_manual_close": True,
-        },
+        "accepted_evidence": [
+            "output_exists",
+            "validation_exists",
+            "report_exists",
+        ],
+        "minimum_evidence_count": 1,
+        "allow_manual_close": True,
     },
     "phase_balance": {
         "unfinished_closure_burden_cap": 5,
@@ -103,6 +80,45 @@ DEFAULT_CONFIG: dict[str, Any] = {
         ],
     },
 }
+
+_MANUAL_OPERATOR_STATE_FIELDS = (
+    "active_objective",
+    "active_task",
+    "active_block_id",
+    "operator_mode",
+    "context_switch_count",
+    "unfinished_closures",
+    "baseline_score",
+    "current_score",
+    "peak_score",
+    "recent_scores",
+    "instability_reasons",
+    "notes",
+)
+
+_ACTIVE_WORK_BLOCK_FIELDS = (
+    "block_id",
+    "block_type",
+    "objective",
+    "active_task",
+    "success_metric",
+    "time_boundary",
+    "non_goals",
+    "operator_mode",
+    "status",
+    "context_switch_count",
+    "reopened_decision_count",
+    "selection_started_at",
+    "execution_started_at",
+    "closed_at",
+    "closure_result",
+)
+
+_VALID_CLOSURE_EVIDENCE_FIELDS = (
+    "output_exists",
+    "validation_exists",
+    "report_exists",
+)
 
 
 def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
@@ -173,6 +189,182 @@ def _average(values: list[float]) -> float | None:
     return float(mean(values)) if values else None
 
 
+def _unique_preserve_order(values: list[str]) -> list[str]:
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for value in values:
+        text = _text(value)
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        ordered.append(text)
+    return ordered
+
+
+def _normalize_string_list(values: Any) -> list[str]:
+    if not isinstance(values, list):
+        return []
+    return [item for item in (_text(value) for value in values) if item]
+
+
+def _has_meaningful_value(value: Any) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, bool):
+        return True
+    if isinstance(value, (int, float)):
+        return True
+    if isinstance(value, str):
+        return bool(value.strip())
+    if isinstance(value, list):
+        return any(_has_meaningful_value(item) for item in value)
+    if isinstance(value, dict):
+        return any(_has_meaningful_value(item) for item in value.values())
+    return bool(value)
+
+
+def _has_any_fields(payload: dict[str, Any], field_names: tuple[str, ...]) -> bool:
+    return any(_has_meaningful_value(payload.get(field_name)) for field_name in field_names)
+
+
+def _signal_row_key(row: dict[str, Any]) -> str:
+    signal_id = _text(row.get("signal_id"))
+    if signal_id:
+        return f"signal_id:{signal_id}"
+    return "|".join(
+        [
+            f"ticker:{_text(row.get('ticker')).upper()}",
+            f"status:{_text(row.get('status'), 'UNKNOWN').upper()}",
+            f"watchlist_tier:{_text(row.get('watchlist_tier'), 'NONE').upper()}",
+            f"pre_entry_state:{_text(row.get('pre_entry_state'), 'NONE').upper()}",
+            f"ce_score:{_text(_safe_round(_coerce_float(row.get('ce_score')), 3))}",
+        ]
+    )
+
+
+def _resolve_closure_rule(
+    closure_config: dict[str, Any] | None,
+    block_type: str,
+) -> dict[str, Any]:
+    active_config = closure_config if isinstance(closure_config, dict) else {}
+
+    # Current repo shape: one global evidence threshold across block types.
+    if "accepted_evidence" in active_config:
+        accepted_evidence = [
+            field
+            for field in _normalize_string_list(active_config.get("accepted_evidence"))
+            if field in _VALID_CLOSURE_EVIDENCE_FIELDS
+        ]
+        if not accepted_evidence:
+            accepted_evidence = list(_VALID_CLOSURE_EVIDENCE_FIELDS)
+        return {
+            "accepted_evidence": accepted_evidence,
+            "minimum_evidence_count": max(
+                1,
+                _coerce_int(active_config.get("minimum_evidence_count"), 1),
+            ),
+            "allow_manual_close": _coerce_bool(
+                active_config.get("allow_manual_close"),
+                True,
+            ),
+            "rule_source": "global_closure_threshold",
+        }
+
+    # Backward compatibility for earlier per-block AND-style rules.
+    legacy_rule = active_config.get(block_type) or active_config.get("default") or {}
+    accepted_evidence: list[str] = []
+    if _coerce_bool(legacy_rule.get("requires_output"), True):
+        accepted_evidence.append("output_exists")
+    if _coerce_bool(legacy_rule.get("requires_validation"), False):
+        accepted_evidence.append("validation_exists")
+    if _coerce_bool(legacy_rule.get("requires_report"), False):
+        accepted_evidence.append("report_exists")
+    if not accepted_evidence:
+        accepted_evidence = list(_VALID_CLOSURE_EVIDENCE_FIELDS)
+    return {
+        "accepted_evidence": accepted_evidence,
+        "minimum_evidence_count": len(accepted_evidence),
+        "allow_manual_close": _coerce_bool(legacy_rule.get("allow_manual_close"), True),
+        "rule_source": "legacy_block_rule",
+    }
+
+
+def _normalize_operator_state_payload(
+    payload: dict[str, Any] | None,
+    target: Path,
+) -> dict[str, Any]:
+    data = payload if isinstance(payload, dict) else {}
+    recent_scores = data.get("recent_scores", [])
+    if not isinstance(recent_scores, list):
+        recent_scores = []
+    normalized_recent_scores = [
+        float(value)
+        for value in (_coerce_float(item) for item in recent_scores)
+        if value is not None
+    ]
+
+    instability_reasons = data.get("instability_reasons", [])
+    if not isinstance(instability_reasons, list):
+        instability_reasons = []
+
+    note_value = data.get("notes")
+    if isinstance(note_value, list):
+        notes = [str(item).strip() for item in note_value if str(item).strip()]
+    elif _text(note_value):
+        notes = [_text(note_value)]
+    else:
+        notes = []
+
+    configured = _has_any_fields(data, _MANUAL_OPERATOR_STATE_FIELDS)
+    return {
+        "configured": configured,
+        "state_source": "manual_runtime_file" if configured else "manual_optional_absent",
+        "active_objective": _text(data.get("active_objective")),
+        "active_task": _text(data.get("active_task")),
+        "active_block_id": _text(data.get("active_block_id")),
+        "operator_mode": _text(data.get("operator_mode"), "unspecified").lower(),
+        "context_switch_count": _coerce_int(data.get("context_switch_count"), 0),
+        "unfinished_closures": _coerce_int(data.get("unfinished_closures"), 0),
+        "baseline_score": _coerce_float(data.get("baseline_score")),
+        "current_score": _coerce_float(data.get("current_score")),
+        "peak_score": _coerce_float(data.get("peak_score")),
+        "recent_scores": normalized_recent_scores,
+        "instability_reasons": [str(item).strip() for item in instability_reasons if str(item).strip()],
+        "notes": notes,
+        "path": repo_relative(target),
+    }
+
+
+def _normalize_active_work_block_payload(
+    payload: dict[str, Any] | None,
+    target: Path,
+) -> dict[str, Any]:
+    data = payload if isinstance(payload, dict) else {}
+    non_goals = data.get("non_goals", [])
+    if not isinstance(non_goals, list):
+        non_goals = []
+    configured = _has_any_fields(data, _ACTIVE_WORK_BLOCK_FIELDS)
+    return {
+        "configured": configured,
+        "path": repo_relative(target),
+        "block_id": _text(data.get("block_id")),
+        "block_type": _text(data.get("block_type"), "default").lower(),
+        "objective": _text(data.get("objective")),
+        "active_task": _text(data.get("active_task")),
+        "success_metric": _text(data.get("success_metric")),
+        "time_boundary": _text(data.get("time_boundary")),
+        "non_goals": [str(item).strip() for item in non_goals if str(item).strip()],
+        "operator_mode": _text(data.get("operator_mode"), "unspecified").lower(),
+        "status": _text(data.get("status"), "inactive").lower(),
+        "context_switch_count": _coerce_int(data.get("context_switch_count"), 0),
+        "reopened_decision_count": _coerce_int(data.get("reopened_decision_count"), 0),
+        "selection_started_at": _text(data.get("selection_started_at")),
+        "execution_started_at": _text(data.get("execution_started_at")),
+        "closed_at": _text(data.get("closed_at")),
+        "closure_result": data.get("closure_result", {}),
+    }
+
+
 def _parse_iso_datetime(value: Any) -> datetime | None:
     text = _text(value)
     if not text:
@@ -218,48 +410,7 @@ def _load_jsonl_rows(path: Path) -> list[dict[str, Any]]:
 def load_operator_state(path: Path | None = None) -> dict[str, Any]:
     target = path or OPERATOR_STATE_PATH
     payload = load_json_file(target, default={})
-    if not isinstance(payload, dict):
-        payload = {}
-
-    recent_scores = payload.get("recent_scores", [])
-    if not isinstance(recent_scores, list):
-        recent_scores = []
-    normalized_recent_scores = [
-        float(value)
-        for value in (_coerce_float(item) for item in recent_scores)
-        if value is not None
-    ]
-
-    instability_reasons = payload.get("instability_reasons", [])
-    if not isinstance(instability_reasons, list):
-        instability_reasons = []
-
-    note_value = payload.get("notes")
-    if isinstance(note_value, list):
-        notes = [str(item).strip() for item in note_value if str(item).strip()]
-    elif _text(note_value):
-        notes = [_text(note_value)]
-    else:
-        notes = []
-
-    configured = bool(payload)
-    return {
-        "configured": configured,
-        "state_source": "manual_runtime_file" if configured else "manual_optional_absent",
-        "active_objective": _text(payload.get("active_objective")),
-        "active_task": _text(payload.get("active_task")),
-        "active_block_id": _text(payload.get("active_block_id")),
-        "operator_mode": _text(payload.get("operator_mode"), "UNSPECIFIED").lower(),
-        "context_switch_count": _coerce_int(payload.get("context_switch_count"), 0),
-        "unfinished_closures": _coerce_int(payload.get("unfinished_closures"), 0),
-        "baseline_score": _coerce_float(payload.get("baseline_score")),
-        "current_score": _coerce_float(payload.get("current_score")),
-        "peak_score": _coerce_float(payload.get("peak_score")),
-        "recent_scores": normalized_recent_scores,
-        "instability_reasons": [str(item).strip() for item in instability_reasons if str(item).strip()],
-        "notes": notes,
-        "path": repo_relative(target),
-    }
+    return _normalize_operator_state_payload(payload, target)
 
 
 def record_operator_state(
@@ -307,13 +458,18 @@ def record_operator_state(
     if notes is not None:
         payload["notes"] = [str(item).strip() for item in notes if str(item).strip()]
 
+    normalized_payload = _normalize_operator_state_payload(payload, target)
+    if not normalized_payload["configured"]:
+        return normalized_payload
+
     payload["artifact_kind"] = "operator_state"
     payload["mode_honesty"] = "manual_optional_input"
     payload["updated_at"] = utc_timestamp()
 
     if write_runtime:
         write_json_atomic(target, payload)
-    return load_operator_state(target)
+        return load_operator_state(target)
+    return normalized_payload
 
 
 def summarize_baseline_vs_peak(operator_state: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -385,15 +541,18 @@ def evaluate_signal_admission(
     watchlist_tier = _text(row.get("watchlist_tier"), "NONE").upper()
     pre_entry_state = _text(row.get("pre_entry_state"), "NONE").upper()
     ce_score = _coerce_float(row.get("ce_score"))
-    ce_score = 0.0 if ce_score is None else ce_score
 
     relevance_floor = float(gate_config.get("relevance_floor", 0.55))
-    relevance_passed = ce_score >= relevance_floor
-    relevance_reason = (
-        "ce_score_meets_floor"
-        if relevance_passed
-        else f"ce_score_below_floor_{ce_score:.3f}<{relevance_floor:.3f}"
-    )
+    if ce_score is None:
+        relevance_passed = False
+        relevance_reason = "ce_score_unavailable"
+    else:
+        relevance_passed = ce_score >= relevance_floor
+        relevance_reason = (
+            "ce_score_meets_floor"
+            if relevance_passed
+            else f"ce_score_below_floor_{ce_score:.3f}<{relevance_floor:.3f}"
+        )
 
     actionable_statuses = {
         _text(item).upper() for item in gate_config.get("actionable_statuses", [])
@@ -411,23 +570,23 @@ def evaluate_signal_admission(
         actionability_passed = True
         actionability_source = f"pre_entry_state:{pre_entry_state}"
     elif (
-        _coerce_bool(gate_config.get("allow_promotable_watchlist"), True)
+        _coerce_bool(gate_config.get("allow_promotable_watchlist"), False)
         and watchlist_tier == "PROMOTABLE"
     ):
         actionability_passed = True
-        actionability_source = "watchlist_tier:PROMOTABLE"
+        actionability_source = "watchlist_tier_shortcut:PROMOTABLE"
     elif (
         _coerce_bool(gate_config.get("allow_standard_watchlist"), False)
         and watchlist_tier == "STANDARD"
     ):
         actionability_passed = True
-        actionability_source = "watchlist_tier:STANDARD"
+        actionability_source = "watchlist_tier_shortcut:STANDARD"
     elif (
         _coerce_bool(gate_config.get("allow_chaos_active_signals"), False)
         and status == "EXECUTED_CHAOS"
     ):
         actionability_passed = True
-        actionability_source = "status:EXECUTED_CHAOS"
+        actionability_source = "status_shortcut:EXECUTED_CHAOS"
 
     actionability_reason = (
         f"actionable_via_{actionability_source}"
@@ -494,6 +653,7 @@ def evaluate_signal_admission(
     )
 
     return {
+        "row_key": _signal_row_key(row),
         "signal_id": signal_id,
         "ticker": ticker,
         "source": source,
@@ -521,15 +681,24 @@ def filter_admitted_signal_rows(
     rows: list[dict[str, Any]],
     gate_report: dict[str, Any],
 ) -> list[dict[str, Any]]:
+    admitted_row_keys = set(gate_report.get("admitted_row_keys", []))
     admitted_signal_ids = set(gate_report.get("admitted_signal_ids", []))
     admitted_tickers = set(gate_report.get("admitted_tickers", []))
     admitted_rows: list[dict[str, Any]] = []
     for row in rows:
         if not isinstance(row, dict):
             continue
+        row_key = _signal_row_key(row)
         signal_id = _text(row.get("signal_id"))
         ticker = _text(row.get("ticker")).upper()
-        if signal_id in admitted_signal_ids or ticker in admitted_tickers:
+        if admitted_row_keys:
+            if row_key in admitted_row_keys:
+                admitted_rows.append(row)
+            continue
+        if signal_id and signal_id in admitted_signal_ids:
+            admitted_rows.append(row)
+            continue
+        if not signal_id and ticker in admitted_tickers:
             admitted_rows.append(row)
     return admitted_rows
 
@@ -545,7 +714,7 @@ def _persist_signal_kill_log(
     existing_keys = {
         (
             _text(row.get("run_id")),
-            _text(row.get("signal_id")),
+            _text(row.get("row_key")),
             "|".join(sorted(_text(item) for item in row.get("rejection_dimensions", []))),
         )
         for row in existing_rows
@@ -559,7 +728,7 @@ def _persist_signal_kill_log(
         ]
         dedupe_key = (
             current_run_id,
-            _text(row.get("signal_id")),
+            _text(row.get("row_key")),
             "|".join(sorted(rejection_dimensions)),
         )
         if dedupe_key in existing_keys:
@@ -567,15 +736,29 @@ def _persist_signal_kill_log(
         entry = {
             "artifact_kind": "signal_kill_entry",
             "timestamp": utc_timestamp(),
+            "row_key": _text(row.get("row_key")),
             "source": _text(row.get("source"), "runtime_state"),
             "signal_id": _text(row.get("signal_id")),
             "ticker": _text(row.get("ticker")).upper(),
+            "status": _text(row.get("status")).upper(),
+            "watchlist_tier": _text(row.get("watchlist_tier"), "NONE").upper(),
+            "pre_entry_state": _text(row.get("pre_entry_state"), "NONE").upper(),
+            "ce_score": _coerce_float(row.get("ce_score")),
+            "signal_age_days": _coerce_float(row.get("signal_age_days")),
             "summary": (
                 f"{_text(row.get('ticker')).upper()} "
                 f"{_text(row.get('status')).upper()} "
                 f"{_text(row.get('watchlist_tier'), 'NONE').upper()}"
             ).strip(),
+            "signal_summary": (
+                f"{_text(row.get('ticker')).upper()} "
+                f"{_text(row.get('status')).upper()} "
+                f"{_text(row.get('watchlist_tier'), 'NONE').upper()}"
+            ).strip(),
             "rejection_dimensions": rejection_dimensions,
+            "rejection_reasons": [
+                _text(item) for item in row.get("rejection_reasons", []) if _text(item)
+            ],
             "rejection_reason": " | ".join(
                 _text(item) for item in row.get("rejection_reasons", []) if _text(item)
             ),
@@ -615,6 +798,7 @@ def build_signal_admission_report(
     admitted_ce_scores: list[float] = []
     rejected_ce_scores: list[float] = []
     reason_counter: Counter[str] = Counter()
+    missing_relevance_count = 0
     for row in rows:
         if not isinstance(row, dict):
             continue
@@ -627,16 +811,36 @@ def build_signal_admission_report(
         )
         decisions.append(decision)
         if decision["admit"]:
-            admitted_ce_scores.append(float(decision["ce_score"] or 0.0))
+            if decision["ce_score"] is not None:
+                admitted_ce_scores.append(float(decision["ce_score"]))
         else:
-            rejected_ce_scores.append(float(decision["ce_score"] or 0.0))
+            if decision["ce_score"] is not None:
+                rejected_ce_scores.append(float(decision["ce_score"]))
             for reason in decision["rejection_reasons"]:
                 reason_counter[reason] += 1
+        if decision["dimension_states"]["relevance"]["reason"] == "ce_score_unavailable":
+            missing_relevance_count += 1
 
-    admitted_signal_ids = [row["signal_id"] for row in decisions if row["admit"] and row["signal_id"]]
-    rejected_signal_ids = [row["signal_id"] for row in decisions if not row["admit"] and row["signal_id"]]
-    admitted_tickers = [row["ticker"] for row in decisions if row["admit"] and row["ticker"]]
-    rejected_tickers = [row["ticker"] for row in decisions if not row["admit"] and row["ticker"]]
+    admitted_decisions = [row for row in decisions if row["admit"]]
+    rejected_decisions = [row for row in decisions if not row["admit"]]
+    admitted_signal_ids = _unique_preserve_order(
+        [row["signal_id"] for row in admitted_decisions if row["signal_id"]]
+    )
+    rejected_signal_ids = _unique_preserve_order(
+        [row["signal_id"] for row in rejected_decisions if row["signal_id"]]
+    )
+    admitted_tickers = _unique_preserve_order(
+        [row["ticker"] for row in admitted_decisions if row["ticker"]]
+    )
+    rejected_tickers = _unique_preserve_order(
+        [row["ticker"] for row in rejected_decisions if row["ticker"]]
+    )
+    admitted_row_keys = _unique_preserve_order(
+        [row["row_key"] for row in admitted_decisions if row["row_key"]]
+    )
+    rejected_row_keys = _unique_preserve_order(
+        [row["row_key"] for row in rejected_decisions if row["row_key"]]
+    )
 
     payload = {
         "artifact_kind": "signal_admission_gate_summary",
@@ -644,17 +848,22 @@ def build_signal_admission_report(
         "mode": "hard_boolean_gate",
         "objective_context": _text(active_operator_state.get("active_objective")),
         "total_signals_considered": len(decisions),
-        "admitted_count": len(admitted_signal_ids),
-        "rejected_count": len(rejected_signal_ids),
+        "admitted_count": len(admitted_decisions),
+        "rejected_count": len(rejected_decisions),
         "admitted_ratio": _safe_round(
-            (len(admitted_signal_ids) / len(decisions)) if decisions else 0.0
+            (len(admitted_decisions) / len(decisions)) if decisions else None
         ),
         "rejected_ratio": _safe_round(
-            (len(rejected_signal_ids) / len(decisions)) if decisions else 0.0
+            (len(rejected_decisions) / len(decisions)) if decisions else None
         ),
         "average_admitted_ce_score": _safe_round(_average(admitted_ce_scores)),
         "average_rejected_ce_score": _safe_round(_average(rejected_ce_scores)),
+        "admitted_ce_score_sample_size": len(admitted_ce_scores),
+        "rejected_ce_score_sample_size": len(rejected_ce_scores),
+        "missing_relevance_count": missing_relevance_count,
         "reason_counts": dict(sorted(reason_counter.items())),
+        "admitted_row_keys": admitted_row_keys,
+        "rejected_row_keys": rejected_row_keys,
         "admitted_signal_ids": admitted_signal_ids,
         "rejected_signal_ids": rejected_signal_ids,
         "admitted_tickers": admitted_tickers,
@@ -662,7 +871,7 @@ def build_signal_admission_report(
         "signals": decisions,
         "note": (
             "Rejected signals are logged only from explicit gate failures. "
-            "No internal-state inference is attempted."
+            "Missing relevance data remains missing and is not converted into a synthetic zero."
         ),
     }
 
@@ -684,30 +893,7 @@ def build_signal_admission_report(
 def load_active_work_block(path: Path | None = None) -> dict[str, Any]:
     target = path or ACTIVE_WORK_BLOCK_PATH
     payload = load_json_file(target, default={})
-    if not isinstance(payload, dict):
-        payload = {}
-    non_goals = payload.get("non_goals", [])
-    if not isinstance(non_goals, list):
-        non_goals = []
-    return {
-        "configured": bool(payload),
-        "path": repo_relative(target),
-        "block_id": _text(payload.get("block_id")),
-        "block_type": _text(payload.get("block_type"), "default").lower(),
-        "objective": _text(payload.get("objective")),
-        "active_task": _text(payload.get("active_task")),
-        "success_metric": _text(payload.get("success_metric")),
-        "time_boundary": _text(payload.get("time_boundary")),
-        "non_goals": [str(item).strip() for item in non_goals if str(item).strip()],
-        "operator_mode": _text(payload.get("operator_mode"), "unspecified").lower(),
-        "status": _text(payload.get("status"), "inactive").lower(),
-        "context_switch_count": _coerce_int(payload.get("context_switch_count"), 0),
-        "reopened_decision_count": _coerce_int(payload.get("reopened_decision_count"), 0),
-        "selection_started_at": _text(payload.get("selection_started_at")),
-        "execution_started_at": _text(payload.get("execution_started_at")),
-        "closed_at": _text(payload.get("closed_at")),
-        "closure_result": payload.get("closure_result", {}),
-    }
+    return _normalize_active_work_block_payload(payload, target)
 
 
 def _write_active_work_block(target: Path, payload: dict[str, Any], write_runtime: bool) -> None:
@@ -730,7 +916,9 @@ def start_work_block(
     write_runtime: bool = True,
 ) -> dict[str, Any]:
     target = path or ACTIVE_WORK_BLOCK_PATH
-    resolved_block_id = _text(block_id) or f"block_{utc_timestamp().replace(':', '').replace('-', '')}"
+    resolved_block_id = _text(block_id) or (
+        f"block_{get_run_id()}_{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S%f')}"
+    )
     payload = {
         "artifact_kind": "active_work_block",
         "mode_honesty": "manual_event_logged",
@@ -766,7 +954,8 @@ def start_work_block(
                 "non_goals": payload["non_goals"],
             },
         )
-    return load_active_work_block(target)
+        return load_active_work_block(target)
+    return _normalize_active_work_block_payload(payload, target)
 
 
 def record_work_block_event(
@@ -797,6 +986,15 @@ def record_work_block_event(
         "note",
     }:
         raise ValueError(f"unsupported work block event_type: {normalized_event_type}")
+
+    active_block_id = _text(active_block.get("block_id"))
+    if (
+        active_block_id
+        and block_id
+        and active_block_id != resolved_block_id
+        and normalized_event_type in {"execution_started", "context_switch", "decision_reopened", "abandoned"}
+    ):
+        raise ValueError("block_id does not match the active work block")
 
     if active_block.get("block_id") == resolved_block_id:
         if normalized_event_type == "execution_started":
@@ -840,8 +1038,9 @@ def evaluate_closure_threshold(
     config: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     active_config = config or load_operator_control_config()
-    closure_config = active_config["closure_thresholds"]
-    rule = closure_config.get(_text(block_type, "default").lower(), closure_config["default"])
+    resolved_block_type = _text(block_type, "default").lower()
+    closure_config = active_config.get("closure_thresholds", {})
+    rule = _resolve_closure_rule(closure_config, resolved_block_type)
 
     checks = {
         "output_exists": bool(output_exists),
@@ -849,35 +1048,50 @@ def evaluate_closure_threshold(
         "report_exists": bool(report_exists),
         "manual_closed": bool(manual_closed),
     }
-    required_checks: list[str] = []
-    if _coerce_bool(rule.get("requires_output"), True):
-        required_checks.append("output_exists")
-    if _coerce_bool(rule.get("requires_validation"), False):
-        required_checks.append("validation_exists")
-    if _coerce_bool(rule.get("requires_report"), False):
-        required_checks.append("report_exists")
-
-    missing_requirements = [
-        check_name for check_name in required_checks if not checks.get(check_name, False)
+    accepted_evidence = [
+        field
+        for field in rule.get("accepted_evidence", [])
+        if field in _VALID_CLOSURE_EVIDENCE_FIELDS
+    ]
+    if not accepted_evidence:
+        accepted_evidence = list(_VALID_CLOSURE_EVIDENCE_FIELDS)
+    minimum_evidence_count = max(
+        1,
+        min(
+            _coerce_int(rule.get("minimum_evidence_count"), 1),
+            len(accepted_evidence),
+        ),
+    )
+    evidence_found = [
+        check_name for check_name in accepted_evidence if checks.get(check_name, False)
+    ]
+    missing_evidence = [
+        check_name for check_name in accepted_evidence if check_name not in evidence_found
     ]
     closure_met = False
     if _coerce_bool(rule.get("allow_manual_close"), True) and checks["manual_closed"]:
         closure_met = True
-    elif not missing_requirements:
+    elif len(evidence_found) >= minimum_evidence_count:
         closure_met = True
 
     return {
-        "block_type": _text(block_type, "default").lower(),
+        "block_type": resolved_block_type,
         "closure_met": closure_met,
-        "required_checks": required_checks,
+        "accepted_evidence": accepted_evidence,
+        "minimum_evidence_count": minimum_evidence_count,
+        "evidence_found": evidence_found,
+        "required_checks": accepted_evidence,
         "checks": checks,
-        "missing_requirements": missing_requirements,
+        "missing_evidence": missing_evidence,
+        "missing_requirements": missing_evidence,
+        "rule_source": _text(rule.get("rule_source"), "global_closure_threshold"),
         "closure_mode": (
             "manual_override" if checks["manual_closed"] and closure_met else "evidence_based"
         ),
         "note": (
-            "Closure is explicit and transparent. The engine only checks logged evidence; "
-            "it does not infer completeness."
+            "Closure is explicit and transparent. The engine only checks logged evidence and "
+            "does not infer completeness. In the current repo default, any one of "
+            "output_exists, validation_exists, or report_exists is enough to close a block."
         ),
     }
 
@@ -904,6 +1118,9 @@ def close_work_block(
     resolved_block_id = _text(block_id or payload.get("block_id"))
     if not resolved_block_id:
         raise ValueError("block_id is required when no active work block exists")
+    active_block_id = _text(payload.get("block_id"))
+    if active_block_id and block_id and active_block_id != resolved_block_id:
+        raise ValueError("block_id does not match the active work block")
 
     block_type = _text(payload.get("block_type"), "default")
     closure_result = evaluate_closure_threshold(
@@ -938,7 +1155,8 @@ def close_work_block(
                 "closure_result": closure_result,
             },
         )
-    return load_active_work_block(target)
+        return load_active_work_block(target)
+    return _normalize_active_work_block_payload(payload, target)
 
 
 def build_work_block_summary(
@@ -1006,14 +1224,14 @@ def build_work_block_summary(
         "mid_block_switches": mid_block_switches,
         "reopened_decisions": reopened_decisions,
         "drift_rate": _safe_round(
-            (mid_block_switches / total_execution_blocks) if total_execution_blocks else 0.0
+            (mid_block_switches / total_execution_blocks) if total_execution_blocks else None
         ),
         "closure_ratio": _safe_round(
-            (closed_block_count / total_execution_blocks) if total_execution_blocks else 0.0
+            (closed_block_count / total_execution_blocks) if total_execution_blocks else None
         ),
         "note": (
-            "Drift and closure metrics are event-based only. If no block events are logged, "
-            "the summary reports zeros rather than inferred behavior."
+            "Drift and closure metrics are event-based only. If no execution blocks are logged, "
+            "the rates stay null rather than implying observed behavior."
         ),
     }
 
@@ -1054,8 +1272,15 @@ def _artifact_coverage(
 
     states = {
         "operator_state": bool(operator_state.get("configured")),
-        "signal_gate_summary": bool(gate_summary.get("total_signals_considered", 0) or gate_summary),
-        "block_logging": bool(block_summary.get("selected_block_count", 0) or block_summary.get("total_execution_blocks", 0)),
+        "signal_gate_summary": (
+            gate_summary.get("artifact_kind") == "signal_admission_gate_summary"
+            or "total_signals_considered" in gate_summary
+        ),
+        "block_logging": (
+            block_summary.get("artifact_kind") == "operator_block_summary"
+            or "selected_block_count" in block_summary
+            or "total_execution_blocks" in block_summary
+        ),
         "structural_cover_map": bool(structural_cover_map.get("control_count", 0)),
     }
     target_count = len(targets) if targets else len(states)
@@ -1068,11 +1293,28 @@ def _artifact_coverage(
     }
 
 
-def _phase_score(components: dict[str, float | None]) -> float | None:
+def _phase_summary(
+    components: dict[str, float | None],
+    *,
+    minimum_component_count: int = 2,
+) -> dict[str, Any]:
     values = [float(value) for value in components.values() if value is not None]
-    if not values:
-        return None
-    return round(sum(values) / len(values), 3)
+    observed_component_count = len(values)
+    if observed_component_count < minimum_component_count:
+        return {
+            "score": None,
+            "components": components,
+            "observed_component_count": observed_component_count,
+            "minimum_component_count_for_score": minimum_component_count,
+            "score_state": "insufficient_evidence",
+        }
+    return {
+        "score": round(sum(values) / len(values), 2),
+        "components": components,
+        "observed_component_count": observed_component_count,
+        "minimum_component_count_for_score": minimum_component_count,
+        "score_state": "observed_proxy_blend",
+    }
 
 
 def build_operator_control_report(
@@ -1160,23 +1402,22 @@ def build_operator_control_report(
         "artifact_coverage": _coerce_float(artifact_coverage.get("coverage_ratio")),
     }
     phase_balance = {
-        "phase_1_self_alignment": {
-            "score": _phase_score(phase_1_components),
-            "components": phase_1_components,
-        },
-        "phase_2_selective_expansion": {
-            "score": _phase_score(phase_2_components),
-            "components": phase_2_components,
-        },
-        "phase_3_system_building": {
-            "score": _phase_score(phase_3_components),
-            "components": phase_3_components,
-        },
+        "phase_1_self_alignment": _phase_summary(phase_1_components),
+        "phase_2_selective_expansion": _phase_summary(phase_2_components),
+        "phase_3_system_building": _phase_summary(phase_3_components),
         "note": (
             "Phase scores are transparent proxy blends over logged drift, closure, "
-            "gate behavior, tests, and artifact coverage."
+            "gate behavior, tests, and artifact coverage. A phase score stays null unless "
+            "at least two observable components are present."
         ),
     }
+
+    if active_block.get("configured") and active_block.get("objective"):
+        header_source = "active_work_block"
+    elif state.get("configured") and state.get("active_objective"):
+        header_source = "operator_state"
+    else:
+        header_source = "absent"
 
     top_down_constraint_header = {
         "active_block_id": active_block.get("block_id"),
@@ -1186,6 +1427,7 @@ def build_operator_control_report(
         "time_boundary": active_block.get("time_boundary"),
         "non_goals": active_block.get("non_goals", []),
         "status": active_block.get("status"),
+        "header_source": header_source,
         "manual_only": True,
         "note": (
             "This header is logged only when the operator explicitly opens a work block "
@@ -1195,7 +1437,7 @@ def build_operator_control_report(
 
     report = {
         "artifact_kind": "operator_control_report",
-        "operator_state": state,
+        "manual_operator_state": state,
         "top_down_constraint_header": top_down_constraint_header,
         "signal_admission_gate": signal_gate_summary,
         "drift_monitor": drift_summary,

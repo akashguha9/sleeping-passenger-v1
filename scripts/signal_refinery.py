@@ -1189,10 +1189,11 @@ def build_signal_refinery_report(
     signals_above_threshold = int(
         runtime_state.get("signal_summary", {}).get("signals_above_ce_threshold", 0) or 0
     )
+    admitted_signal_count = int(signal_admission_gate["admitted_count"])
     decision_grade_signal_count = int(launch_control["decision_grade_signal_count"])
     deployable_signal_count = int(launch_control["deployable_signal_count"])
     average_validation_score = float(validation_engine["average_validation_score"])
-    usable_signal_output = round(signals_above_threshold * average_validation_score, 3)
+    usable_signal_output = round(admitted_signal_count * average_validation_score, 3)
     if deployable_signal_count > 0:
         decision_engine_state = "REVIEW_READY"
     elif decision_grade_signal_count > 0:
@@ -1207,7 +1208,7 @@ def build_signal_refinery_report(
         "source_mode": get_source_mode(),
         "config_path": repo_relative(config_path or SIGNAL_REFINERY_CONFIG_PATH),
         "open_positions_validation_summary": open_positions_summary,
-        "operator_state": operator_state,
+        "manual_operator_state": operator_state,
         "signal_admission_gate": signal_admission_gate,
         "horsepower_monitor": horsepower_monitor,
         "validation_engine": validation_engine,
@@ -1219,7 +1220,7 @@ def build_signal_refinery_report(
         "time_to_valid_signal_kpi": time_to_valid_signal_kpi,
         "decision_engine_summary": {
             "usable_signal_output": usable_signal_output,
-            "admitted_signal_count": signal_admission_gate["admitted_count"],
+            "admitted_signal_count": admitted_signal_count,
             "rejected_signal_count": signal_admission_gate["rejected_count"],
             "decision_grade_signal_count": decision_grade_signal_count,
             "deployable_signal_count": deployable_signal_count,

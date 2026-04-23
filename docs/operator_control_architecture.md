@@ -63,10 +63,14 @@ The layer is intentionally narrow:
 
 - Closure is evidence-based, not inferred.
 - Current rules live in `config/operator_control_config.json`.
-- Examples:
-  - `coding`: `output_exists AND validation_exists`
-  - `research`: `output_exists AND report_exists`
-  - `feature`: `output_exists AND validation_exists`
+- Current repo default:
+  - close when any one of `output_exists`, `validation_exists`, or `report_exists` is logged
+  - or allow an explicit manual close override
+- The closure report records:
+  - `accepted_evidence`
+  - `evidence_found`
+  - `minimum_evidence_count`
+  - `missing_evidence`
 
 `F. Selection vs Execution Split`
 
@@ -78,6 +82,7 @@ The layer is intentionally narrow:
 
 - `runtime/operator_phase_balance.json`
 - `runtime/operator_phase_report.json`
+- The full report exposes `manual_operator_state` to keep it distinct from any derived health labels.
 - Transparent proxies:
   - Phase 1: drift inverse, closure ratio, unfinished burden inverse
   - Phase 2: reject rate, average admitted `ce_score`
@@ -126,3 +131,4 @@ Narrative compression and operator recalibration are still mostly represented as
 - Block drift and closure logging are real if you log events.
 - Baseline/peak is manual unless you explicitly write scores.
 - Phase balance scores are observable proxy blends, not deep truth claims.
+- `operator_pressure_state` in the health report is a derived blockage/readiness label, not an inferred psychological state.
