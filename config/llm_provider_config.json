@@ -18,7 +18,7 @@
       "env_model": "XAI_MODEL",
       "require_explicit_model_env": true,
       "allow_model_fallback": false,
-      "endpoint_path": "/chat/completions",
+      "endpoint_path": "/v1/chat/completions",
       "timeout_seconds": 20.0,
       "user_agent": "pipeline-v5.7-core/grok-xai",
       "report_path": "runtime/grok_xai_report.json",

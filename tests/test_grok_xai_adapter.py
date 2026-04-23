@@ -45,7 +45,7 @@ def test_llm_provider_config_loading_keeps_defaults_under_override(
 def test_grok_xai_unauthorized_handling_is_classified_explicitly(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("XAI_API_BASE_URL", "https://api.x.ai/v1")
+    monkeypatch.setenv("XAI_API_BASE_URL", "https://api.x.ai")
     monkeypatch.setenv("XAI_API_KEY", "bad-key")
     monkeypatch.setenv("XAI_MODEL", "grok-test")
 
@@ -57,7 +57,9 @@ def test_grok_xai_unauthorized_handling_is_classified_explicitly(
     ):
         assert headers is not None
         assert headers["Authorization"] == "Bearer bad-key"
+        assert url == "https://api.x.ai/v1/chat/completions"
         assert payload["model"] == "grok-test"
+        assert payload["response_format"]["json_schema"]["strict"] is True
         return 401, json.dumps({"error": {"message": "invalid api key"}})
 
     report = build_grok_xai_report(
@@ -77,7 +79,7 @@ def test_grok_xai_unauthorized_handling_is_classified_explicitly(
 def test_grok_xai_invalid_json_handling_is_truthful(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("XAI_API_BASE_URL", "https://api.x.ai/v1")
+    monkeypatch.setenv("XAI_API_BASE_URL", "https://api.x.ai")
     monkeypatch.setenv("XAI_API_KEY", "test-key")
     monkeypatch.setenv("XAI_MODEL", "grok-test")
 
@@ -103,7 +105,7 @@ def test_grok_xai_invalid_json_handling_is_truthful(
 def test_grok_xai_empty_response_handling_is_truthful(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("XAI_API_BASE_URL", "https://api.x.ai/v1")
+    monkeypatch.setenv("XAI_API_BASE_URL", "https://api.x.ai")
     monkeypatch.setenv("XAI_API_KEY", "test-key")
     monkeypatch.setenv("XAI_MODEL", "grok-test")
 
@@ -129,7 +131,7 @@ def test_grok_xai_empty_response_handling_is_truthful(
 def test_grok_xai_successful_structured_output_parsing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("XAI_API_BASE_URL", "https://api.x.ai/v1")
+    monkeypatch.setenv("XAI_API_BASE_URL", "https://api.x.ai")
     monkeypatch.setenv("XAI_API_KEY", "test-key")
     monkeypatch.setenv("XAI_MODEL", "grok-test")
 
@@ -139,6 +141,7 @@ def test_grok_xai_successful_structured_output_parsing(
         payload: dict,
         timeout: float,
     ):
+        assert url == "https://api.x.ai/v1/chat/completions"
         assert payload["model"] == "grok-test"
         return (
             200,
@@ -206,7 +209,7 @@ def test_write_grok_xai_report_generates_runtime_artifact(
 ) -> None:
     config_path = _write_config(scratch_path / "llm_provider_config.json", scratch_path)
     output_path = scratch_path / "grok_xai_report.json"
-    monkeypatch.setenv("XAI_API_BASE_URL", "https://api.x.ai/v1")
+    monkeypatch.setenv("XAI_API_BASE_URL", "https://api.x.ai")
     monkeypatch.setenv("XAI_API_KEY", "test-key")
     monkeypatch.setenv("XAI_MODEL", "grok-test")
 
@@ -262,7 +265,7 @@ def test_write_grok_xai_report_generates_runtime_artifact(
 def test_grok_xai_governance_boundary_remains_advisory(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("XAI_API_BASE_URL", "https://api.x.ai/v1")
+    monkeypatch.setenv("XAI_API_BASE_URL", "https://api.x.ai")
     monkeypatch.setenv("XAI_API_KEY", "test-key")
     monkeypatch.setenv("XAI_MODEL", "grok-test")
 
@@ -313,6 +316,76 @@ def test_grok_xai_governance_boundary_remains_advisory(
     assert report["read_only_contract"]["wallet_signing_supported"] is False
     assert report["read_only_contract"]["autonomous_execution_supported"] is False
     assert report["read_only_contract"]["silent_model_fallback_allowed"] is False
+
+
+def test_grok_xai_request_contract_handles_base_url_with_or_without_v1(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("XAI_API_KEY", "test-key")
+    monkeypatch.setenv("XAI_MODEL", "grok-test")
+    seen_urls: list[str] = []
+
+    def success_transport(
+        url: str,
+        headers: dict[str, str] | None,
+        payload: dict,
+        timeout: float,
+    ):
+        seen_urls.append(url)
+        return (
+            200,
+            json.dumps(
+                {
+                    "id": "resp_contract",
+                    "model": "grok-test",
+                    "choices": [
+                        {
+                            "message": {
+                                "content": json.dumps(
+                                    {
+                                        "ranked_items": [
+                                            {
+                                                "item_id": "RTX",
+                                                "label": "RTX",
+                                                "rank": 1,
+                                                "relevance_score": 0.75,
+                                                "rationale": "Top current item.",
+                                            }
+                                        ],
+                                        "top_item": {"item_id": "RTX", "label": "RTX", "rank": 1},
+                                        "why_top_item": "RTX is the strongest item.",
+                                        "risks_of_misread": ["Signal context may be stale."],
+                                        "operator_focus": "Review RTX.",
+                                    }
+                                )
+                            }
+                        }
+                    ],
+                }
+            ),
+        )
+
+    monkeypatch.setenv("XAI_API_BASE_URL", "https://api.x.ai")
+    first = build_grok_xai_report(
+        use_case="signal_ranking_interpreter",
+        runtime_state=_runtime_state(),
+        input_json=json.dumps({"candidate_signals": [{"ticker": "RTX"}]}),
+        transport=success_transport,
+    )
+    monkeypatch.setenv("XAI_API_BASE_URL", "https://api.x.ai/v1")
+    second = build_grok_xai_report(
+        use_case="signal_ranking_interpreter",
+        runtime_state=_runtime_state(),
+        input_json=json.dumps({"candidate_signals": [{"ticker": "RTX"}]}),
+        transport=success_transport,
+    )
+
+    assert first["request_success"] is True
+    assert second["request_success"] is True
+    assert seen_urls == [
+        "https://api.x.ai/v1/chat/completions",
+        "https://api.x.ai/v1/chat/completions",
+    ]
 
 
 def test_pipeline_health_report_accepts_explicit_grok_summary() -> None:

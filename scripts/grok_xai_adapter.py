@@ -64,7 +64,7 @@ except ModuleNotFoundError:
 
 SOURCE_NAME = "grok_xai"
 SOURCE_TYPE = "external_llm_intelligence"
-DEFAULT_ENDPOINT_PATH = "/chat/completions"
+DEFAULT_ENDPOINT_PATH = "/v1/chat/completions"
 DEFAULT_TIMEOUT_SECONDS = 20.0
 DEFAULT_USER_AGENT = "pipeline-v5.7-core/grok-xai"
 DEFAULT_USE_CASE = "signal_ranking_interpreter"
@@ -729,6 +729,7 @@ def _build_request_body(
             "json_schema": {
                 "name": use_case,
                 "schema": _schema_for_use_case(use_case),
+                "strict": True,
             },
         },
     }
@@ -736,6 +737,19 @@ def _build_request_body(
     if max_output_tokens is not None:
         payload["max_tokens"] = int(max_output_tokens)
     return payload
+
+
+def _resolve_endpoint_path(config: dict[str, Any]) -> str:
+    configured = str(config.get("endpoint_path") or DEFAULT_ENDPOINT_PATH).strip()
+    if not configured:
+        return DEFAULT_ENDPOINT_PATH
+    if configured == "/chat/completions":
+        return DEFAULT_ENDPOINT_PATH
+    if configured == "chat/completions":
+        return DEFAULT_ENDPOINT_PATH
+    if not configured.startswith("/"):
+        return f"/{configured}"
+    return configured
 
 
 def _extract_message_content(payload: Any) -> str:
@@ -1024,7 +1038,7 @@ def build_grok_xai_report(
     api_key = resolve_env_value(config.get("env_api_key"))
     model_name = resolve_env_value(config.get("env_model"))
     timeout_seconds = float(config.get("timeout_seconds") or DEFAULT_TIMEOUT_SECONDS)
-    endpoint_path = str(config.get("endpoint_path") or DEFAULT_ENDPOINT_PATH)
+    endpoint_path = _resolve_endpoint_path(config)
     user_agent = str(config.get("user_agent") or DEFAULT_USER_AGENT)
     require_explicit_model_env = bool(config.get("require_explicit_model_env", True))
 
