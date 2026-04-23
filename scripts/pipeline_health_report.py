@@ -11,6 +11,7 @@ from typing import Any
 try:
     from scripts.action_engine import build_action_report
     from scripts.blocker_cost_engine import build_blocker_cost_report
+    from scripts.operator_control import build_operator_control_report
     from scripts.snapshot_logger import build_snapshot_row
     from scripts.runtime_common import (
         COMPLEXITY_LADDER_CONTROLLER_PATH,
@@ -34,6 +35,7 @@ try:
 except ModuleNotFoundError:
     from action_engine import build_action_report
     from blocker_cost_engine import build_blocker_cost_report
+    from operator_control import build_operator_control_report
     from snapshot_logger import build_snapshot_row
     from runtime_common import (
         COMPLEXITY_LADDER_CONTROLLER_PATH,
@@ -1778,6 +1780,11 @@ def build_pipeline_health_report(
         experience_mode_report=experience_mode_report,
         complexity_ladder_controller=complexity_ladder_controller,
     )
+    operator_control_report = build_operator_control_report(
+        gate_summary=signal_refinery_report.get("signal_admission_gate", {}),
+        test_status=test_status,
+        write_runtime=effective_write_runtime,
+    )
 
     report = {
         "health_generated_at": _health_timestamp(),
@@ -1804,6 +1811,7 @@ def build_pipeline_health_report(
             "visibility_timing_context",
             {},
         ),
+        "operator_control": operator_control_report,
         "watchlist_intelligence": watchlist_intelligence,
         "blocked_promotable_candidate_queue": blocked_promotable_candidate_queue,
         "queue_pressure_state": queue_pressure_state,

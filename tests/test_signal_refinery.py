@@ -28,6 +28,8 @@ def test_signal_refinery_live_seed_shape() -> None:
 
     assert report["horsepower_monitor"]["signal_count_total"] == 8
     assert report["horsepower_monitor"]["signals_above_threshold"] == 7
+    assert report["signal_admission_gate"]["admitted_count"] == 4
+    assert set(report["signal_admission_gate"]["rejected_tickers"]) == {"FCG", "GLD", "UNG"}
     assert report["validation_engine"]["validated_signal_count"] == 2
     assert report["launch_control"]["review_ready_count"] == 0
     assert report["launch_control"]["deployable_signal_count"] == 0
@@ -65,7 +67,7 @@ def test_signal_refinery_all_clear_reviews_candidates_but_blocks_deployment() ->
     assert report["launch_control"]["deployable_signal_count"] == 0
     assert rows["RTX"]["launch_state"] == "REVIEW_READY"
     assert rows["ZIM"]["launch_state"] == "REVIEW_READY"
-    assert rows["GLD"]["launch_state"] == "BLOCKED_VALIDATION"
+    assert "GLD" not in rows
     assert report["decision_engine_summary"]["current_operating_mode"] == "VALIDATED_BUT_DEPLOYMENT_BLOCKED"
 
 
@@ -137,4 +139,6 @@ def test_signal_refinery_summary_cli() -> None:
     assert lines[0] == "Signal Refinery"
     assert lines[1].startswith("operating_mode=")
     assert lines[2] == "signals_above_threshold=7"
-    assert lines[3] == "validated_signal_count=2"
+    assert lines[3] == "admitted_signal_count=4"
+    assert lines[4] == "rejected_signal_count=3"
+    assert lines[5] == "validated_signal_count=2"

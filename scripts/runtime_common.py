@@ -307,6 +307,8 @@ def compute_config_fingerprint(config_paths: list[Path] | None = None) -> str:
         EXECUTION_GOVERNANCE_CONFIG_PATH,
         EXPERIENCE_MODE_CONFIG_PATH,
         ENVIRONMENT_FIT_CONFIG_PATH,
+        OPERATOR_CONTROL_CONFIG_PATH,
+        STRUCTURAL_COVER_MAP_PATH,
     ]
     digest = hashlib.sha256()
     for path in paths:
@@ -399,6 +401,11 @@ EXPERIENCE_MODE_REPORT_PATH = RUNTIME_DIR / "experience_mode_report.json"
 ENVIRONMENT_FIT_REPORT_PATH = RUNTIME_DIR / "environment_fit_report.json"
 COMPLEXITY_LADDER_CONTROLLER_PATH = RUNTIME_DIR / "complexity_ladder_controller.json"
 SIGNAL_REFINERY_REPORT_PATH = RUNTIME_DIR / "signal_refinery_report.json"
+SIGNAL_GATE_SUMMARY_PATH = RUNTIME_DIR / "signal_gate_summary.json"
+OPERATOR_STATE_PATH = RUNTIME_DIR / "operator_state.json"
+ACTIVE_WORK_BLOCK_PATH = RUNTIME_DIR / "active_work_block.json"
+OPERATOR_PHASE_BALANCE_PATH = RUNTIME_DIR / "operator_phase_balance.json"
+OPERATOR_PHASE_REPORT_PATH = RUNTIME_DIR / "operator_phase_report.json"
 PAPER_POSITIONS_PATH = RUNTIME_DIR / "paper_positions.json"
 EXTERNAL_MARKS_PATH = RUNTIME_DIR / "external_market_marks.json"
 PAPER_RETIREMENT_REPORT_PATH = RUNTIME_DIR / "paper_retirement_report.json"
@@ -417,6 +424,8 @@ MODEL_FEEDBACK_LEDGER_PATH = LOG_DIR / "model_quality_feedback.jsonl"
 INTERACTION_FEEDBACK_LEDGER_PATH = LOG_DIR / "interaction_quality_feedback.jsonl"
 POST_TRADE_FEEDBACK_PATH = LOG_DIR / "post_trade_feedback.jsonl"
 PAPER_RECONCILIATION_HISTORY_PATH = LOG_DIR / "paper_reconciliation_history.jsonl"
+SIGNAL_KILL_LOG_PATH = LOG_DIR / "signal_kill_log.jsonl"
+OPERATOR_BLOCK_EVENTS_PATH = LOG_DIR / "operator_block_events.jsonl"
 
 CONFIG_DIR = REPO_ROOT / "config"
 BLOCKER_WEIGHTS_PATH = CONFIG_DIR / "blocker_weights.json"
@@ -424,6 +433,8 @@ SIGNAL_REFINERY_CONFIG_PATH = CONFIG_DIR / "signal_refinery_config.json"
 EXECUTION_GOVERNANCE_CONFIG_PATH = CONFIG_DIR / "execution_governance_config.json"
 EXPERIENCE_MODE_CONFIG_PATH = CONFIG_DIR / "experience_mode_config.json"
 ENVIRONMENT_FIT_CONFIG_PATH = CONFIG_DIR / "environment_fit_config.json"
+OPERATOR_CONTROL_CONFIG_PATH = CONFIG_DIR / "operator_control_config.json"
+STRUCTURAL_COVER_MAP_PATH = CONFIG_DIR / "structural_cover_map.json"
 
 OPEN_POSITION_REQUIRED_KEYS = {
     "ticker",

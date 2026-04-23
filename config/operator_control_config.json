@@ -1,0 +1,59 @@
+{
+  "signal_admission_gate": {
+    "relevance_floor": 0.55,
+    "timeliness_max_age_days": 30.0,
+    "allow_missing_timeliness": false,
+    "actionable_statuses": [
+      "EXECUTED_CLEAN"
+    ],
+    "actionable_pre_entry_states": [
+      "BLOCKED_PROMOTABLE_CLEAN_CANDIDATE",
+      "CLEAN_READY_PENDING_TRIGGER",
+      "CLEAN_ENTRY_ELIGIBLE"
+    ],
+    "allow_promotable_watchlist": true,
+    "allow_standard_watchlist": false,
+    "allow_chaos_active_signals": false
+  },
+  "closure_thresholds": {
+    "default": {
+      "requires_output": true,
+      "requires_validation": false,
+      "requires_report": false,
+      "allow_manual_close": true
+    },
+    "coding": {
+      "requires_output": true,
+      "requires_validation": true,
+      "requires_report": false,
+      "allow_manual_close": true
+    },
+    "feature": {
+      "requires_output": true,
+      "requires_validation": true,
+      "requires_report": false,
+      "allow_manual_close": true
+    },
+    "research": {
+      "requires_output": true,
+      "requires_validation": false,
+      "requires_report": true,
+      "allow_manual_close": true
+    },
+    "reconciliation": {
+      "requires_output": true,
+      "requires_validation": false,
+      "requires_report": true,
+      "allow_manual_close": true
+    }
+  },
+  "phase_balance": {
+    "unfinished_closure_burden_cap": 5,
+    "artifact_coverage_targets": [
+      "operator_state",
+      "signal_gate_summary",
+      "block_logging",
+      "structural_cover_map"
+    ]
+  }
+}

@@ -10,10 +10,16 @@ from typing import Any
 
 try:
     from scripts.moltbook_loader import MOLTBOOK_DIR, load_moltbook_bundle
+    from scripts.operator_control import (
+        build_signal_admission_report,
+        filter_admitted_signal_rows,
+        load_operator_state,
+    )
     from scripts.runtime_common import (
         OPEN_POSITIONS_PATH,
         SIGNAL_REFINERY_CONFIG_PATH,
         SIGNAL_REFINERY_REPORT_PATH,
+        build_runtime_state_from_scm_report_payload,
         get_run_started_at,
         get_source_mode,
         load_json_file,
@@ -27,10 +33,16 @@ try:
     )
 except ModuleNotFoundError:
     from moltbook_loader import MOLTBOOK_DIR, load_moltbook_bundle
+    from operator_control import (
+        build_signal_admission_report,
+        filter_admitted_signal_rows,
+        load_operator_state,
+    )
     from runtime_common import (
         OPEN_POSITIONS_PATH,
         SIGNAL_REFINERY_CONFIG_PATH,
         SIGNAL_REFINERY_REPORT_PATH,
+        build_runtime_state_from_scm_report_payload,
         get_run_started_at,
         get_source_mode,
         load_json_file,
@@ -1119,10 +1131,22 @@ def build_signal_refinery_report(
     open_positions, open_positions_summary = load_open_positions(open_positions_path or OPEN_POSITIONS_PATH)
     trade_bundle = load_moltbook_bundle(moltbook_dir or MOLTBOOK_DIR)
     prior_context_by_signal = _prior_visibility_context_by_signal()
+    operator_state = load_operator_state()
+    signal_admission_gate = build_signal_admission_report(
+        runtime_state=runtime_state,
+        operator_state=operator_state,
+        write_runtime=write_runtime,
+    )
+    admitted_signal_rows = filter_admitted_signal_rows(
+        runtime_state.get("per_signal_attribution", []),
+        signal_admission_gate,
+    )
+    gated_runtime_state = dict(runtime_state)
+    gated_runtime_state["per_signal_attribution"] = admitted_signal_rows
 
     horsepower_monitor = _build_horsepower_monitor(runtime_state, config, run_started_at)
     validation_engine = _build_validation_engine(
-        runtime_state,
+        gated_runtime_state,
         config,
         trend_report,
         open_positions,
@@ -1133,14 +1157,14 @@ def build_signal_refinery_report(
         validation_engine.get("signals", [])
     )
     thermal_battery_manager = _build_thermal_battery_manager(
-        runtime_state,
+        gated_runtime_state,
         config,
         open_positions,
         trade_bundle.trade_closes,
         run_started_at,
     )
     launch_control = _build_launch_control(
-        runtime_state,
+        gated_runtime_state,
         config,
         validation_engine,
         thermal_battery_manager,
@@ -1183,6 +1207,8 @@ def build_signal_refinery_report(
         "source_mode": get_source_mode(),
         "config_path": repo_relative(config_path or SIGNAL_REFINERY_CONFIG_PATH),
         "open_positions_validation_summary": open_positions_summary,
+        "operator_state": operator_state,
+        "signal_admission_gate": signal_admission_gate,
         "horsepower_monitor": horsepower_monitor,
         "validation_engine": validation_engine,
         "visibility_timing_context": visibility_timing_context,
@@ -1193,6 +1219,8 @@ def build_signal_refinery_report(
         "time_to_valid_signal_kpi": time_to_valid_signal_kpi,
         "decision_engine_summary": {
             "usable_signal_output": usable_signal_output,
+            "admitted_signal_count": signal_admission_gate["admitted_count"],
+            "rejected_signal_count": signal_admission_gate["rejected_count"],
             "decision_grade_signal_count": decision_grade_signal_count,
             "deployable_signal_count": deployable_signal_count,
             "current_operating_mode": decision_engine_state,
@@ -1200,7 +1228,11 @@ def build_signal_refinery_report(
                 "median_time_to_valid_signal_hours"
             ],
         },
-        "note": "The MVP now treats feed speed as crude horsepower and routes decisions through validation, launch control, thermal discipline, repeatability, and maintenance layers.",
+        "note": (
+            "The MVP now treats feed speed as crude horsepower, applies a hard signal "
+            "admission gate, and routes admitted signals through validation, launch control, "
+            "thermal discipline, repeatability, and maintenance layers."
+        ),
     }
 
     if write_runtime:
@@ -1214,6 +1246,8 @@ def format_signal_refinery_summary(report: dict[str, Any]) -> str:
             "Signal Refinery",
             f"operating_mode={report['decision_engine_summary']['current_operating_mode']}",
             f"signals_above_threshold={report['horsepower_monitor']['signals_above_threshold']}",
+            f"admitted_signal_count={report['signal_admission_gate']['admitted_count']}",
+            f"rejected_signal_count={report['signal_admission_gate']['rejected_count']}",
             f"validated_signal_count={report['validation_engine']['validated_signal_count']}",
             f"review_ready_count={report['launch_control']['review_ready_count']}",
             f"deployable_signal_count={report['launch_control']['deployable_signal_count']}",
@@ -1248,7 +1282,9 @@ def main(argv: list[str] | None = None) -> int:
         from signal_conversion_monitor import build_signal_conversion_report
 
     report = build_signal_refinery_report(
-        runtime_state=build_signal_conversion_report(),
+        runtime_state=build_runtime_state_from_scm_report_payload(
+            build_signal_conversion_report()
+        ),
         write_runtime=args.write_runtime,
     )
     if args.summary:

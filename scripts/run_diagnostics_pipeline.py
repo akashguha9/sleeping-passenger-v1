@@ -80,7 +80,7 @@ def run_diagnostics_pipeline(
     signal_refinery_report = build_signal_refinery_report(
         runtime_state=runtime_state,
         trend_report=pre_snapshot_trend_report,
-        write_runtime=effective_write_runtime,
+        write_runtime=False,
     )
     runtime_state["signal_refinery"] = signal_refinery_report
 

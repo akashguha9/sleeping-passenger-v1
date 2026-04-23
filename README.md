@@ -40,6 +40,24 @@ This repo is a local decision shell for inspecting seeded signal state, blocker 
 - Quote-provider handling is placeholder-only unless explicitly replaced later.
 - External connectivity is optional and currently absent from the verified path.
 
+## Operator Control Layer
+
+The repo now includes an additive operator-control slice designed for truthful manual governance.
+
+- `runtime/operator_state.json`: optional manual operator state. No internal state is inferred if you do not log it.
+- `runtime/signal_gate_summary.json`: hard admission gate summary over current signal rows.
+- `logs/signal_kill_log.jsonl`: persistent rejected-signal log with explicit rejection dimensions and reasons.
+- `runtime/active_work_block.json` and `logs/operator_block_events.jsonl`: manual/event-based selection, execution, context-switch, and closure logging.
+- `runtime/operator_phase_balance.json` and `runtime/operator_phase_report.json`: transparent proxy scores for Phase 1/2/3 using logged drift, closure, gate behavior, tests, and artifact coverage.
+- `config/structural_cover_map.json`: explicit mapping from exposed operator asymmetries to structural controls.
+
+Mode honesty is preserved:
+
+- The operator-control layer is manual or event-driven unless an explicit runtime source exists.
+- Timeliness is derived only from repo-visible signal identifiers when available.
+- Closure is evaluated only from logged evidence such as `output_exists`, `validation_exists`, and `report_exists`.
+- Phase scores are transparent proxy blends, not psychological truth claims.
+
 ## Repo Layout
 
 - `scripts/`: runtime logic, diagnostics, adapters, and reports
@@ -60,6 +78,7 @@ python scripts\complexity_ladder_controller.py --summary
 python scripts\governance_status.py --summary
 python scripts\governance_feedback_report.py --summary
 python scripts\artifact_coherence_check.py --summary
+python scripts\operator_control.py report --summary
 python scripts\paper_execution.py sync --summary
 python scripts\operator_override_ledger.py --ticker RTX --override-action MONITOR --why-this-move "waiting for manual review" --trigger "review-ready candidate" --invalidation "cancel if validation weakens" --regime "review_ready" --why-now "blockers cleared this run" --summary
 python scripts\yahoo_market_data_adapter.py --tickers RTX,ZIM --summary
@@ -121,6 +140,19 @@ The repo now has a first additive experience/readiness report for trainer/utilit
 - That report now also includes a `truth_boundary_summary` block separating observed repo evidence, heuristic inference, placeholders, and items that still need real data or live APIs for full validation.
 - The current tree should still be interpreted as trainer / early-utility phase.
 - These experience/complexity reports are advisory only. They do not change decisioning or execution behavior.
+
+## Manual Operator Control Commands
+
+Examples:
+
+```powershell
+python scripts\operator_control.py state --active-objective "ship operator control MVP" --active-task "wire phase report" --operator-mode focused --baseline-score 0.42 --current-score 0.58 --peak-score 0.73 --note "manual-only input"
+python scripts\operator_control.py start-block --objective "ship operator control MVP" --success-metric "tests green" --time-boundary "90m" --active-task "wire gate" --non-goal "rewrite paper flow" --block-type coding
+python scripts\operator_control.py log-event --event-type execution_started
+python scripts\operator_control.py log-event --event-type context_switch --reason "checked adjacent module before closing"
+python scripts\operator_control.py close-block --output-exists --validation-exists
+python scripts\operator_control.py report --summary
+```
 
 ## Known Coherence Gap
 

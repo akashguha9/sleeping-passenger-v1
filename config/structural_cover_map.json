@@ -1,0 +1,25 @@
+{
+  "version": "STRUCTURAL_COVER_MAP_V1",
+  "controls": [
+    {
+      "operator_strength": "bottom_up signal generation",
+      "exposed_weakness": "too many weak or semi-relevant signals remain in play",
+      "structural_cover": "signal_admission_gate with hard relevance, actionability, and timeliness checks"
+    },
+    {
+      "operator_strength": "rapid synthesis once a block is chosen",
+      "exposed_weakness": "mid-block re-selection reduces closure",
+      "structural_cover": "work-block header plus explicit context_switch and decision_reopened events"
+    },
+    {
+      "operator_strength": "high local throughput",
+      "exposed_weakness": "drift and abandonment stay invisible without explicit logging",
+      "structural_cover": "event-based drift summary and closure threshold evaluation"
+    },
+    {
+      "operator_strength": "asymmetrical pattern recognition",
+      "exposed_weakness": "operator state can become the hidden bottleneck",
+      "structural_cover": "manual operator_state file and baseline_vs_peak tracker with no inferred psychology"
+    }
+  ]
+}
