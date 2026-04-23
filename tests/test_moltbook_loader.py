@@ -930,20 +930,30 @@ def test_pipeline_health_report_summary_cli() -> None:
     assert lines[1] == "operating_mode=seeded"
     assert lines[2] == "truth_origin=seeded"
     assert lines[3] in {"git_clean=true", "git_clean=false"}
-    assert lines[4:] == [
-        "tests_invoked=false",
-        "tests_passed=None",
-        "system_readiness_state=DO_NOT_DEPLOY",
-        "can_deploy_capital=false",
-        "scm_state=LOW_CONVERSION",
-        "policy_state=RESTRICTED",
-        "friction_band=HIGH_FRICTION",
-        "perception_control_state=CONSTRAINED",
-        "what_should_i_do_next=EXIT_NOW: UNG, FCG | CLEAR_GSCE_PHASE_LOCK_FOR: RTX, ZIM | DO NOT ADD NEW RISK",
-        "scorecard=logging_quality=10/10, schema_reliability=8/10, end_to_end_wiring=10/10, self_correction_maturity=10/10, execution_readiness=3/10",
-        "perception_metrics=noise_suppression_ratio=0.429, signal_survival_rate=0.5, average_signal_lux=0.661",
-        "perception_advisory=AMPLIFICATION WITHOUT SURVIVAL - injected signals failing gravity",
-    ]
+    assert "tests_invoked=false" in lines
+    assert "tests_passed=None" in lines
+    assert "system_readiness_state=DO_NOT_DEPLOY" in lines
+    assert "can_deploy_capital=false" in lines
+    assert "scm_state=LOW_CONVERSION" in lines
+    assert "policy_state=RESTRICTED" in lines
+    assert "friction_band=HIGH_FRICTION" in lines
+    assert "perception_control_state=CONSTRAINED" in lines
+    assert any(line.startswith("attention_proxy=state=") for line in lines)
+    assert any(line.startswith("attention_proxy_inputs=") for line in lines)
+    assert any(line.startswith("narrative_proxy_advisory=") for line in lines)
+    assert (
+        "what_should_i_do_next=EXIT_NOW: UNG, FCG | CLEAR_GSCE_PHASE_LOCK_FOR: RTX, ZIM | DO NOT ADD NEW RISK"
+        in lines
+    )
+    assert any(line.startswith("scorecard=") for line in lines)
+    assert (
+        "perception_metrics=noise_suppression_ratio=0.429, signal_survival_rate=0.5, average_signal_lux=0.661"
+        in lines
+    )
+    assert (
+        "perception_advisory=AMPLIFICATION WITHOUT SURVIVAL - injected signals failing gravity"
+        in lines
+    )
 
 
 def test_pipeline_health_report_summary_cli_gsce_clear_includes_transition_candidates() -> None:

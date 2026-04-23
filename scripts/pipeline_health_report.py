@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 try:
+    from scripts.attention_proxy_engine import build_attention_proxy_report
     from scripts.action_engine import build_action_report
     from scripts.archetype_profile import build_archetype_profile_report
     from scripts.blocker_cost_engine import build_blocker_cost_report
@@ -39,6 +40,7 @@ try:
     from scripts.signal_conversion_monitor import build_signal_conversion_report
     from scripts.trend_engine import build_trend_report
 except ModuleNotFoundError:
+    from attention_proxy_engine import build_attention_proxy_report
     from action_engine import build_action_report
     from archetype_profile import build_archetype_profile_report
     from blocker_cost_engine import build_blocker_cost_report
@@ -1689,6 +1691,7 @@ def build_pipeline_health_report(
     complexity_ladder_controller_path: Path | None = None,
     runtime_state: dict[str, Any] | None = None,
     action_report: dict[str, Any] | None = None,
+    attention_proxy_report: dict[str, Any] | None = None,
     friction_report: dict[str, Any] | None = None,
     trend_report: dict[str, Any] | None = None,
     signal_refinery_report: dict[str, Any] | None = None,
@@ -1735,6 +1738,14 @@ def build_pipeline_health_report(
         write_runtime=effective_write_runtime,
         current_snapshot_row=current_snapshot_row,
     )
+    attention_proxy_report = attention_proxy_report or state.get("attention_proxy")
+    if not isinstance(attention_proxy_report, dict) or not attention_proxy_report:
+        attention_proxy_report = build_attention_proxy_report(
+            runtime_state=state,
+            trend_report=trend_report,
+            write_runtime=effective_write_runtime,
+        )
+    state["attention_proxy"] = attention_proxy_report
     signal_refinery_report = signal_refinery_report or build_signal_refinery_report(
         runtime_state=state,
         trend_report=trend_report,
@@ -1957,6 +1968,20 @@ def build_pipeline_health_report(
         "where_am_i_leaking_performance": where_am_i_leaking_performance,
         "what_should_i_do_next": what_should_i_do_next,
         "scm": state["scm_review"],
+        "attention_proxy": attention_proxy_report,
+        "attention_proxy_state": attention_proxy_report.get(
+            "attention_proxy_state",
+            "UNAVAILABLE",
+        ),
+        "attention_proxy_score": attention_proxy_report.get("attention_proxy_score"),
+        "attention_proxy_confidence": attention_proxy_report.get(
+            "attention_proxy_confidence",
+            "LOW",
+        ),
+        "narrative_proxy_advisory": attention_proxy_report.get(
+            "narrative_proxy_advisory",
+            "no_attention_inputs_scored",
+        ),
         "policy": operator_policy,
         "friction": friction_report,
         "governance_feedback": governance_feedback_report,
@@ -2073,6 +2098,13 @@ def format_pipeline_health_summary(report: dict[str, Any]) -> str:
             f"policy_state={report['policy']['policy_state']}",
             f"friction_band={report['friction']['friction_band']}",
             f"perception_control_state={report.get('perception_control_state', 'UNKNOWN')}",
+            (
+                "attention_proxy="
+                f"state={report.get('attention_proxy_state', 'UNAVAILABLE')}, "
+                f"score={report.get('attention_proxy_score')}, "
+                f"confidence={report.get('attention_proxy_confidence', 'LOW')}"
+            ),
+            f"narrative_proxy_advisory={report.get('narrative_proxy_advisory', 'no_attention_inputs_scored')}",
             f"what_should_i_do_next={report['what_should_i_do_next']}",
             (
                 "scorecard="
@@ -2084,6 +2116,20 @@ def format_pipeline_health_summary(report: dict[str, Any]) -> str:
             ),
         ]
     )
+    attention_proxy = report.get("attention_proxy", {})
+    observability = (
+        attention_proxy.get("observability", {})
+        if isinstance(attention_proxy, dict)
+        else {}
+    )
+    if isinstance(observability, dict) and observability:
+        lines.append(
+            "attention_proxy_inputs="
+            f"telemetry_backed={observability.get('telemetry_backed_signal_count', 0)}/"
+            f"{attention_proxy.get('scored_signal_count', 0)}, "
+            f"inferred={observability.get('inferred_signal_count', 0)}, "
+            f"state_overlap={observability.get('state_overlap_signal_count', 0)}"
+        )
     perception_control = report.get("perception_control", {})
     if isinstance(perception_control, dict):
         lines.append(

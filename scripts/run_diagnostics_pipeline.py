@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 
 try:
+    from scripts.attention_proxy_engine import build_attention_proxy_report
     from scripts.action_engine import build_action_report
     from scripts.blocker_cost_engine import build_blocker_cost_report
     from scripts.external_data_runtime_sync import (
@@ -29,6 +30,7 @@ try:
     from scripts.snapshot_logger import build_snapshot_row, log_snapshot
     from scripts.trend_engine import build_trend_report
 except ModuleNotFoundError:
+    from attention_proxy_engine import build_attention_proxy_report
     from action_engine import build_action_report
     from blocker_cost_engine import build_blocker_cost_report
     from external_data_runtime_sync import (
@@ -101,6 +103,12 @@ def run_diagnostics_pipeline(
         write_runtime=False,
         scenario_scope=scenario,
     )
+    attention_proxy_report = build_attention_proxy_report(
+        runtime_state=runtime_state,
+        trend_report=pre_snapshot_trend_report,
+        write_runtime=False,
+    )
+    runtime_state["attention_proxy"] = attention_proxy_report
     signal_refinery_report = build_signal_refinery_report(
         runtime_state=runtime_state,
         trend_report=pre_snapshot_trend_report,
@@ -136,6 +144,12 @@ def run_diagnostics_pipeline(
         current_snapshot_row=current_snapshot_row,
         scenario_scope=scenario,
     )
+    final_attention_proxy_report = build_attention_proxy_report(
+        runtime_state=runtime_state,
+        trend_report=trend_report,
+        write_runtime=effective_write_runtime,
+    )
+    runtime_state["attention_proxy"] = final_attention_proxy_report
     final_signal_refinery_report = build_signal_refinery_report(
         runtime_state=runtime_state,
         trend_report=trend_report,
@@ -160,6 +174,7 @@ def run_diagnostics_pipeline(
         write_runtime=effective_write_runtime,
         runtime_state=runtime_state,
         action_report=action_report,
+        attention_proxy_report=final_attention_proxy_report,
         friction_report=friction_report,
         trend_report=trend_report,
         signal_refinery_report=final_signal_refinery_report,
