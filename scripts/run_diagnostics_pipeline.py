@@ -18,6 +18,7 @@ try:
         build_runtime_state_from_scm_report,
         format_pipeline_health_summary,
     )
+    from scripts.moltbook_feedback import build_moltbook_feedback_report
     from scripts.perception_control import build_perception_control_report
     from scripts.runtime_common import (
         SNAPSHOT_LOG_PATH,
@@ -38,6 +39,7 @@ except ModuleNotFoundError:
         build_external_data_runtime_report,
         write_external_data_runtime_report,
     )
+    from moltbook_feedback import build_moltbook_feedback_report
     from pipeline_health_report import (
         build_pipeline_health_report,
         build_runtime_state_from_scm_report,
@@ -163,6 +165,11 @@ def run_diagnostics_pipeline(
         write_runtime=effective_write_runtime,
     )
     runtime_state["perception_control"] = final_perception_control_report
+    moltbook_feedback_report = build_moltbook_feedback_report(
+        runtime_state=runtime_state,
+        write_runtime=effective_write_runtime,
+    )
+    runtime_state["moltbook_feedback"] = moltbook_feedback_report
     action_report = build_action_report(
         runtime_state=runtime_state,
         signal_refinery_report=final_signal_refinery_report,
@@ -175,6 +182,7 @@ def run_diagnostics_pipeline(
         runtime_state=runtime_state,
         action_report=action_report,
         attention_proxy_report=final_attention_proxy_report,
+        moltbook_feedback_report=moltbook_feedback_report,
         friction_report=friction_report,
         trend_report=trend_report,
         signal_refinery_report=final_signal_refinery_report,

@@ -16,6 +16,7 @@ try:
     from scripts.closure_deficit_monitor import build_closure_deficit_report
     from scripts.external_data_runtime_sync import apply_external_observation_report
     from scripts.governance_feedback_report import build_governance_feedback_report
+    from scripts.moltbook_feedback import build_moltbook_feedback_report
     from scripts.operator_control import build_operator_control_report
     from scripts.perception_control import build_perception_control_report
     from scripts.snapshot_logger import build_snapshot_row
@@ -47,6 +48,7 @@ except ModuleNotFoundError:
     from closure_deficit_monitor import build_closure_deficit_report
     from external_data_runtime_sync import apply_external_observation_report
     from governance_feedback_report import build_governance_feedback_report
+    from moltbook_feedback import build_moltbook_feedback_report
     from operator_control import build_operator_control_report
     from perception_control import build_perception_control_report
     from snapshot_logger import build_snapshot_row
@@ -1692,6 +1694,7 @@ def build_pipeline_health_report(
     runtime_state: dict[str, Any] | None = None,
     action_report: dict[str, Any] | None = None,
     attention_proxy_report: dict[str, Any] | None = None,
+    moltbook_feedback_report: dict[str, Any] | None = None,
     friction_report: dict[str, Any] | None = None,
     trend_report: dict[str, Any] | None = None,
     signal_refinery_report: dict[str, Any] | None = None,
@@ -1746,6 +1749,13 @@ def build_pipeline_health_report(
             write_runtime=effective_write_runtime,
         )
     state["attention_proxy"] = attention_proxy_report
+    moltbook_feedback_report = moltbook_feedback_report or state.get("moltbook_feedback")
+    if not isinstance(moltbook_feedback_report, dict) or not moltbook_feedback_report:
+        moltbook_feedback_report = build_moltbook_feedback_report(
+            runtime_state=state,
+            write_runtime=effective_write_runtime,
+        )
+    state["moltbook_feedback"] = moltbook_feedback_report
     signal_refinery_report = signal_refinery_report or build_signal_refinery_report(
         runtime_state=state,
         trend_report=trend_report,
@@ -1982,6 +1992,28 @@ def build_pipeline_health_report(
             "narrative_proxy_advisory",
             "no_attention_inputs_scored",
         ),
+        "moltbook_feedback": moltbook_feedback_report,
+        "moltbook_feedback_available": bool(
+            moltbook_feedback_report.get("moltbook_feedback_available", False)
+        ),
+        "feedback_learning_state": moltbook_feedback_report.get(
+            "feedback_learning_state",
+            "NO_FEEDBACK",
+        ),
+        "feedback_cases_total": int(moltbook_feedback_report.get("feedback_cases_total", 0) or 0),
+        "feedback_success_rate": moltbook_feedback_report.get("feedback_success_rate", 0.0),
+        "feedback_top_failure_mode": moltbook_feedback_report.get(
+            "feedback_top_failure_mode",
+            "NONE",
+        ),
+        "feedback_readiness_penalty": moltbook_feedback_report.get(
+            "feedback_readiness_penalty",
+            0.0,
+        ),
+        "suggested_feedback_adjustments": moltbook_feedback_report.get(
+            "suggested_feedback_adjustments",
+            [],
+        ),
         "policy": operator_policy,
         "friction": friction_report,
         "governance_feedback": governance_feedback_report,
@@ -2066,7 +2098,7 @@ def build_pipeline_health_report(
         "scorecard_rules": SCORECARD_RULES,
         "note": (
             "Health report integrates the local SCM runtime, signal refinery gating, "
-            "action policy, blocker cost, memory trends, and open-position validation. "
+            "action policy, blocker cost, paper-feedback learning, memory trends, and open-position validation. "
             "It is a local decision shell report, not a live execution report."
         ),
     }
@@ -2105,6 +2137,13 @@ def format_pipeline_health_summary(report: dict[str, Any]) -> str:
                 f"confidence={report.get('attention_proxy_confidence', 'LOW')}"
             ),
             f"narrative_proxy_advisory={report.get('narrative_proxy_advisory', 'no_attention_inputs_scored')}",
+            f"feedback_learning_state={report.get('feedback_learning_state', 'NO_FEEDBACK')}",
+            f"feedback_cases_total={report.get('feedback_cases_total', 0)}",
+            f"feedback_success_rate={report.get('feedback_success_rate', 0.0)}",
+            f"feedback_top_failure_mode={report.get('feedback_top_failure_mode', 'NONE')}",
+            f"feedback_readiness_penalty={report.get('feedback_readiness_penalty', 0.0)}",
+            "moltbook_feedback_available="
+            f"{str(bool(report.get('moltbook_feedback_available', False))).lower()}",
             f"what_should_i_do_next={report['what_should_i_do_next']}",
             (
                 "scorecard="
@@ -2129,6 +2168,12 @@ def format_pipeline_health_summary(report: dict[str, Any]) -> str:
             f"{attention_proxy.get('scored_signal_count', 0)}, "
             f"inferred={observability.get('inferred_signal_count', 0)}, "
             f"state_overlap={observability.get('state_overlap_signal_count', 0)}"
+        )
+    feedback_adjustments = report.get("suggested_feedback_adjustments", [])
+    if isinstance(feedback_adjustments, list) and feedback_adjustments:
+        lines.append(
+            "suggested_feedback_adjustments="
+            + " | ".join(str(value) for value in feedback_adjustments[:2])
         )
     perception_control = report.get("perception_control", {})
     if isinstance(perception_control, dict):

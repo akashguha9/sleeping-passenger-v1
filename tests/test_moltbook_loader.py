@@ -3,6 +3,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
 import scripts.run_diagnostics_pipeline as run_diagnostics_pipeline_module
 from scripts.action_engine import build_action_report
 from scripts.moltbook_loader import summarize_moltbook
@@ -941,15 +942,27 @@ def test_pipeline_health_report_summary_cli() -> None:
     assert any(line.startswith("attention_proxy=state=") for line in lines)
     assert any(line.startswith("attention_proxy_inputs=") for line in lines)
     assert any(line.startswith("narrative_proxy_advisory=") for line in lines)
+    assert "feedback_learning_state=INSUFFICIENT_FEEDBACK" in lines
+    assert "feedback_cases_total=3" in lines
+    assert "feedback_success_rate=0.6667" in lines
+    assert "feedback_top_failure_mode=FAIL_SIGNAL" in lines
+    assert "feedback_readiness_penalty=0.05" in lines
+    assert "moltbook_feedback_available=true" in lines
+    assert any(line.startswith("suggested_feedback_adjustments=") for line in lines)
     assert (
         "what_should_i_do_next=EXIT_NOW: UNG, FCG | CLEAR_GSCE_PHASE_LOCK_FOR: RTX, ZIM | DO NOT ADD NEW RISK"
         in lines
     )
     assert any(line.startswith("scorecard=") for line in lines)
-    assert (
-        "perception_metrics=noise_suppression_ratio=0.429, signal_survival_rate=0.5, average_signal_lux=0.661"
-        in lines
+    perception_metrics_line = next(
+        line for line in lines if line.startswith("perception_metrics=")
     )
+    assert "noise_suppression_ratio=0.429" in perception_metrics_line
+    assert "signal_survival_rate=0.5" in perception_metrics_line
+    average_signal_lux = float(
+        perception_metrics_line.split("average_signal_lux=", maxsplit=1)[1]
+    )
+    assert average_signal_lux == pytest.approx(0.659, abs=0.001)
     assert (
         "perception_advisory=AMPLIFICATION WITHOUT SURVIVAL - injected signals failing gravity"
         in lines
