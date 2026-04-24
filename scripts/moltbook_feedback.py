@@ -659,16 +659,57 @@ def build_feedback_cases_from_rows(
     ]
 
 
+#: Flags in data_quality_flags that indicate the learning evidence is
+#: contaminated even when the case is classified as SUCCESS_VALID_SIGNAL.
+#: These are substrings — any ``data_quality_flag`` containing one of these
+#: tokens is treated as serious for contamination accounting.
+SERIOUS_DATA_QUALITY_FLAG_TOKENS = (
+    "truth_origin_seeded",
+    "missing_feedback",
+    "data_gap",
+    "legacy_incomplete",
+    "placeholder",
+    "missing_mark",
+)
+
+
+def _case_has_serious_data_quality_flags(case: MoltbookFeedbackCase) -> bool:
+    flags = getattr(case, "data_quality_flags", None) or []
+    if not isinstance(flags, list):
+        return False
+    for raw_flag in flags:
+        flag = str(raw_flag or "").strip().lower()
+        if not flag:
+            continue
+        for token in SERIOUS_DATA_QUALITY_FLAG_TOKENS:
+            if token in flag:
+                return True
+    return False
+
+
 def build_feedback_summary(cases: list[MoltbookFeedbackCase]) -> dict[str, Any]:
     total_cases = len(cases)
     cases_by_classification: dict[str, int] = {}
     failure_by_asset: dict[str, int] = {}
+    contaminated_case_count = 0
+    contaminated_success_count = 0
+    # Union of "explicit FAIL_DATA_QUALITY" and "contaminated" — used to
+    # compute effective_data_quality_failure_ratio without double counting a
+    # case that is both classified FAIL_DATA_QUALITY and carrying flags.
+    compromised_case_count = 0
     for case in cases:
         cases_by_classification[case.classification] = (
             cases_by_classification.get(case.classification, 0) + 1
         )
         if case.classification in FAILURE_CLASSIFICATIONS:
             failure_by_asset[case.asset] = failure_by_asset.get(case.asset, 0) + 1
+        is_contaminated = _case_has_serious_data_quality_flags(case)
+        if is_contaminated:
+            contaminated_case_count += 1
+            if case.classification == "SUCCESS_VALID_SIGNAL":
+                contaminated_success_count += 1
+        if is_contaminated or case.classification == "FAIL_DATA_QUALITY":
+            compromised_case_count += 1
 
     success_count = cases_by_classification.get("SUCCESS_VALID_SIGNAL", 0)
     failure_count = sum(
@@ -759,6 +800,38 @@ def build_feedback_summary(cases: list[MoltbookFeedbackCase]) -> dict[str, Any]:
         )
     suggested_global_adjustments = _sorted_unique(suggested_global_adjustments)
 
+    raw_success_rate = round(success_count / total_cases, 4) if total_cases else 0.0
+    clean_success_count = max(success_count - contaminated_success_count, 0)
+    clean_success_rate = (
+        round(clean_success_count / total_cases, 4) if total_cases else 0.0
+    )
+    contaminated_case_ratio = (
+        round(contaminated_case_count / total_cases, 4) if total_cases else 0.0
+    )
+    # Contamination inflates the data-quality failure signal so that contaminated
+    # successes reduce learning-evidence quality instead of being counted as
+    # clean wins. The original FAIL_DATA_QUALITY ratio is kept for backwards
+    # compatibility, and the new effective ratio is published separately.
+    effective_data_quality_failure_ratio = (
+        round(compromised_case_count / total_cases, 4)
+        if total_cases
+        else 0.0
+    )
+    learning_quality_warning = None
+    if contaminated_success_count > 0:
+        learning_quality_warning = (
+            f"{contaminated_success_count} of {success_count} successes carry "
+            "serious data-quality flags (seeded truth_origin, missing feedback, "
+            "data gaps, legacy_incomplete). Treat clean_success_rate as the "
+            "honest learning-evidence rate."
+        )
+    elif contaminated_case_count > 0 and total_cases >= 3:
+        learning_quality_warning = (
+            f"{contaminated_case_count} of {total_cases} feedback cases carry "
+            "serious data-quality flags. Learning evidence is partially "
+            "contaminated even though no successes are affected."
+        )
+
     return {
         "artifact_kind": "moltbook_feedback_summary",
         "generated_at_utc": utc_timestamp(),
@@ -766,19 +839,27 @@ def build_feedback_summary(cases: list[MoltbookFeedbackCase]) -> dict[str, Any]:
         "total_cases": total_cases,
         "feedback_cases_total": total_cases,
         "cases_by_classification": cases_by_classification,
-        "success_rate": round(success_count / total_cases, 4) if total_cases else 0.0,
-        "feedback_success_rate": round(success_count / total_cases, 4) if total_cases else 0.0,
+        "success_rate": raw_success_rate,
+        "feedback_success_rate": raw_success_rate,
+        "raw_success_rate": raw_success_rate,
+        "clean_success_rate": clean_success_rate,
+        "clean_success_count": clean_success_count,
+        "contaminated_case_count": contaminated_case_count,
+        "contaminated_success_count": contaminated_success_count,
+        "contaminated_case_ratio": contaminated_case_ratio,
         "failure_rate": round(failure_count / total_cases, 4) if total_cases else 0.0,
         "top_failure_modes": top_failure_modes,
         "repeated_failure_modes": repeated_failure_modes,
         "assets_with_repeated_failures": assets_with_repeated_failures,
         "timing_failure_ratio": timing_failure_ratio,
         "data_quality_failure_ratio": data_quality_failure_ratio,
+        "effective_data_quality_failure_ratio": effective_data_quality_failure_ratio,
         "inconclusive_ratio": inconclusive_ratio,
         "feedback_top_failure_mode": top_failure_mode,
         "feedback_learning_state": feedback_learning_state,
         "feedback_readiness_penalty": round(readiness_penalty, 2),
         "readiness_penalty": round(readiness_penalty, 2),
+        "learning_quality_warning": learning_quality_warning,
         "suggested_global_adjustments": suggested_global_adjustments,
         "suggested_feedback_adjustments": suggested_global_adjustments,
         "note": (

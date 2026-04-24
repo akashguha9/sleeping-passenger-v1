@@ -279,6 +279,55 @@ def _select_action(
     return "MONITOR", reasons
 
 
+def _build_external_observation_context(
+    state: dict[str, Any],
+    actions: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Attach advisory external-observation context to the action report.
+
+    Observation data is reality context only. It cannot create new actions,
+    override policy, or change rankings. We only surface:
+      * whether the external observation lane attached for this run
+      * how many observations covered action tickers
+      * per-quality counts so a reader can see if external data was
+        actually usable (VALID_EXTERNAL) vs degraded (STALE / ERROR)
+    """
+    summary = state.get("external_observation_summary") if isinstance(state, dict) else None
+    if not isinstance(summary, dict):
+        summary = {}
+    active = bool(summary.get("external_observation_active"))
+    if not active:
+        return {
+            "external_observation_attached": False,
+            "external_observation_context_count": 0,
+            "external_observation_symbols": [],
+            "external_observation_quality_summary": {},
+            "note": (
+                "Advisory external-observation context not attached to this run; "
+                "action rankings are derived from seeded runtime state only."
+            ),
+        }
+
+    obs_symbols = [str(s).strip().upper() for s in summary.get("external_observation_symbols", []) if str(s).strip()]
+    action_tickers = {str(a.get("ticker") or "").strip().upper() for a in actions}
+    covered = sorted(obs_symbols_set & action_tickers) if (obs_symbols_set := set(obs_symbols)) else []
+    return {
+        "external_observation_attached": True,
+        "external_observation_context_count": len(covered),
+        "external_observation_symbols": covered,
+        "external_observation_provider": summary.get("external_observation_provider"),
+        "external_observation_quality_summary": {
+            "valid_count": int(summary.get("external_observation_valid_count", 0) or 0),
+            "error_count": int(summary.get("external_observation_error_count", 0) or 0),
+            "total_count": int(summary.get("external_observation_count", 0) or 0),
+        },
+        "note": (
+            "Advisory reality context only. External observations do not "
+            "create trade signals or alter action rankings."
+        ),
+    }
+
+
 def build_action_report(
     runtime_state: dict[str, Any] | None = None,
     open_positions_path: Path | None = None,
@@ -417,6 +466,7 @@ def build_action_report(
             action_row["experience_mode_advisory"] = dict(experience_mode_advisory)
         actions.append(action_row)
     actions.sort(key=lambda item: (-item["priority_score"], item["ticker"]))
+    external_observation_context = _build_external_observation_context(state, actions)
     report = {
         "policy_state": policy["policy_state"],
         "active_blockers": active_blockers,
@@ -425,6 +475,7 @@ def build_action_report(
         "execution_governance_summary": summarize_action_governance(actions),
         "actions": actions,
         "open_positions_validation": validation,
+        "external_observation_context": external_observation_context,
     }
     if write_runtime:
         write_json_atomic(ACTION_REPORT_PATH, report)

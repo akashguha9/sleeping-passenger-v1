@@ -13,6 +13,12 @@ try:
         build_external_data_runtime_report,
         write_external_data_runtime_report,
     )
+    from scripts.external_observation_lane import (
+        ProviderFetchFn,
+        apply_observation_summary_to_runtime_state,
+        fetch_external_observations,
+        safe_write_external_observation_report,
+    )
     from scripts.pipeline_health_report import (
         build_pipeline_health_report,
         build_runtime_state_from_scm_report,
@@ -39,6 +45,12 @@ except ModuleNotFoundError:
         build_external_data_runtime_report,
         write_external_data_runtime_report,
     )
+    from external_observation_lane import (  # type: ignore[no-redef]
+        ProviderFetchFn,
+        apply_observation_summary_to_runtime_state,
+        fetch_external_observations,
+        safe_write_external_observation_report,
+    )
     from moltbook_feedback import build_moltbook_feedback_report
     from pipeline_health_report import (
         build_pipeline_health_report,
@@ -61,6 +73,10 @@ except ModuleNotFoundError:
 def run_diagnostics_pipeline(
     include_tests: bool = False,
     include_external_data: bool = False,
+    include_external_observations: bool = False,
+    external_observation_symbols: list[str] | None = None,
+    external_observation_provider: str = "yahoo",
+    external_observation_provider_fn: ProviderFetchFn | None = None,
     write_runtime: bool = True,
     write_snapshot: bool = False,
     snapshot_log_path: Path | None = None,
@@ -170,6 +186,61 @@ def run_diagnostics_pipeline(
         write_runtime=effective_write_runtime,
     )
     runtime_state["moltbook_feedback"] = moltbook_feedback_report
+
+    external_observation_report: dict | None = None
+    if include_external_observations:
+        candidate_symbols: list[str] = []
+        if external_observation_symbols:
+            candidate_symbols = [str(s) for s in external_observation_symbols if str(s).strip()]
+        else:
+            # Fall back to the tickers already visible inside runtime state.
+            per_signal_rows = runtime_state.get("per_signal_attribution") or []
+            if isinstance(per_signal_rows, list):
+                seen: set[str] = set()
+                for row in per_signal_rows:
+                    if not isinstance(row, dict):
+                        continue
+                    ticker = str(row.get("ticker") or "").strip().upper()
+                    if ticker and ticker not in seen:
+                        seen.add(ticker)
+                        candidate_symbols.append(ticker)
+        observations = fetch_external_observations(
+            candidate_symbols,
+            provider=external_observation_provider,
+            provider_fn=external_observation_provider_fn,
+        )
+        external_observation_report = safe_write_external_observation_report(
+            observations,
+            provider=external_observation_provider,
+            write=effective_write_runtime,
+        )
+        # Flip runtime state so build_truth_context / classify_operating_mode
+        # pick up the active external lane (turns truth_origin=external,
+        # operating_mode=hybrid). Only does anything when the report is
+        # genuinely active — seeded fallback stays untouched otherwise.
+        runtime_state = apply_observation_summary_to_runtime_state(
+            runtime_state, external_observation_report
+        )
+        runtime_state["external_observation_summary"] = {
+            "external_observation_active": external_observation_report[
+                "external_observation_active"
+            ],
+            "external_observation_count": external_observation_report[
+                "external_observation_count"
+            ],
+            "external_observation_valid_count": external_observation_report[
+                "external_observation_valid_count"
+            ],
+            "external_observation_error_count": external_observation_report[
+                "external_observation_error_count"
+            ],
+            "external_observation_symbols": external_observation_report[
+                "external_observation_symbols"
+            ],
+            "external_observation_provider": external_observation_report[
+                "external_observation_provider"
+            ],
+        }
     action_report = build_action_report(
         runtime_state=runtime_state,
         signal_refinery_report=final_signal_refinery_report,
@@ -188,6 +259,7 @@ def run_diagnostics_pipeline(
         signal_refinery_report=final_signal_refinery_report,
         perception_control_report=final_perception_control_report,
         external_data_report=external_data_report,
+        external_observation_report=external_observation_report,
         latest_snapshot_timestamp=latest_snapshot_timestamp,
         simulate_gsce_clear=simulate_gsce_clear,
         simulate_realm_bis_clear=simulate_realm_bis_clear,
@@ -209,6 +281,31 @@ def build_cli_parser() -> argparse.ArgumentParser:
         "--include-external-data",
         action="store_true",
         help="Run the read-only Polymarket/Blockscout sync before the final health report.",
+    )
+    parser.add_argument(
+        "--include-external-observations",
+        action="store_true",
+        help=(
+            "Attach the external observation lane (yahoo by default) to this "
+            "diagnostics run. Advisory only: observations cannot enable "
+            "capital deployment."
+        ),
+    )
+    parser.add_argument(
+        "--external-observation-symbol",
+        action="append",
+        dest="external_observation_symbols",
+        default=None,
+        help=(
+            "Restrict the external observation lane to these symbols. May be "
+            "repeated; defaults to the tickers present in the current "
+            "per-signal attribution."
+        ),
+    )
+    parser.add_argument(
+        "--external-observation-provider",
+        default="yahoo",
+        help="Provider key for the external observation lane (default: yahoo).",
     )
     parser.add_argument(
         "--no-write",
@@ -249,6 +346,9 @@ def main(argv: list[str] | None = None) -> int:
     report = run_diagnostics_pipeline(
         include_tests=args.include_tests,
         include_external_data=args.include_external_data,
+        include_external_observations=args.include_external_observations,
+        external_observation_symbols=args.external_observation_symbols,
+        external_observation_provider=args.external_observation_provider,
         write_runtime=not args.no_write,
         write_snapshot=args.write_snapshot,
         simulate_gsce_clear=args.simulate_gsce_clear,

@@ -19,6 +19,10 @@ try:
     from scripts.moltbook_feedback import build_moltbook_feedback_report
     from scripts.operator_control import build_operator_control_report
     from scripts.perception_control import build_perception_control_report
+    from scripts.position_truth_resolver import (
+        build_position_truth_summary,
+        format_position_truth_summary,
+    )
     from scripts.snapshot_logger import build_snapshot_row
     from scripts.runtime_common import (
         COMPLEXITY_LADDER_CONTROLLER_PATH,
@@ -51,6 +55,10 @@ except ModuleNotFoundError:
     from moltbook_feedback import build_moltbook_feedback_report
     from operator_control import build_operator_control_report
     from perception_control import build_perception_control_report
+    from position_truth_resolver import (
+        build_position_truth_summary,
+        format_position_truth_summary,
+    )
     from snapshot_logger import build_snapshot_row
     from runtime_common import (
         COMPLEXITY_LADDER_CONTROLLER_PATH,
@@ -226,6 +234,53 @@ def build_external_data_summary(
         "success_source_count": int(report.get("success_source_count", 0)),
         "failure_source_count": int(report.get("failure_source_count", 0)),
         "note": report.get("note"),
+    }
+
+
+def build_external_observation_summary(
+    external_observation_report: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Flatten the external observation lane report for health-report consumption.
+
+    Always returns the same shape. When the lane was not run, all counts are
+    zero and ``external_observation_active=False``. This keeps the
+    diagnostics schema stable across seeded-fallback and external-active
+    runs, and makes the lane's presence independently visible alongside the
+    broader ``external_data_summary`` block.
+    """
+    report = external_observation_report if isinstance(external_observation_report, dict) else {}
+    symbols = report.get("external_observation_symbols") or []
+    if not isinstance(symbols, list):
+        symbols = []
+    providers = report.get("external_observation_providers") or []
+    if not isinstance(providers, list):
+        providers = []
+    quality_counts = report.get("external_observation_data_quality_counts") or {}
+    if not isinstance(quality_counts, dict):
+        quality_counts = {}
+
+    active = bool(report.get("external_observation_active"))
+    valid = int(report.get("external_observation_valid_count", 0) or 0)
+    stale = int(report.get("external_observation_stale_count", 0) or 0)
+    return {
+        "external_observation_active": active,
+        "external_observation_count": int(report.get("external_observation_count", 0) or 0),
+        "external_observation_valid_count": valid,
+        "external_observation_stale_count": stale,
+        "external_observation_error_count": int(
+            report.get("external_observation_error_count", 0) or 0
+        ),
+        "external_observation_active_count": int(
+            report.get("external_observation_active_count", valid + stale) or (valid + stale)
+        ),
+        "external_observation_provider": report.get("external_observation_provider"),
+        "external_observation_providers": [str(p) for p in providers if str(p).strip()],
+        "external_observation_symbols": [str(s) for s in symbols if str(s).strip()],
+        "external_observation_data_quality_counts": {
+            str(k): int(v or 0) for k, v in quality_counts.items()
+        },
+        "external_observation_report_path": report.get("external_observation_report_path"),
+        "live_quotes_available": active,
     }
 
 
@@ -1700,6 +1755,7 @@ def build_pipeline_health_report(
     signal_refinery_report: dict[str, Any] | None = None,
     perception_control_report: dict[str, Any] | None = None,
     external_data_report: dict[str, Any] | None = None,
+    external_observation_report: dict[str, Any] | None = None,
     grok_xai_report: dict[str, Any] | None = None,
     latest_snapshot_timestamp: str | None = None,
     simulate_gsce_clear: bool = False,
@@ -1920,6 +1976,8 @@ def build_pipeline_health_report(
         complexity_ladder_controller=complexity_ladder_controller,
     )
     external_data_summary = build_external_data_summary(loaded_external_data_report)
+    external_observation_summary = build_external_observation_summary(external_observation_report)
+    position_truth_summary = build_position_truth_summary(curated_path=open_positions_path)
     signal_source_summary = build_signal_source_summary(state["per_signal_attribution"])
     intelligence_summary = build_intelligence_summary(grok_xai_report)
     operator_control_report = build_operator_control_report(
@@ -1973,6 +2031,22 @@ def build_pipeline_health_report(
         "can_deploy_capital": can_deploy_capital,
         "experience_mode_summary": experience_mode_summary,
         "external_data_summary": external_data_summary,
+        "external_observation_summary": external_observation_summary,
+        "external_observation_active": external_observation_summary["external_observation_active"],
+        "external_observation_count": external_observation_summary["external_observation_count"],
+        "external_observation_valid_count": external_observation_summary["external_observation_valid_count"],
+        "external_observation_error_count": external_observation_summary["external_observation_error_count"],
+        "external_observation_provider": external_observation_summary["external_observation_provider"],
+        "external_observation_symbols": external_observation_summary["external_observation_symbols"],
+        "external_observation_data_quality_counts": external_observation_summary["external_observation_data_quality_counts"],
+        "external_observation_report_path": external_observation_summary["external_observation_report_path"],
+        "live_quotes_available": external_observation_summary["live_quotes_available"],
+        "position_truth_summary": position_truth_summary,
+        "position_truth_source": position_truth_summary["canonical_position_source"],
+        "position_source_divergence_detected": position_truth_summary["position_source_divergence_detected"],
+        "curated_positions_count": position_truth_summary["curated_moltbook_positions_count"],
+        "runtime_paper_positions_count": position_truth_summary["runtime_paper_positions_count"],
+        "position_truth_warning": position_truth_summary["position_truth_warning"],
         "signal_source_summary": signal_source_summary,
         "intelligence_summary": intelligence_summary,
         "where_am_i_leaking_performance": where_am_i_leaking_performance,
@@ -2206,6 +2280,33 @@ def format_pipeline_health_summary(report: dict[str, Any]) -> str:
                 "external_data_sources="
                 + ", ".join(external_summary.get("active_sources", []))
             )
+    position_truth = report.get("position_truth_summary", {})
+    if isinstance(position_truth, dict) and position_truth:
+        lines.extend(format_position_truth_summary(position_truth))
+    observation_summary = report.get("external_observation_summary", {})
+    if observation_summary.get("external_observation_active"):
+        lines.append(
+            "external_observation_active="
+            f"{str(observation_summary.get('external_observation_active')).lower()}"
+        )
+        lines.append(
+            "external_observation_count="
+            f"valid={int(observation_summary.get('external_observation_valid_count', 0))}, "
+            f"error={int(observation_summary.get('external_observation_error_count', 0))}, "
+            f"total={int(observation_summary.get('external_observation_count', 0))}"
+        )
+        provider = observation_summary.get("external_observation_provider")
+        if provider:
+            lines.append(f"external_observation_provider={provider}")
+        obs_symbols = observation_summary.get("external_observation_symbols", [])
+        if obs_symbols:
+            lines.append(
+                "external_observation_symbols=" + ", ".join(obs_symbols)
+            )
+        lines.append(
+            "live_quotes_available="
+            f"{str(observation_summary.get('live_quotes_available', False)).lower()}"
+        )
     signal_source_summary = report.get("signal_source_summary", {})
     if int(signal_source_summary.get("external_signal_count", 0)) > 0:
         lines.append(
