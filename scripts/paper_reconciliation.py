@@ -499,6 +499,20 @@ def build_reconciliation_row(
         "commit_hash": stamped["commit_hash"],
         "config_fingerprint": stamped["config_fingerprint"],
         "execution_context": "paper_simulated",
+        # Paper lineage carry-forward from the opening fill.
+        "source_observation_id": opening_fill.get("source_observation_id"),
+        "observation_provider": opening_fill.get("observation_provider"),
+        "reference_price": opening_fill.get("reference_price"),
+        "observed_price": opening_fill.get("observed_price"),
+        "price_drift_bps_at_entry": opening_fill.get("price_drift_bps"),
+        "price_drift_pct_at_entry": opening_fill.get("price_drift_pct"),
+        "entry_timestamp": opening_fill.get("entry_timestamp") or entry_time,
+        "reconciliation_timestamp": stamped["artifact_written_at"],
+        "outcome_status": (
+            "reconciled" if reconciliation_status == "fully_reconciled"
+            else "partially_reconciled" if reconciliation_status == "partially_reconciled"
+            else "unreconciled"
+        ),
     }
     row["lineage_completeness_score"] = lineage_completeness_score(row)
     return row

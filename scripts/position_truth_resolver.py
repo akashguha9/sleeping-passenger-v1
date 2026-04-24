@@ -161,6 +161,28 @@ def build_position_truth_summary(
     }
 
 
+def get_canonical_position_path(
+    curated_path: Path | str | None = None,
+    runtime_path: Path | str | None = None,
+) -> Path | None:
+    """Pick a single path that downstream action/diagnostics code can read.
+
+    Default: ``moltbook/open_positions.json`` (the curated source is
+    authoritative when present).
+    Fallback: ``runtime/paper_positions.json`` if the curated file is absent
+    but the runtime file exists.
+    Return None when neither exists — the caller must handle that by
+    failing closed rather than fabricating a position set.
+    """
+    curated_target = Path(curated_path) if curated_path is not None else DEFAULT_CURATED_PATH
+    runtime_target = Path(runtime_path) if runtime_path is not None else DEFAULT_RUNTIME_PATH
+    if curated_target.exists():
+        return curated_target
+    if runtime_target.exists():
+        return runtime_target
+    return None
+
+
 def format_position_truth_summary(summary: dict[str, Any]) -> list[str]:
     """Shape the summary as the four summary lines diagnostics surface."""
     lines = [
@@ -183,4 +205,5 @@ __all__ = [
     "DEFAULT_RUNTIME_PATH",
     "build_position_truth_summary",
     "format_position_truth_summary",
+    "get_canonical_position_path",
 ]

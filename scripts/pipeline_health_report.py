@@ -2052,6 +2052,9 @@ def build_pipeline_health_report(
         "where_am_i_leaking_performance": where_am_i_leaking_performance,
         "what_should_i_do_next": what_should_i_do_next,
         "scm": state["scm_review"],
+        "scm_input_origin": state.get("scm_input_origin", "seeded"),
+        "scm_external_row_count": int(state.get("scm_external_row_count", 0) or 0),
+        "scm_seeded_row_count": int(state.get("scm_seeded_row_count", 0) or 0),
         "attention_proxy": attention_proxy_report,
         "attention_proxy_state": attention_proxy_report.get(
             "attention_proxy_state",
@@ -2283,6 +2286,14 @@ def format_pipeline_health_summary(report: dict[str, Any]) -> str:
     position_truth = report.get("position_truth_summary", {})
     if isinstance(position_truth, dict) and position_truth:
         lines.extend(format_position_truth_summary(position_truth))
+    scm_input_origin = report.get("scm_input_origin")
+    if scm_input_origin:
+        lines.append(f"scm_input_origin={scm_input_origin}")
+        lines.append(
+            "scm_row_counts="
+            f"seeded={int(report.get('scm_seeded_row_count', 0))}, "
+            f"external={int(report.get('scm_external_row_count', 0))}"
+        )
     observation_summary = report.get("external_observation_summary", {})
     if observation_summary.get("external_observation_active"):
         lines.append(

@@ -684,6 +684,32 @@ def build_signal_conversion_report(
         scm_review_payload=review,
     )
 
+    # scm_input_origin: honestly expose which row origin drove SCM counting.
+    # Possible values:
+    #   * "unavailable"         — SCM had no signal rows to count from
+    #   * "external_observation"— every counted row was externally sourced
+    #   * "mixed"               — some seeded, some external rows
+    #   * "seeded"              — all counted rows were seeded
+    external_row_count = 0
+    seeded_row_count = 0
+    for row in per_signal_attribution:
+        if not isinstance(row, dict):
+            continue
+        origin = str(row.get("signal_origin") or "").strip().lower()
+        source_name = str(row.get("source_name") or "").strip().lower()
+        if origin == "external" or source_name.startswith("polymarket") or source_name == "external_price_observation":
+            external_row_count += 1
+        else:
+            seeded_row_count += 1
+    if external_row_count == 0 and seeded_row_count == 0:
+        scm_input_origin = "unavailable"
+    elif external_row_count > 0 and seeded_row_count == 0:
+        scm_input_origin = "external_observation"
+    elif external_row_count > 0 and seeded_row_count > 0:
+        scm_input_origin = "mixed"
+    else:
+        scm_input_origin = "seeded"
+
     return {
         "moltbook_summary": moltbook_summary,
         "signal_summary": signal_summary,
@@ -694,6 +720,9 @@ def build_signal_conversion_report(
         "execution_policy": execution_policy,
         "simulation_context": simulation_context,
         "external_signal_inputs_count": len(resolved_external_signal_rows),
+        "scm_input_origin": scm_input_origin,
+        "scm_external_row_count": external_row_count,
+        "scm_seeded_row_count": seeded_row_count,
         "note": (
             "SCM consumes live Moltbook close data for numerator and signal_ledger.json "
             "for denominator, with fresh ETIL external watchlist inputs merged when available."

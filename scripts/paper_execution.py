@@ -323,6 +323,90 @@ def _build_order_row(
     )
 
 
+def _build_paper_lineage_fields(
+    runtime_state: dict[str, Any],
+    ticker: str,
+    fill_price: float,
+) -> dict[str, Any]:
+    """Produce the paper-lineage metadata block the feedback loop relies on.
+
+    Fields are populated from the external_observation lane when it was
+    active for this run. When no external observation exists for the
+    ticker, every field is None and ``source_observation_id`` carries the
+    honest "seeded_fill" marker so downstream code can distinguish
+    observation-backed fills from seeded ones without guessing.
+    """
+    ticker_norm = str(ticker or "").upper()
+    summary = runtime_state.get("external_observation_summary")
+    entry_timestamp = utc_timestamp()
+    if not isinstance(summary, dict) or not summary.get("external_observation_active"):
+        return {
+            "source_observation_id": "seeded_fill",
+            "observation_provider": None,
+            "reference_price": None,
+            "observed_price": None,
+            "price_drift_bps": None,
+            "price_drift_pct": None,
+            "entry_timestamp": entry_timestamp,
+            "reconciliation_timestamp": None,
+            "outcome_status": "pending_reconciliation",
+        }
+    symbols = [str(s).upper() for s in summary.get("external_observation_symbols", [])]
+    covered = ticker_norm in symbols
+    provider = str(summary.get("external_observation_provider") or "yahoo")
+    observation_id = (
+        f"obs_{provider}_{ticker_norm}_{entry_timestamp.replace(':', '').replace('-', '').replace('+', '').replace('T', '_')}"
+        if covered
+        else "seeded_fill"
+    )
+    observed_price = _observed_price_for_ticker(runtime_state, ticker_norm) if covered else None
+    reference_price = float(fill_price) if fill_price is not None else None
+    drift_bps: float | None = None
+    drift_pct: float | None = None
+    if covered and observed_price is not None and reference_price is not None and reference_price != 0:
+        drift_pct = round((observed_price - reference_price) / reference_price, 6)
+        drift_bps = round(drift_pct * 10_000, 2)
+    return {
+        "source_observation_id": observation_id,
+        "observation_provider": provider if covered else None,
+        "reference_price": reference_price,
+        "observed_price": observed_price,
+        "price_drift_bps": drift_bps,
+        "price_drift_pct": drift_pct,
+        "entry_timestamp": entry_timestamp,
+        "reconciliation_timestamp": None,
+        "outcome_status": "pending_reconciliation",
+    }
+
+
+def _observed_price_for_ticker(runtime_state: dict[str, Any], ticker: str) -> float | None:
+    """Best-effort lookup of the external observation price for a ticker.
+
+    Reads the runtime/external_observation_report.json artifact when
+    available so paper lineage can record the observed price without
+    re-fetching. Returns None when the file is absent or the ticker is
+    not covered — never raises.
+    """
+    try:
+        from pathlib import Path as _Path
+        from scripts.runtime_common import RUNTIME_DIR, load_json_file
+        report = load_json_file(RUNTIME_DIR / "external_observation_report.json", default={}) or {}
+        for row in report.get("observations", []) or []:
+            if not isinstance(row, dict):
+                continue
+            if str(row.get("symbol") or "").upper() == ticker:
+                price = row.get("price")
+                if price is None:
+                    return None
+                try:
+                    return float(price)
+                except (TypeError, ValueError):
+                    return None
+    except Exception:
+        return None
+    return None
+
+
 def _build_fill_row(
     order_row: dict[str, Any],
     fill_price: float,
@@ -337,6 +421,11 @@ def _build_fill_row(
         fill_qty,
         fill_price,
         fill_source,
+    )
+    lineage = _build_paper_lineage_fields(
+        runtime_state=runtime_state,
+        ticker=order_row["ticker"],
+        fill_price=fill_price,
     )
     return stamp_payload(
         {
@@ -353,6 +442,17 @@ def _build_fill_row(
             "filled_at": utc_timestamp(),
             "fill_source": fill_source,
             "slippage_bps": 0.0,
+            # Paper lineage metadata — None-by-default when no external
+            # observation was attached to this run. Never enables execution.
+            "source_observation_id": lineage["source_observation_id"],
+            "observation_provider": lineage["observation_provider"],
+            "reference_price": lineage["reference_price"],
+            "observed_price": lineage["observed_price"],
+            "price_drift_bps": lineage["price_drift_bps"],
+            "price_drift_pct": lineage["price_drift_pct"],
+            "entry_timestamp": lineage["entry_timestamp"],
+            "reconciliation_timestamp": lineage["reconciliation_timestamp"],
+            "outcome_status": lineage["outcome_status"],
         },
         runtime_state=runtime_state,
     )

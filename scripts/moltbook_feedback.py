@@ -847,6 +847,7 @@ def build_feedback_summary(cases: list[MoltbookFeedbackCase]) -> dict[str, Any]:
         "contaminated_case_count": contaminated_case_count,
         "contaminated_success_count": contaminated_success_count,
         "contaminated_case_ratio": contaminated_case_ratio,
+        "failure_count": failure_count,
         "failure_rate": round(failure_count / total_cases, 4) if total_cases else 0.0,
         "top_failure_modes": top_failure_modes,
         "repeated_failure_modes": repeated_failure_modes,
