@@ -1,20 +1,100 @@
-﻿backup/
+﻿# =========================
+# CORE RUNTIME ARTIFACTS
+# =========================
 runtime/
+logs/
+backup/
 audit_bundle/
 audit_bundle.zip
-__pycache__/
-*.pyc
-# moltbook/open_positions.json is a deterministic test fixture and is tracked.
 
-# logs/ contains runtime-generated artifacts only: pytest cache/tmp
-# (per pytest.ini), chronology SQLite DB, and snapshot jsonl streams.
-# Everything under logs/ is runtime-only — the root-level conftest.py
-# creates logs/, logs/.pytest_tmp, logs/.pytest_cache on pytest startup
-# so fresh clones don't need the directory to be tracked.
-logs/
+# =========================
+# ENV / SECRETS (CRITICAL)
+# =========================
+.env
+*.env
+.env.*
+!.env.example
+
+# =========================
+# PYTHON CACHE / BUILD
+# =========================
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+
+# =========================
+# PYTEST / TEST RUNTIME
+# =========================
 .pytest_cache/
 tests/.pytest_tmp/
 tests/pytest-cache-files-*/
 tests/_tmp_runtime/
 
-.env
+# =========================
+# VIRTUAL ENVIRONMENTS
+# =========================
+venv/
+.venv/
+env/
+ENV/
+
+# =========================
+# IDE / EDITOR
+# =========================
+.vscode/
+.idea/
+*.code-workspace
+
+# =========================
+# OS FILES
+# =========================
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# =========================
+# LOG FILES
+# =========================
+*.log
+*.out
+*.err
+
+# =========================
+# DATA / TEMP / EXPORTS
+# =========================
+*.csv
+*.tsv
+*.parquet
+*.db
+*.sqlite
+*.sqlite3
+
+# =========================
+# NOTEBOOKS (OPTIONAL)
+# =========================
+.ipynb_checkpoints/
+
+# =========================
+# DIST / BUILD OUTPUT
+# =========================
+build/
+dist/
+*.egg-info/
+
+# =========================
+# PROJECT-SPECIFIC NOTES
+# =========================
+# Keep deterministic fixtures tracked
+# Example:
+# moltbook/open_positions.json
+
+# =========================
+# SAFETY RULES
+# =========================
+# DO NOT TRACK:
+# - runtime/ (generated pipeline outputs)
+# - logs/ (observability dumps)
+# - .env (secrets)
+# - local DBs or snapshots
