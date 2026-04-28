@@ -4,7 +4,10 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from scripts.position_truth_resolver import build_position_truth_summary
+from scripts.position_truth_resolver import (
+    build_position_reconciliation_report,
+    build_position_truth_summary,
+)
 
 
 def _write(path: Path, payload) -> None:
@@ -107,3 +110,19 @@ def test_positions_nested_under_positions_key_are_understood(scratch_path: Path)
     summary = build_position_truth_summary(curated, runtime)
     assert summary["curated_moltbook_positions_count"] == 2
     assert summary["position_source_divergence_detected"] is False
+
+
+def test_position_reconciliation_report_exposes_visibility_fields(scratch_path: Path):
+    curated = scratch_path / "moltbook" / "open_positions.json"
+    runtime = scratch_path / "runtime" / "paper_positions.json"
+    _write(curated, [{"ticker": "TLT"}, {"ticker": "TIP"}])
+    _write(runtime, [{"ticker": "TLT"}, {"ticker": "UNG"}])
+
+    report = build_position_reconciliation_report(curated, runtime)
+
+    assert report["curated_only_symbols"] == ["TIP"]
+    assert report["runtime_only_symbols"] == ["UNG"]
+    assert report["overlapping_symbols"] == ["TLT"]
+    assert report["recommended_canonical_source"] == "curated_moltbook"
+    assert report["divergence_severity"] == "HIGH"
+    assert "do not auto-migrate" in report["safe_next_action"].lower()

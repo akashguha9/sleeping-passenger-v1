@@ -26,10 +26,12 @@ try:
     from scripts.snapshot_logger import build_snapshot_row
     from scripts.runtime_common import (
         COMPLEXITY_LADDER_CONTROLLER_PATH,
+        EXTREME_STATE_REPORT_PATH,
         EXPERIENCE_MODE_REPORT_PATH,
         HEALTH_REPORT_PATH,
         SNAPSHOT_LOG_PATH,
         build_runtime_state_from_scm_report_payload,
+        resolve_bridge_mode,
         build_truth_context,
         classify_operating_mode,
         load_json_file,
@@ -62,10 +64,12 @@ except ModuleNotFoundError:
     from snapshot_logger import build_snapshot_row
     from runtime_common import (
         COMPLEXITY_LADDER_CONTROLLER_PATH,
+        EXTREME_STATE_REPORT_PATH,
         EXPERIENCE_MODE_REPORT_PATH,
         HEALTH_REPORT_PATH,
         SNAPSHOT_LOG_PATH,
         build_runtime_state_from_scm_report_payload,
+        resolve_bridge_mode,
         build_truth_context,
         classify_operating_mode,
         load_json_file,
@@ -340,6 +344,31 @@ def build_intelligence_summary(
         "top_item": extracted_output.get("top_item"),
         "error_kind": report.get("error_kind"),
         "note": report.get("note"),
+    }
+
+
+def build_extreme_state_logic_summary(
+    extreme_state_report: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    report = extreme_state_report if isinstance(extreme_state_report, dict) else {}
+    counts = report.get("extreme_state_logic", {}) if isinstance(report, dict) else {}
+    if not isinstance(counts, dict):
+        counts = {}
+    return {
+        "report_present": bool(report),
+        "extreme_state": str(report.get("extreme_state") or "UNAVAILABLE"),
+        "signals_evaluated": int(report.get("signals_evaluated", 0) or 0),
+        "termination_required_count": int(counts.get("termination_required_count", 0) or 0),
+        "silent_chaos_count": int(counts.get("silent_chaos_count", 0) or 0),
+        "valid_but_non_executable_count": int(
+            counts.get("valid_but_non_executable_count", 0) or 0
+        ),
+        "non_converting_equilibrium_count": int(
+            counts.get("non_converting_equilibrium_count", 0) or 0
+        ),
+        "promoted_count": int(counts.get("promoted_count", 0) or 0),
+        "downgraded_count": int(counts.get("downgraded_count", 0) or 0),
+        "recommended_action": str(report.get("recommended_action") or "WAIT"),
     }
 
 
@@ -1977,9 +2006,43 @@ def build_pipeline_health_report(
     )
     external_data_summary = build_external_data_summary(loaded_external_data_report)
     external_observation_summary = build_external_observation_summary(external_observation_report)
+    bridge_mode_context = resolve_bridge_mode(
+        include_external_observations=bool(
+            state.get("external_observation_requested", False)
+            or external_observation_report is not None
+        ),
+        external_candidate_bridge_enabled=bool(
+            state.get("external_candidate_bridge_enabled", False)
+        ),
+        external_observation_active=bool(
+            external_observation_summary.get("external_observation_active", False)
+        ),
+        external_observation_valid_count=int(
+            external_observation_summary.get("external_observation_valid_count", 0) or 0
+        ),
+        external_candidate_count=int(state.get("external_candidate_count", 0) or 0),
+        scm_external_row_count=int(state.get("scm_external_row_count", 0) or 0),
+        paper_candidate_count=int(
+            state.get("external_paper_candidate_count", 0) or 0
+        ),
+        provider_error_count=int(
+            external_observation_summary.get("external_observation_error_count", 0) or 0
+        ),
+    )
     position_truth_summary = build_position_truth_summary(curated_path=open_positions_path)
-    signal_source_summary = build_signal_source_summary(state["per_signal_attribution"])
+    external_candidate_rows = state.get("external_candidate_rows", [])
+    signal_source_rows = list(state["per_signal_attribution"])
+    if isinstance(external_candidate_rows, list) and external_candidate_rows:
+        signal_source_rows = signal_source_rows + [
+            row for row in external_candidate_rows if isinstance(row, dict)
+        ]
+    signal_source_summary = build_signal_source_summary(signal_source_rows)
     intelligence_summary = build_intelligence_summary(grok_xai_report)
+    extreme_state_report = _load_optional_runtime_artifact(
+        None,
+        EXTREME_STATE_REPORT_PATH,
+    )
+    extreme_state_logic = build_extreme_state_logic_summary(extreme_state_report)
     operator_control_report = build_operator_control_report(
         gate_summary=signal_refinery_report.get("signal_admission_gate", {}),
         test_status=test_status,
@@ -2041,14 +2104,34 @@ def build_pipeline_health_report(
         "external_observation_data_quality_counts": external_observation_summary["external_observation_data_quality_counts"],
         "external_observation_report_path": external_observation_summary["external_observation_report_path"],
         "live_quotes_available": external_observation_summary["live_quotes_available"],
+        "bridge_mode": bridge_mode_context["bridge_mode"],
+        "bridge_mode_reason": bridge_mode_context["bridge_mode_reason"],
+        "bridge_mode_safety_state": bridge_mode_context["bridge_mode_safety_state"],
         "position_truth_summary": position_truth_summary,
         "position_truth_source": position_truth_summary["canonical_position_source"],
         "position_source_divergence_detected": position_truth_summary["position_source_divergence_detected"],
         "curated_positions_count": position_truth_summary["curated_moltbook_positions_count"],
         "runtime_paper_positions_count": position_truth_summary["runtime_paper_positions_count"],
         "position_truth_warning": position_truth_summary["position_truth_warning"],
+        "position_truth_recommended_canonical_source": position_truth_summary.get(
+            "recommended_canonical_source",
+            position_truth_summary["canonical_position_source"],
+        ),
+        "position_truth_divergence_severity": position_truth_summary.get(
+            "divergence_severity",
+            "NONE",
+        ),
+        "position_truth_safe_next_action": position_truth_summary.get(
+            "safe_next_action",
+            "",
+        ),
         "signal_source_summary": signal_source_summary,
+        "external_candidate_count": int(state.get("external_candidate_count", 0) or 0),
+        "external_paper_candidate_count": int(
+            state.get("external_paper_candidate_count", 0) or 0
+        ),
         "intelligence_summary": intelligence_summary,
+        "extreme_state_logic": extreme_state_logic,
         "where_am_i_leaking_performance": where_am_i_leaking_performance,
         "what_should_i_do_next": what_should_i_do_next,
         "scm": state["scm_review"],
@@ -2221,6 +2304,9 @@ def format_pipeline_health_summary(report: dict[str, Any]) -> str:
             f"feedback_readiness_penalty={report.get('feedback_readiness_penalty', 0.0)}",
             "moltbook_feedback_available="
             f"{str(bool(report.get('moltbook_feedback_available', False))).lower()}",
+            f"bridge_mode={report.get('bridge_mode', 'seeded')}",
+            f"bridge_mode_reason={report.get('bridge_mode_reason', 'no external observation mode requested')}",
+            f"bridge_mode_safety_state={report.get('bridge_mode_safety_state', 'paper_safe_only')}",
             f"what_should_i_do_next={report['what_should_i_do_next']}",
             (
                 "scorecard="
@@ -2286,6 +2372,13 @@ def format_pipeline_health_summary(report: dict[str, Any]) -> str:
     position_truth = report.get("position_truth_summary", {})
     if isinstance(position_truth, dict) and position_truth:
         lines.extend(format_position_truth_summary(position_truth))
+    external_candidate_count = int(report.get("external_candidate_count", 0) or 0)
+    if external_candidate_count > 0:
+        lines.append(f"external_candidate_count={external_candidate_count}")
+        lines.append(
+            "external_paper_candidate_count="
+            f"{int(report.get('external_paper_candidate_count', 0) or 0)}"
+        )
     scm_input_origin = report.get("scm_input_origin")
     if scm_input_origin:
         lines.append(f"scm_input_origin={scm_input_origin}")
@@ -2324,6 +2417,16 @@ def format_pipeline_health_summary(report: dict[str, Any]) -> str:
             "signal_sources="
             f"seeded={int(signal_source_summary.get('seeded_signal_count', 0))}, "
             f"external={int(signal_source_summary.get('external_signal_count', 0))}"
+        )
+    extreme_state_logic = report.get("extreme_state_logic", {})
+    if isinstance(extreme_state_logic, dict) and extreme_state_logic.get("report_present"):
+        lines.append(
+            "extreme_state_logic="
+            f"state={extreme_state_logic.get('extreme_state', 'UNAVAILABLE')}, "
+            f"signals={extreme_state_logic.get('signals_evaluated', 0)}, "
+            f"silent_chaos={extreme_state_logic.get('silent_chaos_count', 0)}, "
+            f"terminations={extreme_state_logic.get('termination_required_count', 0)}, "
+            f"recommended_action={extreme_state_logic.get('recommended_action', 'WAIT')}"
         )
     intelligence_summary = report.get("intelligence_summary", {})
     if intelligence_summary.get("request_success"):

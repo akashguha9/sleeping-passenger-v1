@@ -870,6 +870,108 @@ def build_feedback_summary(cases: list[MoltbookFeedbackCase]) -> dict[str, Any]:
     }
 
 
+def build_feedback_harness_from_paper_candidates(
+    paper_candidates: list[dict[str, Any]] | None,
+    *,
+    outcome_labels: dict[str, str] | None = None,
+    created_at_utc: str | None = None,
+) -> dict[str, Any]:
+    """Build deterministic clean/contaminated/inconclusive feedback fixtures.
+
+    This is a paper-safe harness for tests and local diagnostics scaffolding.
+    It does not fabricate edge and does not write runtime artifacts.
+    """
+    rows = paper_candidates if isinstance(paper_candidates, list) else []
+    labels = outcome_labels if isinstance(outcome_labels, dict) else {}
+    created_at = created_at_utc or utc_timestamp()
+    clean_cases: list[MoltbookFeedbackCase] = []
+    contaminated_cases: list[MoltbookFeedbackCase] = []
+    inconclusive_cases: list[MoltbookFeedbackCase] = []
+
+    for index, row in enumerate(rows):
+        if not isinstance(row, dict):
+            continue
+        signal_id = _text(row.get("signal_id") or row.get("decision_id") or f"candidate_{index}")
+        ticker = _text(row.get("ticker") or row.get("symbol") or f"CANDIDATE_{index}")
+        quality = _text(row.get("data_quality")).upper()
+        truth_origin = _text(row.get("truth_origin") or "external").lower() or "external"
+        label = _text(labels.get(signal_id) or labels.get(ticker) or row.get("harness_outcome")).lower()
+        data_quality_flags: list[str] = []
+        if quality not in {"VALID_EXTERNAL", "STALE_EXTERNAL"}:
+            data_quality_flags.append(f"data_quality_{quality.lower() or 'unknown'}")
+        if truth_origin != "external":
+            data_quality_flags.append(f"truth_origin_{truth_origin or 'unknown'}")
+
+        if label == "clean_success" and not data_quality_flags and quality == "VALID_EXTERNAL":
+            classification = "SUCCESS_VALID_SIGNAL"
+            actual_outcome = "positive_return"
+            pnl = 1.0
+            return_pct = 1.0
+            bucket = clean_cases
+        elif label == "clean_fail_signal" and not data_quality_flags:
+            classification = "FAIL_SIGNAL"
+            actual_outcome = "negative_return"
+            pnl = -1.0
+            return_pct = -1.0
+            bucket = clean_cases
+        elif label == "contaminated_success":
+            classification = "SUCCESS_VALID_SIGNAL"
+            actual_outcome = "positive_return"
+            pnl = 1.0
+            return_pct = 1.0
+            if not data_quality_flags:
+                data_quality_flags.append("legacy_contaminated_fixture")
+            bucket = contaminated_cases
+        else:
+            classification = "INCONCLUSIVE"
+            actual_outcome = None
+            pnl = None
+            return_pct = None
+            if not data_quality_flags:
+                data_quality_flags.append("inconclusive_outcome_fixture")
+            bucket = inconclusive_cases
+
+        case = MoltbookFeedbackCase(
+            case_id=f"feedback_harness_{signal_id}",
+            created_at_utc=created_at,
+            trade_id=f"paper_candidate_{signal_id}",
+            asset=ticker,
+            symbol=ticker,
+            side="BUY",
+            direction="LONG",
+            entry_time=_text(row.get("entry_timestamp") or row.get("observed_at_utc")) or created_at,
+            exit_time=_text(row.get("reconciliation_timestamp")) or None,
+            holding_period_seconds=None,
+            expected_outcome="positive_return",
+            actual_outcome=actual_outcome,
+            pnl=pnl,
+            return_pct=return_pct,
+            classification=classification,
+            classification_confidence=0.7 if classification != "INCONCLUSIVE" else 0.3,
+            primary_reason="feedback_harness_fixture",
+            contributing_reasons=[label or "unlabeled_candidate"],
+            data_quality_flags=data_quality_flags,
+            truth_origin=truth_origin or "external",
+            operating_mode=_text(row.get("operating_mode") or "hybrid") or "hybrid",
+            source_context={
+                "decision_source": row.get("decision_source"),
+                "source_observation_id": row.get("source_observation_id"),
+                "reference_price": row.get("reference_price"),
+                "data_quality": row.get("data_quality"),
+            },
+            suggested_adjustment=CLASSIFICATION_ADJUSTMENTS[classification],
+        )
+        bucket.append(case)
+
+    cases = clean_cases + contaminated_cases + inconclusive_cases
+    return {
+        "cases": cases,
+        "clean_cases": clean_cases,
+        "contaminated_cases": contaminated_cases,
+        "inconclusive_cases": inconclusive_cases,
+    }
+
+
 def build_moltbook_feedback_report(
     runtime_state: dict[str, Any] | None = None,
     *,

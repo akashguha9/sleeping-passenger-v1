@@ -7,7 +7,11 @@ from pathlib import Path
 import pytest
 
 from scripts.action_engine import build_action_report
-from scripts.paper_execution import close_paper_position, sync_paper_execution
+from scripts.paper_execution import (
+    build_paper_candidate_decision_rows,
+    close_paper_position,
+    sync_paper_execution,
+)
 from scripts.runtime_common import build_runtime_state_from_scm_report_payload
 from scripts.signal_conversion_monitor import build_signal_conversion_report
 
@@ -332,3 +336,36 @@ def test_paper_execution_cli_summary_smoke(
     assert lines[0] == "Paper Execution Sync"
     assert "paper_execution_enabled=false" in lines
     assert "entry_execution_approved=false" in lines
+
+
+def test_build_paper_candidate_decision_rows_never_creates_live_execution_rows() -> None:
+    runtime_state = build_runtime_state_from_scm_report_payload(build_signal_conversion_report())
+    candidate_rows = [
+        {
+            "signal_id": "EXT_OBS_YAHOO_UNG_001",
+            "ticker": "UNG",
+            "ce_score": 0.53,
+            "provider": "yahoo",
+            "data_quality": "VALID_EXTERNAL",
+            "source_observation_id": "obs_yahoo_UNG_001",
+            "reference_price": 12.34,
+            "price": 12.34,
+            "observed_at_utc": "2026-04-24T12:00:00+00:00",
+        }
+    ]
+
+    decisions = build_paper_candidate_decision_rows(candidate_rows, runtime_state=runtime_state)
+
+    assert len(decisions) == 1
+    decision = decisions[0]
+    assert decision["artifact_kind"] == "paper_decision"
+    assert decision["action_type"] == "WATCH_ONLY"
+    assert decision["candidate_status"] == "PAPER_CANDIDATE"
+    assert decision["decision_status"] == "WATCH_ONLY"
+    assert decision["decision_source"] == "external_observation_candidate"
+    assert decision["source_observation_id"] == "obs_yahoo_UNG_001"
+    assert decision["reference_price"] == 12.34
+    assert decision["suggestion_only"] is True
+    assert decision["human_execution_required"] is True
+    assert "paper_order_id" not in decision
+    assert "paper_fill_id" not in decision

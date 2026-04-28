@@ -11,6 +11,7 @@ Confirms that:
 """
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -24,7 +25,9 @@ def fake_ok_provider():
             "previous_close": 90.0,
             "volume": 1_000_000,
             "currency": "USD",
-            "regular_market_time": "2026-04-24T12:00:00+00:00",
+            "regular_market_time": datetime.now(timezone.utc)
+            .replace(microsecond=0)
+            .isoformat(),
         }
 
     return _fn
@@ -38,10 +41,13 @@ def fake_error_provider():
     return _fn
 
 
-def test_diagnostics_without_lane_keeps_seeded_fallback(tmp_path: Path):
+def test_diagnostics_without_lane_keeps_seeded_fallback(scratch_path: Path):
     from scripts.run_diagnostics_pipeline import run_diagnostics_pipeline
 
     report = run_diagnostics_pipeline(write_runtime=False)
+    assert report["bridge_mode"] == "seeded"
+    assert report["bridge_mode_reason"] == "no external observation mode requested"
+    assert report["bridge_mode_safety_state"] == "paper_safe_only"
     assert report["operating_mode"] == "seeded"
     assert report["truth_origin"] == "seeded"
     assert report["system_readiness_state"] == "DO_NOT_DEPLOY"
@@ -56,6 +62,7 @@ def test_diagnostics_without_lane_keeps_seeded_fallback(tmp_path: Path):
 
 def test_diagnostics_with_valid_lane_flips_truth_origin_but_preserves_governance(fake_ok_provider):
     from scripts.run_diagnostics_pipeline import run_diagnostics_pipeline
+    from scripts.pipeline_health_report import format_pipeline_health_summary
 
     report = run_diagnostics_pipeline(
         include_external_observations=True,
@@ -77,6 +84,23 @@ def test_diagnostics_with_valid_lane_flips_truth_origin_but_preserves_governance
     assert report["external_observation_error_count"] == 0
     assert sorted(report["external_observation_symbols"]) == ["TIP", "TLT"]
     assert report["external_observation_provider"] == "yahoo"
+    assert report["bridge_mode"] == "external_candidate_validation"
+    assert (
+        report["bridge_mode_reason"]
+        == "valid external observations admitted as SCM candidate rows"
+    )
+    assert report["bridge_mode_safety_state"] == "paper_safe_only"
+    assert report["external_candidate_count"] == 2
+    assert report["external_paper_candidate_count"] == 2
+    assert report["scm_external_row_count"] == 2
+    assert report["scm_input_origin"] in {"mixed", "external_observation"}
+    summary = format_pipeline_health_summary(report)
+    assert "external_candidate_count=2" in summary
+    assert "bridge_mode=external_candidate_validation" in summary
+    assert "bridge_mode_safety_state=paper_safe_only" in summary
+    # Candidate validation remains paper-safe only; no live order/fill path is triggered.
+    assert report["can_deploy_capital"] is False
+    assert report["system_readiness_state"] == "DO_NOT_DEPLOY"
 
 
 def test_diagnostics_with_failing_lane_keeps_seeded_truth(fake_error_provider):
@@ -88,6 +112,12 @@ def test_diagnostics_with_failing_lane_keeps_seeded_truth(fake_error_provider):
         external_observation_provider_fn=fake_error_provider,
         write_runtime=False,
     )
+    assert report["bridge_mode"] == "unavailable"
+    assert (
+        report["bridge_mode_reason"]
+        == "external mode requested but provider returned zero valid observations"
+    )
+    assert report["bridge_mode_safety_state"] == "fail_closed"
     # No valid observation -> truth_origin stays seeded.
     assert report["operating_mode"] == "seeded"
     assert report["truth_origin"] == "seeded"
@@ -99,6 +129,37 @@ def test_diagnostics_with_failing_lane_keeps_seeded_truth(fake_error_provider):
     assert report["external_observation_valid_count"] == 0
     # Governance holds even with a failing external lane.
     assert report["can_deploy_capital"] is False
+    assert report["system_readiness_state"] == "DO_NOT_DEPLOY"
+
+
+def test_diagnostics_with_observation_only_mode_resolves_hybrid_observation(fake_ok_provider):
+    from scripts.run_diagnostics_pipeline import run_diagnostics_pipeline
+    from scripts.pipeline_health_report import format_pipeline_health_summary
+
+    report = run_diagnostics_pipeline(
+        include_external_observations=True,
+        bridge_external_candidates=False,
+        external_observation_symbols=["TLT", "TIP"],
+        external_observation_provider_fn=fake_ok_provider,
+        write_runtime=False,
+    )
+
+    assert report["bridge_mode"] == "hybrid_observation"
+    assert (
+        report["bridge_mode_reason"]
+        == "external observations active but no external candidates admitted into SCM"
+    )
+    assert report["bridge_mode_safety_state"] == "paper_safe_only"
+    assert report["external_observation_active"] is True
+    assert report["external_observation_valid_count"] == 2
+    assert report["external_candidate_count"] == 0
+    assert report["external_paper_candidate_count"] == 0
+    assert report["scm_external_row_count"] == 0
+    assert report["scm_input_origin"] == "seeded"
+    assert report["can_deploy_capital"] is False
+    assert report["system_readiness_state"] == "DO_NOT_DEPLOY"
+    summary = format_pipeline_health_summary(report)
+    assert "bridge_mode=hybrid_observation" in summary
 
 
 def test_action_report_exposes_external_observation_context_when_active(fake_ok_provider):
@@ -164,6 +225,10 @@ def test_lane_preserves_stable_shape_even_when_empty():
         "external_observation_symbols",
         "external_observation_data_quality_counts",
         "external_observation_summary",
+        "external_candidate_count",
+        "bridge_mode",
+        "bridge_mode_reason",
+        "bridge_mode_safety_state",
         "live_quotes_available",
         "position_truth_summary",
         "position_source_divergence_detected",

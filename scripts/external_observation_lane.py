@@ -387,6 +387,87 @@ def observations_to_signal_context(
     return context_rows
 
 
+def _observation_row_id(row: ExternalObservation) -> str:
+    compact_timestamp = (
+        str(row.observed_at_utc or "")
+        .replace(":", "")
+        .replace("-", "")
+        .replace("+", "")
+        .replace("T", "_")
+    )
+    return f"obs_{row.provider}_{row.symbol}_{compact_timestamp}"
+
+
+def _candidate_ce_score(row: ExternalObservation) -> float:
+    """Map observation strength into a bounded SCM-compatible advisory score.
+
+    This is deliberately simple and conservative: it is a watchlist
+    prioritization hint, not a predictive score.
+    """
+    if not row.is_external:
+        return 0.0
+    change_mag = abs(float(row.change_pct or 0.0))
+    volume_bonus = 0.08 if row.volume and float(row.volume) > 0 else 0.0
+    freshness_penalty = 0.12 if row.data_quality == "STALE_EXTERNAL" else 0.0
+    base = 0.45 + min(change_mag * 8.0, 0.25) + volume_bonus - freshness_penalty
+    return round(max(0.0, min(base, 0.95)), 3)
+
+
+def observations_to_scm_candidates(
+    observations: Iterable[ExternalObservation],
+) -> list[dict[str, Any]]:
+    """Convert valid external observations into advisory SCM candidate rows.
+
+    Contract:
+      * Advisory only: rows remain watchlist candidates and carry an explicit
+        gate lock so they cannot imply deployment readiness.
+      * Deterministic: candidate IDs derive from provider/symbol/timestamp.
+      * Honest: only external/stale-external observations become SCM rows.
+    """
+    candidate_rows: list[dict[str, Any]] = []
+    for row in observations:
+        if (
+            not isinstance(row, ExternalObservation)
+            or row.data_quality != "VALID_EXTERNAL"
+        ):
+            continue
+        observation_id = _observation_row_id(row)
+        ce_score = _candidate_ce_score(row)
+        candidate_rows.append(
+            {
+                "signal_id": f"EXT_OBS_{row.provider.upper()}_{row.symbol}_{observation_id.split('_')[-1]}",
+                "ticker": row.symbol,
+                "ce_score": ce_score,
+                "above_ce_threshold": ce_score > 0.0,
+                "status": "WATCHLIST",
+                "conversion_state": "NOT_EXECUTED",
+                "blocker_attribution": "GSCE_PHASE_LOCK",
+                "promotable_clean_candidate": False,
+                "watchlist_tier": "STANDARD",
+                "candidate_conversion_state": "NOT_EXECUTED",
+                "pre_entry_state": "EXTERNAL_OBSERVATION_CANDIDATE",
+                "source_name": "external_observation",
+                "signal_origin": "external",
+                "origin_label": "external_observation_advisory_candidate",
+                "provider": row.provider,
+                "observed_at_utc": row.observed_at_utc,
+                "price": row.price,
+                "reference_price": row.price,
+                "change_pct": row.change_pct,
+                "volume": row.volume,
+                "currency": row.currency,
+                "data_quality": row.data_quality,
+                "source_observation_id": observation_id,
+                "is_trade_signal": False,
+                "question": (
+                    f"External observation candidate for {row.symbol} from "
+                    f"{row.provider}; advisory watchlist context only."
+                ),
+            }
+        )
+    return candidate_rows
+
+
 def apply_observation_summary_to_runtime_state(
     runtime_state: dict[str, Any] | None,
     observation_report: dict[str, Any] | None,
@@ -463,6 +544,7 @@ __all__ = [
     "fetch_external_observations",
     "summarize_external_observations",
     "observations_to_signal_context",
+    "observations_to_scm_candidates",
     "apply_observation_summary_to_runtime_state",
     "safe_write_external_observation_report",
 ]

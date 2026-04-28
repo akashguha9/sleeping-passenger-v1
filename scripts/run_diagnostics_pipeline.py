@@ -17,8 +17,10 @@ try:
         ProviderFetchFn,
         apply_observation_summary_to_runtime_state,
         fetch_external_observations,
+        observations_to_scm_candidates,
         safe_write_external_observation_report,
     )
+    from scripts.paper_execution import build_paper_candidate_decision_rows
     from scripts.pipeline_health_report import (
         build_pipeline_health_report,
         build_runtime_state_from_scm_report,
@@ -29,6 +31,7 @@ try:
     from scripts.runtime_common import (
         SNAPSHOT_LOG_PATH,
         persist_current_runtime_state,
+        resolve_bridge_mode,
         resolve_source_mode,
         set_source_mode,
     )
@@ -49,8 +52,10 @@ except ModuleNotFoundError:
         ProviderFetchFn,
         apply_observation_summary_to_runtime_state,
         fetch_external_observations,
+        observations_to_scm_candidates,
         safe_write_external_observation_report,
     )
+    from paper_execution import build_paper_candidate_decision_rows
     from moltbook_feedback import build_moltbook_feedback_report
     from pipeline_health_report import (
         build_pipeline_health_report,
@@ -61,6 +66,7 @@ except ModuleNotFoundError:
     from runtime_common import (
         SNAPSHOT_LOG_PATH,
         persist_current_runtime_state,
+        resolve_bridge_mode,
         resolve_source_mode,
         set_source_mode,
     )
@@ -74,6 +80,7 @@ def run_diagnostics_pipeline(
     include_tests: bool = False,
     include_external_data: bool = False,
     include_external_observations: bool = False,
+    bridge_external_candidates: bool = True,
     external_observation_symbols: list[str] | None = None,
     external_observation_provider: str = "yahoo",
     external_observation_provider_fn: ProviderFetchFn | None = None,
@@ -186,6 +193,12 @@ def run_diagnostics_pipeline(
         write_runtime=effective_write_runtime,
     )
     runtime_state["moltbook_feedback"] = moltbook_feedback_report
+    runtime_state["external_observation_requested"] = include_external_observations
+    runtime_state["external_candidate_bridge_enabled"] = bool(bridge_external_candidates)
+    runtime_state["external_candidate_count"] = 0
+    runtime_state["external_paper_candidate_count"] = 0
+    runtime_state["external_candidate_rows"] = []
+    runtime_state["external_paper_candidate_rows"] = []
 
     external_observation_report: dict | None = None
     if include_external_observations:
@@ -221,6 +234,41 @@ def run_diagnostics_pipeline(
         runtime_state = apply_observation_summary_to_runtime_state(
             runtime_state, external_observation_report
         )
+        external_candidates = (
+            observations_to_scm_candidates(observations)
+            if bridge_external_candidates
+            else []
+        )
+        paper_candidate_rows = (
+            build_paper_candidate_decision_rows(
+                external_candidates,
+                runtime_state=runtime_state,
+            )
+            if external_candidates
+            else []
+        )
+        runtime_state["external_candidate_count"] = len(external_candidates)
+        runtime_state["external_candidate_rows"] = external_candidates
+        runtime_state["external_paper_candidate_count"] = len(paper_candidate_rows)
+        runtime_state["external_paper_candidate_rows"] = paper_candidate_rows
+        if external_candidates:
+            bridged_scm_report = build_signal_conversion_report(
+                external_signal_inputs=external_candidates,
+                include_external_signal_inputs=True,
+                simulate_gsce_clear=simulate_gsce_clear,
+                simulate_realm_bis_clear=simulate_realm_bis_clear,
+                simulate_all_clear=simulate_all_clear,
+            )
+            runtime_state["scm_input_origin"] = bridged_scm_report.get(
+                "scm_input_origin",
+                runtime_state.get("scm_input_origin", "seeded"),
+            )
+            runtime_state["scm_external_row_count"] = int(
+                bridged_scm_report.get("scm_external_row_count", 0) or 0
+            )
+            runtime_state["scm_seeded_row_count"] = int(
+                bridged_scm_report.get("scm_seeded_row_count", 0) or 0
+            )
         runtime_state["external_observation_summary"] = {
             "external_observation_active": external_observation_report[
                 "external_observation_active"
@@ -240,7 +288,28 @@ def run_diagnostics_pipeline(
             "external_observation_provider": external_observation_report[
                 "external_observation_provider"
             ],
+            "external_candidate_count": len(external_candidates),
         }
+    bridge_mode_context = resolve_bridge_mode(
+        include_external_observations=include_external_observations,
+        external_candidate_bridge_enabled=bool(bridge_external_candidates),
+        external_observation_active=bool(
+            (external_observation_report or {}).get("external_observation_active", False)
+        ),
+        external_observation_valid_count=int(
+            (external_observation_report or {}).get("external_observation_valid_count", 0) or 0
+        ),
+        external_candidate_count=int(runtime_state.get("external_candidate_count", 0) or 0),
+        scm_external_row_count=int(runtime_state.get("scm_external_row_count", 0) or 0),
+        paper_candidate_count=int(
+            runtime_state.get("external_paper_candidate_count", 0) or 0
+        ),
+        provider_error_count=int(
+            (external_observation_report or {}).get("external_observation_error_count", 0)
+            or 0
+        ),
+    )
+    runtime_state.update(bridge_mode_context)
     action_report = build_action_report(
         runtime_state=runtime_state,
         signal_refinery_report=final_signal_refinery_report,
@@ -289,6 +358,15 @@ def build_cli_parser() -> argparse.ArgumentParser:
             "Attach the external observation lane (yahoo by default) to this "
             "diagnostics run. Advisory only: observations cannot enable "
             "capital deployment."
+        ),
+    )
+    parser.add_argument(
+        "--observation-only",
+        action="store_true",
+        help=(
+            "Attach external observations without admitting external candidates "
+            "into SCM. Keeps the run in hybrid_observation mode when valid "
+            "observations exist."
         ),
     )
     parser.add_argument(
@@ -347,6 +425,7 @@ def main(argv: list[str] | None = None) -> int:
         include_tests=args.include_tests,
         include_external_data=args.include_external_data,
         include_external_observations=args.include_external_observations,
+        bridge_external_candidates=not args.observation_only,
         external_observation_symbols=args.external_observation_symbols,
         external_observation_provider=args.external_observation_provider,
         write_runtime=not args.no_write,

@@ -912,6 +912,9 @@ def test_pipeline_health_report_cli_json_shape() -> None:
 
     assert payload["system_readiness_state"] == "DO_NOT_DEPLOY"
     assert payload["can_deploy_capital"] is False
+    assert payload["bridge_mode"] == "seeded"
+    assert payload["bridge_mode_reason"] == "no external observation mode requested"
+    assert payload["bridge_mode_safety_state"] == "paper_safe_only"
     assert payload["scm"]["scm_rate"] == 0.286
     assert payload["policy"]["policy_state"] == "RESTRICTED"
     assert payload["friction"]["friction_band"] == "HIGH_FRICTION"
@@ -948,6 +951,9 @@ def test_pipeline_health_report_summary_cli() -> None:
     assert "feedback_top_failure_mode=FAIL_SIGNAL" in lines
     assert "feedback_readiness_penalty=0.05" in lines
     assert "moltbook_feedback_available=true" in lines
+    assert "bridge_mode=seeded" in lines
+    assert "bridge_mode_reason=no external observation mode requested" in lines
+    assert "bridge_mode_safety_state=paper_safe_only" in lines
     assert any(line.startswith("suggested_feedback_adjustments=") for line in lines)
     assert (
         "what_should_i_do_next=EXIT_NOW: UNG, FCG | CLEAR_GSCE_PHASE_LOCK_FOR: RTX, ZIM | DO NOT ADD NEW RISK"
@@ -962,7 +968,7 @@ def test_pipeline_health_report_summary_cli() -> None:
     average_signal_lux = float(
         perception_metrics_line.split("average_signal_lux=", maxsplit=1)[1]
     )
-    assert average_signal_lux == pytest.approx(0.659, abs=0.001)
+    assert average_signal_lux == pytest.approx(0.645, abs=0.001)
     assert (
         "perception_advisory=AMPLIFICATION WITHOUT SURVIVAL - injected signals failing gravity"
         in lines

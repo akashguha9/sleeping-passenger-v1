@@ -7,6 +7,7 @@ from scripts.moltbook_feedback import (
     MoltbookFeedbackCase,
     append_feedback_case,
     build_feedback_case_from_reconciliation_row,
+    build_feedback_harness_from_paper_candidates,
     build_feedback_summary,
     load_feedback_cases,
 )
@@ -229,3 +230,62 @@ def test_run_diagnostics_pipeline_exposes_feedback_fields(monkeypatch) -> None:
     assert "feedback_learning_state=INSUFFICIENT_FEEDBACK" in summary
     assert "feedback_top_failure_mode=FAIL_TIMING" in summary
     assert "moltbook_feedback_available=true" in summary
+
+
+def test_feedback_harness_separates_clean_contaminated_and_inconclusive_cases() -> None:
+    candidates = [
+        {
+            "decision_id": "paper_decision_clean",
+            "signal_id": "EXT_OBS_CLEAN",
+            "ticker": "TLT",
+            "decision_source": "external_observation_candidate",
+            "source_observation_id": "obs_yahoo_TLT_001",
+            "reference_price": 91.0,
+            "data_quality": "VALID_EXTERNAL",
+            "truth_origin": "external",
+            "operating_mode": "hybrid",
+            "observed_at_utc": FIXED_TIMESTAMP,
+        },
+        {
+            "decision_id": "paper_decision_contaminated",
+            "signal_id": "EXT_OBS_CONTAMINATED",
+            "ticker": "UNG",
+            "decision_source": "external_observation_candidate",
+            "source_observation_id": "seeded_fill",
+            "reference_price": 12.5,
+            "data_quality": "PLACEHOLDER",
+            "truth_origin": "seeded",
+            "operating_mode": "seeded",
+            "observed_at_utc": FIXED_TIMESTAMP,
+        },
+        {
+            "decision_id": "paper_decision_inconclusive",
+            "signal_id": "EXT_OBS_INCONCLUSIVE",
+            "ticker": "TIP",
+            "decision_source": "external_observation_candidate",
+            "source_observation_id": "obs_yahoo_TIP_001",
+            "reference_price": 108.0,
+            "data_quality": "VALID_EXTERNAL",
+            "truth_origin": "external",
+            "operating_mode": "hybrid",
+            "observed_at_utc": FIXED_TIMESTAMP,
+        },
+    ]
+
+    harness = build_feedback_harness_from_paper_candidates(
+        candidates,
+        outcome_labels={
+            "EXT_OBS_CLEAN": "clean_success",
+            "EXT_OBS_CONTAMINATED": "contaminated_success",
+        },
+        created_at_utc=FIXED_TIMESTAMP,
+    )
+    summary = build_feedback_summary(harness["cases"])
+
+    assert len(harness["clean_cases"]) == 1
+    assert len(harness["contaminated_cases"]) == 1
+    assert len(harness["inconclusive_cases"]) == 1
+    assert summary["feedback_cases_total"] == 3
+    assert summary["contaminated_success_count"] == 1
+    assert summary["clean_success_count"] == 1
+    assert summary["raw_success_rate"] > summary["clean_success_rate"]

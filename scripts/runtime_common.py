@@ -43,6 +43,12 @@ VALID_TRUTH_ORIGIN_TAGS = {
     "external",
     "live_ready",
 }
+VALID_BRIDGE_MODES = {
+    "seeded",
+    "hybrid_observation",
+    "external_candidate_validation",
+    "unavailable",
+}
 TRUTH_ORIGIN_TAG_ORDER = (
     "seeded",
     "synthetic",
@@ -300,6 +306,81 @@ def build_truth_context(payload: dict[str, Any] | None = None) -> dict[str, Any]
     }
 
 
+def resolve_bridge_mode(
+    *,
+    include_external_observations: bool,
+    external_candidate_bridge_enabled: bool,
+    external_observation_active: bool,
+    external_observation_valid_count: int,
+    external_candidate_count: int,
+    scm_external_row_count: int,
+    paper_candidate_count: int,
+    provider_error_count: int,
+) -> dict[str, Any]:
+    """Resolve the bounded external-bridge runtime mode.
+
+    Contract:
+      * seeded: no external observation mode requested
+      * hybrid_observation: external observations active, but no SCM
+        candidate admission
+      * external_candidate_validation: valid external observations admitted
+        into SCM candidate rows and paper-safe candidates
+      * unavailable: external mode requested but no valid external
+        observations survived provider/data-quality checks
+    """
+    valid_count = max(int(external_observation_valid_count or 0), 0)
+    candidate_count = max(int(external_candidate_count or 0), 0)
+    external_rows = max(int(scm_external_row_count or 0), 0)
+    paper_candidates = max(int(paper_candidate_count or 0), 0)
+    errors = max(int(provider_error_count or 0), 0)
+
+    if not include_external_observations:
+        return {
+            "bridge_mode": "seeded",
+            "bridge_mode_reason": "no external observation mode requested",
+            "bridge_mode_safety_state": "paper_safe_only",
+        }
+
+    if valid_count <= 0 or not external_observation_active:
+        return {
+            "bridge_mode": "unavailable",
+            "bridge_mode_reason": (
+                "external mode requested but provider returned zero valid observations"
+            ),
+            "bridge_mode_safety_state": "fail_closed",
+        }
+
+    if (
+        external_candidate_bridge_enabled
+        and candidate_count > 0
+        and external_rows > 0
+    ):
+        return {
+            "bridge_mode": "external_candidate_validation",
+            "bridge_mode_reason": (
+                "valid external observations admitted as SCM candidate rows"
+            ),
+            "bridge_mode_safety_state": "paper_safe_only",
+        }
+
+    if errors > 0 and valid_count <= 0:
+        return {
+            "bridge_mode": "unavailable",
+            "bridge_mode_reason": (
+                "external mode requested but provider returned zero valid observations"
+            ),
+            "bridge_mode_safety_state": "fail_closed",
+        }
+
+    return {
+        "bridge_mode": "hybrid_observation",
+        "bridge_mode_reason": (
+            "external observations active but no external candidates admitted into SCM"
+        ),
+        "bridge_mode_safety_state": "paper_safe_only",
+    }
+
+
 def compute_config_fingerprint(config_paths: list[Path] | None = None) -> str:
     paths = config_paths or [
         SIGNAL_REFINERY_CONFIG_PATH,
@@ -430,6 +511,7 @@ PERCEPTION_CONTROL_REPORT_PATH = RUNTIME_DIR / "perception_control_report.json"
 ATTENTION_PROXY_REPORT_PATH = RUNTIME_DIR / "attention_proxy_report.json"
 MOLTBOOK_FEEDBACK_SUMMARY_PATH = RUNTIME_DIR / "moltbook_feedback_summary.json"
 SIGNAL_GATE_SUMMARY_PATH = RUNTIME_DIR / "signal_gate_summary.json"
+EXTREME_STATE_REPORT_PATH = RUNTIME_DIR / "extreme_state_report.json"
 OPERATOR_STATE_PATH = RUNTIME_DIR / "operator_state.json"
 ACTIVE_WORK_BLOCK_PATH = RUNTIME_DIR / "active_work_block.json"
 OPERATOR_PHASE_BALANCE_PATH = RUNTIME_DIR / "operator_phase_balance.json"

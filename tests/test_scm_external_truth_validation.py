@@ -14,6 +14,7 @@ state, and never touches the network.
 """
 from __future__ import annotations
 
+from datetime import datetime, timezone
 import json
 from pathlib import Path
 from typing import Any
@@ -68,11 +69,11 @@ def test_scm_input_origin_becomes_mixed_when_external_rows_arrive():
     assert report["scm_external_row_count"] >= 1
 
 
-def test_scm_input_origin_is_unavailable_when_ledger_is_empty(tmp_path: Path):
+def test_scm_input_origin_is_unavailable_when_ledger_is_empty(scratch_path: Path):
     """Fail-closed behavior: when the ledger contains zero qualifying rows,
     SCM must label the origin as unavailable rather than silently reporting
     seeded."""
-    empty_ledger = tmp_path / "signal_ledger.json"
+    empty_ledger = scratch_path / "signal_ledger.json"
     empty_ledger.write_text("[]", encoding="utf-8")
     report = build_signal_conversion_report(signal_ledger_path=empty_ledger)
     assert report["scm_input_origin"] == "unavailable"
@@ -89,7 +90,9 @@ def _fake_yahoo_ok(symbol: str) -> dict:
     return {
         "last_price": 91.0,
         "previous_close": 90.0,
-        "regular_market_time": "2026-04-24T12:00:00+00:00",
+        "regular_market_time": datetime.now(timezone.utc)
+        .replace(microsecond=0)
+        .isoformat(),
     }
 
 

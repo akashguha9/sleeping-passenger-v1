@@ -297,7 +297,7 @@ def _build_order_row(
     requested_qty: float,
     position_id: str | None,
     runtime_state: dict[str, Any],
-) -> dict[str, Any]:
+    ) -> dict[str, Any]:
     paper_order_id = _stable_id(
         "paper_order",
         decision_row["decision_id"],
@@ -321,6 +321,82 @@ def _build_order_row(
         },
         runtime_state=runtime_state,
     )
+
+
+def build_paper_candidate_decision_rows(
+    external_candidates: list[dict[str, Any]] | None,
+    runtime_state: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    """Shape external observation candidates into paper-safe decision rows.
+
+    These rows are advisory only:
+      * artifact_kind stays ``paper_decision`` for lineage consistency
+      * no orders, fills, or positions are created
+      * action_type remains ``WATCH_ONLY``
+      * candidate_status is ``PAPER_CANDIDATE``
+    """
+    rows = external_candidates if isinstance(external_candidates, list) else []
+    state = runtime_state if isinstance(runtime_state, dict) else {}
+    decision_rows: list[dict[str, Any]] = []
+    for candidate in rows:
+        if not isinstance(candidate, dict):
+            continue
+        ticker = str(candidate.get("ticker") or "").strip().upper()
+        signal_id = str(candidate.get("signal_id") or "").strip()
+        if not ticker or not signal_id:
+            continue
+        quality = str(candidate.get("data_quality") or "PLACEHOLDER").strip().upper()
+        if quality == "VALID_EXTERNAL":
+            confidence_score = 0.8
+        elif quality == "STALE_EXTERNAL":
+            confidence_score = 0.45
+        else:
+            confidence_score = 0.1
+        decision_id = _stable_id(
+            "paper_decision",
+            get_run_id(),
+            signal_id,
+            candidate.get("source_observation_id"),
+            "PAPER_CANDIDATE",
+        )
+        decision_rows.append(
+            stamp_payload(
+                {
+                    "artifact_kind": "paper_decision",
+                    "decision_id": decision_id,
+                    "signal_id": signal_id,
+                    "ticker": ticker,
+                    "action_type": "WATCH_ONLY",
+                    "candidate_status": "PAPER_CANDIDATE",
+                    "decision_status": "WATCH_ONLY",
+                    "conviction_score": round(
+                        float(candidate.get("ce_score", 0.0) or 0.0),
+                        3,
+                    ),
+                    "confidence_score": confidence_score,
+                    "decision_reasons": [
+                        "External observation candidate is advisory context only.",
+                        "No live execution or broker routing is permitted from this path.",
+                    ],
+                    "decision_source": "external_observation_candidate",
+                    "approval_state": "WATCH_ONLY",
+                    "suggestion_only": True,
+                    "human_execution_required": True,
+                    "delegation_permitted": False,
+                    "source_observation_id": candidate.get("source_observation_id"),
+                    "observation_provider": candidate.get("provider"),
+                    "reference_price": candidate.get("reference_price"),
+                    "observed_price": candidate.get("price"),
+                    "data_quality": candidate.get("data_quality"),
+                    "observed_at_utc": candidate.get("observed_at_utc"),
+                    "entry_timestamp": candidate.get("observed_at_utc"),
+                    "reconciliation_timestamp": None,
+                    "outcome_status": "paper_candidate_pending",
+                },
+                runtime_state=state,
+            )
+        )
+    return decision_rows
 
 
 def _build_paper_lineage_fields(

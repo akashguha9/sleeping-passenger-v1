@@ -18,6 +18,7 @@ from scripts.external_observation_lane import (
     fetch_external_observation,
     fetch_external_observations,
     observations_to_signal_context,
+    observations_to_scm_candidates,
     safe_write_external_observation_report,
     summarize_external_observations,
 )
@@ -145,6 +146,28 @@ def test_observations_to_signal_context_marks_every_row_as_non_trade():
     valid = next(r for r in ctx if r["symbol"] == "TLT")
     errored = next(r for r in ctx if r["symbol"] == "UNG")
     assert valid["confidence"] > errored["confidence"]
+
+
+def test_observations_to_scm_candidates_are_advisory_and_external():
+    rows = [
+        fetch_external_observation("TLT", provider_fn=_fake_ok, now_utc=NOW_UTC),
+        fetch_external_observation("UNG", provider_fn=_fake_error, now_utc=NOW_UTC),
+    ]
+
+    candidates = observations_to_scm_candidates(rows)
+
+    assert len(candidates) == 1
+    candidate = candidates[0]
+    assert candidate["ticker"] == "TLT"
+    assert candidate["source_name"] == "external_observation"
+    assert candidate["signal_origin"] == "external"
+    assert candidate["status"] == "WATCHLIST"
+    assert candidate["conversion_state"] == "NOT_EXECUTED"
+    assert candidate["blocker_attribution"] == "GSCE_PHASE_LOCK"
+    assert candidate["source_observation_id"].startswith("obs_yahoo_TLT_")
+    assert candidate["price"] == 91.45
+    assert candidate["data_quality"] == "VALID_EXTERNAL"
+    assert candidate["is_trade_signal"] is False
 
 
 def test_safe_write_external_observation_report_round_trip(scratch_path: Path):

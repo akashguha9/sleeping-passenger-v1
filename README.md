@@ -153,6 +153,15 @@ python scripts\paper_reconciliation.py --summary
 - No order placement, wallet signing, live execution, or secret material is hardcoded.
 - External-data success can move a run into `hybrid` mode because external observation is present, but that still does not imply execution readiness or venue truth.
 
+## External Bridge Modes
+
+- `seeded`: no external observation mode requested; SCM remains seeded.
+- `hybrid_observation`: external observations are attached as read-only context, but no external candidates are admitted into SCM.
+- `external_candidate_validation`: valid external observations are admitted as paper-safe SCM candidate rows.
+- `unavailable`: external mode was requested, but zero valid observations survived provider/data-quality checks; the system fails closed.
+
+All bridge modes remain advisory and paper-safe. They do not enable capital deployment or broker execution.
+
 ## Grok Intelligence Limits
 
 - Grok is an intelligence-extraction layer, not an execution layer.
