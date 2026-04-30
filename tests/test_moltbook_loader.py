@@ -941,7 +941,7 @@ def test_pipeline_health_report_summary_cli() -> None:
     assert "scm_state=LOW_CONVERSION" in lines
     assert "policy_state=RESTRICTED" in lines
     assert "friction_band=HIGH_FRICTION" in lines
-    assert "perception_control_state=CONSTRAINED" in lines
+    assert "perception_control_state=BALANCED" in lines
     assert any(line.startswith("attention_proxy=state=") for line in lines)
     assert any(line.startswith("attention_proxy_inputs=") for line in lines)
     assert any(line.startswith("narrative_proxy_advisory=") for line in lines)

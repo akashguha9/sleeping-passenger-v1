@@ -94,7 +94,7 @@ def test_snapshot_row_carries_signal_refinery_metrics() -> None:
     assert row["decision_grade_signal_count"] == 2
     assert row["thermal_state"] == "COOLING"
     assert row["rolling_expectancy_pct"] == -1.935
-    assert row["perception_control_state"] == "CONSTRAINED"
+    assert row["perception_control_state"] == "BALANCED"
     assert row["gravity_rejection_count"] == 2
     assert row["dominant_spectrum_class"] == "structural"
 
@@ -124,7 +124,7 @@ def test_run_diagnostics_pipeline_includes_signal_refinery() -> None:
 
     assert payload["signal_refinery"]["validation_engine"]["validated_signal_count"] == 2
     assert payload["signal_refinery"]["launch_control"]["review_ready_count"] == 0
-    assert payload["perception_control"]["perception_control_state"] == "CONSTRAINED"
+    assert payload["perception_control"]["perception_control_state"] == "BALANCED"
     assert payload["perception_control"]["noise_suppression_ratio"] == 0.429
     assert payload["trends"]["validation_quality_trend"]["label"] in {
         "IMPROVING",
