@@ -287,6 +287,13 @@ def build_snapshot_row(
     perception = state.get("perception_control", {}) if isinstance(state, dict) else {}
     if not isinstance(perception, dict):
         perception = {}
+    optical = (
+        health_report.get("optical_operating_system", {})
+        if isinstance(health_report, dict)
+        else {}
+    )
+    if not isinstance(optical, dict):
+        optical = {}
 
     return {
         "timestamp": _unique_snapshot_timestamp(snapshot_target),
@@ -334,6 +341,17 @@ def build_snapshot_row(
         "gravity_rejection_count": perception.get("gravity_rejection_count", 0),
         "resurfacing_candidate_count": perception.get("resurfacing_candidate_count", 0),
         "dominant_spectrum_class": perception.get("dominant_spectrum_class", "unknown"),
+        "optical_bull_state": optical.get("optical_bull_state", "UNKNOWN"),
+        "optical_lens_mode": optical.get("lens_mode", "UNKNOWN"),
+        "optical_mirror_mode": optical.get("mirror_mode", "UNKNOWN"),
+        "optical_opacity_state": optical.get("opacity_state", "UNKNOWN"),
+        "optical_aperture_state": optical.get("aperture_state", "UNKNOWN"),
+        "optical_shutter_state": optical.get("shutter_state", "UNKNOWN"),
+        "optical_valve_state": optical.get("valve_state", "UNKNOWN"),
+        "optical_lens_lock": optical.get("lens_lock", False),
+        "optical_action_allowed": optical.get("action_allowed", False),
+        "optical_final_recommendation": optical.get("final_recommendation", "UNKNOWN"),
+        "optical_state_log": optical.get("optical_state_log", {}),
         "transition_state_rows": transition_state_rows,
     }
 

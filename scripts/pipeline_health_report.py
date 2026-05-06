@@ -31,6 +31,7 @@ try:
     from scripts.narrative_operator_wisdom_filter import (
         evaluate_narrative_operator_wisdom_filter,
     )
+    from scripts.optical_operating_system import evaluate_optical_operating_system
     from scripts.operator_control import build_operator_control_report
     from scripts.perception_control import build_perception_control_report
     from scripts.position_truth_resolver import (
@@ -83,6 +84,7 @@ except ModuleNotFoundError:
     from narrative_operator_wisdom_filter import (
         evaluate_narrative_operator_wisdom_filter,
     )
+    from optical_operating_system import evaluate_optical_operating_system
     from operator_control import build_operator_control_report
     from perception_control import build_perception_control_report
     from position_truth_resolver import (
@@ -2387,10 +2389,129 @@ def build_pipeline_health_report(
             - float(reflection_context["validation_row"].get("cross_source_confirmation_score", 0.0)),
         }
     )
+    primary_packet = reflection_context.get("primary_packet", {})
+    current_lens_mode = "WIDE"
+    if primary_packet:
+        current_lens_mode = "TELEPHOTO"
+    if str(primary_packet.get("target_pre_entry_state") or "").upper() == "CLEAN_ENTRY_ELIGIBLE":
+        current_lens_mode = "MACRO"
+    if reflection_context["execution_packet_locked"]:
+        current_lens_mode = "LEICA"
+    opportunity_half_life = float(
+        reflection_context["validation_row"].get(
+            "repricing_headroom_score",
+            reflection_context["evidence_strength"],
+        )
+        or 0.0
+    )
+    validation_time = float(
+        signal_refinery_report.get("time_to_valid_signal_kpi", {}).get(
+            "median_time_to_valid_signal_hours",
+            0.0,
+        )
+        or 0.0
+    )
+    if validation_time > 1.0:
+        validation_time = 1.0
+    candidate_count = max(
+        len(entry_review_packets),
+        len(transition_review_packets),
+        int(state.get("signal_summary", {}).get("signals_above_ce_threshold", 0) or 0),
+    )
+    optical_operating_system_report = evaluate_optical_operating_system(
+        {
+            "timestamp": state.get("artifact_written_at") or state.get("run_started_at"),
+            "run_id": state.get("run_id"),
+            "asset": reflection_context["primary_ticker"],
+            "ticker": reflection_context["primary_ticker"],
+            "signal_id": reflection_context["primary_packet"].get("signal_id"),
+            "detection_strength": reflection_context["evidence_strength"],
+            "validation_quality": reflection_context["validation_row"].get(
+                "cross_source_confirmation_score",
+                reflection_context["evidence_strength"],
+            ),
+            "durability_score": asset_durability_report["adjusted_score"],
+            "execution_survivability": min(
+                float(busquets_audit_report["audit_score"]),
+                float(execution_integrity_report["execution_integrity_score"]),
+            ),
+            "source_quality": reflection_context["validation_row"].get(
+                "source_quality_score",
+                reflection_context["evidence_strength"],
+            ),
+            "signal_strength": reflection_context["validation_row"].get(
+                "validation_score",
+                reflection_context["evidence_strength"],
+            ),
+            "evidence_strength": reflection_context["evidence_strength"],
+            "narrative_confidence": reflection_context["narrative_confidence"],
+            "opportunity_half_life": opportunity_half_life,
+            "validation_time": validation_time,
+            "information_gain": reflection_context["narrative_confidence"],
+            "delay_cost": min(
+                1.0,
+                float(reflection_context["context_switch_count"] + reflection_context["reopen_count"])
+                * 0.15,
+            ),
+            "current_lens_mode": current_lens_mode,
+            "momentum_score": reflection_context["validation_row"].get(
+                "first_order_score",
+                0.0,
+            ),
+            "persistence": min(
+                1.0,
+                float(trend_report.get("snapshot_count", 0) or 0) / 10.0,
+            ),
+            "convergence": reflection_context["validation_row"].get(
+                "cross_source_confirmation_score",
+                0.0,
+            ),
+            "volatility": max(
+                float(attention_proxy_report.get("narrative_heat_score") or 0.0),
+                1.0 if reflection_context["chaos_veto_active"] else 0.0,
+            ),
+            "risk_score": 0.0
+            if (
+                busquets_audit_report["risk_clearance"]
+                and not reflection_context["primary_packet"].get("open_position_conflict", False)
+            )
+            else 1.0,
+            "regime_stress": 1.0 if reflection_context["chaos_veto_active"] else 0.35,
+            "candidate_count": candidate_count,
+            "active_blockers": state.get("active_blockers", []),
+            "chaos_veto_active": reflection_context["chaos_veto_active"],
+            "shock_override_active": temporal_integrity["temporal_integrity_state"] == "FAILED"
+            or position_truth_summary.get("divergence_severity") == "CRITICAL",
+            "policy_clear": bool(reflection_context["policy"].get("allow_new_risk", False)),
+            "policy_state": reflection_context["policy"].get("policy_state"),
+            "risk_clear": busquets_audit_report["risk_clearance"],
+            "signal_valid": (
+                str(reflection_context["validation_row"].get("validation_state") or "").upper()
+                == "VALIDATED"
+            ),
+            "minimum_validation_passed": bool(reflection_context["validation_row"])
+            and float(reflection_context["evidence_strength"]) >= 0.55,
+            "urgency_spike": reflection_context["context_switch_count"] > 1,
+            "confidence_surge": reflection_context["narrative_confidence"] >= 0.75,
+            "cognitive_load": min(
+                1.0,
+                float(reflection_context["context_switch_count"] + reflection_context["reopen_count"])
+                * 0.2,
+            ),
+            "requested_lens_change": reflection_context["reopen_count"] > 0,
+            "operator_state": narrative_filter_report["operator_state"],
+            "operator_state_fit": narrative_filter_report["operator_stability_score"],
+            "lens_lock_active": reflection_context["execution_packet_locked"]
+            and execution_integrity_report["execution_integrity_state"]
+            in {"LOCKED_EXECUTION", "ADAPTIVE_EXECUTION_ALLOWED"},
+            "data_integrity_failure": temporal_integrity["temporal_integrity_state"] == "FAILED",
+        }
+    )
     reflection_allowed_to_execute = bool(
         busquets_audit_report["allowed_to_execute"]
         and execution_integrity_report["allowed_to_execute"]
         and narrative_filter_report["allowed_to_execute"]
+        and optical_operating_system_report["action_allowed"]
         and not reflection_context["chaos_veto_active"]
         and bool(reflection_context["policy"].get("allow_new_risk", False))
     )
@@ -2520,6 +2641,29 @@ def build_pipeline_health_report(
         "paracetamol_score": asset_durability_report["paracetamol_score"],
         "durability_class": asset_durability_report["durability_class"],
         "positive_adaptation_score": asset_durability_report["positive_adaptation_score"],
+        "optical_operating_system": optical_operating_system_report,
+        "optical_bull_state": optical_operating_system_report["optical_bull_state"],
+        "optical_lens_mode": optical_operating_system_report["lens_mode"],
+        "optical_target_lens_mode": optical_operating_system_report["target_lens_mode"],
+        "optical_lens_transition_state": optical_operating_system_report[
+            "lens_transition_state"
+        ],
+        "optical_mirror_mode": optical_operating_system_report["mirror_mode"],
+        "optical_opacity_state": optical_operating_system_report["opacity_state"],
+        "optical_opacity_score": optical_operating_system_report["opacity_score"],
+        "optical_aperture_state": optical_operating_system_report["aperture_state"],
+        "optical_shutter_state": optical_operating_system_report["shutter_state"],
+        "optical_valve_state": optical_operating_system_report["valve_state"],
+        "optical_operator_band": optical_operating_system_report["operator_band"],
+        "optical_macro_pass": optical_operating_system_report["macro_pass"],
+        "optical_leica_clearance": optical_operating_system_report["leica_clearance"],
+        "optical_lens_lock": optical_operating_system_report["lens_lock"],
+        "optical_action_allowed": optical_operating_system_report["action_allowed"],
+        "optical_final_recommendation": optical_operating_system_report[
+            "final_recommendation"
+        ],
+        "optical_blocking_reason": optical_operating_system_report["blocking_reason"],
+        "optical_state_log": optical_operating_system_report["optical_state_log"],
         "intelligence_summary": intelligence_summary,
         "extreme_state_logic": extreme_state_logic,
         "where_am_i_leaking_performance": where_am_i_leaking_performance,
@@ -2740,6 +2884,18 @@ def format_pipeline_health_summary(report: dict[str, Any]) -> str:
             f"paracetamol_score={report.get('paracetamol_score')}",
             f"durability_class={report.get('durability_class', 'UNKNOWN')}",
             f"positive_adaptation_score={report.get('positive_adaptation_score')}",
+            f"optical_bull_state={report.get('optical_bull_state', 'UNKNOWN')}",
+            f"optical_lens_mode={report.get('optical_lens_mode', 'UNKNOWN')}",
+            f"optical_mirror_mode={report.get('optical_mirror_mode', 'UNKNOWN')}",
+            f"optical_opacity_state={report.get('optical_opacity_state', 'UNKNOWN')}",
+            f"optical_aperture_state={report.get('optical_aperture_state', 'UNKNOWN')}",
+            f"optical_shutter_state={report.get('optical_shutter_state', 'UNKNOWN')}",
+            f"optical_valve_state={report.get('optical_valve_state', 'UNKNOWN')}",
+            f"optical_lens_lock={str(bool(report.get('optical_lens_lock', False))).lower()}",
+            "optical_action_allowed="
+            f"{str(bool(report.get('optical_action_allowed', False))).lower()}",
+            "optical_final_recommendation="
+            f"{report.get('optical_final_recommendation', 'UNKNOWN')}",
             f"what_should_i_do_next={report['what_should_i_do_next']}",
             (
                 "scorecard="
