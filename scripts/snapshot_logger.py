@@ -315,6 +315,13 @@ def build_snapshot_row(
     )
     if not isinstance(signal_metabolism, dict):
         signal_metabolism = {}
+    field_dynamics = (
+        health_report.get("gauss_maxwell_lorentz_state", {})
+        if isinstance(health_report, dict)
+        else {}
+    )
+    if not isinstance(field_dynamics, dict):
+        field_dynamics = {}
 
     return {
         "timestamp": _unique_snapshot_timestamp(snapshot_target),
@@ -383,6 +390,10 @@ def build_snapshot_row(
         "football_tarkowski_candidates_count": football.get("tarkowski_candidates_count", 0),
         "football_top_baines_candidate": football.get("top_baines_candidate"),
         "football_top_tarkowski_candidate": football.get("top_tarkowski_candidate"),
+        "field_dynamics_engine_state": field_dynamics.get("field_dynamics_engine_state", "EMPTY"),
+        "valid_signal_rate": field_dynamics.get("valid_signal_rate", 0.0),
+        "trade_readiness": field_dynamics.get("trade_readiness", 0.0),
+        "field_dynamics_top_asset": field_dynamics.get("top_field_asset"),
         "signal_metabolism_engine_state": signal_metabolism.get("signal_metabolism_engine_state", "EMPTY"),
         "signal_metabolism_candidate_count": signal_metabolism.get("signal_metabolism_candidate_count", 0),
         "signal_metabolism_guarded_count": signal_metabolism.get("signal_metabolism_guarded_count", 0),

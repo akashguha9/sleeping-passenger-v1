@@ -19,6 +19,7 @@ try:
     from scripts.closure_deficit_monitor import build_closure_deficit_report
     from scripts.execution_integrity_audit import evaluate_execution_integrity_audit
     from scripts.external_data_runtime_sync import apply_external_observation_report
+    from scripts.field_dynamics_engine import build_field_dynamics_report
     from scripts.governance_feedback_report import build_governance_feedback_report
     from scripts.football_portfolio_archetype_engine import (
         build_football_portfolio_archetype_report,
@@ -48,6 +49,7 @@ try:
         COMPLEXITY_LADDER_CONTROLLER_PATH,
         EXTREME_STATE_REPORT_PATH,
         EXPERIENCE_MODE_REPORT_PATH,
+        FIELD_DYNAMICS_REPORT_PATH,
         FOOTBALL_PORTFOLIO_ARCHETYPE_REPORT_PATH,
         HEALTH_REPORT_PATH,
         SIGNAL_METABOLISM_REPORT_PATH,
@@ -80,6 +82,7 @@ except ModuleNotFoundError:
     from closure_deficit_monitor import build_closure_deficit_report
     from execution_integrity_audit import evaluate_execution_integrity_audit
     from external_data_runtime_sync import apply_external_observation_report
+    from field_dynamics_engine import build_field_dynamics_report
     from governance_feedback_report import build_governance_feedback_report
     from football_portfolio_archetype_engine import (
         build_football_portfolio_archetype_report,
@@ -109,6 +112,7 @@ except ModuleNotFoundError:
         COMPLEXITY_LADDER_CONTROLLER_PATH,
         EXTREME_STATE_REPORT_PATH,
         EXPERIENCE_MODE_REPORT_PATH,
+        FIELD_DYNAMICS_REPORT_PATH,
         FOOTBALL_PORTFOLIO_ARCHETYPE_REPORT_PATH,
         HEALTH_REPORT_PATH,
         SIGNAL_METABOLISM_REPORT_PATH,
@@ -2009,6 +2013,77 @@ def _build_signal_metabolism_inputs(
     return inputs, regime_context, compatibility_defaults
 
 
+def _build_field_dynamics_inputs(
+    *,
+    state: dict[str, Any],
+    signal_refinery_report: dict[str, Any],
+    operator_policy: dict[str, Any],
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    validation_rows = signal_refinery_report.get("validation_engine", {}).get("signals", [])
+    validation_by_ticker = {
+        str(row.get("ticker") or "").upper(): row
+        for row in validation_rows
+        if isinstance(row, dict) and str(row.get("ticker") or "").strip()
+    }
+    active_blockers = normalize_active_blockers(state.get("active_blockers"))
+    chaos_veto = "REALM_BIS" in active_blockers or int(
+        state.get("moltbook_summary", {}).get("chaos_entries", 0) or 0
+    ) > 0
+    policy_context = {
+        "policy_state": operator_policy.get("policy_state", "RESTRICTED"),
+        "allow_new_risk": bool(operator_policy.get("allow_new_risk", False)),
+        "chaos_veto": chaos_veto,
+    }
+
+    inputs: list[dict[str, Any]] = []
+    for row in state.get("per_signal_attribution", []):
+        if not isinstance(row, dict):
+            continue
+        ticker = str(row.get("ticker") or "").upper()
+        if not ticker:
+            continue
+        validation_row = validation_by_ticker.get(ticker, {})
+        status = str(row.get("status") or "").upper()
+        validation_state = str(validation_row.get("validation_state") or "").upper()
+        first_order = float(validation_row.get("first_order_score", 0.0) or 0.0)
+        confirmation = float(validation_row.get("cross_source_confirmation_score", 0.0) or 0.0)
+        source_quality = float(validation_row.get("source_quality_score", 0.0) or 0.0)
+        light_score = float(validation_row.get("light_score", 0.0) or 0.0)
+        novelty = float(validation_row.get("novelty_score", 0.0) or 0.0)
+        price_lead = float(validation_row.get("price_lead_score", 0.0) or 0.0)
+        repricing = float(validation_row.get("repricing_headroom_score", 0.0) or 0.0)
+        price_direction = price_lead if status != "EXECUTED_CHAOS" else -price_lead
+        sentiment_direction = confirmation if validation_state != "INVALIDATED" else -confirmation
+        inputs.append(
+            {
+                "candidate_id": str(row.get("signal_id") or ticker),
+                "asset": ticker,
+                "asset_symbol": ticker,
+                "ticker": ticker,
+                "sentiment_score": sentiment_direction,
+                "price_move_pct": price_direction,
+                "volume_move_ratio": light_score,
+                "event_prior_score": confirmation,
+                "narrative_score": source_quality,
+                "narrative_direction_score": sentiment_direction,
+                "liquidity_score": source_quality,
+                "repeatability_score": first_order,
+                "persistence_score": first_order,
+                "durability_score": repricing,
+                "execution_survivability_score": float(
+                    validation_row.get("blocker_clearance_score", 0.0) or 0.0
+                ),
+                "timing_alignment_score": max(repricing, confirmation),
+                "timing_window": validation_row.get("time_to_valid_signal_hours"),
+                "momentum_score": first_order,
+                "minimum_validation_passed": validation_state in {"VALIDATED", "NEEDS_CONFIRMATION"},
+                "policy_permission": bool(operator_policy.get("allow_new_risk", False)),
+                "chaos_veto": chaos_veto or status == "EXECUTED_CHAOS",
+            }
+        )
+    return inputs, policy_context
+
+
 def build_entry_review_packets(
     live_state: dict[str, Any],
     scenario_state: dict[str, Any],
@@ -2776,6 +2851,17 @@ def build_pipeline_health_report(
         run_id=state.get("run_id"),
         generated_at=state.get("artifact_written_at") or state.get("run_started_at"),
     )
+    field_dynamics_inputs, field_dynamics_policy = _build_field_dynamics_inputs(
+        state=state,
+        signal_refinery_report=signal_refinery_report,
+        operator_policy=operator_policy,
+    )
+    field_dynamics_report = build_field_dynamics_report(
+        field_dynamics_inputs,
+        policy_state=field_dynamics_policy,
+        run_id=state.get("run_id"),
+        generated_at=state.get("artifact_written_at") or state.get("run_started_at"),
+    )
     football_archetype_inputs, football_chaos_state = _build_football_portfolio_archetype_inputs(
         state=state,
         signal_refinery_report=signal_refinery_report,
@@ -3049,6 +3135,28 @@ def build_pipeline_health_report(
         "baines_chaos_vetoed": baines_engine_report["baines_chaos_vetoed"],
         "top_baines_candidate": baines_engine_report["top_baines_candidate"],
         "top_baines_score": baines_engine_report["top_baines_score"],
+        "gauss_maxwell_lorentz_state": field_dynamics_report,
+        "gauss_maxwell_lorentz_dashboard": field_dynamics_report[
+            "gauss_maxwell_lorentz_dashboard"
+        ],
+        "field_dynamics_engine_available": field_dynamics_report[
+            "field_dynamics_engine_available"
+        ],
+        "field_dynamics_engine_state": field_dynamics_report["field_dynamics_engine_state"],
+        "valid_signal_rate": field_dynamics_report["valid_signal_rate"],
+        "trade_readiness": field_dynamics_report["trade_readiness"],
+        "field_dynamics_candidate_count": field_dynamics_report[
+            "field_dynamics_candidate_count"
+        ],
+        "field_dynamics_strong_field_count": field_dynamics_report["strong_field_count"],
+        "field_dynamics_divergent_field_count": field_dynamics_report[
+            "divergent_field_count"
+        ],
+        "field_dynamics_actionable_under_policy_count": field_dynamics_report[
+            "actionable_under_policy_count"
+        ],
+        "field_dynamics_top_asset": field_dynamics_report["top_field_asset"],
+        "field_dynamics_report_path": repo_relative(FIELD_DYNAMICS_REPORT_PATH),
         "signal_metabolism": signal_metabolism_report,
         "signal_metabolism_engine_available": signal_metabolism_report[
             "signal_metabolism_engine_available"
@@ -3291,6 +3399,11 @@ def build_pipeline_health_report(
     if effective_write_runtime:
         write_json_atomic(HEALTH_REPORT_PATH, report, stamp=False)
         write_json_atomic(
+            FIELD_DYNAMICS_REPORT_PATH,
+            field_dynamics_report,
+            stamp=True,
+        )
+        write_json_atomic(
             SIGNAL_METABOLISM_REPORT_PATH,
             signal_metabolism_report,
             stamp=True,
@@ -3376,6 +3489,21 @@ def format_pipeline_health_summary(report: dict[str, Any]) -> str:
             f"baines_chaos_vetoed={int(report.get('baines_chaos_vetoed', 0) or 0)}",
             f"top_baines_candidate={report.get('top_baines_candidate')}",
             f"top_baines_score={report.get('top_baines_score')}",
+            "field_dynamics_engine_available="
+            f"{str(bool(report.get('field_dynamics_engine_available', False))).lower()}",
+            f"field_dynamics_engine_state={report.get('field_dynamics_engine_state', 'EMPTY')}",
+            f"valid_signal_rate={report.get('valid_signal_rate')}",
+            f"trade_readiness={report.get('trade_readiness')}",
+            "field_dynamics_candidate_count="
+            f"{int(report.get('field_dynamics_candidate_count', 0) or 0)}",
+            "field_dynamics_strong_field_count="
+            f"{int(report.get('field_dynamics_strong_field_count', 0) or 0)}",
+            "field_dynamics_divergent_field_count="
+            f"{int(report.get('field_dynamics_divergent_field_count', 0) or 0)}",
+            "field_dynamics_actionable_under_policy_count="
+            f"{int(report.get('field_dynamics_actionable_under_policy_count', 0) or 0)}",
+            f"field_dynamics_top_asset={report.get('field_dynamics_top_asset')}",
+            f"field_dynamics_report_path={report.get('field_dynamics_report_path')}",
             "signal_metabolism_engine_available="
             f"{str(bool(report.get('signal_metabolism_engine_available', False))).lower()}",
             "signal_metabolism_engine_state="
