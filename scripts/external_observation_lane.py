@@ -35,6 +35,7 @@ from pathlib import Path
 from typing import Any, Callable, Iterable
 
 try:
+    from scripts.integrity_diagnostics import validate_candidate_observation_timestamp
     from scripts.runtime_common import (
         RUNTIME_DIR,
         get_source_mode,
@@ -42,6 +43,7 @@ try:
         write_json_atomic,
     )
 except ModuleNotFoundError:  # pragma: no cover - script-relative import fallback
+    from integrity_diagnostics import validate_candidate_observation_timestamp
     from runtime_common import (
         RUNTIME_DIR,
         get_source_mode,
@@ -415,6 +417,9 @@ def _candidate_ce_score(row: ExternalObservation) -> float:
 
 def observations_to_scm_candidates(
     observations: Iterable[ExternalObservation],
+    *,
+    decision_timestamp: str | None = None,
+    rejection_reasons: list[str] | None = None,
 ) -> list[dict[str, Any]]:
     """Convert valid external observations into advisory SCM candidate rows.
 
@@ -425,11 +430,20 @@ def observations_to_scm_candidates(
       * Honest: only external/stale-external observations become SCM rows.
     """
     candidate_rows: list[dict[str, Any]] = []
+    resolved_decision_timestamp = decision_timestamp or utc_timestamp()
     for row in observations:
         if (
             not isinstance(row, ExternalObservation)
             or row.data_quality != "VALID_EXTERNAL"
         ):
+            continue
+        admitted, rejection_reason = validate_candidate_observation_timestamp(
+            row.observed_at_utc,
+            resolved_decision_timestamp,
+        )
+        if not admitted:
+            if isinstance(rejection_reasons, list) and rejection_reason:
+                rejection_reasons.append(f"{row.symbol}:{rejection_reason}")
             continue
         observation_id = _observation_row_id(row)
         ce_score = _candidate_ce_score(row)
@@ -451,6 +465,7 @@ def observations_to_scm_candidates(
                 "origin_label": "external_observation_advisory_candidate",
                 "provider": row.provider,
                 "observed_at_utc": row.observed_at_utc,
+                "decision_timestamp": resolved_decision_timestamp,
                 "price": row.price,
                 "reference_price": row.price,
                 "change_pct": row.change_pct,
@@ -521,6 +536,8 @@ def safe_write_external_observation_report(
         "external_observation_active": active,
         "external_observation_provider": provider,
         **summary,
+        "external_observation_temporal_rejection_count": 0,
+        "external_observation_temporal_rejections": [],
         "observations": [row.to_dict() for row in rows],
         "advisory_note": (
             "External price observations are advisory context only. They do "

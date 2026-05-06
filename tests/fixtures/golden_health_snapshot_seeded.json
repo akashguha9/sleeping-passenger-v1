@@ -1,0 +1,10 @@
+{
+  "bridge_mode": "seeded",
+  "can_deploy_capital": false,
+  "feedback_learning_state": "INSUFFICIENT_FEEDBACK",
+  "policy_state": "RESTRICTED",
+  "position_integrity_state": "DIVERGED",
+  "scm_input_origin": "seeded",
+  "scm_state": "LOW_CONVERSION",
+  "system_readiness_state": "DO_NOT_DEPLOY"
+}

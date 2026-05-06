@@ -16,6 +16,14 @@ try:
     from scripts.closure_deficit_monitor import build_closure_deficit_report
     from scripts.external_data_runtime_sync import apply_external_observation_report
     from scripts.governance_feedback_report import build_governance_feedback_report
+    from scripts.integrity_diagnostics import (
+        build_reproducibility_summary,
+        build_signal_segmentation_summary,
+        build_stable_health_snapshot,
+        build_temporal_integrity_summary,
+        build_truth_metrics_summary,
+        compute_stable_health_snapshot_hash,
+    )
     from scripts.moltbook_feedback import build_moltbook_feedback_report
     from scripts.operator_control import build_operator_control_report
     from scripts.perception_control import build_perception_control_report
@@ -54,6 +62,14 @@ except ModuleNotFoundError:
     from closure_deficit_monitor import build_closure_deficit_report
     from external_data_runtime_sync import apply_external_observation_report
     from governance_feedback_report import build_governance_feedback_report
+    from integrity_diagnostics import (
+        build_reproducibility_summary,
+        build_signal_segmentation_summary,
+        build_stable_health_snapshot,
+        build_temporal_integrity_summary,
+        build_truth_metrics_summary,
+        compute_stable_health_snapshot_hash,
+    )
     from moltbook_feedback import build_moltbook_feedback_report
     from operator_control import build_operator_control_report
     from perception_control import build_perception_control_report
@@ -283,6 +299,13 @@ def build_external_observation_summary(
         "external_observation_data_quality_counts": {
             str(k): int(v or 0) for k, v in quality_counts.items()
         },
+        "external_observation_temporal_rejection_count": int(
+            report.get("external_observation_temporal_rejection_count", 0) or 0
+        ),
+        "external_observation_temporal_rejections": list(
+            report.get("external_observation_temporal_rejections") or []
+        ),
+        "observations": list(report.get("observations") or []),
         "external_observation_report_path": report.get("external_observation_report_path"),
         "live_quotes_available": active,
     }
@@ -2037,6 +2060,27 @@ def build_pipeline_health_report(
             row for row in external_candidate_rows if isinstance(row, dict)
         ]
     signal_source_summary = build_signal_source_summary(signal_source_rows)
+    signal_segmentation = build_signal_segmentation_summary(
+        per_signal_rows=signal_source_rows,
+        external_candidate_count=int(state.get("external_candidate_count", 0) or 0),
+        external_observation_valid_count=int(
+            external_observation_summary.get("external_observation_valid_count", 0) or 0
+        ),
+        scm_external_row_count=int(state.get("scm_external_row_count", 0) or 0),
+        scm_seeded_row_count=int(state.get("scm_seeded_row_count", 0) or 0),
+    )
+    temporal_integrity = build_temporal_integrity_summary(
+        decision_timestamp=state.get("decision_timestamp"),
+        reconciliation_timestamp=state.get("reconciliation_timestamp"),
+        observations=external_observation_summary.get("observations", []),
+        feature_rows=signal_source_rows,
+    )
+    truth_metrics = build_truth_metrics_summary(
+        signal_summary=state.get("signal_summary"),
+        per_signal_rows=signal_source_rows,
+        feedback_report=moltbook_feedback_report,
+        signal_segmentation=signal_segmentation,
+    )
     intelligence_summary = build_intelligence_summary(grok_xai_report)
     extreme_state_report = _load_optional_runtime_artifact(
         None,
@@ -2110,6 +2154,7 @@ def build_pipeline_health_report(
         "position_truth_summary": position_truth_summary,
         "position_truth_source": position_truth_summary["canonical_position_source"],
         "position_source_divergence_detected": position_truth_summary["position_source_divergence_detected"],
+        "position_integrity_state": position_truth_summary.get("position_integrity_state", "UNKNOWN"),
         "curated_positions_count": position_truth_summary["curated_moltbook_positions_count"],
         "runtime_paper_positions_count": position_truth_summary["runtime_paper_positions_count"],
         "position_truth_warning": position_truth_summary["position_truth_warning"],
@@ -2125,11 +2170,31 @@ def build_pipeline_health_report(
             "safe_next_action",
             "",
         ),
+        "canonical_position_source": position_truth_summary.get("canonical_position_source"),
+        "canonical_position_count": position_truth_summary.get("canonical_position_count"),
+        "advisory_position_sources": position_truth_summary.get("advisory_position_sources", []),
+        "curated_only_symbols": position_truth_summary.get("curated_only_symbols", []),
+        "runtime_only_symbols": position_truth_summary.get("runtime_only_symbols", []),
+        "overlapping_symbols": position_truth_summary.get("overlapping_symbols", []),
+        "canonical_position_checksum": position_truth_summary.get("canonical_position_checksum"),
+        "advisory_position_checksum": position_truth_summary.get("advisory_position_checksum"),
         "signal_source_summary": signal_source_summary,
+        "signal_segmentation": signal_segmentation,
+        "seeded_signal_count": signal_segmentation["seeded_signal_count"],
+        "external_signal_count": signal_segmentation["external_signal_count"],
+        "mixed_signal_metric_warning": signal_segmentation["mixed_signal_metric_warning"],
+        "evidence_contamination_risk": signal_segmentation["evidence_contamination_risk"],
         "external_candidate_count": int(state.get("external_candidate_count", 0) or 0),
         "external_paper_candidate_count": int(
             state.get("external_paper_candidate_count", 0) or 0
         ),
+        "temporal_integrity": temporal_integrity,
+        "temporal_integrity_state": temporal_integrity["temporal_integrity_state"],
+        "temporal_integrity_violation_count": temporal_integrity[
+            "temporal_integrity_violation_count"
+        ],
+        "temporal_integrity_warnings": temporal_integrity["temporal_integrity_warnings"],
+        "truth_metrics": truth_metrics,
         "intelligence_summary": intelligence_summary,
         "extreme_state_logic": extreme_state_logic,
         "where_am_i_leaking_performance": where_am_i_leaking_performance,
@@ -2263,6 +2328,23 @@ def build_pipeline_health_report(
         ),
     }
     report = stamp_payload(report, runtime_state=state)
+    state["reconciliation_timestamp"] = report.get("artifact_written_at")
+    temporal_integrity = build_temporal_integrity_summary(
+        decision_timestamp=state.get("decision_timestamp"),
+        reconciliation_timestamp=state.get("reconciliation_timestamp"),
+        observations=external_observation_summary.get("observations", []),
+        feature_rows=signal_source_rows,
+    )
+    report["temporal_integrity"] = temporal_integrity
+    report["temporal_integrity_state"] = temporal_integrity["temporal_integrity_state"]
+    report["temporal_integrity_violation_count"] = temporal_integrity[
+        "temporal_integrity_violation_count"
+    ]
+    report["temporal_integrity_warnings"] = temporal_integrity["temporal_integrity_warnings"]
+    reproducibility_summary = build_reproducibility_summary(repo_root=base, report=report)
+    report["reproducibility_summary"] = reproducibility_summary
+    report["golden_health_snapshot"] = build_stable_health_snapshot(report)
+    report["golden_health_snapshot_hash"] = compute_stable_health_snapshot_hash(report)
 
     if effective_write_runtime:
         write_json_atomic(HEALTH_REPORT_PATH, report, stamp=False)
@@ -2307,6 +2389,13 @@ def format_pipeline_health_summary(report: dict[str, Any]) -> str:
             f"bridge_mode={report.get('bridge_mode', 'seeded')}",
             f"bridge_mode_reason={report.get('bridge_mode_reason', 'no external observation mode requested')}",
             f"bridge_mode_safety_state={report.get('bridge_mode_safety_state', 'paper_safe_only')}",
+            f"position_integrity_state={report.get('position_integrity_state', 'UNKNOWN')}",
+            f"temporal_integrity_state={report.get('temporal_integrity_state', 'UNKNOWN')}",
+            f"temporal_integrity_violation_count={int(report.get('temporal_integrity_violation_count', 0) or 0)}",
+            f"seeded_signal_count={int(report.get('seeded_signal_count', 0) or 0)}",
+            f"external_signal_count={int(report.get('external_signal_count', 0) or 0)}",
+            f"evidence_contamination_risk={report.get('evidence_contamination_risk', 'UNKNOWN')}",
+            f"golden_health_snapshot_hash={report.get('golden_health_snapshot_hash')}",
             f"what_should_i_do_next={report['what_should_i_do_next']}",
             (
                 "scorecard="
@@ -2372,6 +2461,9 @@ def format_pipeline_health_summary(report: dict[str, Any]) -> str:
     position_truth = report.get("position_truth_summary", {})
     if isinstance(position_truth, dict) and position_truth:
         lines.extend(format_position_truth_summary(position_truth))
+    mixed_signal_metric_warning = report.get("mixed_signal_metric_warning")
+    if mixed_signal_metric_warning:
+        lines.append(f"mixed_signal_metric_warning={mixed_signal_metric_warning}")
     external_candidate_count = int(report.get("external_candidate_count", 0) or 0)
     if external_candidate_count > 0:
         lines.append(f"external_candidate_count={external_candidate_count}")
@@ -2411,12 +2503,33 @@ def format_pipeline_health_summary(report: dict[str, Any]) -> str:
             "live_quotes_available="
             f"{str(observation_summary.get('live_quotes_available', False)).lower()}"
         )
+    temporal_warnings = report.get("temporal_integrity_warnings", [])
+    if temporal_warnings:
+        lines.append("temporal_integrity_warnings=" + " | ".join(temporal_warnings))
     signal_source_summary = report.get("signal_source_summary", {})
     if int(signal_source_summary.get("external_signal_count", 0)) > 0:
         lines.append(
             "signal_sources="
             f"seeded={int(signal_source_summary.get('seeded_signal_count', 0))}, "
             f"external={int(signal_source_summary.get('external_signal_count', 0))}"
+        )
+    reproducibility = report.get("reproducibility_summary", {})
+    if isinstance(reproducibility, dict) and reproducibility:
+        lines.append(
+            "reproducibility="
+            f"python={reproducibility.get('python_version')}, "
+            f"requirements={str(bool(reproducibility.get('requirements_txt_exists'))).lower()}, "
+            f"ci={str(bool(reproducibility.get('ci_workflow_exists'))).lower()}, "
+            f"runtime_metadata={str(bool(reproducibility.get('runtime_metadata_exposed'))).lower()}"
+        )
+    truth_metrics = report.get("truth_metrics", {})
+    if isinstance(truth_metrics, dict) and truth_metrics:
+        lines.append(
+            "truth_metrics="
+            f"candidate_survival_rate={truth_metrics.get('candidate_survival_rate', {}).get('value')}, "
+            f"governance_trip_rate={truth_metrics.get('governance_trip_rate', {}).get('value')}, "
+            f"seeded_vs_external_delta={truth_metrics.get('seeded_vs_external_delta', {}).get('value')}, "
+            f"feedback_information_gain={truth_metrics.get('feedback_information_gain', {}).get('value')}"
         )
     extreme_state_logic = report.get("extreme_state_logic", {})
     if isinstance(extreme_state_logic, dict) and extreme_state_logic.get("report_present"):

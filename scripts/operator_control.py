@@ -391,6 +391,39 @@ def _parse_signal_emergence_ts(signal_id: Any) -> datetime | None:
     return datetime(year, month, day, tzinfo=timezone.utc)
 
 
+def _resolve_signal_gate_as_of(
+    runtime_state: dict[str, Any] | None,
+    fallback: datetime,
+) -> datetime:
+    state = runtime_state if isinstance(runtime_state, dict) else {}
+    for key in ("decision_timestamp", "run_started_at", "latest_snapshot_timestamp"):
+        raw_value = state.get(key)
+        if not raw_value:
+            continue
+        try:
+            parsed = datetime.fromisoformat(str(raw_value).replace("Z", "+00:00"))
+        except ValueError:
+            continue
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed
+
+    latest_emergence: datetime | None = None
+    rows = state.get("per_signal_attribution", [])
+    if isinstance(rows, list):
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            parsed = _parse_signal_emergence_ts(_text(row.get("signal_id")))
+            if parsed is None:
+                continue
+            if latest_emergence is None or parsed > latest_emergence:
+                latest_emergence = parsed
+    if latest_emergence is not None:
+        return latest_emergence
+    return fallback
+
+
 def _load_jsonl_rows(path: Path) -> list[dict[str, Any]]:
     if not path.exists():
         return []
@@ -789,7 +822,10 @@ def build_signal_admission_report(
         operator_state if isinstance(operator_state, dict) else load_operator_state()
     )
     config = load_operator_control_config(config_path)
-    generated_at = datetime.now(timezone.utc)
+    generated_at = _resolve_signal_gate_as_of(
+        state,
+        datetime.now(timezone.utc),
+    )
     rows = state.get("per_signal_attribution", [])
     if not isinstance(rows, list):
         rows = []

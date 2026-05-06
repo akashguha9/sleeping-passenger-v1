@@ -26,6 +26,7 @@ try:
         build_runtime_state_from_scm_report,
         format_pipeline_health_summary,
     )
+    from scripts.integrity_diagnostics import build_temporal_integrity_summary
     from scripts.moltbook_feedback import build_moltbook_feedback_report
     from scripts.perception_control import build_perception_control_report
     from scripts.runtime_common import (
@@ -34,6 +35,7 @@ try:
         resolve_bridge_mode,
         resolve_source_mode,
         set_source_mode,
+        utc_timestamp,
     )
     from scripts.signal_refinery import build_signal_refinery_report
     from scripts.signal_conversion_monitor import build_signal_conversion_report
@@ -62,6 +64,7 @@ except ModuleNotFoundError:
         build_runtime_state_from_scm_report,
         format_pipeline_health_summary,
     )
+    from integrity_diagnostics import build_temporal_integrity_summary
     from perception_control import build_perception_control_report
     from runtime_common import (
         SNAPSHOT_LOG_PATH,
@@ -69,6 +72,7 @@ except ModuleNotFoundError:
         resolve_bridge_mode,
         resolve_source_mode,
         set_source_mode,
+        utc_timestamp,
     )
     from signal_refinery import build_signal_refinery_report
     from signal_conversion_monitor import build_signal_conversion_report
@@ -199,6 +203,7 @@ def run_diagnostics_pipeline(
     runtime_state["external_paper_candidate_count"] = 0
     runtime_state["external_candidate_rows"] = []
     runtime_state["external_paper_candidate_rows"] = []
+    runtime_state["decision_timestamp"] = utc_timestamp()
 
     external_observation_report: dict | None = None
     if include_external_observations:
@@ -234,8 +239,13 @@ def run_diagnostics_pipeline(
         runtime_state = apply_observation_summary_to_runtime_state(
             runtime_state, external_observation_report
         )
+        temporal_rejections: list[str] = []
         external_candidates = (
-            observations_to_scm_candidates(observations)
+            observations_to_scm_candidates(
+                observations,
+                decision_timestamp=runtime_state.get("decision_timestamp"),
+                rejection_reasons=temporal_rejections,
+            )
             if bridge_external_candidates
             else []
         )
@@ -251,6 +261,10 @@ def run_diagnostics_pipeline(
         runtime_state["external_candidate_rows"] = external_candidates
         runtime_state["external_paper_candidate_count"] = len(paper_candidate_rows)
         runtime_state["external_paper_candidate_rows"] = paper_candidate_rows
+        external_observation_report["external_observation_temporal_rejection_count"] = len(
+            temporal_rejections
+        )
+        external_observation_report["external_observation_temporal_rejections"] = temporal_rejections
         if external_candidates:
             bridged_scm_report = build_signal_conversion_report(
                 external_signal_inputs=external_candidates,
@@ -289,7 +303,13 @@ def run_diagnostics_pipeline(
                 "external_observation_provider"
             ],
             "external_candidate_count": len(external_candidates),
+            "external_observation_temporal_rejection_count": len(temporal_rejections),
+            "external_observation_temporal_rejections": temporal_rejections,
         }
+        runtime_state["temporal_integrity"] = build_temporal_integrity_summary(
+            decision_timestamp=runtime_state.get("decision_timestamp"),
+            observations=external_observation_report.get("observations", []),
+        )
     bridge_mode_context = resolve_bridge_mode(
         include_external_observations=include_external_observations,
         external_candidate_bridge_enabled=bool(bridge_external_candidates),

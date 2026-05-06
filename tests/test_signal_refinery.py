@@ -94,7 +94,7 @@ def test_snapshot_row_carries_signal_refinery_metrics() -> None:
     assert row["decision_grade_signal_count"] == 2
     assert row["thermal_state"] == "COOLING"
     assert row["rolling_expectancy_pct"] == -1.935
-    assert row["perception_control_state"] == "CONSTRAINED"
+    assert row["perception_control_state"] == "BALANCED"
     assert row["gravity_rejection_count"] == 2
     assert row["dominant_spectrum_class"] == "structural"
 

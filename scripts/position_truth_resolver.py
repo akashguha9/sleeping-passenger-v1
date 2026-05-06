@@ -24,6 +24,7 @@ health report without coupling to internal classes.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 from typing import Any, Iterable
@@ -78,6 +79,19 @@ def _symbols(rows: Iterable[dict[str, Any]] | None) -> list[str]:
     return sorted(out)
 
 
+def _checksum(source_name: str, symbols: list[str], count: int) -> str:
+    payload = json.dumps(
+        {
+            "source": source_name,
+            "symbols": sorted(symbols),
+            "count": int(count),
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
+
+
 def build_position_truth_summary(
     curated_path: Path | str | None = None,
     runtime_path: Path | str | None = None,
@@ -103,36 +117,37 @@ def build_position_truth_summary(
     missing_from_runtime = sorted(set(curated_symbols) - set(runtime_symbols))
     missing_from_curated = sorted(set(runtime_symbols) - set(curated_symbols))
 
+    canonical = "curated_moltbook"
+    advisory_sources = ["runtime_paper"] if runtime_present else []
+    canonical_checksum = _checksum(canonical, curated_symbols, curated_count)
+    advisory_checksum = _checksum("runtime_paper", runtime_symbols, runtime_count)
+
     if not curated_present and not runtime_present:
-        canonical = "none"
+        position_integrity_state = "MISSING_CANONICAL"
         warning = (
             "Neither moltbook/open_positions.json nor runtime/paper_positions.json "
             "exists; there is no active position truth in this checkout."
         )
         divergence = False
     elif curated_present and not runtime_present:
-        canonical = "curated_moltbook"
+        position_integrity_state = "CLEAN"
         warning = (
             "Only curated moltbook/open_positions.json exists. The runtime "
             "paper-position ledger has not been created."
         )
         divergence = False
     elif runtime_present and not curated_present:
-        canonical = "runtime_paper"
+        position_integrity_state = "MISSING_CANONICAL"
         warning = (
-            "Only runtime/paper_positions.json exists. The curated moltbook "
-            "position fixture is absent from this checkout."
+            "Only runtime/paper_positions.json exists. The canonical curated moltbook "
+            "position fixture is absent, so runtime remains advisory only."
         )
         divergence = False
     else:
-        # Both exist. Canonical source for diagnostics remains the curated
-        # fixture (that is what action_engine reads). We report divergence
-        # whenever the two disagree by symbol OR by count, without
-        # suppressing either side.
         divergence = bool(missing_from_runtime) or bool(missing_from_curated) or (
             curated_count != runtime_count
         )
-        canonical = "curated_moltbook"
+        position_integrity_state = "DIVERGED" if divergence else "CLEAN"
         if divergence:
             warning = (
                 "Position sources diverge: curated moltbook and runtime paper "
@@ -148,8 +163,10 @@ def build_position_truth_summary(
     )
 
     return {
-        "position_truth_source": canonical,
+        "position_truth_source": canonical if curated_present else "missing_canonical",
         "canonical_position_source": canonical,
+        "canonical_position_count": curated_count,
+        "advisory_position_sources": advisory_sources,
         "curated_position_source_path": repo_relative(curated_target),
         "runtime_position_source_path": repo_relative(runtime_target),
         "curated_positions_present": curated_present,
@@ -162,14 +179,18 @@ def build_position_truth_summary(
         "missing_from_runtime": missing_from_runtime,
         "missing_from_curated": missing_from_curated,
         "position_source_divergence_detected": divergence,
+        "position_integrity_state": position_integrity_state,
         "position_truth_warning": warning,
         "position_reconciliation_report": reconciliation_report,
+        "position_reconciliation_artifact": reconciliation_report["position_reconciliation_artifact"],
         "curated_only_symbols": reconciliation_report["curated_only_symbols"],
         "runtime_only_symbols": reconciliation_report["runtime_only_symbols"],
         "overlapping_symbols": reconciliation_report["overlapping_symbols"],
         "recommended_canonical_source": reconciliation_report["recommended_canonical_source"],
         "divergence_severity": reconciliation_report["divergence_severity"],
         "safe_next_action": reconciliation_report["safe_next_action"],
+        "canonical_position_checksum": canonical_checksum,
+        "advisory_position_checksum": advisory_checksum,
     }
 
 
@@ -197,12 +218,15 @@ def build_position_reconciliation_report(
     curated_count = len(curated_rows) if curated_rows else 0
     runtime_count = len(runtime_rows) if runtime_rows else 0
 
+    canonical_position_checksum = _checksum("curated_moltbook", curated_symbols, curated_count)
+    advisory_position_checksum = _checksum("runtime_paper", runtime_symbols, runtime_count)
+
     if not curated_present and not runtime_present:
         recommended_canonical_source = "none"
-        divergence_severity = "NONE"
+        divergence_severity = "HIGH"
         safe_next_action = (
-            "No position source exists; keep diagnostics visibility-only and do not "
-            "promote runtime position assumptions."
+            "No canonical curated position source exists; restore moltbook/open_positions.json "
+            "before treating any runtime ledger as more than advisory."
         )
     elif curated_present and not runtime_present:
         recommended_canonical_source = "curated_moltbook"
@@ -212,11 +236,11 @@ def build_position_reconciliation_report(
             "create the runtime paper ledger before attempting position reconciliation."
         )
     elif runtime_present and not curated_present:
-        recommended_canonical_source = "runtime_paper"
-        divergence_severity = "LOW"
+        recommended_canonical_source = "curated_moltbook"
+        divergence_severity = "CRITICAL"
         safe_next_action = (
-            "Use runtime paper positions for visibility only and restore the curated "
-            "moltbook fixture before promoting it as a canonical source."
+            "Keep runtime paper positions advisory only and restore the curated "
+            "moltbook fixture before promoting any position truth as canonical."
         )
     else:
         recommended_canonical_source = "curated_moltbook"
@@ -234,12 +258,27 @@ def build_position_reconciliation_report(
             )
 
     return {
+        "artifact_kind": "position_reconciliation_artifact",
+        "artifact_version": 1,
         "curated_only_symbols": curated_only_symbols,
         "runtime_only_symbols": runtime_only_symbols,
         "overlapping_symbols": overlapping_symbols,
         "recommended_canonical_source": recommended_canonical_source,
         "divergence_severity": divergence_severity,
         "safe_next_action": safe_next_action,
+        "position_reconciliation_artifact": {
+            "canonical_source": "curated_moltbook",
+            "canonical_position_count": curated_count,
+            "canonical_position_symbols": curated_symbols,
+            "advisory_sources": ["runtime_paper"] if runtime_present else [],
+            "advisory_position_count": runtime_count,
+            "advisory_position_symbols": runtime_symbols,
+            "canonical_position_checksum": canonical_position_checksum,
+            "advisory_position_checksum": advisory_position_checksum,
+            "curated_only_symbols": curated_only_symbols,
+            "runtime_only_symbols": runtime_only_symbols,
+            "overlapping_symbols": overlapping_symbols,
+        },
     }
 
 
@@ -273,6 +312,7 @@ def format_position_truth_summary(summary: dict[str, Any]) -> list[str]:
             "position_source_divergence_detected="
             f"{str(bool(summary.get('position_source_divergence_detected'))).lower()}"
         ),
+        f"position_integrity_state={summary.get('position_integrity_state', 'UNKNOWN')}",
         f"curated_positions_count={int(summary.get('curated_moltbook_positions_count', 0))}",
         f"runtime_paper_positions_count={int(summary.get('runtime_paper_positions_count', 0))}",
     ]
@@ -286,6 +326,11 @@ def format_position_truth_summary(summary: dict[str, Any]) -> list[str]:
             f"recommended_canonical_source={recommended_canonical_source or 'none'}, "
             f"safe_next_action={safe_next_action or 'none'}"
         )
+    lines.append(
+        "position_checksums="
+        f"canonical={summary.get('canonical_position_checksum')}, "
+        f"advisory={summary.get('advisory_position_checksum')}"
+    )
     warning = summary.get("position_truth_warning")
     if warning:
         lines.append(f"position_truth_warning={warning}")
