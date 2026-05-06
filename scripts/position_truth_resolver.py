@@ -130,12 +130,22 @@ def build_position_truth_summary(
         )
         divergence = False
     elif curated_present and not runtime_present:
-        position_integrity_state = "CLEAN"
+        default_seeded_paths = (
+            curated_target.resolve() == DEFAULT_CURATED_PATH.resolve()
+            and runtime_target.resolve() == DEFAULT_RUNTIME_PATH.resolve()
+        )
+        position_integrity_state = "DIVERGED" if default_seeded_paths else "CLEAN"
         warning = (
             "Only curated moltbook/open_positions.json exists. The runtime "
-            "paper-position ledger has not been created."
+            + (
+                "paper-position ledger has not been created, so seeded/default "
+                "position truth remains conservatively divergent until runtime "
+                "paper state exists for reconciliation."
+                if default_seeded_paths
+                else "paper-position ledger has not been created."
+            )
         )
-        divergence = False
+        divergence = default_seeded_paths
     elif runtime_present and not curated_present:
         position_integrity_state = "MISSING_CANONICAL"
         warning = (

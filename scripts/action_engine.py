@@ -110,6 +110,18 @@ def _build_experience_mode_advisory(
     return advisory
 
 
+def _default_seeded_experience_mode_advisory() -> dict[str, Any]:
+    return {
+        "recommendation_surface_profile": "trainer",
+        "degraded_mode_required": True,
+        "confidence_downgrade_required": True,
+        "advisory_reason": (
+            "surface=trainer; seeded_trainer_surface; premium_blocked_by_gaps; "
+            "degraded_mode_required; confidence_downgraded"
+        ),
+    }
+
+
 def _lookup_launch_row(
     ticker: str,
     signal_refinery_report: dict[str, Any] | None,
@@ -384,6 +396,8 @@ def build_action_report(
             effective_complexity_ladder_path
         ),
     )
+    if experience_mode_advisory is None and use_default_advisory_artifacts:
+        experience_mode_advisory = _default_seeded_experience_mode_advisory()
     open_positions, validation = load_open_positions(open_positions_path)
     positions_by_ticker: dict[str, dict[str, Any]] = {}
     for position in open_positions:

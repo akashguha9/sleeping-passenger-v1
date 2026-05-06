@@ -308,11 +308,13 @@ GOLDEN_HEALTH_KEYS = (
 
 
 def build_stable_health_snapshot(report: dict[str, Any]) -> dict[str, Any]:
+    policy = report.get("policy") or {}
+    scm = report.get("scm") or {}
     snapshot = {
         "system_readiness_state": report.get("system_readiness_state"),
         "can_deploy_capital": report.get("can_deploy_capital"),
-        "policy_state": ((report.get("policy") or {}).get("policy_state")),
-        "scm_state": ((report.get("scm") or {}).get("scm_state")),
+        "policy_state": report.get("policy_state", policy.get("policy_state")),
+        "scm_state": report.get("scm_state", scm.get("scm_state")),
         "bridge_mode": report.get("bridge_mode"),
         "scm_input_origin": report.get("scm_input_origin"),
         "position_integrity_state": report.get("position_integrity_state"),
