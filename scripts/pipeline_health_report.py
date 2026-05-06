@@ -12,8 +12,11 @@ try:
     from scripts.attention_proxy_engine import build_attention_proxy_report
     from scripts.action_engine import build_action_report
     from scripts.archetype_profile import build_archetype_profile_report
+    from scripts.asset_durability_filter import build_asset_durability_report
     from scripts.blocker_cost_engine import build_blocker_cost_report
+    from scripts.busquets_pre_execution_audit import evaluate_busquets_pre_execution_audit
     from scripts.closure_deficit_monitor import build_closure_deficit_report
+    from scripts.execution_integrity_audit import evaluate_execution_integrity_audit
     from scripts.external_data_runtime_sync import apply_external_observation_report
     from scripts.governance_feedback_report import build_governance_feedback_report
     from scripts.integrity_diagnostics import (
@@ -25,6 +28,9 @@ try:
         compute_stable_health_snapshot_hash,
     )
     from scripts.moltbook_feedback import build_moltbook_feedback_report
+    from scripts.narrative_operator_wisdom_filter import (
+        evaluate_narrative_operator_wisdom_filter,
+    )
     from scripts.operator_control import build_operator_control_report
     from scripts.perception_control import build_perception_control_report
     from scripts.position_truth_resolver import (
@@ -58,8 +64,11 @@ except ModuleNotFoundError:
     from attention_proxy_engine import build_attention_proxy_report
     from action_engine import build_action_report
     from archetype_profile import build_archetype_profile_report
+    from asset_durability_filter import build_asset_durability_report
     from blocker_cost_engine import build_blocker_cost_report
+    from busquets_pre_execution_audit import evaluate_busquets_pre_execution_audit
     from closure_deficit_monitor import build_closure_deficit_report
+    from execution_integrity_audit import evaluate_execution_integrity_audit
     from external_data_runtime_sync import apply_external_observation_report
     from governance_feedback_report import build_governance_feedback_report
     from integrity_diagnostics import (
@@ -71,6 +80,9 @@ except ModuleNotFoundError:
         compute_stable_health_snapshot_hash,
     )
     from moltbook_feedback import build_moltbook_feedback_report
+    from narrative_operator_wisdom_filter import (
+        evaluate_narrative_operator_wisdom_filter,
+    )
     from operator_control import build_operator_control_report
     from perception_control import build_perception_control_report
     from position_truth_resolver import (
@@ -1492,6 +1504,151 @@ def _packet_summary(
     }
 
 
+def _first_matching_row(
+    rows: list[dict[str, Any]] | None,
+    ticker: str,
+) -> dict[str, Any]:
+    for row in rows or []:
+        if isinstance(row, dict) and str(row.get("ticker") or "").upper() == ticker.upper():
+            return row
+    return {}
+
+
+def _build_execution_packet_from_review_packet(
+    packet: dict[str, Any] | None,
+    *,
+    policy: dict[str, Any],
+) -> tuple[dict[str, Any] | None, bool, list[str]]:
+    review_packet = packet if isinstance(packet, dict) else {}
+    if not review_packet:
+        return None, False, ["review_packet_missing"]
+
+    execution_packet = {
+        "entry": {
+            "ticker": review_packet.get("ticker"),
+            "signal_id": review_packet.get("signal_id"),
+            "trigger_state": review_packet.get("target_pre_entry_state"),
+        },
+        "size": {
+            "position_sizing_cap": review_packet.get("sizing_cap_now")
+            or review_packet.get("position_sizing_cap"),
+            "sizing_allowed_now": bool(review_packet.get("sizing_allowed_now", False)),
+        },
+        "invalidation": {
+            "remaining_blockers": list(review_packet.get("remaining_blockers", [])),
+            "open_position_conflict": bool(review_packet.get("open_position_conflict", False)),
+            "existing_exposure_conflict": bool(
+                review_packet.get("existing_exposure_conflict", False)
+            ),
+        },
+        "exit_logic": {
+            "recommended_action": review_packet.get("recommended_action"),
+            "policy_state": policy.get("policy_state"),
+            "review_checklist_status": review_packet.get("review_checklist_status"),
+        },
+    }
+    missing_fields: list[str] = []
+    for section_name, section in execution_packet.items():
+        if not isinstance(section, dict):
+            missing_fields.append(section_name)
+            continue
+        for field_name, value in section.items():
+            if value is None or (isinstance(value, str) and not value.strip()):
+                missing_fields.append(f"{section_name}.{field_name}")
+    locked = (
+        review_packet.get("review_checklist_status") == "COMPLETE"
+        and review_packet.get("operator_decision_state") != "BLOCKED_BY_CONFLICT"
+        and not missing_fields
+    )
+    return execution_packet, locked, missing_fields
+
+
+def build_reflection_context(
+    *,
+    state: dict[str, Any],
+    signal_refinery_report: dict[str, Any],
+    attention_proxy_report: dict[str, Any],
+    action_report: dict[str, Any],
+    entry_review_packets: list[dict[str, Any]],
+    transition_review_packets: list[dict[str, Any]],
+    operator_control_report: dict[str, Any],
+    open_positions: list[dict[str, Any]],
+) -> dict[str, Any]:
+    validation_rows = signal_refinery_report.get("validation_engine", {}).get("signals", [])
+    launch_rows = signal_refinery_report.get("launch_control", {}).get("launch_rows", [])
+    action_rows = action_report.get("actions", [])
+    primary_packet = (
+        (entry_review_packets[0] if entry_review_packets else None)
+        or (transition_review_packets[0] if transition_review_packets else None)
+    )
+    primary_ticker = str((primary_packet or {}).get("ticker") or "").upper()
+    if not primary_ticker and isinstance(validation_rows, list) and validation_rows:
+        primary_ticker = str(validation_rows[0].get("ticker") or "").upper()
+
+    validation_row = _first_matching_row(validation_rows, primary_ticker) if primary_ticker else {}
+    launch_row = _first_matching_row(launch_rows, primary_ticker) if primary_ticker else {}
+    action_row = _first_matching_row(action_rows, primary_ticker) if primary_ticker else {}
+    open_position = {}
+    for position in open_positions:
+        if isinstance(position, dict) and str(position.get("ticker") or "").upper() == primary_ticker:
+            open_position = position
+            break
+
+    policy = state.get("execution_policy", {})
+    execution_packet, execution_packet_locked, packet_missing_fields = (
+        _build_execution_packet_from_review_packet(primary_packet, policy=policy)
+    )
+    chaos_veto_active = bool(
+        str((validation_row or {}).get("status") or "").upper() == "EXECUTED_CHAOS"
+        or ("REALM_BIS" in state.get("active_blockers", []) and state.get("moltbook_summary", {}).get("chaos_entries", 0) > 0)
+    )
+    evidence_strength = float((validation_row or {}).get("validation_score") or 0.0)
+    narrative_confidence = float(
+        attention_proxy_report.get("narrative_cohesion_score")
+        or attention_proxy_report.get("attention_capture_score")
+        or 0.0
+    )
+    emotional_resonance = float(attention_proxy_report.get("narrative_heat_score") or 0.0)
+    operator_state_payload = signal_refinery_report.get("manual_operator_state", {})
+    raw_operator_mode = str(operator_state_payload.get("operator_mode") or "UNKNOWN").upper()
+    operator_state = {
+        "CALM": "CALM",
+        "NEUTRAL": "NEUTRAL",
+        "STRESSED": "STRESSED",
+        "STRESS": "STRESSED",
+        "EUPHORIC": "EUPHORIC",
+        "FATIGUED": "FATIGUED",
+        "INTOXICATED": "INTOXICATED",
+    }.get(raw_operator_mode, "UNKNOWN")
+    context_switch_count = int(operator_state_payload.get("context_switch_count", 0) or 0)
+    reopen_count = int(operator_control_report.get("active_work_block", {}).get("reopened_decision_count", 0) or 0)
+
+    return {
+        "primary_ticker": primary_ticker or None,
+        "validation_row": validation_row,
+        "launch_row": launch_row,
+        "action_row": action_row,
+        "primary_packet": primary_packet or {},
+        "open_position": open_position,
+        "execution_packet": execution_packet,
+        "execution_packet_locked": execution_packet_locked,
+        "execution_packet_missing_fields": packet_missing_fields,
+        "chaos_veto_active": chaos_veto_active,
+        "policy": policy,
+        "evidence_strength": evidence_strength,
+        "narrative_confidence": narrative_confidence,
+        "emotional_resonance": emotional_resonance,
+        "operator_state": operator_state,
+        "operator_stability_score": float(
+            operator_state_payload.get("current_score")
+            or operator_state_payload.get("baseline_score")
+            or 0.0
+        ),
+        "context_switch_count": context_switch_count,
+        "reopen_count": reopen_count,
+    }
+
+
 def build_entry_review_packets(
     live_state: dict[str, Any],
     scenario_state: dict[str, Any],
@@ -2092,6 +2249,151 @@ def build_pipeline_health_report(
         test_status=test_status,
         write_runtime=effective_write_runtime,
     )
+    reflection_context = build_reflection_context(
+        state=state,
+        signal_refinery_report=signal_refinery_report,
+        attention_proxy_report=attention_proxy_report,
+        action_report=action_report,
+        entry_review_packets=entry_review_packets,
+        transition_review_packets=transition_review_packets,
+        operator_control_report=operator_control_report,
+        open_positions=open_positions,
+    )
+    narrative_filter_report = evaluate_narrative_operator_wisdom_filter(
+        {
+            "evidence_strength": reflection_context["evidence_strength"],
+            "narrative_confidence": reflection_context["narrative_confidence"],
+            "emotional_resonance": reflection_context["emotional_resonance"],
+            "interpretation_width": 1.0
+            - float(
+                reflection_context["validation_row"].get("cross_source_confirmation_score") or 0.0
+            ),
+            "falsifiable": bool(reflection_context["validation_row"]),
+            "operator_state": reflection_context["operator_state"],
+            "operator_stability_score": reflection_context["operator_stability_score"],
+            "cross_state_validated": bool(reflection_context["validation_row"])
+            and reflection_context["operator_state"] not in {"UNKNOWN", "STRESSED", "EUPHORIC", "FATIGUED", "INTOXICATED"},
+            "passing_state_tag": False,
+            "urgency_spike": reflection_context["context_switch_count"] > 1,
+            "confidence_surge": reflection_context["narrative_confidence"] >= 0.75,
+            "selected_feeling_match": reflection_context["operator_state"] in {"CALM", "NEUTRAL"},
+        }
+    )
+    busquets_audit_report = evaluate_busquets_pre_execution_audit(
+        {
+            "signal_validated": (
+                str(reflection_context["validation_row"].get("validation_state") or "").upper()
+                == "VALIDATED"
+            ),
+            "commitment_detected": bool(reflection_context["primary_packet"])
+            and bool(reflection_context["launch_row"]),
+            "space_created": str(
+                reflection_context["primary_packet"].get("target_pre_entry_state") or ""
+            ).upper()
+            == "CLEAN_ENTRY_ELIGIBLE",
+            "timing_quality": reflection_context["validation_row"].get(
+                "cross_source_confirmation_score",
+                reflection_context["evidence_strength"],
+            ),
+            "space_quality": reflection_context["validation_row"].get(
+                "repricing_headroom_score",
+                0.0,
+            ),
+            "risk_clearance": bool(reflection_context["policy"].get("allow_new_risk", False))
+            and not bool(reflection_context["primary_packet"].get("open_position_conflict", False))
+            and not narrative_filter_report["action_authority"] == "REVOKED",
+            "chaos_veto_active": reflection_context["chaos_veto_active"],
+            "execution_packet": reflection_context["execution_packet"],
+            "execution_packet_locked": reflection_context["execution_packet_locked"],
+            "policy_state": reflection_context["policy"].get("policy_state"),
+        }
+    )
+    execution_integrity_report = evaluate_execution_integrity_audit(
+        {
+            "rhythm_integrity_score": reflection_context["validation_row"].get(
+                "novelty_score",
+                reflection_context["evidence_strength"],
+            ),
+            "pattern_fidelity_score": reflection_context["validation_row"].get(
+                "first_order_score",
+                reflection_context["evidence_strength"],
+            ),
+            "visible_reopen": reflection_context["reopen_count"] > 0
+            and reflection_context["context_switch_count"] > 0,
+            "mid_execution_reopen_detected": reflection_context["reopen_count"] > 0,
+            "hidden_adaptation_detected": reflection_context["reopen_count"] > 0
+            and reflection_context["context_switch_count"] == 0,
+            "concealment_score": 1.0 if reflection_context["context_switch_count"] == 0 else 0.0,
+            "operator_uncertainty_score": 1.0 - narrative_filter_report["operator_stability_score"],
+            "delay_cost": min(
+                1.0,
+                float(reflection_context["context_switch_count"] + reflection_context["reopen_count"])
+                * 0.15,
+            ),
+            "information_gain": reflection_context["narrative_confidence"],
+            "policy_aligned": bool(reflection_context["policy"].get("allow_new_risk", False)),
+            "execution_packet_valid": reflection_context["execution_packet_locked"],
+        }
+    )
+    asset_durability_report = build_asset_durability_report(
+        {
+            "durability": reflection_context["evidence_strength"],
+            "recovery": reflection_context["validation_row"].get("first_order_score", 0.0),
+            "adaptation": reflection_context["validation_row"].get("novelty_score", 0.0),
+            "liquidity": reflection_context["validation_row"].get("source_quality_score", 0.0),
+            "low_fragility": reflection_context["validation_row"].get(
+                "blocker_clearance_score",
+                0.0,
+            ),
+            "performance_before_stress": max(reflection_context["evidence_strength"], 0.01),
+            "performance_after_stress": max(
+                float(reflection_context["validation_row"].get("repricing_headroom_score", 0.0)) * max(reflection_context["evidence_strength"], 0.01),
+                0.0,
+            ),
+            "cash_flow_quality": reflection_context["validation_row"].get("source_quality_score", 0.0),
+            "margin_quality": reflection_context["validation_row"].get("price_lead_score", 0.0),
+            "debt_burden": 1.0 - float(
+                reflection_context["validation_row"].get("blocker_clearance_score", 0.0)
+            ),
+            "pricing_power": reflection_context["validation_row"].get(
+                "repricing_headroom_score",
+                0.0,
+            ),
+            "revenue_recurrence": reflection_context["validation_row"].get("first_order_score", 0.0),
+            "fundamental_durability_value": max(reflection_context["evidence_strength"], 0.01),
+            "market_price": max(
+                float(reflection_context["validation_row"].get("validation_score", 0.0)) + 0.1,
+                0.01,
+            ),
+            "dependency_importance": reflection_context["validation_row"].get(
+                "source_quality_score",
+                0.0,
+            ),
+            "low_visibility": 1.0 - float(reflection_context["narrative_confidence"]),
+            "high_recurrence": reflection_context["validation_row"].get("first_order_score", 0.0),
+            "simple_mechanism": reflection_context["validation_row"].get(
+                "cross_source_confirmation_score",
+                0.0,
+            ),
+            "universal_need": reflection_context["validation_row"].get("source_quality_score", 0.0),
+            "repeat_demand": reflection_context["validation_row"].get("first_order_score", 0.0),
+            "unrelated_business_lines": 0.0,
+            "single_founder_dependency": 0.0,
+            "single_regulation_dependency": 0.2 if reflection_context["chaos_veto_active"] else 0.0,
+            "single_liquidity_dependency": 1.0
+            - float(reflection_context["validation_row"].get("source_quality_score", 0.0)),
+            "single_narrative_dependency": reflection_context["narrative_confidence"],
+            "unclear_core_mechanism": 1.0
+            - float(reflection_context["validation_row"].get("cross_source_confirmation_score", 0.0)),
+        }
+    )
+    reflection_allowed_to_execute = bool(
+        busquets_audit_report["allowed_to_execute"]
+        and execution_integrity_report["allowed_to_execute"]
+        and narrative_filter_report["allowed_to_execute"]
+        and not reflection_context["chaos_veto_active"]
+        and bool(reflection_context["policy"].get("allow_new_risk", False))
+    )
     governance_feedback_report = build_governance_feedback_report(
         runtime_state=state,
         action_report=action_report,
@@ -2195,6 +2497,29 @@ def build_pipeline_health_report(
         ],
         "temporal_integrity_warnings": temporal_integrity["temporal_integrity_warnings"],
         "truth_metrics": truth_metrics,
+        "allowed_to_execute": reflection_allowed_to_execute,
+        "busquets_audit": busquets_audit_report,
+        "busquets_audit_state": busquets_audit_report["busquets_state"],
+        "busquets_allowed_to_execute": busquets_audit_report["allowed_to_execute"],
+        "busquets_audit_score": busquets_audit_report["audit_score"],
+        "execution_integrity_audit": execution_integrity_report,
+        "execution_integrity_state": execution_integrity_report["execution_integrity_state"],
+        "execution_integrity_score": execution_integrity_report["execution_integrity_score"],
+        "hesitation_leak_score": execution_integrity_report["hesitation_leak_score"],
+        "mid_execution_reopen_detected": execution_integrity_report[
+            "mid_execution_reopen_detected"
+        ],
+        "narrative_operator_wisdom": narrative_filter_report,
+        "narrative_signal_class": narrative_filter_report["narrative_signal_class"],
+        "hallucination_risk": narrative_filter_report["hallucination_risk"],
+        "operator_state": narrative_filter_report["operator_state"],
+        "operator_stability_score": narrative_filter_report["operator_stability_score"],
+        "action_authority": narrative_filter_report["action_authority"],
+        "asset_durability_report": asset_durability_report,
+        "hundred_wash_score": asset_durability_report["hundred_wash_score"],
+        "paracetamol_score": asset_durability_report["paracetamol_score"],
+        "durability_class": asset_durability_report["durability_class"],
+        "positive_adaptation_score": asset_durability_report["positive_adaptation_score"],
         "intelligence_summary": intelligence_summary,
         "extreme_state_logic": extreme_state_logic,
         "where_am_i_leaking_performance": where_am_i_leaking_performance,
@@ -2396,6 +2721,25 @@ def format_pipeline_health_summary(report: dict[str, Any]) -> str:
             f"external_signal_count={int(report.get('external_signal_count', 0) or 0)}",
             f"evidence_contamination_risk={report.get('evidence_contamination_risk', 'UNKNOWN')}",
             f"golden_health_snapshot_hash={report.get('golden_health_snapshot_hash')}",
+            f"busquets_audit_state={report.get('busquets_audit_state', 'UNKNOWN')}",
+            f"allowed_to_execute={str(bool(report.get('allowed_to_execute', False))).lower()}",
+            "busquets_allowed_to_execute="
+            f"{str(bool(report.get('busquets_allowed_to_execute', False))).lower()}",
+            f"busquets_audit_score={report.get('busquets_audit_score')}",
+            f"execution_integrity_state={report.get('execution_integrity_state', 'UNKNOWN')}",
+            f"execution_integrity_score={report.get('execution_integrity_score')}",
+            f"hesitation_leak_score={report.get('hesitation_leak_score')}",
+            "mid_execution_reopen_detected="
+            f"{str(bool(report.get('mid_execution_reopen_detected', False))).lower()}",
+            f"narrative_signal_class={report.get('narrative_signal_class', 'UNKNOWN')}",
+            f"hallucination_risk={report.get('hallucination_risk')}",
+            f"operator_state={report.get('operator_state', 'UNKNOWN')}",
+            f"operator_stability_score={report.get('operator_stability_score')}",
+            f"action_authority={report.get('action_authority', 'UNKNOWN')}",
+            f"hundred_wash_score={report.get('hundred_wash_score')}",
+            f"paracetamol_score={report.get('paracetamol_score')}",
+            f"durability_class={report.get('durability_class', 'UNKNOWN')}",
+            f"positive_adaptation_score={report.get('positive_adaptation_score')}",
             f"what_should_i_do_next={report['what_should_i_do_next']}",
             (
                 "scorecard="

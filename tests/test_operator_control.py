@@ -382,4 +382,12 @@ def test_pipeline_health_report_includes_operator_control() -> None:
     assert payload["operator_control"]["signal_admission_gate"]["rejected_count"] == 3
     assert "phase_balance" in payload["operator_control"]
     assert "operator_pressure_state" in payload
-    assert "operator_state" not in payload
+    assert payload["operator_state"] in {
+        "CALM",
+        "NEUTRAL",
+        "STRESSED",
+        "EUPHORIC",
+        "FATIGUED",
+        "INTOXICATED",
+        "UNKNOWN",
+    }

@@ -107,6 +107,15 @@ class MoltbookFeedbackCase:
     operating_mode: str
     regime_context: dict[str, Any] = field(default_factory=dict)
     signal_context: dict[str, Any] = field(default_factory=dict)
+    interpretation: dict[str, Any] = field(default_factory=dict)
+    operator_state_context: dict[str, Any] = field(default_factory=dict)
+    decision_context: dict[str, Any] = field(default_factory=dict)
+    execution_packet: dict[str, Any] = field(default_factory=dict)
+    busquets_audit: dict[str, Any] = field(default_factory=dict)
+    execution_integrity_audit: dict[str, Any] = field(default_factory=dict)
+    asset_durability_report: dict[str, Any] = field(default_factory=dict)
+    feedback_delta: float | None = None
+    tags: list[str] = field(default_factory=list)
     operator_override_context: dict[str, Any] = field(default_factory=dict)
     source_context: dict[str, Any] = field(default_factory=dict)
     suggested_adjustment: str = ""
@@ -358,6 +367,13 @@ def _build_source_context(row: dict[str, Any]) -> dict[str, Any]:
         if isinstance(row.get("data_gap_flags"), list)
         else [],
     }
+
+
+def _reflection_tags(row: dict[str, Any]) -> list[str]:
+    values = row.get("tags", [])
+    if not isinstance(values, list):
+        return []
+    return [str(value).strip() for value in values if str(value).strip()]
 
 
 def _data_quality_flags(
@@ -629,6 +645,29 @@ def build_feedback_case_from_reconciliation_row(
         operating_mode=_text(row.get("operating_mode")) or "unknown",
         regime_context=regime_context,
         signal_context=signal_context,
+        interpretation=dict(row.get("interpretation", {}))
+        if isinstance(row.get("interpretation"), dict)
+        else {},
+        operator_state_context=dict(row.get("operator_state_context", {}))
+        if isinstance(row.get("operator_state_context"), dict)
+        else {},
+        decision_context=dict(row.get("decision_context", {}))
+        if isinstance(row.get("decision_context"), dict)
+        else {},
+        execution_packet=dict(row.get("execution_packet", {}))
+        if isinstance(row.get("execution_packet"), dict)
+        else {},
+        busquets_audit=dict(row.get("busquets_audit", {}))
+        if isinstance(row.get("busquets_audit"), dict)
+        else {},
+        execution_integrity_audit=dict(row.get("execution_integrity_audit", {}))
+        if isinstance(row.get("execution_integrity_audit"), dict)
+        else {},
+        asset_durability_report=dict(row.get("asset_durability_report", {}))
+        if isinstance(row.get("asset_durability_report"), dict)
+        else {},
+        feedback_delta=_safe_round(_coerce_float(row.get("feedback_delta"))),
+        tags=_reflection_tags(row),
         operator_override_context=operator_override_context,
         source_context=source_context,
         suggested_adjustment=suggested_adjustment,
