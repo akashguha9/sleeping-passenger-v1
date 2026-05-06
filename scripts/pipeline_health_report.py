@@ -117,6 +117,7 @@ except ModuleNotFoundError:
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+SEEDED_SNAPSHOT_FIXTURE_PATH = REPO_ROOT / "tests" / "fixtures" / "system_snapshots_seed.jsonl"
 TARGET_TEST_COMMAND = [
     sys.executable,
     "-m",
@@ -203,6 +204,21 @@ def _load_optional_runtime_artifact(path: Path | None, default_path: Path) -> di
     if not isinstance(payload, dict):
         return {}
     return payload
+
+
+def _deterministic_trend_log_path(
+    *,
+    state: dict[str, Any],
+    write_runtime: bool,
+    simulation_context: dict[str, Any],
+) -> Path | None:
+    if write_runtime or simulation_context.get("is_simulated", False):
+        return None
+    operating_mode = str(classify_operating_mode(state) or "").strip().lower()
+    truth_origin = str(build_truth_context(state).get("truth_origin") or "").strip().lower()
+    if operating_mode == "seeded" and truth_origin == "seeded" and SEEDED_SNAPSHOT_FIXTURE_PATH.exists():
+        return SEEDED_SNAPSHOT_FIXTURE_PATH
+    return None
 
 
 def build_experience_mode_summary(
@@ -2005,6 +2021,11 @@ def build_pipeline_health_report(
         write_runtime=effective_write_runtime,
     )
     trend_report = trend_report or build_trend_report(
+        log_path=_deterministic_trend_log_path(
+            state=state,
+            write_runtime=effective_write_runtime,
+            simulation_context=simulation_context,
+        ),
         write_runtime=effective_write_runtime,
         current_snapshot_row=current_snapshot_row,
     )

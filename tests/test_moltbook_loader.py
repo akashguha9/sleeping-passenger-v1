@@ -968,7 +968,7 @@ def test_pipeline_health_report_summary_cli() -> None:
     average_signal_lux = float(
         perception_metrics_line.split("average_signal_lux=", maxsplit=1)[1]
     )
-    assert average_signal_lux == pytest.approx(0.627, abs=0.001)
+    assert average_signal_lux == pytest.approx(0.629, abs=0.001)
     assert (
         "perception_advisory=AMPLIFICATION WITHOUT SURVIVAL - injected signals failing gravity"
         in lines
