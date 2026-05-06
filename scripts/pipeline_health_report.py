@@ -13,6 +13,7 @@ try:
     from scripts.action_engine import build_action_report
     from scripts.archetype_profile import build_archetype_profile_report
     from scripts.asset_durability_filter import build_asset_durability_report
+    from scripts.baines_engine import build_baines_engine_report
     from scripts.blocker_cost_engine import build_blocker_cost_report
     from scripts.busquets_pre_execution_audit import evaluate_busquets_pre_execution_audit
     from scripts.closure_deficit_monitor import build_closure_deficit_report
@@ -66,6 +67,7 @@ except ModuleNotFoundError:
     from action_engine import build_action_report
     from archetype_profile import build_archetype_profile_report
     from asset_durability_filter import build_asset_durability_report
+    from baines_engine import build_baines_engine_report
     from blocker_cost_engine import build_blocker_cost_report
     from busquets_pre_execution_audit import evaluate_busquets_pre_execution_audit
     from closure_deficit_monitor import build_closure_deficit_report
@@ -1667,6 +1669,112 @@ def build_reflection_context(
     }
 
 
+def _historical_conversion_score_for_baines(status: str) -> float:
+    normalized = str(status or "").upper()
+    if normalized == "EXECUTED_CLEAN":
+        return 0.8
+    if normalized == "WATCHLIST":
+        return 0.55
+    if normalized == "EXECUTED_CHAOS":
+        return 0.2
+    return 0.35
+
+
+def _build_baines_inputs(
+    *,
+    state: dict[str, Any],
+    signal_refinery_report: dict[str, Any],
+    operator_policy: dict[str, Any],
+) -> list[dict[str, Any]]:
+    validation_rows = signal_refinery_report.get("validation_engine", {}).get("signals", [])
+    validation_by_ticker = {
+        str(row.get("ticker") or "").upper(): row
+        for row in validation_rows
+        if isinstance(row, dict) and str(row.get("ticker") or "").strip()
+    }
+    active_blockers = set(normalize_active_blockers(state.get("active_blockers")))
+    policy_veto = not bool(operator_policy.get("allow_new_risk", False))
+
+    inputs: list[dict[str, Any]] = []
+    for row in state.get("per_signal_attribution", []):
+        if not isinstance(row, dict):
+            continue
+        ticker = str(row.get("ticker") or "").upper()
+        if not ticker:
+            continue
+        validation_row = validation_by_ticker.get(ticker, {})
+        ce_score = float(row.get("ce_score", 0.0) or 0.0)
+        output_score = float(validation_row.get("validation_score", 0.0) or 0.0)
+        attention_score = float(validation_row.get("light_score", 0.0) or 0.0)
+        first_order_score = float(validation_row.get("first_order_score", 0.0) or 0.0)
+        source_quality_score = float(validation_row.get("source_quality_score", 0.0) or 0.0)
+        cross_source_confirmation = float(
+            validation_row.get("cross_source_confirmation_score", 0.0) or 0.0
+        )
+        repricing_headroom = float(validation_row.get("repricing_headroom_score", 0.0) or 0.0)
+        blocker_clearance = float(validation_row.get("blocker_clearance_score", 0.0) or 0.0)
+        novelty_score = float(validation_row.get("novelty_score", 0.0) or 0.0)
+        price_lead_score = float(validation_row.get("price_lead_score", 0.0) or 0.0)
+        crowding_state = str(validation_row.get("crowding_state") or "").upper()
+        chaos_veto = (
+            str(row.get("status") or "").upper() == "EXECUTED_CHAOS"
+            or str(row.get("conversion_state") or "").upper() == "CHAOS_ENTRY"
+            or "REALM_BIS" in active_blockers
+        )
+        price_expectation_percentile = max(
+            0.0,
+            min(
+                1.0,
+                (ce_score * 0.65)
+                + (attention_score * 0.20)
+                + (0.15 if crowding_state in {"CROWDED", "ALREADY_EXTENDED"} else 0.0),
+            ),
+        )
+        risk_adjusted_cost = max(
+            0.05,
+            (1.0 - blocker_clearance)
+            + max(0.0, novelty_score - (first_order_score * 0.5))
+            + (1.0 - source_quality_score)
+            + (0.10 if chaos_veto else 0.0),
+        )
+        inputs.append(
+            {
+                "asset_id": ticker,
+                "asset_class": "unknown",
+                "listed_role": str(row.get("conversion_state") or "unknown").lower(),
+                "observed_function": str(validation_row.get("validation_state") or "unknown").lower(),
+                "price_score": max(0.0, min(1.0, ce_score)),
+                "output_score": max(0.0, min(1.0, output_score)),
+                "output_percentile": max(0.0, min(1.0, output_score)),
+                "price_expectation_percentile": round(price_expectation_percentile, 3),
+                "attention_score": max(0.0, min(1.0, attention_score)),
+                "payoff_channels": {
+                    "confirmation": cross_source_confirmation,
+                    "repricing": repricing_headroom,
+                    "source_quality": source_quality_score,
+                    "price_lead": price_lead_score,
+                },
+                "persistence_score": max(0.0, min(1.0, first_order_score)),
+                "stability_score": max(0.0, min(1.0, 1.0 - novelty_score)),
+                "historical_conversion_score": _historical_conversion_score_for_baines(
+                    str(row.get("status") or "")
+                ),
+                "performance_before_stress": max(output_score, 0.05),
+                "performance_after_stress": max(output_score * repricing_headroom, 0.0),
+                "risk_adjusted_cost": risk_adjusted_cost,
+                "volatility_penalty": max(0.0, min(1.0, novelty_score)),
+                "liquidity_penalty": max(0.0, min(1.0, 1.0 - source_quality_score)),
+                "reality_gap_penalty": max(
+                    0.0,
+                    min(1.0, 1.0 - cross_source_confirmation),
+                ),
+                "policy_veto": policy_veto,
+                "chaos_veto": chaos_veto,
+            }
+        )
+    return inputs
+
+
 def build_entry_review_packets(
     live_state: dict[str, Any],
     scenario_state: dict[str, Any],
@@ -2410,6 +2518,13 @@ def build_pipeline_health_report(
             - float(reflection_context["validation_row"].get("cross_source_confirmation_score", 0.0)),
         }
     )
+    baines_engine_report = build_baines_engine_report(
+        _build_baines_inputs(
+            state=state,
+            signal_refinery_report=signal_refinery_report,
+            operator_policy=operator_policy,
+        )
+    )
     primary_packet = reflection_context.get("primary_packet", {})
     current_lens_mode = "WIDE"
     if primary_packet:
@@ -2662,6 +2777,15 @@ def build_pipeline_health_report(
         "paracetamol_score": asset_durability_report["paracetamol_score"],
         "durability_class": asset_durability_report["durability_class"],
         "positive_adaptation_score": asset_durability_report["positive_adaptation_score"],
+        "baines_engine": baines_engine_report,
+        "baines_engine_available": baines_engine_report["baines_engine_available"],
+        "baines_engine_state": baines_engine_report["baines_engine_state"],
+        "baines_candidates_detected": baines_engine_report["baines_candidates_detected"],
+        "baines_durable_candidates": baines_engine_report["baines_durable_candidates"],
+        "baines_policy_vetoed": baines_engine_report["baines_policy_vetoed"],
+        "baines_chaos_vetoed": baines_engine_report["baines_chaos_vetoed"],
+        "top_baines_candidate": baines_engine_report["top_baines_candidate"],
+        "top_baines_score": baines_engine_report["top_baines_score"],
         "optical_operating_system": optical_operating_system_report,
         "optical_bull_state": optical_operating_system_report["optical_bull_state"],
         "optical_lens_mode": optical_operating_system_report["lens_mode"],
@@ -2905,6 +3029,15 @@ def format_pipeline_health_summary(report: dict[str, Any]) -> str:
             f"paracetamol_score={report.get('paracetamol_score')}",
             f"durability_class={report.get('durability_class', 'UNKNOWN')}",
             f"positive_adaptation_score={report.get('positive_adaptation_score')}",
+            "baines_engine_available="
+            f"{str(bool(report.get('baines_engine_available', False))).lower()}",
+            f"baines_engine_state={report.get('baines_engine_state', 'EMPTY')}",
+            f"baines_candidates_detected={int(report.get('baines_candidates_detected', 0) or 0)}",
+            f"baines_durable_candidates={int(report.get('baines_durable_candidates', 0) or 0)}",
+            f"baines_policy_vetoed={int(report.get('baines_policy_vetoed', 0) or 0)}",
+            f"baines_chaos_vetoed={int(report.get('baines_chaos_vetoed', 0) or 0)}",
+            f"top_baines_candidate={report.get('top_baines_candidate')}",
+            f"top_baines_score={report.get('top_baines_score')}",
             f"optical_bull_state={report.get('optical_bull_state', 'UNKNOWN')}",
             f"optical_lens_mode={report.get('optical_lens_mode', 'UNKNOWN')}",
             f"optical_mirror_mode={report.get('optical_mirror_mode', 'UNKNOWN')}",

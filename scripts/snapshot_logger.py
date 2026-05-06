@@ -294,6 +294,13 @@ def build_snapshot_row(
     )
     if not isinstance(optical, dict):
         optical = {}
+    baines = (
+        health_report.get("baines_engine", {})
+        if isinstance(health_report, dict)
+        else {}
+    )
+    if not isinstance(baines, dict):
+        baines = {}
 
     return {
         "timestamp": _unique_snapshot_timestamp(snapshot_target),
@@ -352,6 +359,11 @@ def build_snapshot_row(
         "optical_action_allowed": optical.get("action_allowed", False),
         "optical_final_recommendation": optical.get("final_recommendation", "UNKNOWN"),
         "optical_state_log": optical.get("optical_state_log", {}),
+        "baines_engine_state": baines.get("baines_engine_state", "EMPTY"),
+        "baines_candidates_detected": baines.get("baines_candidates_detected", 0),
+        "baines_durable_candidates": baines.get("baines_durable_candidates", 0),
+        "top_baines_candidate": baines.get("top_baines_candidate"),
+        "top_baines_score": baines.get("top_baines_score"),
         "transition_state_rows": transition_state_rows,
     }
 
