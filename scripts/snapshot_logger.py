@@ -308,6 +308,13 @@ def build_snapshot_row(
     )
     if not isinstance(football, dict):
         football = {}
+    signal_metabolism = (
+        health_report.get("signal_metabolism", {})
+        if isinstance(health_report, dict)
+        else {}
+    )
+    if not isinstance(signal_metabolism, dict):
+        signal_metabolism = {}
 
     return {
         "timestamp": _unique_snapshot_timestamp(snapshot_target),
@@ -376,6 +383,10 @@ def build_snapshot_row(
         "football_tarkowski_candidates_count": football.get("tarkowski_candidates_count", 0),
         "football_top_baines_candidate": football.get("top_baines_candidate"),
         "football_top_tarkowski_candidate": football.get("top_tarkowski_candidate"),
+        "signal_metabolism_engine_state": signal_metabolism.get("signal_metabolism_engine_state", "EMPTY"),
+        "signal_metabolism_candidate_count": signal_metabolism.get("signal_metabolism_candidate_count", 0),
+        "signal_metabolism_guarded_count": signal_metabolism.get("signal_metabolism_guarded_count", 0),
+        "signal_metabolism_top_candidate": signal_metabolism.get("signal_metabolism_top_candidate"),
         "transition_state_rows": transition_state_rows,
     }
 
