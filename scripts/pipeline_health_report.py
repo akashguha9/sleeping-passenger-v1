@@ -20,6 +20,9 @@ try:
     from scripts.execution_integrity_audit import evaluate_execution_integrity_audit
     from scripts.external_data_runtime_sync import apply_external_observation_report
     from scripts.governance_feedback_report import build_governance_feedback_report
+    from scripts.football_portfolio_archetype_engine import (
+        build_football_portfolio_archetype_report,
+    )
     from scripts.integrity_diagnostics import (
         build_reproducibility_summary,
         build_signal_segmentation_summary,
@@ -44,6 +47,7 @@ try:
         COMPLEXITY_LADDER_CONTROLLER_PATH,
         EXTREME_STATE_REPORT_PATH,
         EXPERIENCE_MODE_REPORT_PATH,
+        FOOTBALL_PORTFOLIO_ARCHETYPE_REPORT_PATH,
         HEALTH_REPORT_PATH,
         SNAPSHOT_LOG_PATH,
         build_runtime_state_from_scm_report_payload,
@@ -55,6 +59,7 @@ try:
         normalize_active_blockers,
         normalize_per_signal_rows,
         persist_current_runtime_state,
+        repo_relative,
         set_source_mode,
         stamp_payload,
         write_json_atomic,
@@ -74,6 +79,9 @@ except ModuleNotFoundError:
     from execution_integrity_audit import evaluate_execution_integrity_audit
     from external_data_runtime_sync import apply_external_observation_report
     from governance_feedback_report import build_governance_feedback_report
+    from football_portfolio_archetype_engine import (
+        build_football_portfolio_archetype_report,
+    )
     from integrity_diagnostics import (
         build_reproducibility_summary,
         build_signal_segmentation_summary,
@@ -98,6 +106,7 @@ except ModuleNotFoundError:
         COMPLEXITY_LADDER_CONTROLLER_PATH,
         EXTREME_STATE_REPORT_PATH,
         EXPERIENCE_MODE_REPORT_PATH,
+        FOOTBALL_PORTFOLIO_ARCHETYPE_REPORT_PATH,
         HEALTH_REPORT_PATH,
         SNAPSHOT_LOG_PATH,
         build_runtime_state_from_scm_report_payload,
@@ -109,6 +118,7 @@ except ModuleNotFoundError:
         normalize_active_blockers,
         normalize_per_signal_rows,
         persist_current_runtime_state,
+        repo_relative,
         set_source_mode,
         stamp_payload,
         write_json_atomic,
@@ -1775,6 +1785,126 @@ def _build_baines_inputs(
     return inputs
 
 
+def _build_football_portfolio_archetype_inputs(
+    *,
+    state: dict[str, Any],
+    signal_refinery_report: dict[str, Any],
+    operator_policy: dict[str, Any],
+) -> tuple[list[dict[str, Any]], bool]:
+    validation_rows = signal_refinery_report.get("validation_engine", {}).get("signals", [])
+    validation_by_ticker = {
+        str(row.get("ticker") or "").upper(): row
+        for row in validation_rows
+        if isinstance(row, dict) and str(row.get("ticker") or "").strip()
+    }
+    active_blockers = set(normalize_active_blockers(state.get("active_blockers")))
+    chaos_state = "REALM_BIS" in active_blockers or int(
+        state.get("moltbook_summary", {}).get("chaos_entries", 0) or 0
+    ) > 0
+    policy_veto = not bool(operator_policy.get("allow_new_risk", False))
+
+    inputs: list[dict[str, Any]] = []
+    for row in state.get("per_signal_attribution", []):
+        if not isinstance(row, dict):
+            continue
+        ticker = str(row.get("ticker") or "").upper()
+        if not ticker:
+            continue
+        validation_row = validation_by_ticker.get(ticker, {})
+        status = str(row.get("status") or "").upper()
+        conversion_state = str(row.get("conversion_state") or "").upper()
+        primary_role_score = float(validation_row.get("blocker_clearance_score", 0.0) or 0.0)
+        secondary_output_score = float(validation_row.get("validation_score", 0.0) or 0.0)
+        multi_channel_output_score = min(
+            1.0,
+            (
+                float(validation_row.get("cross_source_confirmation_score", 0.0) or 0.0)
+                + float(validation_row.get("repricing_headroom_score", 0.0) or 0.0)
+                + float(validation_row.get("source_quality_score", 0.0) or 0.0)
+            )
+            / 2.2,
+        )
+        repeatability_score = float(validation_row.get("first_order_score", 0.0) or 0.0)
+        catalyst_score = float(validation_row.get("novelty_score", 0.0) or 0.0)
+        attention_score = float(validation_row.get("light_score", 0.0) or 0.0)
+        relative_cost_score = min(
+            1.0,
+            (
+                float(row.get("ce_score", 0.0) or 0.0) * 0.55
+                + attention_score * 0.20
+                + (0.25 if status == "WATCHLIST" else 0.0)
+            ),
+        )
+        system_dependency_score = min(
+            1.0,
+            max(
+                0.0,
+                float(validation_row.get("novelty_score", 0.0) or 0.0)
+                + (0.35 if status == "WATCHLIST" else 0.0)
+                + (0.25 if conversion_state == "CHAOS_ENTRY" else 0.0)
+                - (0.20 * float(validation_row.get("cross_source_confirmation_score", 0.0) or 0.0)),
+            ),
+        )
+        structural_compromise_score = min(
+            1.0,
+            max(
+                0.0,
+                (1.0 - primary_role_score) * 0.55
+                + system_dependency_score * 0.30
+                + (1.0 - float(validation_row.get("source_quality_score", 0.0) or 0.0)) * 0.15,
+            ),
+        )
+        risk_adjusted_cost = max(
+            0.05,
+            relative_cost_score
+            + structural_compromise_score
+            + max(0.0, float(validation_row.get("novelty_score", 0.0) or 0.0) - repeatability_score * 0.4),
+        )
+        defense_score = min(
+            1.0,
+            (primary_role_score * 0.60)
+            + (float(validation_row.get("source_quality_score", 0.0) or 0.0) * 0.25)
+            + (float(validation_row.get("blocker_clearance_score", 0.0) or 0.0) * 0.15),
+        )
+        survival_score = min(
+            1.0,
+            (repeatability_score * 0.45)
+            + (float(validation_row.get("repricing_headroom_score", 0.0) or 0.0) * 0.30)
+            + (float(validation_row.get("source_quality_score", 0.0) or 0.0) * 0.25),
+        )
+        inputs.append(
+            {
+                "candidate_id": ticker,
+                "asset_symbol": ticker,
+                "asset_name": ticker,
+                "primary_role_score": primary_role_score,
+                "secondary_output_score": secondary_output_score,
+                "output_percentile": secondary_output_score,
+                "price_percentile": relative_cost_score,
+                "multi_channel_output_score": multi_channel_output_score,
+                "repeatability_score": repeatability_score,
+                "catalyst_score": catalyst_score,
+                "attention_score": attention_score,
+                "relative_cost_score": relative_cost_score,
+                "risk_adjusted_cost": risk_adjusted_cost,
+                "defense_score": defense_score,
+                "survival_score": survival_score,
+                "catalyst_probability": catalyst_score,
+                "impact_magnitude": float(validation_row.get("repricing_headroom_score", 0.0) or 0.0),
+                "structural_safety_score": max(0.0, 1.0 - structural_compromise_score),
+                "system_dependency_score": system_dependency_score,
+                "structural_compromise_score": structural_compromise_score,
+                "validated_output_score": secondary_output_score,
+                "policy_veto": policy_veto,
+                "chaos_state": chaos_state,
+                "heat_state": attention_score >= 0.75,
+                "run_id": state.get("run_id"),
+                "generated_at": state.get("artifact_written_at") or state.get("run_started_at"),
+            }
+        )
+    return inputs, chaos_state
+
+
 def build_entry_review_packets(
     live_state: dict[str, Any],
     scenario_state: dict[str, Any],
@@ -2525,6 +2655,18 @@ def build_pipeline_health_report(
             operator_policy=operator_policy,
         )
     )
+    football_archetype_inputs, football_chaos_state = _build_football_portfolio_archetype_inputs(
+        state=state,
+        signal_refinery_report=signal_refinery_report,
+        operator_policy=operator_policy,
+    )
+    football_portfolio_archetype_report = build_football_portfolio_archetype_report(
+        football_archetype_inputs,
+        policy_state=operator_policy.get("policy_state", "RESTRICTED"),
+        chaos_state=football_chaos_state,
+        run_id=state.get("run_id"),
+        generated_at=state.get("artifact_written_at") or state.get("run_started_at"),
+    )
     primary_packet = reflection_context.get("primary_packet", {})
     current_lens_mode = "WIDE"
     if primary_packet:
@@ -2786,6 +2928,47 @@ def build_pipeline_health_report(
         "baines_chaos_vetoed": baines_engine_report["baines_chaos_vetoed"],
         "top_baines_candidate": baines_engine_report["top_baines_candidate"],
         "top_baines_score": baines_engine_report["top_baines_score"],
+        "football_portfolio_archetypes": football_portfolio_archetype_report,
+        "football_portfolio_archetype_engine_available": football_portfolio_archetype_report[
+            "football_portfolio_archetype_engine_available"
+        ],
+        "football_portfolio_archetype_engine_state": football_portfolio_archetype_report[
+            "football_portfolio_archetype_engine_state"
+        ],
+        "football_baines_candidates_count": football_portfolio_archetype_report[
+            "baines_candidates_count"
+        ],
+        "football_tarkowski_candidates_count": football_portfolio_archetype_report[
+            "tarkowski_candidates_count"
+        ],
+        "football_alonso_variant_count": football_portfolio_archetype_report[
+            "alonso_variant_count"
+        ],
+        "football_trent_risk_count": football_portfolio_archetype_report[
+            "trent_risk_count"
+        ],
+        "football_primary_role_rejections_count": football_portfolio_archetype_report[
+            "primary_role_rejections_count"
+        ],
+        "football_chaos_rejections_count": football_portfolio_archetype_report[
+            "chaos_rejections_count"
+        ],
+        "football_top_baines_candidate": football_portfolio_archetype_report[
+            "top_baines_candidate"
+        ],
+        "football_top_tarkowski_candidate": football_portfolio_archetype_report[
+            "top_tarkowski_candidate"
+        ],
+        "football_portfolio_mode": football_portfolio_archetype_report["portfolio_mode"],
+        "football_allocation_recommendation": football_portfolio_archetype_report[
+            "allocation_recommendation"
+        ],
+        "football_policy_veto_applied": football_portfolio_archetype_report[
+            "policy_veto_applied"
+        ],
+        "football_portfolio_archetype_report_path": repo_relative(
+            FOOTBALL_PORTFOLIO_ARCHETYPE_REPORT_PATH
+        ),
         "optical_operating_system": optical_operating_system_report,
         "optical_bull_state": optical_operating_system_report["optical_bull_state"],
         "optical_lens_mode": optical_operating_system_report["lens_mode"],
@@ -2962,6 +3145,11 @@ def build_pipeline_health_report(
 
     if effective_write_runtime:
         write_json_atomic(HEALTH_REPORT_PATH, report, stamp=False)
+        write_json_atomic(
+            FOOTBALL_PORTFOLIO_ARCHETYPE_REPORT_PATH,
+            football_portfolio_archetype_report,
+            stamp=True,
+        )
 
     return report
 
@@ -3038,6 +3226,28 @@ def format_pipeline_health_summary(report: dict[str, Any]) -> str:
             f"baines_chaos_vetoed={int(report.get('baines_chaos_vetoed', 0) or 0)}",
             f"top_baines_candidate={report.get('top_baines_candidate')}",
             f"top_baines_score={report.get('top_baines_score')}",
+            "football_portfolio_archetype_engine_available="
+            f"{str(bool(report.get('football_portfolio_archetype_engine_available', False))).lower()}",
+            "football_portfolio_archetype_engine_state="
+            f"{report.get('football_portfolio_archetype_engine_state', 'EMPTY')}",
+            "football_baines_candidates_count="
+            f"{int(report.get('football_baines_candidates_count', 0) or 0)}",
+            "football_tarkowski_candidates_count="
+            f"{int(report.get('football_tarkowski_candidates_count', 0) or 0)}",
+            "football_alonso_variant_count="
+            f"{int(report.get('football_alonso_variant_count', 0) or 0)}",
+            f"football_trent_risk_count={int(report.get('football_trent_risk_count', 0) or 0)}",
+            "football_primary_role_rejections_count="
+            f"{int(report.get('football_primary_role_rejections_count', 0) or 0)}",
+            "football_chaos_rejections_count="
+            f"{int(report.get('football_chaos_rejections_count', 0) or 0)}",
+            f"football_top_baines_candidate={report.get('football_top_baines_candidate')}",
+            f"football_top_tarkowski_candidate={report.get('football_top_tarkowski_candidate')}",
+            f"football_portfolio_mode={report.get('football_portfolio_mode', 'UNKNOWN')}",
+            "football_policy_veto_applied="
+            f"{str(bool(report.get('football_policy_veto_applied', False))).lower()}",
+            "football_portfolio_archetype_report_path="
+            f"{report.get('football_portfolio_archetype_report_path')}",
             f"optical_bull_state={report.get('optical_bull_state', 'UNKNOWN')}",
             f"optical_lens_mode={report.get('optical_lens_mode', 'UNKNOWN')}",
             f"optical_mirror_mode={report.get('optical_mirror_mode', 'UNKNOWN')}",
@@ -3075,6 +3285,16 @@ def format_pipeline_health_summary(report: dict[str, Any]) -> str:
             f"inferred={observability.get('inferred_signal_count', 0)}, "
             f"state_overlap={observability.get('state_overlap_signal_count', 0)}"
         )
+    football_allocation = report.get("football_allocation_recommendation", {})
+    if isinstance(football_allocation, dict) and football_allocation:
+        allocation_bands = football_allocation.get("allocation_bands", {})
+        if isinstance(allocation_bands, dict):
+            lines.append(
+                "football_allocation_recommendation="
+                f"tarkowski_core={allocation_bands.get('tarkowski_core')}, "
+                f"baines_expansion={allocation_bands.get('baines_expansion')}, "
+                f"optional_spikes={allocation_bands.get('optional_spikes')}"
+            )
     feedback_adjustments = report.get("suggested_feedback_adjustments", [])
     if isinstance(feedback_adjustments, list) and feedback_adjustments:
         lines.append(

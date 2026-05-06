@@ -301,6 +301,13 @@ def build_snapshot_row(
     )
     if not isinstance(baines, dict):
         baines = {}
+    football = (
+        health_report.get("football_portfolio_archetypes", {})
+        if isinstance(health_report, dict)
+        else {}
+    )
+    if not isinstance(football, dict):
+        football = {}
 
     return {
         "timestamp": _unique_snapshot_timestamp(snapshot_target),
@@ -364,6 +371,11 @@ def build_snapshot_row(
         "baines_durable_candidates": baines.get("baines_durable_candidates", 0),
         "top_baines_candidate": baines.get("top_baines_candidate"),
         "top_baines_score": baines.get("top_baines_score"),
+        "football_portfolio_mode": football.get("portfolio_mode", "UNKNOWN"),
+        "football_baines_candidates_count": football.get("baines_candidates_count", 0),
+        "football_tarkowski_candidates_count": football.get("tarkowski_candidates_count", 0),
+        "football_top_baines_candidate": football.get("top_baines_candidate"),
+        "football_top_tarkowski_candidate": football.get("top_tarkowski_candidate"),
         "transition_state_rows": transition_state_rows,
     }
 
