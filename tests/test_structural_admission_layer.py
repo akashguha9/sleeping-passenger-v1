@@ -8,17 +8,26 @@ from scripts.pipeline_health_report import (
 )
 from scripts.structural_admission_layer import (
     AdmissionClass,
+    BehavioralSkinInput,
     BurnProfile,
+    BuyerClass,
+    BuyerTypeInput,
     DesignIntegrityInput,
     DomainInstrumentInput,
     EngineClass,
     EnvironmentInput,
+    ExecutionSurvivabilityInput,
+    ForceFlowInput,
+    MaintenanceCostInput,
     OperatorClarityInput,
+    PeakMomentInput,
     PrimitiveCompetenceInput,
     ProgressionInput,
+    RecoveryQualityInput,
     RealityAnchorInput,
     RegimeClass,
     RejectionReason,
+    SourceValidationInput,
     SignalGraphInput,
     StructuralAdmissionInput,
     TransitionClass,
@@ -26,19 +35,34 @@ from scripts.structural_admission_layer import (
     TrapdoorInput,
     TrustInput,
     UseCaseFitInput,
+    ActorResponseInput,
+    BullState,
     classify_materiality,
+    classify_buyer_type,
     classify_regime,
+    compute_bull_state,
     detect_trapdoor,
     estimate_burn_profile,
+    evaluate_actor_response,
+    evaluate_behavioral_skin,
+    evaluate_buyer_alignment,
     evaluate_design_integrity,
     evaluate_domain_fit,
+    evaluate_execution_survivability,
+    evaluate_force_flow,
+    evaluate_maintenance_survival,
     evaluate_operator_clarity,
+    evaluate_peak_moment,
+    evaluate_recovery_quality,
     evaluate_reality_alignment,
     evaluate_signal_harmony,
+    evaluate_source_validation,
     evaluate_structural_admission,
     evaluate_transition_quality,
     evaluate_trust,
     evaluate_use_case_fit,
+    load_structural_admission_thresholds,
+    route_evaluation_model,
     select_engine,
 )
 
@@ -129,7 +153,74 @@ def _base_input() -> StructuralAdmissionInput:
             specialization_match=0.9,
             generalist_output_used_for_execution=False,
         ),
+        buyer_type=BuyerTypeInput(
+            asset_class="stock",
+            objective="QUALITY_EXECUTION",
+            risk_tolerance=0.4,
+            time_horizon_days=180.0,
+            identity_fit=0.7,
+            narrative_strength=0.5,
+            income_relevance=0.5,
+            optionality=0.4,
+            hedge_need=0.2,
+            event_catalyst_strength=0.5,
+            quality_bias=0.8,
+            passive_fit=0.7,
+        ),
+        execution_survivability=ExecutionSurvivabilityInput(
+            volatility=0.2,
+            spread=0.2,
+            slippage=0.2,
+            latency=0.2,
+            data_gaps=0.1,
+            false_positive_rate=0.1,
+            news_reversal_risk=0.2,
+            liquidity_gap_risk=0.2,
+            operator_confusion=0.1,
+            external_confirmation_failure=0.1,
+        ),
+        source_validation=SourceValidationInput(
+            source_credibility=0.9,
+            external_confirmation=0.85,
+            consistency=0.9,
+            wrapper_uncertainty=0.1,
+        ),
+        peak_moment=PeakMomentInput(
+            novelty=0.4,
+            emotional_intensity=0.4,
+            recall_frequency=0.4,
+            total_quality=0.8,
+        ),
+        behavioral_skin=BehavioralSkinInput(
+            appearance=0.4,
+            behavior=0.7,
+            feature_access=0.7,
+            system_tuning=0.7,
+        ),
+        recovery_quality=RecoveryQualityInput(
+            surface_recovery=0.5,
+            structural_integrity=0.8,
+        ),
+        force_flow=ForceFlowInput(
+            signal_force=0.8,
+            transmission_path=0.8,
+            buyer_sensitivity=0.7,
+            damping=0.1,
+        ),
+        actor_response=ActorResponseInput(
+            buyer_probabilities={
+                BuyerClass.INSTITUTIONAL_QUALITY.value: 0.7,
+                BuyerClass.RETAIL_MOMENTUM.value: 0.4,
+            },
+            capital_weights={
+                BuyerClass.INSTITUTIONAL_QUALITY.value: 0.9,
+                BuyerClass.RETAIL_MOMENTUM.value: 0.4,
+            },
+            reaction_speed=0.7,
+            conviction=0.75,
+        ),
         validation_strength=0.9,
+        fast_track_momentum=0.7,
         chaos_veto=False,
         policy_veto=False,
         source="TEST",
@@ -354,5 +445,234 @@ def test_structural_admission_integration_surfaces_diagnostics_state() -> None:
     state = report["structural_admission_state"]
     assert state["admission_class"] == AdmissionClass.CHAOS_VETO.value
     assert "component_scores" in state
+    assert "buyer_type" in state
+    assert "layer_scores" in state
+    assert "mvp_admission_layer" in report
+    assert "operator_summary" in report
     assert report["structural_admission_chaos_veto"] is True
     assert "structural_admission_class=CHAOS_VETO" in summary
+
+
+def test_low_material_durability_produces_rejection_reason() -> None:
+    payload = _base_input()
+    payload.burn_profile = BurnProfile(
+        ignition_speed=0.95,
+        duration_score=0.2,
+        stability_score=0.2,
+        environment_resistance_score=0.2,
+        decay_rate=0.9,
+    )
+    result = evaluate_structural_admission(payload)
+    assert _has_reason(result, RejectionReason.LOW_DURABILITY_SIGNAL)
+
+
+def test_peak_moment_does_not_override_total_quality() -> None:
+    details, reasons = evaluate_peak_moment(
+        PeakMomentInput(
+            novelty=0.95,
+            emotional_intensity=0.95,
+            recall_frequency=0.95,
+            total_quality=0.2,
+        )
+    )
+    assert details["peak_moment_score"] > 0.6
+    assert reasons[0].code == RejectionReason.PEAK_MOMENT_WITHOUT_TOTAL_QUALITY.value
+
+
+def test_credible_source_without_confirmation_remains_uncertain() -> None:
+    details, reasons = evaluate_source_validation(
+        SourceValidationInput(
+            source_credibility=0.95,
+            external_confirmation=0.2,
+            consistency=0.7,
+            wrapper_uncertainty=0.1,
+        ),
+        thresholds=load_structural_admission_thresholds(),
+    )
+    assert details["validated_product_or_event"] is False
+    assert reasons[0].code == RejectionReason.SOURCE_CREDIBILITY_WITHOUT_VALIDATION.value
+
+
+def test_cosmetic_skin_is_not_treated_as_behavioral() -> None:
+    details, reasons = evaluate_behavioral_skin(
+        BehavioralSkinInput(
+            appearance=0.9,
+            behavior=0.1,
+            feature_access=0.1,
+            system_tuning=0.1,
+        )
+    )
+    assert details["skin_class"] == "COSMETIC_SKIN"
+    assert reasons[0].code == RejectionReason.COSMETIC_SKIN_ONLY.value
+
+
+def test_surface_only_recovery_is_not_structural() -> None:
+    details, reasons = evaluate_recovery_quality(
+        RecoveryQualityInput(
+            surface_recovery=0.9,
+            structural_integrity=0.2,
+        )
+    )
+    assert details["recovery_class"] == "SURFACE_ONLY"
+    assert reasons[0].code == RejectionReason.SURFACE_ONLY_IMPROVEMENT.value
+
+
+def test_buyer_type_routes_evaluation_model() -> None:
+    buyer = classify_buyer_type(
+        BuyerTypeInput(
+            asset_class="crypto",
+            objective="MOMENTUM",
+            risk_tolerance=0.9,
+            time_horizon_days=10.0,
+            identity_fit=0.8,
+            narrative_strength=0.9,
+            quality_bias=0.2,
+        )
+    )
+    assert buyer["buyer_type"] in {
+        BuyerClass.RETAIL_MOMENTUM.value,
+        BuyerClass.NARRATIVE_SPECULATOR.value,
+        BuyerClass.EVENT_DRIVEN.value,
+    }
+    assert route_evaluation_model("crypto", buyer["buyer_type"]) == "CRYPTO_MOMENTUM_LIQUIDITY_NARRATIVE_MODEL"
+
+
+def test_actor_response_unclear_blocks_promotion() -> None:
+    details, reasons = evaluate_actor_response(
+        ActorResponseInput(
+            buyer_probabilities={BuyerClass.RETAIL_MOMENTUM.value: 0.1},
+            capital_weights={BuyerClass.RETAIL_MOMENTUM.value: 0.1},
+            reaction_speed=0.1,
+            conviction=0.1,
+        )
+    )
+    assert details["clarity_score"] < 0.5
+    assert reasons[0].code == RejectionReason.ACTOR_RESPONSE_UNCLEAR.value
+
+
+def test_force_flow_break_is_flagged() -> None:
+    details, reasons = evaluate_force_flow(
+        ForceFlowInput(
+            signal_force=0.4,
+            transmission_path=0.1,
+            buyer_sensitivity=0.2,
+            damping=0.7,
+        )
+    )
+    assert details["price_pressure"] < 0.25
+    assert reasons[0].code == RejectionReason.FORCE_FLOW_BREAK.value
+
+
+def test_low_maintenance_survival_is_rejected() -> None:
+    details, reasons = evaluate_maintenance_survival(
+        payload=MaintenanceCostInput(
+            performance_after_stress=0.2,
+            performance_before_stress=1.0,
+            desire=0.7,
+            maintenance_cost=0.8,
+            failure_friction=0.8,
+        ),
+        thresholds=load_structural_admission_thresholds(),
+    )
+    assert details["survival_score"] == pytest.approx(0.2)
+    assert reasons[0].code == RejectionReason.LOW_MAINTENANCE_SURVIVAL.value
+
+
+def test_low_buyer_alignment_blocks_execution_candidate() -> None:
+    payload = _base_input()
+    payload.buyer_type = BuyerTypeInput(
+        asset_class="stock",
+        objective="UNCLEAR",
+        risk_tolerance=0.1,
+        time_horizon_days=5.0,
+        identity_fit=0.1,
+        narrative_strength=0.1,
+        income_relevance=0.1,
+        optionality=0.1,
+        hedge_need=0.1,
+        event_catalyst_strength=0.1,
+        quality_bias=0.1,
+        passive_fit=0.1,
+    )
+    result = evaluate_structural_admission(payload)
+    assert _has_reason(result, RejectionReason.LOW_BUYER_ALIGNMENT)
+    assert result.admission_class != AdmissionClass.ADMIT_EXECUTION_CANDIDATE.value
+
+
+def test_low_execution_survivability_blocks_execution_candidate() -> None:
+    payload = _base_input()
+    payload.execution_survivability = ExecutionSurvivabilityInput(
+        volatility=0.9,
+        spread=0.9,
+        slippage=0.9,
+        latency=0.9,
+        data_gaps=0.9,
+        false_positive_rate=0.8,
+        news_reversal_risk=0.9,
+        liquidity_gap_risk=0.9,
+        operator_confusion=0.8,
+        external_confirmation_failure=0.8,
+    )
+    result = evaluate_structural_admission(payload)
+    assert _has_reason(result, RejectionReason.LOW_EXECUTION_SURVIVABILITY)
+    assert result.admission_class != AdmissionClass.ADMIT_EXECUTION_CANDIDATE.value
+
+
+def test_diablo_chaos_veto_overrides_normal_logic() -> None:
+    bull_state, reason = compute_bull_state(
+        chaos_veto=True,
+        policy_veto=False,
+        trapdoor_risk=0.1,
+        validation_strength=0.95,
+        material_durability=0.95,
+        buyer_alignment=0.95,
+        execution_survivability=0.95,
+        primitive_understanding=0.95,
+        fast_track_momentum=0.95,
+        thresholds=load_structural_admission_thresholds(),
+    )
+    assert bull_state == BullState.DIABLO.value
+    assert "outranks" in reason.lower()
+
+
+def test_huracan_fast_track_requires_validation_and_risk_caps() -> None:
+    bull_state, _ = compute_bull_state(
+        chaos_veto=False,
+        policy_veto=False,
+        trapdoor_risk=0.1,
+        validation_strength=0.8,
+        material_durability=0.8,
+        buyer_alignment=0.8,
+        execution_survivability=0.8,
+        primitive_understanding=0.9,
+        fast_track_momentum=0.9,
+        thresholds=load_structural_admission_thresholds(),
+    )
+    assert bull_state == BullState.HURACAN.value
+
+
+def test_bull_state_mapping_is_deterministic() -> None:
+    payload = _base_input()
+    left = evaluate_structural_admission(payload)
+    right = evaluate_structural_admission(payload)
+    assert left.bull_state == right.bull_state
+    assert left.next_required_action == right.next_required_action
+
+
+def test_buyer_alignment_component_is_exposed() -> None:
+    score, result, reasons = evaluate_buyer_alignment(
+        BuyerTypeInput(
+            asset_class="etf",
+            objective="ALLOCATION",
+            risk_tolerance=0.2,
+            time_horizon_days=720.0,
+            identity_fit=0.7,
+            narrative_strength=0.2,
+            quality_bias=0.8,
+            passive_fit=0.9,
+        ),
+        use_case_score=0.8,
+    )
+    assert score.score >= 0.5
+    assert result["evaluation_model"] == "ETF_ALLOCATION_RISK_MACRO_MODEL"
+    assert reasons == []

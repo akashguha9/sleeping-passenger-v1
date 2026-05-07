@@ -3463,20 +3463,50 @@ def build_pipeline_health_report(
             "admission_class": structural_admission_report["admission_class"],
             "admission_score": structural_admission_report["admission_score"],
             "diagnostic_score": structural_admission_report["diagnostic_score"],
+            "passed": structural_admission_report["passed"],
+            "bottleneck_layer": structural_admission_report["bottleneck_layer"],
             "hard_reject": structural_admission_report["hard_reject"],
             "chaos_veto": structural_admission_report["chaos_veto"],
             "recommended_engine": structural_admission_report["recommended_engine"],
             "regime_class": structural_admission_report["regime_class"],
             "material_class": structural_admission_report["material_class"],
             "transition_class": structural_admission_report["transition_class"],
+            "buyer_type": structural_admission_report["buyer_type"],
+            "materiality": structural_admission_report["materiality"],
+            "transition": structural_admission_report["transition"],
+            "source_validation": structural_admission_report["source_validation"],
+            "actor_response": structural_admission_report["actor_response"],
+            "bull_state": structural_admission_report["bull_state"],
+            "next_required_action": structural_admission_report["next_required_action"],
             "component_scores": structural_admission_report["component_scores"],
+            "layer_scores": structural_admission_report["layer_scores"],
             "rejection_reasons": structural_admission_report["rejection_reasons"],
             "operator_summary": structural_admission_report["operator_summary"],
         },
+        "mvp_admission_layer": {
+            "admission_score": structural_admission_report["admission_score"],
+            "passed": structural_admission_report["passed"],
+            "bottleneck_layer": structural_admission_report["bottleneck_layer"],
+            "layer_scores": structural_admission_report["layer_scores"],
+            "rejection_reasons": structural_admission_report["rejection_reasons"],
+            "recommended_state": structural_admission_report["admission_class"],
+            "bull_state": structural_admission_report["bull_state"],
+            "next_required_action": structural_admission_report["next_required_action"],
+            "buyer_type": structural_admission_report["buyer_type"],
+            "transition": structural_admission_report["transition"],
+            "materiality": structural_admission_report["materiality"],
+            "source_validation": structural_admission_report["source_validation"],
+            "actor_response": structural_admission_report["actor_response"],
+        },
+        "operator_summary": structural_admission_report["operator_summary_payload"],
         "structural_admission_class": structural_admission_report["admission_class"],
         "structural_admission_score": structural_admission_report["admission_score"],
         "structural_admission_diagnostic_score": structural_admission_report[
             "diagnostic_score"
+        ],
+        "structural_admission_passed": structural_admission_report["passed"],
+        "structural_admission_bottleneck_layer": structural_admission_report[
+            "bottleneck_layer"
         ],
         "structural_admission_hard_reject": structural_admission_report["hard_reject"],
         "structural_admission_chaos_veto": structural_admission_report["chaos_veto"],
@@ -3489,6 +3519,10 @@ def build_pipeline_health_report(
         ],
         "structural_admission_transition_class": structural_admission_report[
             "transition_class"
+        ],
+        "structural_admission_bull_state": structural_admission_report["bull_state"],
+        "structural_admission_next_required_action": structural_admission_report[
+            "next_required_action"
         ],
         "structural_admission_report_path": repo_relative(STRUCTURAL_ADMISSION_REPORT_PATH),
         "structural_design_state": {
@@ -3877,10 +3911,18 @@ def format_pipeline_health_summary(report: dict[str, Any]) -> str:
             f"{report.get('structural_admission_score')}",
             "structural_admission_diagnostic_score="
             f"{report.get('structural_admission_diagnostic_score')}",
+            "structural_admission_passed="
+            f"{str(bool(report.get('structural_admission_passed', False))).lower()}",
+            "structural_admission_bottleneck_layer="
+            f"{report.get('structural_admission_bottleneck_layer', 'UNKNOWN')}",
             "structural_admission_recommended_engine="
             f"{report.get('structural_admission_recommended_engine', 'UNKNOWN')}",
             "structural_admission_regime_class="
             f"{report.get('structural_admission_regime_class', 'UNKNOWN')}",
+            "structural_admission_bull_state="
+            f"{report.get('structural_admission_bull_state', 'UNKNOWN')}",
+            "structural_admission_next_required_action="
+            f"{report.get('structural_admission_next_required_action', 'UNKNOWN')}",
             "structural_design_state="
             f"{report.get('structural_design_structure_state', 'UNKNOWN')}",
             "structural_design_pressure_score="

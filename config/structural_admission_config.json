@@ -1,0 +1,20 @@
+{
+  "domain_fit_threshold": 1.0,
+  "environment_fit_threshold": 0.45,
+  "material_durability_threshold": 0.45,
+  "signal_harmony_threshold": 0.55,
+  "transition_quality_threshold": 0.55,
+  "validation_strength_threshold": 0.55,
+  "trust_observability_threshold": 0.55,
+  "operator_clarity_threshold": 0.45,
+  "reality_alignment_threshold": 0.45,
+  "primitive_understanding_threshold": 0.55,
+  "use_case_fit_threshold": 0.45,
+  "buyer_alignment_threshold": 0.5,
+  "execution_survivability_threshold": 0.5,
+  "trapdoor_risk_max": 0.65,
+  "fast_track_momentum_threshold": 0.75,
+  "fast_track_validation_threshold": 0.7,
+  "source_confirmation_threshold": 0.55,
+  "maintenance_survival_threshold": 0.5
+}

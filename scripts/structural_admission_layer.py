@@ -9,9 +9,11 @@ from typing import Any
 
 try:
     from scripts.runtime_common import (
+        REPO_ROOT,
         STRUCTURAL_ADMISSION_REPORT_PATH,
         build_runtime_state_from_scm_report_payload,
         get_run_id,
+        load_json_file,
         get_source_mode,
         repo_relative,
         utc_timestamp,
@@ -20,9 +22,11 @@ try:
     from scripts.signal_conversion_monitor import build_signal_conversion_report
 except ModuleNotFoundError:
     from runtime_common import (  # type: ignore[no-redef]
+        REPO_ROOT,
         STRUCTURAL_ADMISSION_REPORT_PATH,
         build_runtime_state_from_scm_report_payload,
         get_run_id,
+        load_json_file,
         get_source_mode,
         repo_relative,
         utc_timestamp,
@@ -39,6 +43,27 @@ DEFAULT_THRESHOLD_TRAPDOOR = 0.65
 DEFAULT_THRESHOLD_TRUST = 0.55
 DEFAULT_THRESHOLD_OPERATOR_CLARITY = 0.45
 DEFAULT_MAX_VALIDATION_AGE_HOURS = 24.0
+STRUCTURAL_ADMISSION_CONFIG_PATH = REPO_ROOT / "config" / "structural_admission_config.json"
+DEFAULT_THRESHOLDS = {
+    "domain_fit_threshold": 1.0,
+    "environment_fit_threshold": 0.45,
+    "material_durability_threshold": DEFAULT_THRESHOLD_MATERIAL,
+    "signal_harmony_threshold": DEFAULT_THRESHOLD_HARMONY,
+    "transition_quality_threshold": 0.55,
+    "validation_strength_threshold": 0.55,
+    "trust_observability_threshold": DEFAULT_THRESHOLD_TRUST,
+    "operator_clarity_threshold": DEFAULT_THRESHOLD_OPERATOR_CLARITY,
+    "reality_alignment_threshold": 0.45,
+    "primitive_understanding_threshold": 0.55,
+    "use_case_fit_threshold": 0.45,
+    "buyer_alignment_threshold": 0.5,
+    "execution_survivability_threshold": 0.5,
+    "trapdoor_risk_max": DEFAULT_THRESHOLD_TRAPDOOR,
+    "fast_track_momentum_threshold": 0.75,
+    "fast_track_validation_threshold": 0.7,
+    "source_confirmation_threshold": 0.55,
+    "maintenance_survival_threshold": 0.5,
+}
 
 
 class RejectionReason(str, Enum):
@@ -54,6 +79,15 @@ class RejectionReason(str, Enum):
     NO_PRIMITIVE_UNDERSTANDING = "NO_PRIMITIVE_UNDERSTANDING"
     MISUSED_GENERALIST = "MISUSED_GENERALIST"
     UTILITY_WITHOUT_STRUCTURE = "UTILITY_WITHOUT_STRUCTURE"
+    LOW_BUYER_ALIGNMENT = "LOW_BUYER_ALIGNMENT"
+    LOW_EXECUTION_SURVIVABILITY = "LOW_EXECUTION_SURVIVABILITY"
+    SOURCE_CREDIBILITY_WITHOUT_VALIDATION = "SOURCE_CREDIBILITY_WITHOUT_VALIDATION"
+    SURFACE_ONLY_IMPROVEMENT = "SURFACE_ONLY_IMPROVEMENT"
+    COSMETIC_SKIN_ONLY = "COSMETIC_SKIN_ONLY"
+    PEAK_MOMENT_WITHOUT_TOTAL_QUALITY = "PEAK_MOMENT_WITHOUT_TOTAL_QUALITY"
+    LOW_MAINTENANCE_SURVIVAL = "LOW_MAINTENANCE_SURVIVAL"
+    FORCE_FLOW_BREAK = "FORCE_FLOW_BREAK"
+    ACTOR_RESPONSE_UNCLEAR = "ACTOR_RESPONSE_UNCLEAR"
 
 
 class RegimeClass(str, Enum):
@@ -87,6 +121,9 @@ class TransitionClass(str, Enum):
     TRAPDOOR = "TRAPDOOR"
     RESOLVED = "RESOLVED"
     FAILED_RESOLUTION = "FAILED_RESOLUTION"
+    FALSE_BREAKOUT = "FALSE_BREAKOUT"
+    ACCUMULATION = "ACCUMULATION"
+    DISTRIBUTION = "DISTRIBUTION"
     UNKNOWN = "UNKNOWN"
 
 
@@ -103,6 +140,48 @@ class SeverityLevel(str, Enum):
     HARD = "HARD"
     MEDIUM = "MEDIUM"
     LOW = "LOW"
+
+
+class BuyerClass(str, Enum):
+    RETAIL_MOMENTUM = "RETAIL_MOMENTUM"
+    INSTITUTIONAL_QUALITY = "INSTITUTIONAL_QUALITY"
+    PASSIVE_ALLOCATION = "PASSIVE_ALLOCATION"
+    VENTURE_OPTIONALITY = "VENTURE_OPTIONALITY"
+    INCOME_INVESTOR = "INCOME_INVESTOR"
+    HEDGER = "HEDGER"
+    NARRATIVE_SPECULATOR = "NARRATIVE_SPECULATOR"
+    EVENT_DRIVEN = "EVENT_DRIVEN"
+    DISTRESSED_VALUE = "DISTRESSED_VALUE"
+    MACRO_ROTATION = "MACRO_ROTATION"
+    INSIDER_SIGNAL_FOLLOWER = "INSIDER_SIGNAL_FOLLOWER"
+    UNKNOWN = "UNKNOWN"
+
+
+class SkinClass(str, Enum):
+    COSMETIC_SKIN = "COSMETIC_SKIN"
+    FUNCTIONAL_SKIN = "FUNCTIONAL_SKIN"
+    BEHAVIORAL_SKIN = "BEHAVIORAL_SKIN"
+    STRUCTURAL_SKIN = "STRUCTURAL_SKIN"
+
+
+class RecoveryClass(str, Enum):
+    SURFACE_ONLY = "SURFACE_ONLY"
+    OPERATIONAL = "OPERATIONAL"
+    FINANCIAL = "FINANCIAL"
+    STRATEGIC = "STRATEGIC"
+    RISK_REDUCING = "RISK_REDUCING"
+    STRUCTURAL = "STRUCTURAL"
+
+
+class BullState(str, Enum):
+    MIURA = "MIURA"
+    MURCIELAGO = "MURCIELAGO"
+    AVENTADOR = "AVENTADOR"
+    GALLARDO = "GALLARDO"
+    ISLERO = "ISLERO"
+    DIABLO = "DIABLO"
+    HURACAN = "HURACAN"
+    UNKNOWN = "UNKNOWN"
 
 
 @dataclass(slots=True)
@@ -225,6 +304,103 @@ class UseCaseFitInput:
 
 
 @dataclass(slots=True)
+class BuyerTypeInput:
+    asset_class: str = "UNKNOWN"
+    objective: str = "UNKNOWN"
+    risk_tolerance: float = 0.0
+    time_horizon_days: float = 0.0
+    identity_fit: float = 0.0
+    narrative_strength: float = 0.0
+    income_relevance: float = 0.0
+    optionality: float = 0.0
+    hedge_need: float = 0.0
+    event_catalyst_strength: float = 0.0
+    quality_bias: float = 0.0
+    passive_fit: float = 0.0
+    threshold: float = 0.5
+
+
+@dataclass(slots=True)
+class ExecutionSurvivabilityInput:
+    volatility: float = 0.0
+    spread: float = 0.0
+    slippage: float = 0.0
+    latency: float = 0.0
+    data_gaps: float = 0.0
+    false_positive_rate: float = 0.0
+    news_reversal_risk: float = 0.0
+    liquidity_gap_risk: float = 0.0
+    operator_confusion: float = 0.0
+    external_confirmation_failure: float = 0.0
+    threshold: float = 0.5
+
+
+@dataclass(slots=True)
+class SourceValidationInput:
+    source_credibility: float = 0.0
+    external_confirmation: float = 0.0
+    consistency: float = 0.0
+    wrapper_uncertainty: float = 0.0
+    threshold: float = 0.55
+
+
+@dataclass(slots=True)
+class PeakMomentInput:
+    novelty: float = 0.0
+    emotional_intensity: float = 0.0
+    recall_frequency: float = 0.0
+    total_quality: float = 0.0
+
+
+@dataclass(slots=True)
+class AnchorFeatureInput:
+    top_feature_mentions: float = 0.0
+    total_feature_mentions: float = 0.0
+    baseline_competence: float = 0.0
+
+
+@dataclass(slots=True)
+class BehavioralSkinInput:
+    appearance: float = 0.0
+    behavior: float = 0.0
+    feature_access: float = 0.0
+    system_tuning: float = 0.0
+
+
+@dataclass(slots=True)
+class MaintenanceCostInput:
+    performance_after_stress: float = 0.0
+    performance_before_stress: float = 1.0
+    desire: float = 0.0
+    maintenance_cost: float = 0.0
+    failure_friction: float = 0.0
+    threshold: float = 0.5
+
+
+@dataclass(slots=True)
+class RecoveryQualityInput:
+    surface_recovery: float = 0.0
+    structural_integrity: float = 0.0
+
+
+@dataclass(slots=True)
+class ForceFlowInput:
+    signal_force: float = 0.0
+    transmission_path: float = 0.0
+    buyer_sensitivity: float = 0.0
+    damping: float = 0.0
+
+
+@dataclass(slots=True)
+class ActorResponseInput:
+    buyer_probabilities: dict[str, float] = field(default_factory=dict)
+    capital_weights: dict[str, float] = field(default_factory=dict)
+    reaction_speed: float = 0.0
+    conviction: float = 0.0
+    threshold: float = 0.5
+
+
+@dataclass(slots=True)
 class StructuralAdmissionInput:
     design_integrity: DesignIntegrityInput = field(default_factory=DesignIntegrityInput)
     domain_instrument: DomainInstrumentInput = field(default_factory=DomainInstrumentInput)
@@ -239,7 +415,18 @@ class StructuralAdmissionInput:
     reality_anchor: RealityAnchorInput = field(default_factory=RealityAnchorInput)
     primitive_competence: PrimitiveCompetenceInput = field(default_factory=PrimitiveCompetenceInput)
     use_case_fit: UseCaseFitInput = field(default_factory=UseCaseFitInput)
+    buyer_type: BuyerTypeInput = field(default_factory=BuyerTypeInput)
+    execution_survivability: ExecutionSurvivabilityInput = field(default_factory=ExecutionSurvivabilityInput)
+    source_validation: SourceValidationInput = field(default_factory=SourceValidationInput)
+    peak_moment: PeakMomentInput = field(default_factory=PeakMomentInput)
+    anchor_feature: AnchorFeatureInput = field(default_factory=AnchorFeatureInput)
+    behavioral_skin: BehavioralSkinInput = field(default_factory=BehavioralSkinInput)
+    maintenance_cost: MaintenanceCostInput = field(default_factory=MaintenanceCostInput)
+    recovery_quality: RecoveryQualityInput = field(default_factory=RecoveryQualityInput)
+    force_flow: ForceFlowInput = field(default_factory=ForceFlowInput)
+    actor_response: ActorResponseInput = field(default_factory=ActorResponseInput)
     validation_strength: float = 0.0
+    fast_track_momentum: float = 0.0
     chaos_veto: bool = False
     policy_veto: bool = False
     system_name: str = "UNKNOWN"
@@ -274,15 +461,26 @@ class StructuralAdmissionResult:
     admission_score: float
     diagnostic_score: float
     admission_class: str
+    passed: bool
+    bottleneck_layer: str
     hard_reject: bool
     chaos_veto: bool
     recommended_engine: str
     regime_class: str
     material_class: str
     transition_class: str
+    buyer_type: dict[str, Any]
+    materiality: dict[str, Any]
+    transition: dict[str, Any]
+    source_validation: dict[str, Any]
+    actor_response: dict[str, Any]
+    bull_state: str
+    next_required_action: str
     component_scores: dict[str, float]
+    layer_scores: dict[str, dict[str, Any]]
     rejection_reasons: list[dict[str, Any]]
     operator_summary: str
+    operator_summary_payload: dict[str, str]
 
 
 def clamp01(value: Any) -> float:
@@ -304,6 +502,23 @@ def weighted_sum(values: dict[str, float], weights: dict[str, float]) -> float:
     for key, weight in weights.items():
         total += weight * clamp01(values.get(key, 0.0))
     return clamp01(total)
+
+
+def load_structural_admission_thresholds() -> dict[str, float]:
+    payload = load_json_file(STRUCTURAL_ADMISSION_CONFIG_PATH, default={})
+    if not isinstance(payload, dict):
+        return dict(DEFAULT_THRESHOLDS)
+    thresholds = dict(DEFAULT_THRESHOLDS)
+    for key, default in DEFAULT_THRESHOLDS.items():
+        thresholds[key] = clamp01(payload.get(key, default)) if key != "domain_fit_threshold" else float(payload.get(key, default))
+    return thresholds
+
+
+def _threshold(thresholds: dict[str, float], key: str) -> float:
+    value = thresholds.get(key, DEFAULT_THRESHOLDS[key])
+    if key == "domain_fit_threshold":
+        return float(value)
+    return clamp01(value)
 
 
 def _make_rejection(
@@ -988,6 +1203,479 @@ def evaluate_use_case_fit(
     )
 
 
+def classify_buyer_type(payload: BuyerTypeInput) -> dict[str, Any]:
+    scores = {
+        BuyerClass.RETAIL_MOMENTUM.value: clamp01(
+            0.35 * payload.narrative_strength + 0.25 * payload.risk_tolerance + 0.20 * payload.identity_fit + 0.20 * clamp01(1.0 - min(payload.time_horizon_days, 365.0) / 365.0)
+        ),
+        BuyerClass.INSTITUTIONAL_QUALITY.value: clamp01(
+            0.40 * payload.quality_bias + 0.25 * clamp01(payload.time_horizon_days / 365.0) + 0.20 * clamp01(1.0 - payload.risk_tolerance) + 0.15 * payload.identity_fit
+        ),
+        BuyerClass.PASSIVE_ALLOCATION.value: clamp01(
+            0.50 * payload.passive_fit + 0.25 * clamp01(payload.time_horizon_days / 365.0) + 0.25 * clamp01(1.0 - payload.risk_tolerance)
+        ),
+        BuyerClass.VENTURE_OPTIONALITY.value: clamp01(
+            0.50 * payload.optionality + 0.25 * payload.risk_tolerance + 0.25 * payload.narrative_strength
+        ),
+        BuyerClass.INCOME_INVESTOR.value: clamp01(
+            0.55 * payload.income_relevance + 0.25 * clamp01(1.0 - payload.risk_tolerance) + 0.20 * clamp01(payload.time_horizon_days / 365.0)
+        ),
+        BuyerClass.HEDGER.value: clamp01(
+            0.60 * payload.hedge_need + 0.20 * clamp01(1.0 - payload.risk_tolerance) + 0.20 * payload.identity_fit
+        ),
+        BuyerClass.NARRATIVE_SPECULATOR.value: clamp01(
+            0.45 * payload.narrative_strength + 0.35 * payload.risk_tolerance + 0.20 * payload.identity_fit
+        ),
+        BuyerClass.EVENT_DRIVEN.value: clamp01(
+            0.55 * payload.event_catalyst_strength + 0.25 * payload.risk_tolerance + 0.20 * clamp01(1.0 - min(payload.time_horizon_days, 90.0) / 90.0)
+        ),
+        BuyerClass.DISTRESSED_VALUE.value: clamp01(
+            0.40 * payload.optionality + 0.30 * payload.quality_bias + 0.30 * clamp01(payload.time_horizon_days / 365.0)
+        ),
+        BuyerClass.MACRO_ROTATION.value: clamp01(
+            0.35 * payload.hedge_need + 0.35 * payload.passive_fit + 0.30 * payload.event_catalyst_strength
+        ),
+        BuyerClass.INSIDER_SIGNAL_FOLLOWER.value: clamp01(
+            0.45 * payload.event_catalyst_strength + 0.30 * payload.narrative_strength + 0.25 * payload.risk_tolerance
+        ),
+    }
+    buyer_type = max(scores.items(), key=lambda item: item[1])[0] if scores else BuyerClass.UNKNOWN.value
+    confidence = scores.get(buyer_type, 0.0)
+    return {
+        "buyer_type": buyer_type,
+        "confidence": round(confidence, 4),
+        "objective": payload.objective,
+        "time_horizon": round(max(payload.time_horizon_days, 0.0), 4),
+        "risk_profile": round(clamp01(payload.risk_tolerance), 4),
+        "likely_action_probability": round(clamp01(confidence * 0.9), 4),
+        "capital_weight": round(clamp01(0.5 * confidence + 0.5 * payload.quality_bias), 4),
+        "evaluation_model": route_evaluation_model(payload.asset_class, buyer_type),
+    }
+
+
+def route_evaluation_model(asset_class: str, buyer_type: str) -> str:
+    normalized_asset = str(asset_class or "UNKNOWN").strip().lower()
+    if normalized_asset == "crypto":
+        return "CRYPTO_MOMENTUM_LIQUIDITY_NARRATIVE_MODEL"
+    if normalized_asset == "etf":
+        return "ETF_ALLOCATION_RISK_MACRO_MODEL"
+    if normalized_asset in {"stock", "blue_chip_stock", "equity"}:
+        return "BLUE_CHIP_FUNDAMENTALS_MOAT_MODEL"
+    if normalized_asset == "startup":
+        return "STARTUP_OPTIONALITY_SURVIVAL_MODEL"
+    if normalized_asset == "event_trade" or buyer_type == BuyerClass.EVENT_DRIVEN.value:
+        return "EVENT_CATALYST_REPRICING_MODEL"
+    return "GENERIC_SPECIALIST_VALIDATION_MODEL"
+
+
+def evaluate_buyer_alignment(
+    payload: BuyerTypeInput,
+    *,
+    use_case_score: float,
+) -> tuple[ComponentScore, dict[str, Any], list[RejectionRecord]]:
+    buyer_result = classify_buyer_type(payload)
+    score = clamp01(
+        buyer_result["confidence"] * 0.55
+        + clamp01(use_case_score) * 0.25
+        + clamp01(buyer_result["capital_weight"]) * 0.20
+    )
+    passed = score >= payload.threshold
+    reasons: list[RejectionRecord] = []
+    if not passed:
+        reasons.append(
+            _make_rejection(
+                code=RejectionReason.LOW_BUYER_ALIGNMENT,
+                severity=SeverityLevel.MEDIUM,
+                blocking_weight=0.85,
+                explanation="Signal does not map cleanly to a buyer type, objective, and time horizon.",
+                failed_component="buyer_alignment",
+                observed_value=round(score, 4),
+                threshold=payload.threshold,
+            )
+        )
+    return (
+        ComponentScore(
+            component="buyer_alignment",
+            score=score,
+            threshold=payload.threshold,
+            passed=passed,
+            hard_reject=False,
+            explanation="AssetValue = BuyerFit * UseCaseFit * TimingFit",
+        ),
+        buyer_result,
+        reasons,
+    )
+
+
+def evaluate_execution_survivability(
+    payload: ExecutionSurvivabilityInput,
+    *,
+    thresholds: dict[str, float],
+) -> tuple[ComponentScore, dict[str, Any], list[RejectionRecord]]:
+    survival_score = clamp01(
+        1.0
+        - mean_score(
+            payload.volatility,
+            payload.spread,
+            payload.slippage,
+            payload.latency,
+            payload.data_gaps,
+            payload.false_positive_rate,
+            payload.news_reversal_risk,
+            payload.liquidity_gap_risk,
+            payload.operator_confusion,
+            payload.external_confirmation_failure,
+        )
+    )
+    passed = survival_score >= max(payload.threshold, _threshold(thresholds, "execution_survivability_threshold"))
+    reasons: list[RejectionRecord] = []
+    if not passed:
+        reasons.append(
+            _make_rejection(
+                code=RejectionReason.LOW_EXECUTION_SURVIVABILITY,
+                severity=SeverityLevel.MEDIUM,
+                blocking_weight=0.9,
+                explanation="Execution path does not survive current friction, spread, latency, or confirmation risk.",
+                failed_component="execution_survivability",
+                observed_value=round(survival_score, 4),
+                threshold=max(payload.threshold, _threshold(thresholds, "execution_survivability_threshold")),
+            )
+        )
+    return (
+        ComponentScore(
+            component="execution_survivability",
+            score=survival_score,
+            threshold=max(payload.threshold, _threshold(thresholds, "execution_survivability_threshold")),
+            passed=passed,
+            hard_reject=False,
+            explanation="SurvivalScore = PerformanceAfterStress / PerformanceBeforeStress",
+        ),
+        {
+            "survival_score": round(survival_score, 4),
+            "maintenance_survival_threshold": round(
+                max(payload.threshold, _threshold(thresholds, "execution_survivability_threshold")), 4
+            ),
+        },
+        reasons,
+    )
+
+
+def evaluate_source_validation(
+    payload: SourceValidationInput,
+    *,
+    thresholds: dict[str, float],
+) -> tuple[dict[str, Any], list[RejectionRecord]]:
+    source_credibility = clamp01(payload.source_credibility)
+    external_confirmation = clamp01(payload.external_confirmation)
+    consistency = clamp01(payload.consistency)
+    wrapper_uncertainty = clamp01(payload.wrapper_uncertainty)
+    validated_direction = clamp01(
+        source_credibility * external_confirmation * consistency * (1.0 - wrapper_uncertainty) * 1.8
+    )
+    confidence = clamp01(
+        0.4 * source_credibility + 0.35 * external_confirmation + 0.25 * consistency - 0.25 * wrapper_uncertainty
+    )
+    reasons: list[RejectionRecord] = []
+    threshold = max(payload.threshold, _threshold(thresholds, "source_confirmation_threshold"))
+    if source_credibility >= 0.7 and external_confirmation < threshold:
+        reasons.append(
+            _make_rejection(
+                code=RejectionReason.SOURCE_CREDIBILITY_WITHOUT_VALIDATION,
+                severity=SeverityLevel.MEDIUM,
+                blocking_weight=0.75,
+                explanation="Credible wrapper exists, but external confirmation depth is still below admission standard.",
+                failed_component="source_validation",
+                observed_value=round(external_confirmation, 4),
+                threshold=threshold,
+            )
+        )
+    return (
+        {
+            "source_credibility": round(source_credibility, 4),
+            "external_confirmation": round(external_confirmation, 4),
+            "consistency": round(consistency, 4),
+            "wrapper_uncertainty": round(wrapper_uncertainty, 4),
+            "validated_direction": round(validated_direction, 4),
+            "validated_product_or_event": external_confirmation >= threshold and consistency >= 0.55,
+            "confidence": round(confidence, 4),
+        },
+        reasons,
+    )
+
+
+def evaluate_peak_moment(payload: PeakMomentInput) -> tuple[dict[str, Any], list[RejectionRecord]]:
+    peak_moment_score = clamp01(
+        clamp01(payload.novelty) * clamp01(payload.emotional_intensity) * clamp01(payload.recall_frequency) * 1.8
+    )
+    reasons: list[RejectionRecord] = []
+    if peak_moment_score >= 0.65 and clamp01(payload.total_quality) < 0.55:
+        reasons.append(
+            _make_rejection(
+                code=RejectionReason.PEAK_MOMENT_WITHOUT_TOTAL_QUALITY,
+                severity=SeverityLevel.LOW,
+                blocking_weight=0.45,
+                explanation="Peak moment is memorable, but total product quality is not yet strong enough for admission.",
+                failed_component="peak_moment",
+                observed_value=round(peak_moment_score, 4),
+                threshold=0.55,
+            )
+        )
+    return (
+        {
+            "memory_imprint": round(peak_moment_score, 4),
+            "peak_moment_score": round(peak_moment_score, 4),
+            "novelty": round(clamp01(payload.novelty), 4),
+            "emotional_intensity": round(clamp01(payload.emotional_intensity), 4),
+            "recall_frequency": round(clamp01(payload.recall_frequency), 4),
+        },
+        reasons,
+    )
+
+
+def evaluate_anchor_feature(payload: AnchorFeatureInput) -> dict[str, Any]:
+    denominator = max(float(payload.total_feature_mentions or 0.0), 1.0)
+    concentration = clamp01(float(payload.top_feature_mentions or 0.0) / denominator)
+    return {
+        "anchor_concentration": round(concentration, 4),
+        "product_position": round(clamp01(concentration * 0.6 + clamp01(payload.baseline_competence) * 0.4), 4),
+    }
+
+
+def evaluate_behavioral_skin(
+    payload: BehavioralSkinInput,
+) -> tuple[dict[str, Any], list[RejectionRecord]]:
+    cosmetic = clamp01(payload.appearance)
+    behavior = clamp01(payload.behavior)
+    capability = mean_score(payload.feature_access, payload.system_tuning)
+    if capability >= 0.75 and behavior >= 0.7:
+        skin_class = SkinClass.STRUCTURAL_SKIN
+    elif behavior >= 0.55 or capability >= 0.55:
+        skin_class = SkinClass.BEHAVIORAL_SKIN
+    elif capability >= 0.35:
+        skin_class = SkinClass.FUNCTIONAL_SKIN
+    else:
+        skin_class = SkinClass.COSMETIC_SKIN
+    depth_score = clamp01(0.3 * cosmetic + 0.35 * behavior + 0.35 * capability)
+    reasons: list[RejectionRecord] = []
+    if skin_class == SkinClass.COSMETIC_SKIN and cosmetic >= 0.6:
+        reasons.append(
+            _make_rejection(
+                code=RejectionReason.COSMETIC_SKIN_ONLY,
+                severity=SeverityLevel.LOW,
+                blocking_weight=0.4,
+                explanation="Visible wrapper changed appearance more than behavior, capability, or system tuning.",
+                failed_component="behavioral_skin",
+                observed_value=skin_class.value,
+                threshold=SkinClass.BEHAVIORAL_SKIN.value,
+            )
+        )
+    return (
+        {
+            "skin_class": skin_class.value,
+            "skin_depth_score": round(depth_score, 4),
+            "strategic_skin": round(clamp01(cosmetic * 0.2 + behavior * 0.4 + capability * 0.4), 4),
+        },
+        reasons,
+    )
+
+
+def evaluate_maintenance_survival(
+    payload: MaintenanceCostInput,
+    *,
+    thresholds: dict[str, float],
+) -> tuple[dict[str, Any], list[RejectionRecord]]:
+    before = max(float(payload.performance_before_stress or 0.0), 0.0001)
+    survival_score = clamp01(float(payload.performance_after_stress or 0.0) / before)
+    adoption_score = clamp01(
+        clamp01(payload.desire) - 0.5 * clamp01(payload.maintenance_cost) - 0.5 * clamp01(payload.failure_friction)
+    )
+    threshold = max(payload.threshold, _threshold(thresholds, "maintenance_survival_threshold"))
+    reasons: list[RejectionRecord] = []
+    if survival_score < threshold:
+        reasons.append(
+            _make_rejection(
+                code=RejectionReason.LOW_MAINTENANCE_SURVIVAL,
+                severity=SeverityLevel.MEDIUM,
+                blocking_weight=0.75,
+                explanation="Signal or module degrades too sharply after stress, maintenance cost, or failure friction.",
+                failed_component="maintenance_survival",
+                observed_value=round(survival_score, 4),
+                threshold=threshold,
+            )
+        )
+    return (
+        {
+            "survival_score": round(survival_score, 4),
+            "adoption_score": round(adoption_score, 4),
+        },
+        reasons,
+    )
+
+
+def evaluate_recovery_quality(
+    payload: RecoveryQualityInput,
+) -> tuple[dict[str, Any], list[RejectionRecord]]:
+    surface = clamp01(payload.surface_recovery)
+    structural = clamp01(payload.structural_integrity)
+    if structural >= 0.75:
+        recovery_class = RecoveryClass.STRUCTURAL
+    elif structural >= 0.6:
+        recovery_class = RecoveryClass.RISK_REDUCING
+    elif surface >= 0.65 and structural < 0.45:
+        recovery_class = RecoveryClass.SURFACE_ONLY
+    elif surface >= 0.55:
+        recovery_class = RecoveryClass.OPERATIONAL
+    else:
+        recovery_class = RecoveryClass.FINANCIAL
+    reasons: list[RejectionRecord] = []
+    if recovery_class == RecoveryClass.SURFACE_ONLY:
+        reasons.append(
+            _make_rejection(
+                code=RejectionReason.SURFACE_ONLY_IMPROVEMENT,
+                severity=SeverityLevel.LOW,
+                blocking_weight=0.4,
+                explanation="Observed recovery is mostly cosmetic or operational. Structural resilience is still weak.",
+                failed_component="recovery_quality",
+                observed_value=round(surface, 4),
+                threshold=0.45,
+            )
+        )
+    return (
+        {
+            "recovery_class": recovery_class.value,
+            "recovery_quality": round(clamp01(0.45 * surface + 0.55 * structural), 4),
+        },
+        reasons,
+    )
+
+
+def evaluate_force_flow(
+    payload: ForceFlowInput,
+) -> tuple[dict[str, Any], list[RejectionRecord]]:
+    price_pressure = clamp01(
+        clamp01(payload.signal_force)
+        * clamp01(payload.transmission_path)
+        * clamp01(payload.buyer_sensitivity)
+        * (1.0 - clamp01(payload.damping))
+        * 1.8
+    )
+    reasons: list[RejectionRecord] = []
+    if clamp01(payload.transmission_path) < 0.35 or price_pressure < 0.25:
+        reasons.append(
+            _make_rejection(
+                code=RejectionReason.FORCE_FLOW_BREAK,
+                severity=SeverityLevel.LOW,
+                blocking_weight=0.45,
+                explanation="Signal force is not transmitting cleanly through the expected market architecture.",
+                failed_component="force_flow",
+                observed_value=round(price_pressure, 4),
+                threshold=0.25,
+            )
+        )
+    return (
+        {
+            "price_pressure": round(price_pressure, 4),
+            "system_response": round(clamp01(price_pressure * (1.0 - clamp01(payload.damping))), 4),
+        },
+        reasons,
+    )
+
+
+def evaluate_actor_response(
+    payload: ActorResponseInput,
+) -> tuple[dict[str, Any], list[RejectionRecord]]:
+    expected_move = 0.0
+    reaction_detail: dict[str, float] = {}
+    for buyer_class, probability in payload.buyer_probabilities.items():
+        capital_weight = clamp01(payload.capital_weights.get(buyer_class, 0.0))
+        contribution = clamp01(probability) * capital_weight
+        reaction_detail[buyer_class] = round(contribution, 4)
+        expected_move += contribution
+    expected_move = clamp01(expected_move)
+    conviction = clamp01(payload.conviction)
+    reaction_speed = clamp01(payload.reaction_speed)
+    clarity_score = clamp01(expected_move * 0.5 + conviction * 0.3 + reaction_speed * 0.2)
+    reasons: list[RejectionRecord] = []
+    if clarity_score < payload.threshold:
+        reasons.append(
+            _make_rejection(
+                code=RejectionReason.ACTOR_RESPONSE_UNCLEAR,
+                severity=SeverityLevel.MEDIUM,
+                blocking_weight=0.75,
+                explanation="The system cannot yet identify who is likely to act, how quickly, or with enough capital weight.",
+                failed_component="actor_response",
+                observed_value=round(clarity_score, 4),
+                threshold=payload.threshold,
+            )
+        )
+    return (
+        {
+            "expected_move": round(expected_move, 4),
+            "buyer_classes": sorted(reaction_detail.keys()),
+            "probability_action_by_class": {key: round(clamp01(value), 4) for key, value in payload.buyer_probabilities.items()},
+            "capital_weight_by_class": {key: round(clamp01(value), 4) for key, value in payload.capital_weights.items()},
+            "estimated_reaction_speed": round(reaction_speed, 4),
+            "conviction_score": round(conviction, 4),
+            "clarity_score": round(clarity_score, 4),
+        },
+        reasons,
+    )
+
+
+def compute_bull_state(
+    *,
+    chaos_veto: bool,
+    policy_veto: bool,
+    trapdoor_risk: float,
+    validation_strength: float,
+    material_durability: float,
+    buyer_alignment: float,
+    execution_survivability: float,
+    primitive_understanding: float,
+    fast_track_momentum: float,
+    thresholds: dict[str, float],
+) -> tuple[str, str]:
+    if policy_veto or chaos_veto:
+        return BullState.DIABLO.value, "Policy veto or chaos veto outranks all admission logic."
+    if trapdoor_risk >= _threshold(thresholds, "trapdoor_risk_max"):
+        return BullState.ISLERO.value, "Trapdoor risk remains too high for normal promotion."
+    fast_track = (
+        clamp01(fast_track_momentum) >= _threshold(thresholds, "fast_track_momentum_threshold")
+        and clamp01(validation_strength) >= _threshold(thresholds, "fast_track_validation_threshold")
+        and trapdoor_risk < _threshold(thresholds, "trapdoor_risk_max")
+        and primitive_understanding >= _threshold(thresholds, "primitive_understanding_threshold")
+    )
+    if fast_track and execution_survivability >= _threshold(thresholds, "execution_survivability_threshold"):
+        return BullState.HURACAN.value, "Momentum fast-track is allowed only because validation and risk caps remain clean."
+    if material_durability >= _threshold(thresholds, "material_durability_threshold") and validation_strength >= _threshold(thresholds, "validation_strength_threshold"):
+        if buyer_alignment >= _threshold(thresholds, "buyer_alignment_threshold") and execution_survivability >= _threshold(thresholds, "execution_survivability_threshold"):
+            return BullState.AVENTADOR.value, "Signal survived durability, buyer-fit, and execution-survivability review."
+        return BullState.MURCIELAGO.value, "Signal is durable and validated, but buyer or execution fit still needs work."
+    if validation_strength >= 0.45:
+        return BullState.MIURA.value, "Signal remains in raw or partially validated detection mode."
+    return BullState.UNKNOWN.value, "Admission logic does not support promotion yet."
+
+
+def _next_required_action(
+    *,
+    admission_class: AdmissionClass,
+    reasons: list[RejectionRecord],
+) -> str:
+    if admission_class == AdmissionClass.CHAOS_VETO:
+        return "WAIT_FOR_POLICY_AND_CHAOS_CLEARANCE"
+    if any(reason.code == RejectionReason.DRIFT_FROM_REALITY.value for reason in reasons):
+        return "RECHECK_EXTERNAL_CONFIRMATION"
+    if any(reason.code == RejectionReason.NO_PRIMITIVE_UNDERSTANDING.value for reason in reasons):
+        return "COMPLETE_PRIMITIVE_CHECKLIST"
+    if any(reason.code == RejectionReason.LOW_BUYER_ALIGNMENT.value for reason in reasons):
+        return "MAP_SIGNAL_TO_BUYER_AND_USE_CASE"
+    if admission_class == AdmissionClass.ADMIT_WATCHLIST_ONLY:
+        return "PROMOTE_TO_WATCHLIST"
+    if admission_class == AdmissionClass.ADMIT_EXECUTION_CANDIDATE:
+        return "KEEP_HUMAN_REVIEW_REQUIRED"
+    return "OBSERVE_AND_REVALIDATE"
+
+
 def _admission_class(
     *,
     admission_score: float,
@@ -1036,9 +1724,38 @@ def _operator_summary(
     )
 
 
+def _operator_summary_payload(
+    *,
+    admission_class: AdmissionClass,
+    summary_text: str,
+    next_required_action: str,
+) -> dict[str, str]:
+    state_map = {
+        AdmissionClass.ADMIT_EXECUTION_CANDIDATE: "EXECUTE",
+        AdmissionClass.ADMIT_WATCHLIST_ONLY: "PROMOTE",
+        AdmissionClass.NEEDS_REVALIDATION: "RECHECK_REALITY",
+        AdmissionClass.CHAOS_VETO: "CHAOS_VETO",
+        AdmissionClass.REJECT: "REJECT",
+        AdmissionClass.OBSERVE_ONLY: "WAIT",
+    }
+    state = state_map.get(admission_class, "BLOCK")
+    do_not_do = (
+        "Do not execute automatically."
+        if admission_class != AdmissionClass.ADMIT_EXECUTION_CANDIDATE
+        else "Do not bypass policy, chaos, or human review."
+    )
+    return {
+        "state": state,
+        "plain_english_reason": summary_text,
+        "do_next": next_required_action,
+        "do_not_do": do_not_do,
+    }
+
+
 def evaluate_structural_admission(
     payload: StructuralAdmissionInput,
 ) -> StructuralAdmissionResult:
+    thresholds = load_structural_admission_thresholds()
     design_integrity, design_reasons = evaluate_design_integrity(payload.design_integrity)
     domain_fit, domain_reasons = evaluate_domain_fit(payload.domain_instrument)
     environment_fit, regime_class, recommended_engine, environment_reasons = evaluate_environment_fit(
@@ -1065,6 +1782,33 @@ def evaluate_structural_admission(
         payload.primitive_competence
     )
     use_case_fit, use_case_reasons = evaluate_use_case_fit(payload.use_case_fit)
+    buyer_alignment, buyer_type_result, buyer_reasons = evaluate_buyer_alignment(
+        payload.buyer_type,
+        use_case_score=use_case_fit.score,
+    )
+    execution_survivability, execution_survivability_detail, execution_reasons = (
+        evaluate_execution_survivability(payload.execution_survivability, thresholds=thresholds)
+    )
+    source_validation_result, source_validation_reasons = evaluate_source_validation(
+        payload.source_validation,
+        thresholds=thresholds,
+    )
+    peak_moment_result, peak_moment_reasons = evaluate_peak_moment(payload.peak_moment)
+    anchor_feature_result = evaluate_anchor_feature(payload.anchor_feature)
+    behavioral_skin_result, behavioral_skin_reasons = evaluate_behavioral_skin(
+        payload.behavioral_skin
+    )
+    maintenance_survival_result, maintenance_survival_reasons = evaluate_maintenance_survival(
+        payload.maintenance_cost,
+        thresholds=thresholds,
+    )
+    recovery_quality_result, recovery_quality_reasons = evaluate_recovery_quality(
+        payload.recovery_quality
+    )
+    force_flow_result, force_flow_reasons = evaluate_force_flow(payload.force_flow)
+    actor_response_result, actor_response_reasons = evaluate_actor_response(
+        payload.actor_response
+    )
 
     component_scores = {
         "domain_fit": domain_fit.score,
@@ -1078,6 +1822,8 @@ def evaluate_structural_admission(
         "reality_alignment": reality_alignment.score,
         "primitive_understanding": primitive_understanding.score,
         "use_case_fit": use_case_fit.score,
+        "buyer_alignment": buyer_alignment.score,
+        "execution_survivability": execution_survivability.score,
     }
     admission_score = min(component_scores.values())
     diagnostic_score = weighted_sum(
@@ -1094,6 +1840,8 @@ def evaluate_structural_admission(
             "reality_alignment": 0.10,
             "primitive_understanding": 0.075,
             "use_case_fit": 0.075,
+            "buyer_alignment": 0.075,
+            "execution_survivability": 0.075,
         },
     )
     all_reasons = (
@@ -1110,6 +1858,15 @@ def evaluate_structural_admission(
         + reality_reasons
         + primitive_reasons
         + use_case_reasons
+        + buyer_reasons
+        + execution_reasons
+        + source_validation_reasons
+        + peak_moment_reasons
+        + behavioral_skin_reasons
+        + maintenance_survival_reasons
+        + recovery_quality_reasons
+        + force_flow_reasons
+        + actor_response_reasons
     )
     hard_reject = any(reason.severity == SeverityLevel.HARD.value for reason in all_reasons)
     chaos_veto = bool(payload.chaos_veto or payload.policy_veto)
@@ -1134,25 +1891,95 @@ def evaluate_structural_admission(
                 threshold="allow_new_risk=true",
             )
         )
+    bull_state, bull_reason = compute_bull_state(
+        chaos_veto=bool(payload.chaos_veto),
+        policy_veto=bool(payload.policy_veto),
+        trapdoor_risk=trapdoor_risk,
+        validation_strength=clamp01(payload.validation_strength),
+        material_durability=material_durability.score,
+        buyer_alignment=buyer_alignment.score,
+        execution_survivability=execution_survivability.score,
+        primitive_understanding=primitive_understanding.score,
+        fast_track_momentum=payload.fast_track_momentum,
+        thresholds=thresholds,
+    )
+    bottleneck_layer = min(component_scores, key=component_scores.get)
+    passed = admission_class in {
+        AdmissionClass.ADMIT_EXECUTION_CANDIDATE.value,
+        AdmissionClass.ADMIT_WATCHLIST_ONLY.value,
+    }
+    next_required_action = _next_required_action(
+        admission_class=admission_class,
+        reasons=all_reasons,
+    )
+    operator_summary_text = _operator_summary(
+        admission_class=admission_class,
+        reasons=all_reasons[:3],
+        recommended_engine=recommended_engine,
+        regime_class=regime_class,
+    )
+    operator_summary_payload = _operator_summary_payload(
+        admission_class=admission_class,
+        summary_text=operator_summary_text,
+        next_required_action=next_required_action,
+    )
     serialized_reasons = [asdict(reason) for reason in all_reasons]
+    layer_scores = {
+        design_integrity.component: asdict(design_integrity),
+        domain_fit.component: asdict(domain_fit),
+        environment_fit.component: asdict(environment_fit),
+        material_durability.component: asdict(material_durability),
+        signal_harmony.component: asdict(signal_harmony),
+        transition_score.component: asdict(transition_score),
+        trust_observability.component: asdict(trust_observability),
+        operator_clarity.component: asdict(operator_clarity),
+        reality_alignment.component: asdict(reality_alignment),
+        primitive_understanding.component: asdict(primitive_understanding),
+        use_case_fit.component: asdict(use_case_fit),
+        buyer_alignment.component: asdict(buyer_alignment),
+        execution_survivability.component: asdict(execution_survivability),
+        "progression": asdict(progression_score),
+    }
     return StructuralAdmissionResult(
         admission_score=round(admission_score, 4),
         diagnostic_score=round(diagnostic_score, 4),
         admission_class=admission_class.value,
+        passed=passed,
+        bottleneck_layer=bottleneck_layer,
         hard_reject=hard_reject,
         chaos_veto=chaos_veto,
         recommended_engine=recommended_engine.value,
         regime_class=regime_class.value,
         material_class=material_class.value,
         transition_class=transition_class.value,
+        buyer_type=buyer_type_result,
+        materiality={
+            "material_class": material_class.value,
+            "ignition_speed": round(clamp01(payload.burn_profile.ignition_speed), 4),
+            "duration": round(clamp01(payload.burn_profile.duration_score), 4),
+            "stability": round(clamp01(payload.burn_profile.stability_score), 4),
+            "environment_resistance": round(clamp01(payload.burn_profile.environment_resistance_score), 4),
+            "decay_rate": round(clamp01(payload.burn_profile.decay_rate), 4),
+            "durability_score": round(material_durability.score, 4),
+        },
+        transition={
+            "transition_class": transition_class.value,
+            "curvature": round(clamp01(payload.transition.curvature), 4),
+            "oscillation": round(clamp01(payload.transition.oscillation), 4),
+            "resolution_strength": round(clamp01(payload.transition.resolution_strength), 4),
+            "trapdoor_risk": round(clamp01(max(payload.transition.trapdoor_risk, trapdoor_risk)), 4),
+            "transition_quality": round(transition_score.score, 4),
+            "passed": transition_score.passed,
+        },
+        source_validation=source_validation_result,
+        actor_response=actor_response_result,
+        bull_state=bull_state,
+        next_required_action=next_required_action,
         component_scores={key: round(value, 4) for key, value in component_scores.items()},
+        layer_scores=layer_scores,
         rejection_reasons=serialized_reasons,
-        operator_summary=_operator_summary(
-            admission_class=admission_class,
-            reasons=all_reasons[:3],
-            recommended_engine=recommended_engine,
-            regime_class=regime_class,
-        ),
+        operator_summary=operator_summary_text,
+        operator_summary_payload=operator_summary_payload,
     )
 
 
@@ -1215,13 +2042,27 @@ def build_structural_admission_report(
     progression_sequence = ["EVENT", "NEWS", "SENTIMENT", "VOLUME", "PRICE"]
     if float(validation_row.get("cross_source_confirmation_score", 0.0) or 0.0) >= 0.45:
         progression_sequence.append("OPTIONS")
+    validation_strength = clamp01(float(validation_row.get("validation_score", 0.0) or 0.0))
+    cross_confirmation = clamp01(float(validation_row.get("cross_source_confirmation_score", 0.0) or 0.0))
+    blocker_clearance = clamp01(float(validation_row.get("blocker_clearance_score", 0.0) or 0.0))
+    novelty_score = clamp01(float(validation_row.get("novelty_score", 0.0) or 0.0))
+    first_order_score = clamp01(float(validation_row.get("first_order_score", 0.0) or 0.0))
+    repricing_headroom = clamp01(float(validation_row.get("repricing_headroom_score", 0.0) or 0.0))
+    readiness_compatibility = clamp01(float(perception_row.get("readiness_compatibility", 0.0) or 0.0))
+    survival_score = clamp01(float(perception_row.get("survival_score", 0.0) or 0.0))
+    attention_score = clamp01(float(attention_proxy_report.get("attention_proxy_score", 0.0) or 0.0))
+    narrative_heat = clamp01(float(attention_proxy_report.get("narrative_heat_score", 0.0) or 0.0))
+    temporal_clean = (
+        str(runtime_state.get("temporal_integrity", {}).get("temporal_integrity_state", "CLEAN")).upper()
+        == "CLEAN"
+    )
     input_payload = StructuralAdmissionInput(
         design_integrity=DesignIntegrityInput(
             readability_score=clamp01(float(perception_control_report.get("average_signal_lux", 0.0) or 0.0)),
             structure_score=clamp01(float(perception_row.get("structural_relevance", 0.0) or 0.0)),
             traceability_score=source_quality,
             risk_visibility_score=clamp01(1.0 - float(validation_row.get("blocker_clearance_score", 0.0) or 0.0)),
-            execution_clarity_score=clamp01(float(perception_row.get("readiness_compatibility", 0.0) or 0.0)),
+            execution_clarity_score=readiness_compatibility,
             utility_high=bool(runtime_state.get("signal_summary", {}).get("signals_above_ce_threshold", 0) or 0),
         ),
         domain_instrument=DomainInstrumentInput(
@@ -1238,26 +2079,28 @@ def build_structural_admission_report(
             selected_engine=selected_engine,
         ),
         burn_profile=BurnProfile(
-            ignition_speed=clamp01(float(validation_row.get("novelty_score", 0.0) or 0.0)),
-            duration_score=clamp01(float(validation_row.get("first_order_score", 0.0) or 0.0)),
-            stability_score=clamp01(float(perception_row.get("survival_score", 0.0) or 0.0)),
-            environment_resistance_score=clamp01(float(validation_row.get("blocker_clearance_score", 0.0) or 0.0)),
+            ignition_speed=novelty_score,
+            duration_score=first_order_score,
+            stability_score=survival_score,
+            environment_resistance_score=blocker_clearance,
             decay_rate=clamp01(1.0 - float(perception_control_report.get("signal_survival_rate", 0.0) or 0.0)),
         ),
         signal_graph=SignalGraphInput(
             node_values={
-                "PRICE": clamp01(float(validation_row.get("validation_score", 0.0) or 0.0)),
-                "VOLUME": clamp01(float(validation_row.get("first_order_score", 0.0) or 0.0)),
-                "NEWS": clamp01(float(attention_proxy_report.get("attention_proxy_score", 0.0) or 0.0)),
+                "PRICE": validation_strength,
+                "VOLUME": first_order_score,
+                "NEWS": attention_score,
                 "LIQUIDITY": source_quality,
-                "EVENT_PRIOR": clamp01(float(validation_row.get("repricing_headroom_score", 0.0) or 0.0)),
+                "EVENT_PRIOR": repricing_headroom,
                 "TECHNICAL": clamp01(float(runtime_state.get("signal_summary", {}).get("scm_rate", 0.0) or 0.0)),
+                "BUYER_TYPE": clamp01(float(runtime_state.get("position_truth_summary", {}).get("position_count", 0) or 0) / 5.0),
             },
-            expected_edges=[("PRICE", "VOLUME"), ("NEWS", "PRICE"), ("LIQUIDITY", "PRICE")],
+            expected_edges=[("PRICE", "VOLUME"), ("NEWS", "PRICE"), ("LIQUIDITY", "PRICE"), ("PRICE", "BUYER_TYPE")],
             observed_edges=[
-                ("PRICE", "VOLUME", "confirm" if float(validation_row.get("first_order_score", 0.0) or 0.0) >= 0.45 else "conflict"),
-                ("NEWS", "PRICE", "confirm" if float(attention_proxy_report.get("attention_proxy_score", 0.0) or 0.0) <= 0.65 else "conflict"),
+                ("PRICE", "VOLUME", "confirm" if first_order_score >= 0.45 else "conflict"),
+                ("NEWS", "PRICE", "confirm" if attention_score <= 0.65 else "conflict"),
                 ("LIQUIDITY", "PRICE", "confirm" if source_quality >= 0.45 else "conflict"),
+                ("PRICE", "BUYER_TYPE", "confirm" if validation_strength >= 0.45 else "conflict"),
             ],
         ),
         progression=ProgressionInput(
@@ -1265,15 +2108,15 @@ def build_structural_admission_report(
             required_confirmations=["PRICE", "VOLUME"],
         ),
         transition=TransitionInput(
-            curvature=clamp01(float(validation_row.get("novelty_score", 0.0) or 0.0)),
-            oscillation=clamp01(float(attention_proxy_report.get("narrative_heat_score", 0.0) or 0.0)),
-            resolution_strength=clamp01(float(validation_row.get("first_order_score", 0.0) or 0.0)),
-            trapdoor_risk=clamp01(1.0 - float(validation_row.get("blocker_clearance_score", 0.0) or 0.0)),
+            curvature=novelty_score,
+            oscillation=narrative_heat,
+            resolution_strength=first_order_score,
+            trapdoor_risk=clamp01(1.0 - blocker_clearance),
         ),
         trapdoor=TrapdoorInput(
-            expected_path_deviation=clamp01(1.0 - float(validation_row.get("blocker_clearance_score", 0.0) or 0.0)),
+            expected_path_deviation=clamp01(1.0 - blocker_clearance),
             impact=volatility,
-            speed=clamp01(float(attention_proxy_report.get("attention_proxy_score", 0.0) or 0.0)),
+            speed=attention_score,
         ),
         trust=TrustInput(
             observability=clamp01(float(perception_control_report.get("noise_suppression_ratio", 0.0) or 0.0)),
@@ -1291,11 +2134,11 @@ def build_structural_admission_report(
         reality_anchor=RealityAnchorInput(
             freshness=1.0,
             external_confirmation=0.45 if runtime_state.get("truth_origin") == "external" else 0.35,
-            regime_consistency=1.0 if str(runtime_state.get("temporal_integrity", {}).get("temporal_integrity_state", "CLEAN")).upper() == "CLEAN" else 0.25,
+            regime_consistency=1.0 if temporal_clean else 0.25,
             time_since_validation_hours=0.0,
         ),
         primitive_competence=PrimitiveCompetenceInput(
-            primitive_understanding=clamp01(float(validation_row.get("validation_score", 0.0) or 0.0)),
+            primitive_understanding=validation_strength,
             interface_leverage=1.0 if validation_row else 0.0,
             signal_defined=bool(validation_row),
             variable_defined=bool(validation_row),
@@ -1311,14 +2154,111 @@ def build_structural_admission_report(
             specialization_match=1.0 if validation_row else 0.0,
             generalist_output_used_for_execution=False,
         ),
-        validation_strength=clamp01(float(validation_row.get("validation_score", 0.0) or 0.0)),
+        buyer_type=BuyerTypeInput(
+            asset_class=str(validation_row.get("asset_class") or runtime_state.get("asset_class") or "stock"),
+            objective="EXECUTION_CANDIDATE_REVIEW",
+            risk_tolerance=narrative_heat,
+            time_horizon_days=max(5.0, float(runtime_state.get("signal_summary", {}).get("avg_hold_days", 5.0) or 5.0)),
+            identity_fit=clamp01(float(runtime_state.get("signal_summary", {}).get("scm_rate", 0.0) or 0.0)),
+            narrative_strength=attention_score,
+            income_relevance=clamp01(float(validation_row.get("cashflow_quality_score", 0.0) or 0.0)),
+            optionality=repricing_headroom,
+            hedge_need=clamp01(float(len(active_blockers)) / 5.0),
+            event_catalyst_strength=novelty_score,
+            quality_bias=validation_strength,
+            passive_fit=source_quality,
+        ),
+        execution_survivability=ExecutionSurvivabilityInput(
+            volatility=volatility,
+            spread=clamp01(1.0 - source_quality),
+            slippage=1.0 if friction_band == "HIGH_FRICTION" else 0.5 if friction_band == "MEDIUM_FRICTION" else 0.2,
+            latency=clamp01(1.0 - float(perception_control_report.get("noise_suppression_ratio", 0.0) or 0.0)),
+            data_gaps=clamp01(1.0 - source_quality),
+            false_positive_rate=clamp01(1.0 - validation_strength),
+            news_reversal_risk=attention_score,
+            liquidity_gap_risk=clamp01(1.0 - source_quality),
+            operator_confusion=clamp01(len(active_blockers) / 5.0),
+            external_confirmation_failure=clamp01(1.0 - cross_confirmation),
+        ),
+        source_validation=SourceValidationInput(
+            source_credibility=source_quality,
+            external_confirmation=cross_confirmation,
+            consistency=validation_strength,
+            wrapper_uncertainty=clamp01(1.0 - source_quality),
+        ),
+        peak_moment=PeakMomentInput(
+            novelty=novelty_score,
+            emotional_intensity=attention_score,
+            recall_frequency=narrative_heat,
+            total_quality=validation_strength,
+        ),
+        anchor_feature=AnchorFeatureInput(
+            top_feature_mentions=float(runtime_state.get("signal_summary", {}).get("signals_above_ce_threshold", 0) or 0),
+            total_feature_mentions=float(max(runtime_state.get("signal_summary", {}).get("total_signals", 0) or 0, 1)),
+            baseline_competence=validation_strength,
+        ),
+        behavioral_skin=BehavioralSkinInput(
+            appearance=attention_score,
+            behavior=readiness_compatibility,
+            feature_access=validation_strength,
+            system_tuning=survival_score,
+        ),
+        maintenance_cost=MaintenanceCostInput(
+            performance_after_stress=blocker_clearance,
+            performance_before_stress=max(validation_strength, 0.0001),
+            desire=attention_score,
+            maintenance_cost=clamp01(1.0 - blocker_clearance),
+            failure_friction=1.0 if friction_band == "HIGH_FRICTION" else 0.5 if friction_band == "MEDIUM_FRICTION" else 0.2,
+        ),
+        recovery_quality=RecoveryQualityInput(
+            surface_recovery=attention_score,
+            structural_integrity=blocker_clearance,
+        ),
+        force_flow=ForceFlowInput(
+            signal_force=validation_strength,
+            transmission_path=source_quality,
+            buyer_sensitivity=attention_score,
+            damping=clamp01(len(active_blockers) / 5.0),
+        ),
+        actor_response=ActorResponseInput(
+            buyer_probabilities={
+                BuyerClass.RETAIL_MOMENTUM.value: attention_score,
+                BuyerClass.INSTITUTIONAL_QUALITY.value: validation_strength,
+                BuyerClass.EVENT_DRIVEN.value: novelty_score,
+            },
+            capital_weights={
+                BuyerClass.RETAIL_MOMENTUM.value: 0.35,
+                BuyerClass.INSTITUTIONAL_QUALITY.value: 0.75 if allow_new_risk else 0.25,
+                BuyerClass.EVENT_DRIVEN.value: 0.5,
+            },
+            reaction_speed=attention_score,
+            conviction=validation_strength,
+        ),
+        validation_strength=validation_strength,
+        fast_track_momentum=clamp01(float(runtime_state.get("signal_summary", {}).get("scm_rate", 0.0) or 0.0)),
         chaos_veto=chaos_veto,
         policy_veto=not allow_new_risk,
         system_name=str(validation_row.get("ticker") or "PIPELINE"),
         source="DEFAULT_STRUCTURAL_ADMISSION",
     )
+    peak_moment_result, _ = evaluate_peak_moment(input_payload.peak_moment)
+    anchor_feature_result = evaluate_anchor_feature(input_payload.anchor_feature)
+    behavioral_skin_result, _ = evaluate_behavioral_skin(input_payload.behavioral_skin)
+    maintenance_survival_result, _ = evaluate_maintenance_survival(
+        input_payload.maintenance_cost,
+        thresholds=load_structural_admission_thresholds(),
+    )
+    recovery_quality_result, _ = evaluate_recovery_quality(input_payload.recovery_quality)
+    force_flow_result, _ = evaluate_force_flow(input_payload.force_flow)
     result = evaluate_structural_admission(input_payload)
     report = asdict(result)
+    report["peak_moment"] = peak_moment_result
+    report["anchor_feature"] = anchor_feature_result
+    report["behavioral_skin"] = behavioral_skin_result
+    report["maintenance_survival"] = maintenance_survival_result
+    report["recovery_quality"] = recovery_quality_result
+    report["force_flow"] = force_flow_result
+    report["thresholds"] = load_structural_admission_thresholds()
     report["input_summary"] = {
         "system_name": input_payload.system_name,
         "source": input_payload.source,
@@ -1341,6 +2281,8 @@ def format_structural_admission_summary(report: dict[str, Any]) -> str:
             f"diagnostic_score={report.get('diagnostic_score', 0.0)}",
             f"regime_class={report.get('regime_class', RegimeClass.UNKNOWN.value)}",
             f"recommended_engine={report.get('recommended_engine', EngineClass.MATCHBOX_ENGINE.value)}",
+            f"bull_state={report.get('bull_state', BullState.UNKNOWN.value)}",
+            f"next_required_action={report.get('next_required_action', 'OBSERVE_AND_REVALIDATE')}",
         ]
     )
 

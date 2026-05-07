@@ -85,3 +85,79 @@ Important doctrine:
 Current limitation:
 - repo-native proxy inputs are used where the MVP does not yet expose a dedicated live source for a component
 - this remains offline-first and advisory-only
+
+Buyer and execution-fit extension:
+
+```text
+MVPDecisionQuality =
+DomainFit
+* EnvironmentFit
+* MaterialDurability
+* SignalHarmony
+* TransitionQuality
+* ValidationStrength
+* TrustObservability
+* OperatorClarity
+* RealityAlignment
+* PrimitiveUnderstanding
+* UseCaseFit
+* BuyerAlignment
+* ExecutionSurvivability
+
+AdmissionScore = min(
+DomainFit,
+EnvironmentFit,
+MaterialDurability,
+SignalHarmony,
+TransitionQuality,
+ValidationStrength,
+TrustObservability,
+OperatorClarity,
+RealityAlignment,
+PrimitiveUnderstanding,
+UseCaseFit,
+BuyerAlignment,
+ExecutionSurvivability
+)
+```
+
+Additional formulas now implemented:
+
+```text
+AssetValue = BuyerFit * UseCaseFit * TimingFit
+DecisionTrust = Observability * Auditability * Explainability
+SurvivalScore = PerformanceAfterStress / PerformanceBeforeStress
+ValidatedSignal = SourceCredibility * ConfirmationDepth * Consistency
+PricePressure = SignalForce * TransmissionPath * BuyerSensitivity
+ExpectedMove = Sum(BuyerClass_i * ProbabilityAction_i * CapitalWeight_i)
+InvestableSignal = Detection * Validation * Durability * BuyerAlignment * ExecutionSurvivability
+```
+
+Additional components:
+- Buyer Type Engine
+- Evaluation Model Router
+- Source Credibility vs Validation Gate
+- Peak Moment Detector
+- Anchor Feature Classifier
+- Behavioral Skin Layer
+- Durability / Maintenance Cost Gate
+- Surface vs Structure Classifier
+- Force Flow / Pressure Transmission Engine
+- Actor Response Prediction Engine
+- Bull archetype routing
+
+Runtime shape:
+- existing compatibility remains under `structural_admission_state`
+- richer additive state is exposed under `mvp_admission_layer`
+- operator-facing next-step guidance is exposed under `operator_summary`
+
+Threshold configuration:
+- `config/structural_admission_config.json`
+
+Extended doctrine:
+- attraction is not admission
+- credibility is not validation
+- peak moment is not total quality
+- cosmetic recovery is not structural recovery
+- generalists explore; specialists validate
+- policy veto and chaos veto still outrank every admission state
