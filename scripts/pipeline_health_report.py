@@ -68,6 +68,7 @@ try:
         HEDGE_TRADE_ENTRY_REPORT_PATH,
         SIGNAL_SURFACE_REPORT_PATH,
         BOARD_CONTROL_SAFETY_REPORT_PATH,
+        PRE_EXECUTION_SCAN_REPORT_PATH,
         INTERPRETATION_DRIFT_REPORT_PATH,
         INTERPRETATION_FAILURE_LOG_PATH,
         INTERPRETATION_PACKET_REPORT_PATH,
@@ -174,6 +175,7 @@ except ModuleNotFoundError:
         HEDGE_TRADE_ENTRY_REPORT_PATH,
         SIGNAL_SURFACE_REPORT_PATH,
         BOARD_CONTROL_SAFETY_REPORT_PATH,
+        PRE_EXECUTION_SCAN_REPORT_PATH,
         INTERPRETATION_DRIFT_REPORT_PATH,
         INTERPRETATION_FAILURE_LOG_PATH,
         INTERPRETATION_PACKET_REPORT_PATH,
@@ -648,6 +650,48 @@ def build_board_control_safety_summary(
         ),
         "report_path": str(
             report.get("report_path") or repo_relative(BOARD_CONTROL_SAFETY_REPORT_PATH)
+        ),
+    }
+
+
+def build_pre_execution_scan_summary(
+    pre_execution_scan_report: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    report = pre_execution_scan_report if isinstance(pre_execution_scan_report, dict) else {}
+    return {
+        "report_present": bool(report),
+        "pre_execution_scan_state": str(
+            report.get("pre_execution_scan_state")
+            or "UNKNOWN_PRE_EXECUTION_STATE"
+        ),
+        "pre_execution_scan_readiness": str(
+            report.get("pre_execution_scan_readiness") or "BLIND"
+        ),
+        "pre_execution_pressure_state": str(
+            report.get("pre_execution_pressure_state") or "CHAOS"
+        ),
+        "pre_execution_turn_decision": str(
+            report.get("pre_execution_turn_decision") or "QUARANTINE"
+        ),
+        "pre_execution_surprise_band": str(
+            report.get("pre_execution_surprise_band") or "CRITICAL"
+        ),
+        "pre_execution_board_control_state": str(
+            report.get("pre_execution_board_control_state") or "UNKNOWN"
+        ),
+        "pre_execution_decision": str(
+            report.get("pre_execution_decision") or "QUARANTINE"
+        ),
+        "pre_execution_archetype": str(
+            report.get("pre_execution_archetype") or "UNKNOWN_PRE_EXECUTION_STATE"
+        ),
+        "pre_execution_score": float(report.get("pre_execution_score", 0.0) or 0.0),
+        "pre_execution_action_permission": bool(
+            report.get("pre_execution_action_permission", False)
+        ),
+        "signals_evaluated": int(report.get("signals_evaluated", 0) or 0),
+        "report_path": str(
+            report.get("report_path") or repo_relative(PRE_EXECUTION_SCAN_REPORT_PATH)
         ),
     }
 
@@ -2608,6 +2652,7 @@ def build_pipeline_health_report(
     external_data_report: dict[str, Any] | None = None,
     external_observation_report: dict[str, Any] | None = None,
     signal_surface_report: dict[str, Any] | None = None,
+    pre_execution_scan_report: dict[str, Any] | None = None,
     board_control_safety_report: dict[str, Any] | None = None,
     grok_xai_report: dict[str, Any] | None = None,
     latest_snapshot_timestamp: str | None = None,
@@ -2901,6 +2946,14 @@ def build_pipeline_health_report(
             SIGNAL_SURFACE_REPORT_PATH,
         )
     signal_surface_logic = build_signal_surface_summary(signal_surface_report)
+    if not isinstance(pre_execution_scan_report, dict) or not pre_execution_scan_report:
+        pre_execution_scan_report = _load_optional_runtime_artifact(
+            None,
+            PRE_EXECUTION_SCAN_REPORT_PATH,
+        )
+    pre_execution_scan_logic = build_pre_execution_scan_summary(
+        pre_execution_scan_report
+    )
     if not isinstance(board_control_safety_report, dict) or not board_control_safety_report:
         board_control_safety_report = _load_optional_runtime_artifact(
             None,
@@ -4050,6 +4103,7 @@ def build_pipeline_health_report(
         "intelligence_summary": intelligence_summary,
         "extreme_state_logic": extreme_state_logic,
         "signal_surface_logic": signal_surface_logic,
+        "pre_execution_scan_logic": pre_execution_scan_logic,
         "board_control_safety_logic": board_control_safety_logic,
         "extreme_state_layer_available": bool(extreme_state_logic.get("report_present", False)),
         "extreme_state_signals_evaluated": extreme_state_logic.get("signals_evaluated", 0),
@@ -4088,6 +4142,40 @@ def build_pipeline_health_report(
         "signal_surface_report_path": signal_surface_logic.get(
             "report_path",
             repo_relative(SIGNAL_SURFACE_REPORT_PATH),
+        ),
+        "pre_execution_scan_state": pre_execution_scan_logic.get(
+            "pre_execution_scan_state"
+        ),
+        "pre_execution_scan_readiness": pre_execution_scan_logic.get(
+            "pre_execution_scan_readiness"
+        ),
+        "pre_execution_pressure_state": pre_execution_scan_logic.get(
+            "pre_execution_pressure_state"
+        ),
+        "pre_execution_turn_decision": pre_execution_scan_logic.get(
+            "pre_execution_turn_decision"
+        ),
+        "pre_execution_surprise_band": pre_execution_scan_logic.get(
+            "pre_execution_surprise_band"
+        ),
+        "pre_execution_board_control_state": pre_execution_scan_logic.get(
+            "pre_execution_board_control_state"
+        ),
+        "pre_execution_decision": pre_execution_scan_logic.get(
+            "pre_execution_decision"
+        ),
+        "pre_execution_archetype": pre_execution_scan_logic.get(
+            "pre_execution_archetype"
+        ),
+        "pre_execution_score": pre_execution_scan_logic.get(
+            "pre_execution_score", 0.0
+        ),
+        "pre_execution_action_permission": pre_execution_scan_logic.get(
+            "pre_execution_action_permission", False
+        ),
+        "pre_execution_report_path": pre_execution_scan_logic.get(
+            "report_path",
+            repo_relative(PRE_EXECUTION_SCAN_REPORT_PATH),
         ),
         "board_control_score": board_control_safety_logic.get("board_control_score", 0.0),
         "critical_square_exposure": board_control_safety_logic.get(
@@ -4771,6 +4859,17 @@ def format_pipeline_health_summary(report: dict[str, Any]) -> str:
             f"score={signal_surface_logic.get('signal_surface_score', 0.0)}, "
             f"damage={signal_surface_logic.get('signal_surface_damage_class', 'UNKNOWN')}, "
             f"bull={signal_surface_logic.get('signal_surface_bull_state', 'UNKNOWN_SURFACE_STATE')}"
+        )
+    pre_execution_scan_logic = report.get("pre_execution_scan_logic", {})
+    if isinstance(pre_execution_scan_logic, dict) and pre_execution_scan_logic.get("report_present"):
+        lines.append(
+            "pre_execution_scan="
+            f"state={pre_execution_scan_logic.get('pre_execution_scan_state', 'UNKNOWN_PRE_EXECUTION_STATE')}, "
+            f"readiness={pre_execution_scan_logic.get('pre_execution_scan_readiness', 'BLIND')}, "
+            f"pressure={pre_execution_scan_logic.get('pre_execution_pressure_state', 'CHAOS')}, "
+            f"turn={pre_execution_scan_logic.get('pre_execution_turn_decision', 'QUARANTINE')}, "
+            f"decision={pre_execution_scan_logic.get('pre_execution_decision', 'QUARANTINE')}, "
+            f"score={pre_execution_scan_logic.get('pre_execution_score', 0.0)}"
         )
     board_control_safety_logic = report.get("board_control_safety_logic", {})
     if isinstance(board_control_safety_logic, dict) and board_control_safety_logic.get("report_present"):
