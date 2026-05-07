@@ -48,6 +48,7 @@ try:
     )
     from scripts.signal_metabolism import build_signal_metabolism_report
     from scripts.snapshot_logger import build_snapshot_row
+    from scripts.structural_admission_layer import build_structural_admission_report
     from scripts.structural_design_engine import build_structural_design_report
     from scripts.runtime_common import (
         COMPLEXITY_LADDER_CONTROLLER_PATH,
@@ -59,6 +60,7 @@ try:
         HEALTH_REPORT_PATH,
         SIGNAL_METABOLISM_REPORT_PATH,
         SNAPSHOT_LOG_PATH,
+        STRUCTURAL_ADMISSION_REPORT_PATH,
         STRUCTURAL_DESIGN_REPORT_PATH,
         build_runtime_state_from_scm_report_payload,
         resolve_bridge_mode,
@@ -117,6 +119,7 @@ except ModuleNotFoundError:
     )
     from signal_metabolism import build_signal_metabolism_report
     from snapshot_logger import build_snapshot_row
+    from structural_admission_layer import build_structural_admission_report
     from structural_design_engine import build_structural_design_report
     from runtime_common import (
         COMPLEXITY_LADDER_CONTROLLER_PATH,
@@ -128,6 +131,7 @@ except ModuleNotFoundError:
         HEALTH_REPORT_PATH,
         SIGNAL_METABOLISM_REPORT_PATH,
         SNAPSHOT_LOG_PATH,
+        STRUCTURAL_ADMISSION_REPORT_PATH,
         STRUCTURAL_DESIGN_REPORT_PATH,
         build_runtime_state_from_scm_report_payload,
         resolve_bridge_mode,
@@ -3058,6 +3062,17 @@ def build_pipeline_health_report(
         operator_control_report=operator_control_report,
         write_runtime=effective_write_runtime,
     )
+    structural_admission_report = state.get("structural_admission")
+    if not isinstance(structural_admission_report, dict) or not structural_admission_report:
+        structural_admission_report = build_structural_admission_report(
+            runtime_state=state,
+            signal_refinery_report=signal_refinery_report,
+            attention_proxy_report=attention_proxy_report,
+            perception_control_report=perception_control_report,
+            friction_report=friction_report,
+            trend_report=trend_report,
+            write_runtime=effective_write_runtime,
+        )
     structural_design_report = build_structural_design_report(
         runtime_state=state,
         reflection_context=reflection_context,
@@ -3444,6 +3459,38 @@ def build_pipeline_health_report(
             "policy_veto_outranks_layer"
         ],
         "safety_state_intact": false_negative_casino_monopoly_report["safety_state_intact"],
+        "structural_admission_state": {
+            "admission_class": structural_admission_report["admission_class"],
+            "admission_score": structural_admission_report["admission_score"],
+            "diagnostic_score": structural_admission_report["diagnostic_score"],
+            "hard_reject": structural_admission_report["hard_reject"],
+            "chaos_veto": structural_admission_report["chaos_veto"],
+            "recommended_engine": structural_admission_report["recommended_engine"],
+            "regime_class": structural_admission_report["regime_class"],
+            "material_class": structural_admission_report["material_class"],
+            "transition_class": structural_admission_report["transition_class"],
+            "component_scores": structural_admission_report["component_scores"],
+            "rejection_reasons": structural_admission_report["rejection_reasons"],
+            "operator_summary": structural_admission_report["operator_summary"],
+        },
+        "structural_admission_class": structural_admission_report["admission_class"],
+        "structural_admission_score": structural_admission_report["admission_score"],
+        "structural_admission_diagnostic_score": structural_admission_report[
+            "diagnostic_score"
+        ],
+        "structural_admission_hard_reject": structural_admission_report["hard_reject"],
+        "structural_admission_chaos_veto": structural_admission_report["chaos_veto"],
+        "structural_admission_recommended_engine": structural_admission_report[
+            "recommended_engine"
+        ],
+        "structural_admission_regime_class": structural_admission_report["regime_class"],
+        "structural_admission_material_class": structural_admission_report[
+            "material_class"
+        ],
+        "structural_admission_transition_class": structural_admission_report[
+            "transition_class"
+        ],
+        "structural_admission_report_path": repo_relative(STRUCTURAL_ADMISSION_REPORT_PATH),
         "structural_design_state": {
             "structure_state": structural_design_report["structure_state"],
             "pressure_score": structural_design_report["pressure_score"],
@@ -3647,6 +3694,11 @@ def build_pipeline_health_report(
             stamp=True,
         )
         write_json_atomic(
+            STRUCTURAL_ADMISSION_REPORT_PATH,
+            structural_admission_report,
+            stamp=True,
+        )
+        write_json_atomic(
             STRUCTURAL_DESIGN_REPORT_PATH,
             structural_design_report,
             stamp=True,
@@ -3819,6 +3871,16 @@ def format_pipeline_health_summary(report: dict[str, Any]) -> str:
             f"cycle_state={report.get('cycle_state', 'UNKNOWN')}",
             "investable_signal_adjusted_score="
             f"{report.get('investable_signal_adjusted_score')}",
+            "structural_admission_class="
+            f"{report.get('structural_admission_class', 'UNKNOWN')}",
+            "structural_admission_score="
+            f"{report.get('structural_admission_score')}",
+            "structural_admission_diagnostic_score="
+            f"{report.get('structural_admission_diagnostic_score')}",
+            "structural_admission_recommended_engine="
+            f"{report.get('structural_admission_recommended_engine', 'UNKNOWN')}",
+            "structural_admission_regime_class="
+            f"{report.get('structural_admission_regime_class', 'UNKNOWN')}",
             "structural_design_state="
             f"{report.get('structural_design_structure_state', 'UNKNOWN')}",
             "structural_design_pressure_score="

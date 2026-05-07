@@ -37,6 +37,7 @@ try:
         set_source_mode,
         utc_timestamp,
     )
+    from scripts.structural_admission_layer import build_structural_admission_report
     from scripts.signal_refinery import build_signal_refinery_report
     from scripts.signal_conversion_monitor import build_signal_conversion_report
     from scripts.snapshot_logger import build_snapshot_row, log_snapshot
@@ -74,6 +75,7 @@ except ModuleNotFoundError:
         set_source_mode,
         utc_timestamp,
     )
+    from structural_admission_layer import build_structural_admission_report
     from signal_refinery import build_signal_refinery_report
     from signal_conversion_monitor import build_signal_conversion_report
     from snapshot_logger import build_snapshot_row, log_snapshot
@@ -330,6 +332,16 @@ def run_diagnostics_pipeline(
         ),
     )
     runtime_state.update(bridge_mode_context)
+    structural_admission_report = build_structural_admission_report(
+        runtime_state=runtime_state,
+        signal_refinery_report=final_signal_refinery_report,
+        attention_proxy_report=final_attention_proxy_report,
+        perception_control_report=final_perception_control_report,
+        friction_report=friction_report,
+        trend_report=trend_report,
+        write_runtime=effective_write_runtime,
+    )
+    runtime_state["structural_admission"] = structural_admission_report
     action_report = build_action_report(
         runtime_state=runtime_state,
         signal_refinery_report=final_signal_refinery_report,
