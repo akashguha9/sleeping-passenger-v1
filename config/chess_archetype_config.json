@@ -1,0 +1,12 @@
+{
+  "theta_shock": 0.74,
+  "theta_durability": 0.6,
+  "theta_hidden_risk": 0.6,
+  "theta_precision_margin": 0.1,
+  "theta_validation_floor": 0.55,
+  "theta_operator_veto": 0.7,
+  "theta_fast_track": 0.6,
+  "theta_execution_feasibility": 0.65,
+  "theta_state_actionable": 0.62,
+  "theta_initiative": 0.6
+}

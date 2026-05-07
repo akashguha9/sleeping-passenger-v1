@@ -51,6 +51,7 @@ try:
     from scripts.latent_signal_release_bull_layer import (
         build_latent_signal_release_bull_report,
     )
+    from scripts.chess_archetype_decision_layer import write_chess_archetype_report
     from scripts.tennis_archetype_execution import (
         write_tennis_archetype_report,
     )
@@ -60,6 +61,7 @@ try:
         AVENTADOR_PROMOTION_REPORT_PATH,
         BULL_STATE_REPORT_PATH,
         BULL_TRANSITION_LOG_PATH,
+        CHESS_ARCHETYPE_REPORT_PATH,
         COLLAPSE_ANALYSIS_REPORT_PATH,
         COMPLEXITY_LADDER_CONTROLLER_PATH,
         EXTREME_STATE_REPORT_PATH,
@@ -141,6 +143,9 @@ except ModuleNotFoundError:
     from latent_signal_release_bull_layer import (  # type: ignore[no-redef]
         build_latent_signal_release_bull_report,
     )
+    from chess_archetype_decision_layer import (  # type: ignore[no-redef]
+        write_chess_archetype_report,
+    )
     from tennis_archetype_execution import (  # type: ignore[no-redef]
         write_tennis_archetype_report,
     )
@@ -150,6 +155,7 @@ except ModuleNotFoundError:
         AVENTADOR_PROMOTION_REPORT_PATH,
         BULL_STATE_REPORT_PATH,
         BULL_TRANSITION_LOG_PATH,
+        CHESS_ARCHETYPE_REPORT_PATH,
         COLLAPSE_ANALYSIS_REPORT_PATH,
         COMPLEXITY_LADDER_CONTROLLER_PATH,
         EXTREME_STATE_REPORT_PATH,
@@ -3129,6 +3135,13 @@ def build_pipeline_health_report(
             runtime_state=state,
             write_runtime=effective_write_runtime,
         )
+    chess_archetype_report = state.get("chess_archetype")
+    if not isinstance(chess_archetype_report, dict) or not chess_archetype_report:
+        chess_archetype_report = write_chess_archetype_report(
+            [],
+            runtime_state=state,
+            write_runtime=effective_write_runtime,
+        )
     structural_design_report = build_structural_design_report(
         runtime_state=state,
         reflection_context=reflection_context,
@@ -3712,6 +3725,46 @@ def build_pipeline_health_report(
             "summary_recommendation"
         ],
         "tennis_archetype_report_path": repo_relative(TENNIS_ARCHETYPE_REPORT_PATH),
+        "chess_archetype_layer_available": True,
+        "chess_archetype_state": {
+            "total_signals_evaluated": chess_archetype_report["total_signals_evaluated"],
+            "archetype_distribution": chess_archetype_report["archetype_distribution"],
+            "veto_counts": chess_archetype_report["veto_counts"],
+            "fast_track_candidates": chess_archetype_report["fast_track_candidates"],
+            "precision_required_cases": chess_archetype_report["precision_required_cases"],
+            "recovery_activations": chess_archetype_report["recovery_activations"],
+            "average_multi_order_consequence_score": chess_archetype_report[
+                "average_multi_order_consequence_score"
+            ],
+            "most_common_rejection_reason": chess_archetype_report[
+                "most_common_rejection_reason"
+            ],
+            "system_readiness_impact": chess_archetype_report["system_readiness_impact"],
+        },
+        "chess_selected_archetype": (
+            chess_archetype_report["signals"][0]["selected_archetype"]
+            if chess_archetype_report["signals"]
+            else "none"
+        ),
+        "chess_final_state": (
+            chess_archetype_report["signals"][0]["final_state"]
+            if chess_archetype_report["signals"]
+            else "RAW_SIGNAL"
+        ),
+        "chess_decision": (
+            chess_archetype_report["signals"][0]["decision"]
+            if chess_archetype_report["signals"]
+            else "WAIT"
+        ),
+        "chess_policy_veto_count": chess_archetype_report["veto_counts"]["policy_veto_count"],
+        "chess_chaos_veto_count": chess_archetype_report["veto_counts"]["chaos_veto_count"],
+        "chess_fast_track_candidates": chess_archetype_report["fast_track_candidates"],
+        "chess_precision_required_cases": chess_archetype_report["precision_required_cases"],
+        "chess_recovery_activations": chess_archetype_report["recovery_activations"],
+        "chess_average_multi_order_consequence": chess_archetype_report[
+            "average_multi_order_consequence_score"
+        ],
+        "chess_report_path": repo_relative(CHESS_ARCHETYPE_REPORT_PATH),
         "structural_design_state": {
             "structure_state": structural_design_report["structure_state"],
             "pressure_score": structural_design_report["pressure_score"],
@@ -4140,6 +4193,16 @@ def format_pipeline_health_summary(report: dict[str, Any]) -> str:
             f"{report.get('tennis_execution_ready_simulation_only_count')}",
             "tennis_summary_recommendation="
             f"{report.get('tennis_summary_recommendation', 'UNKNOWN')}",
+            f"chess_selected_archetype={report.get('chess_selected_archetype', 'UNKNOWN')}",
+            f"chess_final_state={report.get('chess_final_state', 'UNKNOWN')}",
+            f"chess_decision={report.get('chess_decision', 'UNKNOWN')}",
+            f"chess_policy_veto_count={report.get('chess_policy_veto_count')}",
+            f"chess_chaos_veto_count={report.get('chess_chaos_veto_count')}",
+            f"chess_fast_track_candidates={report.get('chess_fast_track_candidates')}",
+            f"chess_precision_required_cases={report.get('chess_precision_required_cases')}",
+            f"chess_recovery_activations={report.get('chess_recovery_activations')}",
+            "chess_average_multi_order_consequence="
+            f"{report.get('chess_average_multi_order_consequence')}",
             "structural_design_state="
             f"{report.get('structural_design_structure_state', 'UNKNOWN')}",
             "structural_design_pressure_score="
