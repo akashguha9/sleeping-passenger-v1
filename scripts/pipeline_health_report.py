@@ -63,7 +63,13 @@ try:
         BULL_STATE_REPORT_PATH,
         BULL_TRANSITION_LOG_PATH,
         CHESS_ARCHETYPE_REPORT_PATH,
+        CONTEXT_PROFILE_REPORT_PATH,
+        CONTEXTUAL_INTERPRETATION_SUMMARY_PATH,
         HEDGE_TRADE_ENTRY_REPORT_PATH,
+        INTERPRETATION_DRIFT_REPORT_PATH,
+        INTERPRETATION_FAILURE_LOG_PATH,
+        INTERPRETATION_PACKET_REPORT_PATH,
+        REALITY_RENDERING_REPORT_PATH,
         COLLAPSE_ANALYSIS_REPORT_PATH,
         COMPLEXITY_LADDER_CONTROLLER_PATH,
         EXTREME_STATE_REPORT_PATH,
@@ -161,7 +167,13 @@ except ModuleNotFoundError:
         BULL_STATE_REPORT_PATH,
         BULL_TRANSITION_LOG_PATH,
         CHESS_ARCHETYPE_REPORT_PATH,
+        CONTEXT_PROFILE_REPORT_PATH,
+        CONTEXTUAL_INTERPRETATION_SUMMARY_PATH,
         HEDGE_TRADE_ENTRY_REPORT_PATH,
+        INTERPRETATION_DRIFT_REPORT_PATH,
+        INTERPRETATION_FAILURE_LOG_PATH,
+        INTERPRETATION_PACKET_REPORT_PATH,
+        REALITY_RENDERING_REPORT_PATH,
         COLLAPSE_ANALYSIS_REPORT_PATH,
         COMPLEXITY_LADDER_CONTROLLER_PATH,
         EXTREME_STATE_REPORT_PATH,
@@ -3155,6 +3167,9 @@ def build_pipeline_health_report(
             runtime_state=state,
             write_runtime=effective_write_runtime,
         )
+    contextual_interpretation_report = state.get("contextual_interpretation")
+    if not isinstance(contextual_interpretation_report, dict):
+        contextual_interpretation_report = {}
     structural_design_report = build_structural_design_report(
         runtime_state=state,
         reflection_context=reflection_context,
@@ -3812,6 +3827,48 @@ def build_pipeline_health_report(
         "annualized_projection": hedge_trade_entry_report["annualized_projection"],
         "assumption_flags": hedge_trade_entry_report["assumption_flags"],
         "hedge_trade_entry_report_path": repo_relative(HEDGE_TRADE_ENTRY_REPORT_PATH),
+        "contextual_interpretation_report": contextual_interpretation_report,
+        "contextual_interpretation_enabled": bool(contextual_interpretation_report.get("enabled", False)),
+        "contextual_interpretation_state": {
+            "validation_input_mode": contextual_interpretation_report.get("validation_input_mode", "RAW_SIGNAL"),
+            "average_interpretation_drift": contextual_interpretation_report.get("average_interpretation_drift"),
+            "average_interpretation_confidence": contextual_interpretation_report.get("average_interpretation_confidence"),
+            "chaos_veto_count": contextual_interpretation_report.get("chaos_veto_count", 0),
+            "block_count": contextual_interpretation_report.get("block_count", 0),
+            "reduce_size_count": contextual_interpretation_report.get("reduce_size_count", 0),
+            "render_operator_mode": contextual_interpretation_report.get("render_operator_mode", "validate"),
+        },
+        "interpretation_validation_input_mode": contextual_interpretation_report.get(
+            "validation_input_mode",
+            "RAW_SIGNAL",
+        ),
+        "interpretation_average_drift": contextual_interpretation_report.get(
+            "average_interpretation_drift"
+        ),
+        "interpretation_average_confidence": contextual_interpretation_report.get(
+            "average_interpretation_confidence"
+        ),
+        "interpretation_chaos_veto_count": contextual_interpretation_report.get(
+            "chaos_veto_count",
+            0,
+        ),
+        "interpretation_block_count": contextual_interpretation_report.get("block_count", 0),
+        "interpretation_reduce_size_count": contextual_interpretation_report.get(
+            "reduce_size_count",
+            0,
+        ),
+        "interpretation_render_operator_mode": contextual_interpretation_report.get(
+            "render_operator_mode",
+            "validate",
+        ),
+        "contextual_interpretation_report_path": repo_relative(
+            CONTEXTUAL_INTERPRETATION_SUMMARY_PATH
+        ),
+        "context_profile_report_path": repo_relative(CONTEXT_PROFILE_REPORT_PATH),
+        "interpretation_packet_report_path": repo_relative(INTERPRETATION_PACKET_REPORT_PATH),
+        "interpretation_drift_report_path": repo_relative(INTERPRETATION_DRIFT_REPORT_PATH),
+        "reality_rendering_report_path": repo_relative(REALITY_RENDERING_REPORT_PATH),
+        "interpretation_failure_log_path": repo_relative(INTERPRETATION_FAILURE_LOG_PATH),
         "structural_design_state": {
             "structure_state": structural_design_report["structure_state"],
             "pressure_score": structural_design_report["pressure_score"],
@@ -4262,6 +4319,22 @@ def format_pipeline_health_summary(report: dict[str, Any]) -> str:
             f"entry_gate_state={report.get('entry_gate_state', 'UNKNOWN')}",
             f"execution_quality_score={report.get('execution_quality_score')}",
             f"annualized_projection={report.get('annualized_projection')}",
+            "contextual_interpretation_enabled="
+            f"{str(bool(report.get('contextual_interpretation_enabled', False))).lower()}",
+            "interpretation_validation_input_mode="
+            f"{report.get('interpretation_validation_input_mode', 'RAW_SIGNAL')}",
+            "interpretation_average_drift="
+            f"{report.get('interpretation_average_drift')}",
+            "interpretation_average_confidence="
+            f"{report.get('interpretation_average_confidence')}",
+            "interpretation_chaos_veto_count="
+            f"{report.get('interpretation_chaos_veto_count', 0)}",
+            "interpretation_block_count="
+            f"{report.get('interpretation_block_count', 0)}",
+            "interpretation_reduce_size_count="
+            f"{report.get('interpretation_reduce_size_count', 0)}",
+            "interpretation_render_operator_mode="
+            f"{report.get('interpretation_render_operator_mode', 'validate')}",
             "structural_design_state="
             f"{report.get('structural_design_structure_state', 'UNKNOWN')}",
             "structural_design_pressure_score="

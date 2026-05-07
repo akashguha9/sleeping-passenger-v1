@@ -33,6 +33,9 @@ try:
         build_latent_signal_release_bull_report,
     )
     from scripts.chess_archetype_decision_layer import write_chess_archetype_report
+    from scripts.contextual_interpretation import (
+        build_contextual_interpretation_summary,
+    )
     from scripts.hedge_trade_entry_playbook import build_hedge_trade_entry_report
     from scripts.tennis_archetype_execution import (
         load_runtime_compatible_signals,
@@ -82,6 +85,9 @@ except ModuleNotFoundError:
     from chess_archetype_decision_layer import (  # type: ignore[no-redef]
         write_chess_archetype_report,
     )
+    from contextual_interpretation import (  # type: ignore[no-redef]
+        build_contextual_interpretation_summary,
+    )
     from hedge_trade_entry_playbook import (  # type: ignore[no-redef]
         build_hedge_trade_entry_report,
     )
@@ -108,6 +114,10 @@ def run_diagnostics_pipeline(
     include_tests: bool = False,
     include_external_data: bool = False,
     include_external_observations: bool = False,
+    include_contextual_interpretation: bool = False,
+    contextual_interpretation_summary: bool = False,
+    interpretation_drift_threshold: float | None = None,
+    render_operator_mode: str = "validate",
     bridge_external_candidates: bool = True,
     external_observation_symbols: list[str] | None = None,
     external_observation_provider: str = "yahoo",
@@ -379,6 +389,24 @@ def run_diagnostics_pipeline(
         signal_refinery_report=final_signal_refinery_report,
         perception_control_report=final_perception_control_report,
     )
+    if include_contextual_interpretation:
+        contextual_report = build_contextual_interpretation_summary(
+            tennis_signals,
+            runtime_state=runtime_state,
+            drift_threshold=(
+                interpretation_drift_threshold
+                if interpretation_drift_threshold is not None
+                else 0.35
+            ),
+            render_operator_mode=render_operator_mode,
+            write_runtime=effective_write_runtime,
+        )
+        runtime_state["contextual_interpretation"] = contextual_report
+        runtime_state["contextual_interpretation_enabled"] = True
+        runtime_state["validation_input_mode"] = contextual_report["validation_input_mode"]
+        runtime_state["interpreted_signals"] = list(contextual_report["interpreted_signals"])
+    elif contextual_interpretation_summary:
+        runtime_state["contextual_interpretation_summary_requested"] = True
     tennis_archetype_report = write_tennis_archetype_report(
         tennis_signals,
         runtime_state=runtime_state,
@@ -473,6 +501,35 @@ def build_cli_parser() -> argparse.ArgumentParser:
         help="Provider key for the external observation lane (default: yahoo).",
     )
     parser.add_argument(
+        "--include-contextual-interpretation",
+        action="store_true",
+        help=(
+            "Enable the contextual interpretation layer. This attaches "
+            "interpretation packets to signals before downstream validation-style "
+            "diagnostics and writes contextual runtime artifacts."
+        ),
+    )
+    parser.add_argument(
+        "--contextual-interpretation-summary",
+        action="store_true",
+        help=(
+            "Print the compact contextual interpretation summary view. Implies "
+            "summary-style output when combined with the interpretation layer."
+        ),
+    )
+    parser.add_argument(
+        "--interpretation-drift-threshold",
+        type=float,
+        default=None,
+        help="Override the drift threshold used by the contextual interpretation layer.",
+    )
+    parser.add_argument(
+        "--render-operator-mode",
+        choices=["scout", "validate", "execute", "risk", "review"],
+        default="validate",
+        help="Renderer mode for contextual interpretation artifacts.",
+    )
+    parser.add_argument(
         "--no-write",
         action="store_true",
         help="Do not persist runtime artifacts while running the pipeline.",
@@ -512,6 +569,11 @@ def main(argv: list[str] | None = None) -> int:
         include_tests=args.include_tests,
         include_external_data=args.include_external_data,
         include_external_observations=args.include_external_observations,
+        include_contextual_interpretation=args.include_contextual_interpretation
+        or args.contextual_interpretation_summary,
+        contextual_interpretation_summary=args.contextual_interpretation_summary,
+        interpretation_drift_threshold=args.interpretation_drift_threshold,
+        render_operator_mode=args.render_operator_mode,
         bridge_external_candidates=not args.observation_only,
         external_observation_symbols=args.external_observation_symbols,
         external_observation_provider=args.external_observation_provider,
@@ -521,7 +583,7 @@ def main(argv: list[str] | None = None) -> int:
         simulate_realm_bis_clear=args.simulate_realm_bis_clear,
         simulate_all_clear=args.simulate_all_clear,
     )
-    if args.summary:
+    if args.summary or args.contextual_interpretation_summary:
         print(format_pipeline_health_summary(report))
     else:
         print(json.dumps(report, indent=2))
