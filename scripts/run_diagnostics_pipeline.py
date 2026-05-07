@@ -29,6 +29,9 @@ try:
     from scripts.integrity_diagnostics import build_temporal_integrity_summary
     from scripts.moltbook_feedback import build_moltbook_feedback_report
     from scripts.perception_control import build_perception_control_report
+    from scripts.latent_signal_release_bull_layer import (
+        build_latent_signal_release_bull_report,
+    )
     from scripts.runtime_common import (
         SNAPSHOT_LOG_PATH,
         persist_current_runtime_state,
@@ -67,6 +70,9 @@ except ModuleNotFoundError:
     )
     from integrity_diagnostics import build_temporal_integrity_summary
     from perception_control import build_perception_control_report
+    from latent_signal_release_bull_layer import (  # type: ignore[no-redef]
+        build_latent_signal_release_bull_report,
+    )
     from runtime_common import (
         SNAPSHOT_LOG_PATH,
         persist_current_runtime_state,
@@ -342,6 +348,16 @@ def run_diagnostics_pipeline(
         write_runtime=effective_write_runtime,
     )
     runtime_state["structural_admission"] = structural_admission_report
+    latent_signal_release_bull_report = build_latent_signal_release_bull_report(
+        runtime_state=runtime_state,
+        signal_refinery_report=final_signal_refinery_report,
+        attention_proxy_report=final_attention_proxy_report,
+        perception_control_report=final_perception_control_report,
+        structural_admission_report=structural_admission_report,
+        friction_report=friction_report,
+        write_runtime=effective_write_runtime,
+    )
+    runtime_state["latent_signal_release_bull"] = latent_signal_release_bull_report
     action_report = build_action_report(
         runtime_state=runtime_state,
         signal_refinery_report=final_signal_refinery_report,

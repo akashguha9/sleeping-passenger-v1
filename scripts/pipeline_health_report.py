@@ -48,20 +48,35 @@ try:
     )
     from scripts.signal_metabolism import build_signal_metabolism_report
     from scripts.snapshot_logger import build_snapshot_row
+    from scripts.latent_signal_release_bull_layer import (
+        build_latent_signal_release_bull_report,
+    )
     from scripts.structural_admission_layer import build_structural_admission_report
     from scripts.structural_design_engine import build_structural_design_report
     from scripts.runtime_common import (
+        AVENTADOR_PROMOTION_REPORT_PATH,
+        BULL_STATE_REPORT_PATH,
+        BULL_TRANSITION_LOG_PATH,
+        COLLAPSE_ANALYSIS_REPORT_PATH,
         COMPLEXITY_LADDER_CONTROLLER_PATH,
         EXTREME_STATE_REPORT_PATH,
         EXPERIENCE_MODE_REPORT_PATH,
+        FALSE_CONVICTION_REPORT_PATH,
         FIELD_DYNAMICS_REPORT_PATH,
         FALSE_NEGATIVE_CASINO_MONOPOLY_REPORT_PATH,
         FOOTBALL_PORTFOLIO_ARCHETYPE_REPORT_PATH,
+        GALLARDO_EXECUTION_REPORT_PATH,
         HEALTH_REPORT_PATH,
+        LATENT_SIGNAL_RELEASE_REPORT_PATH,
+        MURCIELAGO_DURABILITY_REPORT_PATH,
+        OPPORTUNITY_HALF_LIFE_REPORT_PATH,
         SIGNAL_METABOLISM_REPORT_PATH,
+        SIGNAL_TEXTURE_REPORT_PATH,
+        SIGNAL_ZETA_REPORT_PATH,
         SNAPSHOT_LOG_PATH,
         STRUCTURAL_ADMISSION_REPORT_PATH,
         STRUCTURAL_DESIGN_REPORT_PATH,
+        VALIDATION_BUFFER_REPORT_PATH,
         build_runtime_state_from_scm_report_payload,
         resolve_bridge_mode,
         build_truth_context,
@@ -119,20 +134,35 @@ except ModuleNotFoundError:
     )
     from signal_metabolism import build_signal_metabolism_report
     from snapshot_logger import build_snapshot_row
+    from latent_signal_release_bull_layer import (  # type: ignore[no-redef]
+        build_latent_signal_release_bull_report,
+    )
     from structural_admission_layer import build_structural_admission_report
     from structural_design_engine import build_structural_design_report
     from runtime_common import (
+        AVENTADOR_PROMOTION_REPORT_PATH,
+        BULL_STATE_REPORT_PATH,
+        BULL_TRANSITION_LOG_PATH,
+        COLLAPSE_ANALYSIS_REPORT_PATH,
         COMPLEXITY_LADDER_CONTROLLER_PATH,
         EXTREME_STATE_REPORT_PATH,
         EXPERIENCE_MODE_REPORT_PATH,
+        FALSE_CONVICTION_REPORT_PATH,
         FIELD_DYNAMICS_REPORT_PATH,
         FALSE_NEGATIVE_CASINO_MONOPOLY_REPORT_PATH,
         FOOTBALL_PORTFOLIO_ARCHETYPE_REPORT_PATH,
+        GALLARDO_EXECUTION_REPORT_PATH,
         HEALTH_REPORT_PATH,
+        LATENT_SIGNAL_RELEASE_REPORT_PATH,
+        MURCIELAGO_DURABILITY_REPORT_PATH,
+        OPPORTUNITY_HALF_LIFE_REPORT_PATH,
         SIGNAL_METABOLISM_REPORT_PATH,
+        SIGNAL_TEXTURE_REPORT_PATH,
+        SIGNAL_ZETA_REPORT_PATH,
         SNAPSHOT_LOG_PATH,
         STRUCTURAL_ADMISSION_REPORT_PATH,
         STRUCTURAL_DESIGN_REPORT_PATH,
+        VALIDATION_BUFFER_REPORT_PATH,
         build_runtime_state_from_scm_report_payload,
         resolve_bridge_mode,
         build_truth_context,
@@ -3073,6 +3103,17 @@ def build_pipeline_health_report(
             trend_report=trend_report,
             write_runtime=effective_write_runtime,
         )
+    latent_signal_release_bull_report = state.get("latent_signal_release_bull")
+    if not isinstance(latent_signal_release_bull_report, dict) or not latent_signal_release_bull_report:
+        latent_signal_release_bull_report = build_latent_signal_release_bull_report(
+            runtime_state=state,
+            signal_refinery_report=signal_refinery_report,
+            attention_proxy_report=attention_proxy_report,
+            perception_control_report=perception_control_report,
+            structural_admission_report=structural_admission_report,
+            friction_report=friction_report,
+            write_runtime=effective_write_runtime,
+        )
     structural_design_report = build_structural_design_report(
         runtime_state=state,
         reflection_context=reflection_context,
@@ -3525,6 +3566,91 @@ def build_pipeline_health_report(
             "next_required_action"
         ],
         "structural_admission_report_path": repo_relative(STRUCTURAL_ADMISSION_REPORT_PATH),
+        "latent_signal_release_bull_state": {
+            "bull_state": latent_signal_release_bull_report["state"],
+            "release_pressure": latent_signal_release_bull_report["release_pressure"],
+            "release_ready": latent_signal_release_bull_report["release_ready"],
+            "trigger_strength": latent_signal_release_bull_report["trigger_strength"],
+            "system_mode": latent_signal_release_bull_report["system_mode"],
+            "signal_texture": latent_signal_release_bull_report["signal_texture"],
+            "opportunity_half_life": latent_signal_release_bull_report[
+                "opportunity_half_life"
+            ],
+            "validation_buffer": latent_signal_release_bull_report["validation_buffer"],
+            "separation_strength": latent_signal_release_bull_report[
+                "separation_strength"
+            ],
+            "signal_zeta": latent_signal_release_bull_report["signal_zeta"],
+            "aggregation_risk": latent_signal_release_bull_report["aggregation_risk"],
+            "false_conviction_risk": latent_signal_release_bull_report[
+                "false_conviction_risk"
+            ],
+            "collapse_mode_active": latent_signal_release_bull_report[
+                "collapse_mode_active"
+            ],
+            "collapse_cluster_count": latent_signal_release_bull_report[
+                "collapse_cluster_count"
+            ],
+            "durability_score": latent_signal_release_bull_report["durability_score"],
+            "promotion_ready": latent_signal_release_bull_report["promotion_ready"],
+            "execution_ready": latent_signal_release_bull_report["execution_ready"],
+            "active_vetoes": latent_signal_release_bull_report["active_vetoes"],
+            "recommended_next_action": latent_signal_release_bull_report[
+                "recommended_next_action"
+            ],
+            "rationale": latent_signal_release_bull_report["rationale"],
+        },
+        "latent_bull_state": latent_signal_release_bull_report["state"],
+        "release_pressure": latent_signal_release_bull_report["release_pressure"],
+        "release_ready": latent_signal_release_bull_report["release_ready"],
+        "trigger_strength": latent_signal_release_bull_report["trigger_strength"],
+        "latent_system_mode": latent_signal_release_bull_report["system_mode"],
+        "signal_texture": latent_signal_release_bull_report["signal_texture"],
+        "opportunity_half_life": latent_signal_release_bull_report[
+            "opportunity_half_life"
+        ],
+        "validation_buffer": latent_signal_release_bull_report["validation_buffer"],
+        "separation_strength": latent_signal_release_bull_report["separation_strength"],
+        "signal_zeta": latent_signal_release_bull_report["signal_zeta"],
+        "aggregation_risk": latent_signal_release_bull_report["aggregation_risk"],
+        "false_conviction_risk": latent_signal_release_bull_report[
+            "false_conviction_risk"
+        ],
+        "collapse_mode_active": latent_signal_release_bull_report[
+            "collapse_mode_active"
+        ],
+        "collapse_cluster_count": latent_signal_release_bull_report[
+            "collapse_cluster_count"
+        ],
+        "durability_score": latent_signal_release_bull_report["durability_score"],
+        "promotion_ready": latent_signal_release_bull_report["promotion_ready"],
+        "execution_ready": latent_signal_release_bull_report["execution_ready"],
+        "latent_active_vetoes": latent_signal_release_bull_report["active_vetoes"],
+        "recommended_next_action": latent_signal_release_bull_report[
+            "recommended_next_action"
+        ],
+        "latent_signal_release_report_path": repo_relative(
+            LATENT_SIGNAL_RELEASE_REPORT_PATH
+        ),
+        "signal_texture_report_path": repo_relative(SIGNAL_TEXTURE_REPORT_PATH),
+        "opportunity_half_life_report_path": repo_relative(
+            OPPORTUNITY_HALF_LIFE_REPORT_PATH
+        ),
+        "validation_buffer_report_path": repo_relative(VALIDATION_BUFFER_REPORT_PATH),
+        "signal_zeta_report_path": repo_relative(SIGNAL_ZETA_REPORT_PATH),
+        "false_conviction_report_path": repo_relative(FALSE_CONVICTION_REPORT_PATH),
+        "collapse_analysis_report_path": repo_relative(COLLAPSE_ANALYSIS_REPORT_PATH),
+        "murcielago_durability_report_path": repo_relative(
+            MURCIELAGO_DURABILITY_REPORT_PATH
+        ),
+        "aventador_promotion_report_path": repo_relative(
+            AVENTADOR_PROMOTION_REPORT_PATH
+        ),
+        "gallardo_execution_report_path": repo_relative(
+            GALLARDO_EXECUTION_REPORT_PATH
+        ),
+        "bull_state_report_path": repo_relative(BULL_STATE_REPORT_PATH),
+        "bull_transition_log_path": repo_relative(BULL_TRANSITION_LOG_PATH),
         "structural_design_state": {
             "structure_state": structural_design_report["structure_state"],
             "pressure_score": structural_design_report["pressure_score"],
@@ -3923,6 +4049,24 @@ def format_pipeline_health_summary(report: dict[str, Any]) -> str:
             f"{report.get('structural_admission_bull_state', 'UNKNOWN')}",
             "structural_admission_next_required_action="
             f"{report.get('structural_admission_next_required_action', 'UNKNOWN')}",
+            f"latent_bull_state={report.get('latent_bull_state', 'UNKNOWN')}",
+            f"release_pressure={report.get('release_pressure')}",
+            f"release_ready={str(bool(report.get('release_ready', False))).lower()}",
+            f"trigger_strength={report.get('trigger_strength')}",
+            f"latent_system_mode={report.get('latent_system_mode', 'UNKNOWN')}",
+            f"signal_texture={report.get('signal_texture')}",
+            f"opportunity_half_life={report.get('opportunity_half_life')}",
+            f"validation_buffer={report.get('validation_buffer')}",
+            f"separation_strength={report.get('separation_strength')}",
+            f"signal_zeta={report.get('signal_zeta')}",
+            f"aggregation_risk={report.get('aggregation_risk')}",
+            f"false_conviction_risk={report.get('false_conviction_risk')}",
+            f"collapse_mode_active={str(bool(report.get('collapse_mode_active', False))).lower()}",
+            f"collapse_cluster_count={report.get('collapse_cluster_count')}",
+            f"durability_score={report.get('durability_score')}",
+            f"promotion_ready={str(bool(report.get('promotion_ready', False))).lower()}",
+            f"execution_ready={str(bool(report.get('execution_ready', False))).lower()}",
+            f"recommended_next_action={report.get('recommended_next_action', 'UNKNOWN')}",
             "structural_design_state="
             f"{report.get('structural_design_structure_state', 'UNKNOWN')}",
             "structural_design_pressure_score="

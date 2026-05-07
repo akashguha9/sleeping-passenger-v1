@@ -1,0 +1,15 @@
+{
+  "theta_release": 0.65,
+  "theta_trigger": 0.6,
+  "theta_texture": 0.55,
+  "theta_zeta_min": 0.6,
+  "theta_false_conviction_max": 0.35,
+  "theta_coherence": 0.6,
+  "theta_durability": 0.7,
+  "theta_stress": 0.65,
+  "theta_chaos": 0.75,
+  "theta_momentum": 0.8,
+  "theta_min_validation": 0.5,
+  "theta_separation_min": 0.5,
+  "theta_validation": 0.6
+}
