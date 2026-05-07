@@ -67,6 +67,7 @@ try:
         CONTEXTUAL_INTERPRETATION_SUMMARY_PATH,
         HEDGE_TRADE_ENTRY_REPORT_PATH,
         SIGNAL_SURFACE_REPORT_PATH,
+        BOARD_CONTROL_SAFETY_REPORT_PATH,
         INTERPRETATION_DRIFT_REPORT_PATH,
         INTERPRETATION_FAILURE_LOG_PATH,
         INTERPRETATION_PACKET_REPORT_PATH,
@@ -172,6 +173,7 @@ except ModuleNotFoundError:
         CONTEXTUAL_INTERPRETATION_SUMMARY_PATH,
         HEDGE_TRADE_ENTRY_REPORT_PATH,
         SIGNAL_SURFACE_REPORT_PATH,
+        BOARD_CONTROL_SAFETY_REPORT_PATH,
         INTERPRETATION_DRIFT_REPORT_PATH,
         INTERPRETATION_FAILURE_LOG_PATH,
         INTERPRETATION_PACKET_REPORT_PATH,
@@ -574,6 +576,78 @@ def build_signal_surface_summary(
         "huracan_count": int(counts.get("huracan_count", 0) or 0),
         "report_path": str(
             report.get("report_path") or repo_relative(SIGNAL_SURFACE_REPORT_PATH)
+        ),
+    }
+
+
+def build_board_control_safety_summary(
+    board_control_safety_report: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    report = board_control_safety_report if isinstance(board_control_safety_report, dict) else {}
+    counts = report.get("board_control_counts", {}) if isinstance(report, dict) else {}
+    if not isinstance(counts, dict):
+        counts = {}
+    return {
+        "report_present": bool(report),
+        "board_control_score": float(report.get("board_control_score", 0.0) or 0.0),
+        "critical_square_exposure": float(report.get("critical_square_exposure", 0.0) or 0.0),
+        "weakest_path_score": float(report.get("weakest_path_score", 0.0) or 0.0),
+        "local_global_clearance_gap": float(report.get("local_global_clearance_gap", 0.0) or 0.0),
+        "feedback_integrity_score": float(report.get("feedback_integrity_score", 0.0) or 0.0),
+        "review_theater_score": float(report.get("review_theater_score", 0.0) or 0.0),
+        "hidden_disturbance_score": float(report.get("hidden_disturbance_score", 0.0) or 0.0),
+        "execution_drift_score": float(report.get("execution_drift_score", 0.0) or 0.0),
+        "baseline_violation_flag": bool(report.get("baseline_violation_flag", False)),
+        "error_cluster_type": str(
+            report.get("error_cluster_type") or "NO_BOARD_RISK_DETECTED"
+        ),
+        "board_control_active_mode": str(
+            report.get("board_control_active_mode") or "BOARD_CONTROL_ACCEPTABLE"
+        ),
+        "board_control_disabled_tools": list(
+            report.get("board_control_disabled_tools", [])
+        ),
+        "operator_precision_readiness": float(
+            report.get("operator_precision_readiness", 0.0) or 0.0
+        ),
+        "ritual_effectiveness_score": float(
+            report.get("ritual_effectiveness_score", 0.0) or 0.0
+        ),
+        "conversion_failure_score": float(
+            report.get("conversion_failure_score", 0.0) or 0.0
+        ),
+        "protective_friction_score": float(
+            report.get("protective_friction_score", 0.0) or 0.0
+        ),
+        "board_control_final_state": str(
+            report.get("board_control_final_state") or "NO_BOARD_RISK_DETECTED"
+        ),
+        "board_control_bull_state": str(
+            report.get("board_control_bull_state") or "DIABLO"
+        ),
+        "board_control_promotion_allowed": bool(
+            report.get("board_control_promotion_allowed", False)
+        ),
+        "board_control_action_allowed": bool(
+            report.get("board_control_action_allowed", False)
+        ),
+        "board_control_fallback_required": bool(
+            report.get("board_control_fallback_required", False)
+        ),
+        "board_control_recommended_next_action": str(
+            report.get("board_control_recommended_next_action") or "HOLD_NO_ACTION"
+        ),
+        "signals_evaluated": int(report.get("signals_evaluated", 0) or 0),
+        "blocked_count": int(counts.get("blocked_count", 0) or 0),
+        "fallback_required_count": int(counts.get("fallback_required_count", 0) or 0),
+        "precision_tools_disabled_count": int(
+            counts.get("precision_tools_disabled_count", 0) or 0
+        ),
+        "critical_square_exposed_count": int(
+            counts.get("critical_square_exposed_count", 0) or 0
+        ),
+        "report_path": str(
+            report.get("report_path") or repo_relative(BOARD_CONTROL_SAFETY_REPORT_PATH)
         ),
     }
 
@@ -2534,6 +2608,7 @@ def build_pipeline_health_report(
     external_data_report: dict[str, Any] | None = None,
     external_observation_report: dict[str, Any] | None = None,
     signal_surface_report: dict[str, Any] | None = None,
+    board_control_safety_report: dict[str, Any] | None = None,
     grok_xai_report: dict[str, Any] | None = None,
     latest_snapshot_timestamp: str | None = None,
     simulate_gsce_clear: bool = False,
@@ -2826,6 +2901,14 @@ def build_pipeline_health_report(
             SIGNAL_SURFACE_REPORT_PATH,
         )
     signal_surface_logic = build_signal_surface_summary(signal_surface_report)
+    if not isinstance(board_control_safety_report, dict) or not board_control_safety_report:
+        board_control_safety_report = _load_optional_runtime_artifact(
+            None,
+            BOARD_CONTROL_SAFETY_REPORT_PATH,
+        )
+    board_control_safety_logic = build_board_control_safety_summary(
+        board_control_safety_report
+    )
     operator_control_report = build_operator_control_report(
         gate_summary=signal_refinery_report.get("signal_admission_gate", {}),
         test_status=test_status,
@@ -3967,6 +4050,7 @@ def build_pipeline_health_report(
         "intelligence_summary": intelligence_summary,
         "extreme_state_logic": extreme_state_logic,
         "signal_surface_logic": signal_surface_logic,
+        "board_control_safety_logic": board_control_safety_logic,
         "extreme_state_layer_available": bool(extreme_state_logic.get("report_present", False)),
         "extreme_state_signals_evaluated": extreme_state_logic.get("signals_evaluated", 0),
         "extreme_state_termination_required_count": extreme_state_logic.get(
@@ -4004,6 +4088,70 @@ def build_pipeline_health_report(
         "signal_surface_report_path": signal_surface_logic.get(
             "report_path",
             repo_relative(SIGNAL_SURFACE_REPORT_PATH),
+        ),
+        "board_control_score": board_control_safety_logic.get("board_control_score", 0.0),
+        "critical_square_exposure": board_control_safety_logic.get(
+            "critical_square_exposure", 0.0
+        ),
+        "weakest_path_score": board_control_safety_logic.get("weakest_path_score", 0.0),
+        "local_global_clearance_gap": board_control_safety_logic.get(
+            "local_global_clearance_gap", 0.0
+        ),
+        "feedback_integrity_score": board_control_safety_logic.get(
+            "feedback_integrity_score", 0.0
+        ),
+        "review_theater_score": board_control_safety_logic.get(
+            "review_theater_score", 0.0
+        ),
+        "hidden_disturbance_score": board_control_safety_logic.get(
+            "hidden_disturbance_score", 0.0
+        ),
+        "execution_drift_score": board_control_safety_logic.get(
+            "execution_drift_score", 0.0
+        ),
+        "baseline_violation_flag": board_control_safety_logic.get(
+            "baseline_violation_flag", False
+        ),
+        "error_cluster_type": board_control_safety_logic.get("error_cluster_type"),
+        "board_control_active_mode": board_control_safety_logic.get(
+            "board_control_active_mode"
+        ),
+        "board_control_disabled_tools": board_control_safety_logic.get(
+            "board_control_disabled_tools", []
+        ),
+        "operator_precision_readiness": board_control_safety_logic.get(
+            "operator_precision_readiness", 0.0
+        ),
+        "ritual_effectiveness_score": board_control_safety_logic.get(
+            "ritual_effectiveness_score", 0.0
+        ),
+        "conversion_failure_score": board_control_safety_logic.get(
+            "conversion_failure_score", 0.0
+        ),
+        "protective_friction_score": board_control_safety_logic.get(
+            "protective_friction_score", 0.0
+        ),
+        "board_control_final_state": board_control_safety_logic.get(
+            "board_control_final_state"
+        ),
+        "board_control_bull_state": board_control_safety_logic.get(
+            "board_control_bull_state"
+        ),
+        "board_control_promotion_allowed": board_control_safety_logic.get(
+            "board_control_promotion_allowed", False
+        ),
+        "board_control_action_allowed": board_control_safety_logic.get(
+            "board_control_action_allowed", False
+        ),
+        "board_control_fallback_required": board_control_safety_logic.get(
+            "board_control_fallback_required", False
+        ),
+        "board_control_recommended_next_action": board_control_safety_logic.get(
+            "board_control_recommended_next_action"
+        ),
+        "board_control_report_path": board_control_safety_logic.get(
+            "report_path",
+            repo_relative(BOARD_CONTROL_SAFETY_REPORT_PATH),
         ),
         "where_am_i_leaking_performance": where_am_i_leaking_performance,
         "what_should_i_do_next": what_should_i_do_next,
@@ -4623,6 +4771,16 @@ def format_pipeline_health_summary(report: dict[str, Any]) -> str:
             f"score={signal_surface_logic.get('signal_surface_score', 0.0)}, "
             f"damage={signal_surface_logic.get('signal_surface_damage_class', 'UNKNOWN')}, "
             f"bull={signal_surface_logic.get('signal_surface_bull_state', 'UNKNOWN_SURFACE_STATE')}"
+        )
+    board_control_safety_logic = report.get("board_control_safety_logic", {})
+    if isinstance(board_control_safety_logic, dict) and board_control_safety_logic.get("report_present"):
+        lines.append(
+            "board_control_safety="
+            f"state={board_control_safety_logic.get('board_control_final_state', 'NO_BOARD_RISK_DETECTED')}, "
+            f"score={board_control_safety_logic.get('board_control_score', 0.0)}, "
+            f"weakest_path={board_control_safety_logic.get('weakest_path_score', 0.0)}, "
+            f"hidden_drift={board_control_safety_logic.get('hidden_disturbance_score', 0.0)}, "
+            f"action={board_control_safety_logic.get('board_control_recommended_next_action', 'HOLD_NO_ACTION')}"
         )
     intelligence_summary = report.get("intelligence_summary", {})
     if intelligence_summary.get("request_success"):

@@ -36,6 +36,7 @@ try:
     from scripts.contextual_interpretation import (
         build_contextual_interpretation_summary,
     )
+    from scripts.board_control_safety_layer import build_board_control_safety_report
     from scripts.extreme_state import build_extreme_state_report
     from scripts.hedge_trade_entry_playbook import build_hedge_trade_entry_report
     from scripts.signal_surface_engine import build_signal_surface_report
@@ -89,6 +90,9 @@ except ModuleNotFoundError:
     )
     from contextual_interpretation import (  # type: ignore[no-redef]
         build_contextual_interpretation_summary,
+    )
+    from board_control_safety_layer import (  # type: ignore[no-redef]
+        build_board_control_safety_report,
     )
     from extreme_state import build_extreme_state_report  # type: ignore[no-redef]
     from hedge_trade_entry_playbook import (  # type: ignore[no-redef]
@@ -435,6 +439,12 @@ def run_diagnostics_pipeline(
         write_runtime=effective_write_runtime,
     )
     runtime_state["signal_surface_report"] = signal_surface_report
+    board_control_safety_report = build_board_control_safety_report(
+        tennis_signals,
+        runtime_state=runtime_state,
+        write_runtime=effective_write_runtime,
+    )
+    runtime_state["board_control_safety_report"] = board_control_safety_report
     extreme_state_report = build_extreme_state_report(
         tennis_signals,
         runtime_state=runtime_state,
@@ -461,6 +471,7 @@ def run_diagnostics_pipeline(
         external_data_report=external_data_report,
         external_observation_report=external_observation_report,
         signal_surface_report=signal_surface_report,
+        board_control_safety_report=board_control_safety_report,
         latest_snapshot_timestamp=latest_snapshot_timestamp,
         simulate_gsce_clear=simulate_gsce_clear,
         simulate_realm_bis_clear=simulate_realm_bis_clear,
