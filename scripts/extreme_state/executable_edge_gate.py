@@ -11,6 +11,7 @@ def evaluate_executable_edge_gate(
     conversion_probability: float,
     exit_clarity_score: float,
     silent_chaos_flag: bool,
+    termination_required: bool = False,
     thresholds: ExtremeStateThresholds | None = None,
 ) -> dict[str, object]:
     active = thresholds or ExtremeStateThresholds()
@@ -18,9 +19,10 @@ def evaluate_executable_edge_gate(
     executable = (
         not policy_blocked
         and not silent_chaos_flag
-        and clamp01(signal.signal_validity_score) >= 0.60
-        and clamp01(conversion_probability) >= 0.50
-        and clamp01(exit_clarity_score) >= 0.65
+        and not termination_required
+        and clamp01(signal.signal_validity_score) >= active.theta_validity
+        and clamp01(conversion_probability) >= active.theta_conversion
+        and clamp01(exit_clarity_score) >= active.theta_exit
         and clamp01(executable_edge) >= active.theta_executable
     )
     return {

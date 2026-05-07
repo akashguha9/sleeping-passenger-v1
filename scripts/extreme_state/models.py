@@ -13,13 +13,19 @@ DO_NOT_DEPLOY_POLICY_STATES = {"RESTRICTED", "DO_NOT_DEPLOY", "BLOCKED", "NOT_RE
 class ExtremeStateThresholds:
     """Central thresholds for the extreme-state logic layer."""
 
-    theta_executable: float = 0.60
-    high_symmetry_threshold: float = 0.75
+    theta_validity: float = 0.60
+    theta_conversion: float = 0.50
+    theta_exit: float = 0.65
+    theta_executable: float = 0.50
+    minimum_repeatability_for_promotion: float = 0.55
+    high_symmetry_threshold: float = 0.80
+    low_conversion_threshold: float = 0.35
     equilibrium_threshold: float = 0.70
     silent_chaos_threshold: float = 0.70
     low_transition_threshold: float = 0.25
-    loop_risk_threshold: float = 0.65
+    loop_risk_threshold: float = 0.75
     duration_threshold: float = 0.80
+    holding_cost_threshold: float = 0.70
 
 
 @dataclass
@@ -169,6 +175,7 @@ class ExtremeStateEvaluation:
     flags: dict[str, bool]
     decision: dict[str, str]
     warnings: list[str] = field(default_factory=list)
+    timestamp: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

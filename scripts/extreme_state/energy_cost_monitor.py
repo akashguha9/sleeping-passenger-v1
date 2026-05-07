@@ -9,11 +9,11 @@ def compute_holding_cost(
     opportunity_cost: float,
     risk_cost: float,
 ) -> float:
-    """HoldingCost = 0.25T + 0.15M + 0.35O + 0.25R."""
+    """HoldingCost = 0.25*TimeCost + 0.20*MentalCost + 0.30*OpportunityCost + 0.25*RiskCost."""
     return clamp01(
         (0.25 * clamp01(time_cost))
-        + (0.15 * clamp01(mental_cost))
-        + (0.35 * clamp01(opportunity_cost))
+        + (0.20 * clamp01(mental_cost))
+        + (0.30 * clamp01(opportunity_cost))
         + (0.25 * clamp01(risk_cost))
     )
 

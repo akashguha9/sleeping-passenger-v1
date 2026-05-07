@@ -36,6 +36,7 @@ try:
     from scripts.contextual_interpretation import (
         build_contextual_interpretation_summary,
     )
+    from scripts.extreme_state import build_extreme_state_report
     from scripts.hedge_trade_entry_playbook import build_hedge_trade_entry_report
     from scripts.tennis_archetype_execution import (
         load_runtime_compatible_signals,
@@ -88,6 +89,7 @@ except ModuleNotFoundError:
     from contextual_interpretation import (  # type: ignore[no-redef]
         build_contextual_interpretation_summary,
     )
+    from extreme_state import build_extreme_state_report  # type: ignore[no-redef]
     from hedge_trade_entry_playbook import (  # type: ignore[no-redef]
         build_hedge_trade_entry_report,
     )
@@ -425,6 +427,12 @@ def run_diagnostics_pipeline(
         write_runtime=effective_write_runtime,
     )
     runtime_state["hedge_trade_entry"] = hedge_trade_entry_report
+    extreme_state_report = build_extreme_state_report(
+        tennis_signals,
+        runtime_state=runtime_state,
+        write_runtime=effective_write_runtime,
+    )
+    runtime_state["extreme_state_report"] = extreme_state_report
     action_report = build_action_report(
         runtime_state=runtime_state,
         signal_refinery_report=final_signal_refinery_report,

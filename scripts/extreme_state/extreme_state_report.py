@@ -7,7 +7,9 @@ from typing import Any
 
 try:
     from scripts.runtime_common import (
+        EXTREME_STATE_EVENTS_PATH,
         EXTREME_STATE_REPORT_PATH,
+        append_jsonl,
         build_truth_context,
         get_source_mode,
         repo_relative,
@@ -16,7 +18,9 @@ try:
     )
 except ModuleNotFoundError:
     from runtime_common import (  # type: ignore[no-redef]
+        EXTREME_STATE_EVENTS_PATH,
         EXTREME_STATE_REPORT_PATH,
+        append_jsonl,
         build_truth_context,
         get_source_mode,
         repo_relative,
@@ -26,8 +30,9 @@ except ModuleNotFoundError:
 
 from .extreme_state_classifier import (
     DO_NOT_DEPLOY,
+    INFINITE_LOOP_RISK,
     SILENT_CHAOS,
-    TERMINATE_OR_RECLASSIFY,
+    TERMINATION_REQUIRED,
     evaluate_extreme_state_signal,
     evaluation_to_dict,
     summarize_extreme_state_counts,
@@ -37,7 +42,7 @@ from .extreme_state_classifier import (
 def _dominant_state(evaluations: list[dict[str, Any]]) -> str:
     if not evaluations:
         return "NORMAL"
-    priority = [DO_NOT_DEPLOY, SILENT_CHAOS, TERMINATE_OR_RECLASSIFY]
+    priority = [DO_NOT_DEPLOY, TERMINATION_REQUIRED, INFINITE_LOOP_RISK, SILENT_CHAOS]
     for state in priority:
         if any(row.get("extreme_state") == state for row in evaluations):
             return state
@@ -50,18 +55,15 @@ def build_extreme_state_report(
     *,
     runtime_state: dict[str, Any] | None = None,
     output_path: Path | None = None,
+    events_path: Path | None = None,
     write_runtime: bool = True,
 ) -> dict[str, Any]:
     rows = signals if isinstance(signals, list) else []
-    evaluations = [evaluation_to_dict(evaluate_extreme_state_signal(row)) for row in rows]
-    counts = summarize_extreme_state_counts(
-        [evaluate_extreme_state_signal(row) for row in rows]
-    )
+    evaluations_obj = [evaluate_extreme_state_signal(row) for row in rows]
+    evaluations = [evaluation_to_dict(item) for item in evaluations_obj]
+    counts = summarize_extreme_state_counts(evaluations_obj)
     truth_context = build_truth_context(runtime_state or {})
     dominant_state = _dominant_state(evaluations)
-    can_execute = any(bool(row.get("flags", {}).get("can_execute")) for row in evaluations) and (
-        truth_context["truth_origin"] != "seeded"
-    )
     summary_scores = {
         key: round(
             sum(float(row.get("scores", {}).get(key, 0.0) or 0.0) for row in evaluations)
@@ -69,43 +71,45 @@ def build_extreme_state_report(
             3,
         )
         for key in (
-            "performance_ceiling",
-            "execution_efficiency",
-            "structural_advantage",
-            "repeatability",
+            "performance_ceiling_score",
+            "execution_efficiency_score",
+            "structural_advantage_score",
+            "repeatability_score",
             "stress_adjusted_repeatability",
-            "conversion_probability",
-            "exit_clarity",
-            "true_edge",
-            "executable_edge",
-            "symmetry_risk",
-            "equilibrium_score",
+            "usable_edge_score",
+            "conversion_probability_score",
+            "executable_edge_score",
+            "net_signal_score",
+            "symmetry_score",
             "silent_chaos_score",
-            "loop_risk",
-            "holding_cost",
-            "progress_score",
+            "loop_risk_score",
+            "holding_cost_score",
         )
     }
     diagnostics: list[str] = []
     if counts["silent_chaos_count"] > 0:
-        diagnostics.append("Persistence is not progress")
+        diagnostics.append("Persistence is not progress.")
     if counts["valid_but_non_executable_count"] > 0:
-        diagnostics.append("Signal is valid but non-executable")
-    if summary_scores["exit_clarity"] < 0.65:
-        diagnostics.append("No exit clarity detected")
+        diagnostics.append("A valid signal is not automatically executable.")
+    if counts["non_converting_equilibrium_count"] > 0:
+        diagnostics.append("Symmetry canceled advantage before conversion.")
+    if summary_scores["holding_cost_score"] >= 0.60:
+        diagnostics.append("Holding cost is rising faster than transition quality.")
     if truth_context["truth_origin"] == "seeded":
-        diagnostics.append("Inputs remain seeded; external reality is not connected")
+        diagnostics.append("Inputs remain seeded; external reality is not connected.")
+
     recommendation = (
-        "BLOCK"
+        "REJECT"
         if dominant_state == DO_NOT_DEPLOY
         else "TERMINATE"
-        if dominant_state in {SILENT_CHAOS, TERMINATE_OR_RECLASSIFY}
+        if dominant_state in {SILENT_CHAOS, TERMINATION_REQUIRED, INFINITE_LOOP_RISK}
         else "DOWNGRADE"
-        if counts["valid_but_non_executable_count"] or counts["non_converting_equilibrium_count"]
+        if counts["valid_but_non_executable_count"] or counts["non_converting_equilibrium_count"] or counts["downgraded_count"]
         else "PROMOTE"
         if counts["promoted_count"] > 0
-        else "WAIT"
+        else "HOLD"
     )
+
     report = {
         "module": "extreme_state_logic",
         "schema_version": "1.0",
@@ -116,7 +120,7 @@ def build_extreme_state_report(
         "policy_state": str((runtime_state or {}).get("execution_policy", {}).get("policy_state") or "UNKNOWN").upper(),
         "signals_evaluated": len(evaluations),
         "extreme_state": dominant_state,
-        "can_execute": bool(can_execute),
+        "can_execute": False,
         "termination_triggered": counts["termination_required_count"] > 0,
         "silent_chaos_detected": counts["silent_chaos_count"] > 0,
         "non_converting_equilibrium_detected": counts["non_converting_equilibrium_count"] > 0,
@@ -127,10 +131,13 @@ def build_extreme_state_report(
         "extreme_state_logic": counts,
         "signals": evaluations,
         "report_path": repo_relative(output_path or EXTREME_STATE_REPORT_PATH),
+        "events_path": repo_relative(events_path or EXTREME_STATE_EVENTS_PATH),
     }
     stamped = stamp_payload(report, runtime_state=runtime_state or report)
     if write_runtime:
         write_json_atomic(output_path or EXTREME_STATE_REPORT_PATH, stamped, stamp=False)
+        for row in evaluations:
+            append_jsonl(events_path or EXTREME_STATE_EVENTS_PATH, row, stamp=True)
     return stamped
 
 
@@ -140,18 +147,9 @@ def format_extreme_state_summary(report: dict[str, Any]) -> str:
             "Extreme State Report",
             f"extreme_state={report.get('extreme_state', 'NORMAL')}",
             f"signals_evaluated={report.get('signals_evaluated', 0)}",
-            f"Executable Edge={report.get('scores', {}).get('executable_edge')}",
-            f"Loop Risk={report.get('scores', {}).get('loop_risk')}",
-            f"Recommended Action={report.get('recommended_action', 'WAIT')}",
-            (
-                "Reason: "
-                + (
-                    report.get("diagnostics", ["No extreme-state warnings detected"])[0]
-                    if isinstance(report.get("diagnostics"), list)
-                    and report.get("diagnostics")
-                    else "No extreme-state warnings detected"
-                )
-            ),
+            f"termination_required_count={report.get('extreme_state_logic', {}).get('termination_required_count', 0)}",
+            f"silent_chaos_count={report.get('extreme_state_logic', {}).get('silent_chaos_count', 0)}",
+            f"recommended_action={report.get('recommended_action', 'HOLD')}",
         ]
     )
 

@@ -5,10 +5,9 @@ from .utils import clamp01
 
 
 def compute_repeatability(signal: ExtremeStateSignal, alpha: float = 1.0) -> float:
-    """Repeatability = (successful_repetitions + alpha) / (total_attempts + 2*alpha)."""
-    numerator = signal.successful_repetitions + alpha
-    denominator = signal.total_attempts + (2.0 * alpha)
-    return clamp01(numerator / denominator)
+    """Repeatability = SuccessfulRepetitions / max(TotalAttempts, 1)."""
+    del alpha
+    return clamp01(signal.successful_repetitions / max(signal.total_attempts, 1))
 
 
 def compute_stress_adjusted_repeatability(

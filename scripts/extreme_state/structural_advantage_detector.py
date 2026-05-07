@@ -5,7 +5,7 @@ from .utils import weighted_sum
 
 
 def compute_performance_ceiling(signal: ExtremeStateSignal) -> float:
-    """PerformanceCeiling = 0.30T + 0.25S + 0.20Ti + 0.25R."""
+    """PerformanceCeiling = 0.25*Technique + 0.30*Structure + 0.20*Timing + 0.25*Repeatability."""
     repeatability_seed = (
         0.0
         if signal.total_attempts <= 0
@@ -13,8 +13,8 @@ def compute_performance_ceiling(signal: ExtremeStateSignal) -> float:
     )
     return weighted_sum(
         {
-            "technique": (signal.technique_score, 0.30),
-            "structure": (signal.structure_score, 0.25),
+            "technique": (signal.technique_score, 0.25),
+            "structure": (signal.structure_score, 0.30),
             "timing": (signal.timing_score, 0.20),
             "repeatability": (repeatability_seed, 0.25),
         }

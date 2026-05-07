@@ -520,6 +520,7 @@ def build_extreme_state_logic_summary(
         "promoted_count": int(counts.get("promoted_count", 0) or 0),
         "downgraded_count": int(counts.get("downgraded_count", 0) or 0),
         "recommended_action": str(report.get("recommended_action") or "WAIT"),
+        "report_path": str(report.get("report_path") or repo_relative(EXTREME_STATE_REPORT_PATH)),
     }
 
 
@@ -2757,10 +2758,12 @@ def build_pipeline_health_report(
         signal_segmentation=signal_segmentation,
     )
     intelligence_summary = build_intelligence_summary(grok_xai_report)
-    extreme_state_report = _load_optional_runtime_artifact(
-        None,
-        EXTREME_STATE_REPORT_PATH,
-    )
+    extreme_state_report = state.get("extreme_state_report")
+    if not isinstance(extreme_state_report, dict) or not extreme_state_report:
+        extreme_state_report = _load_optional_runtime_artifact(
+            None,
+            EXTREME_STATE_REPORT_PATH,
+        )
     extreme_state_logic = build_extreme_state_logic_summary(extreme_state_report)
     operator_control_report = build_operator_control_report(
         gate_summary=signal_refinery_report.get("signal_admission_gate", {}),
@@ -3900,6 +3903,27 @@ def build_pipeline_health_report(
         "structural_design_report_path": repo_relative(STRUCTURAL_DESIGN_REPORT_PATH),
         "intelligence_summary": intelligence_summary,
         "extreme_state_logic": extreme_state_logic,
+        "extreme_state_layer_available": bool(extreme_state_logic.get("report_present", False)),
+        "extreme_state_signals_evaluated": extreme_state_logic.get("signals_evaluated", 0),
+        "extreme_state_termination_required_count": extreme_state_logic.get(
+            "termination_required_count",
+            0,
+        ),
+        "extreme_state_silent_chaos_count": extreme_state_logic.get("silent_chaos_count", 0),
+        "extreme_state_valid_but_non_executable_count": extreme_state_logic.get(
+            "valid_but_non_executable_count",
+            0,
+        ),
+        "extreme_state_non_converting_equilibrium_count": extreme_state_logic.get(
+            "non_converting_equilibrium_count",
+            0,
+        ),
+        "extreme_state_promoted_count": extreme_state_logic.get("promoted_count", 0),
+        "extreme_state_downgraded_count": extreme_state_logic.get("downgraded_count", 0),
+        "extreme_state_report_path": extreme_state_logic.get(
+            "report_path",
+            repo_relative(EXTREME_STATE_REPORT_PATH),
+        ),
         "where_am_i_leaking_performance": where_am_i_leaking_performance,
         "what_should_i_do_next": what_should_i_do_next,
         "scm": state["scm_review"],
@@ -4501,6 +4525,13 @@ def format_pipeline_health_summary(report: dict[str, Any]) -> str:
             f"silent_chaos={extreme_state_logic.get('silent_chaos_count', 0)}, "
             f"terminations={extreme_state_logic.get('termination_required_count', 0)}, "
             f"recommended_action={extreme_state_logic.get('recommended_action', 'WAIT')}"
+        )
+        lines.append(
+            "extreme_state_counts="
+            f"valid_but_non_executable={extreme_state_logic.get('valid_but_non_executable_count', 0)}, "
+            f"non_converting_equilibrium={extreme_state_logic.get('non_converting_equilibrium_count', 0)}, "
+            f"promoted={extreme_state_logic.get('promoted_count', 0)}, "
+            f"downgraded={extreme_state_logic.get('downgraded_count', 0)}"
         )
     intelligence_summary = report.get("intelligence_summary", {})
     if intelligence_summary.get("request_success"):
