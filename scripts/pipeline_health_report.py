@@ -48,6 +48,7 @@ try:
     )
     from scripts.signal_metabolism import build_signal_metabolism_report
     from scripts.snapshot_logger import build_snapshot_row
+    from scripts.structural_design_engine import build_structural_design_report
     from scripts.runtime_common import (
         COMPLEXITY_LADDER_CONTROLLER_PATH,
         EXTREME_STATE_REPORT_PATH,
@@ -58,6 +59,7 @@ try:
         HEALTH_REPORT_PATH,
         SIGNAL_METABOLISM_REPORT_PATH,
         SNAPSHOT_LOG_PATH,
+        STRUCTURAL_DESIGN_REPORT_PATH,
         build_runtime_state_from_scm_report_payload,
         resolve_bridge_mode,
         build_truth_context,
@@ -115,6 +117,7 @@ except ModuleNotFoundError:
     )
     from signal_metabolism import build_signal_metabolism_report
     from snapshot_logger import build_snapshot_row
+    from structural_design_engine import build_structural_design_report
     from runtime_common import (
         COMPLEXITY_LADDER_CONTROLLER_PATH,
         EXTREME_STATE_REPORT_PATH,
@@ -125,6 +128,7 @@ except ModuleNotFoundError:
         HEALTH_REPORT_PATH,
         SIGNAL_METABOLISM_REPORT_PATH,
         SNAPSHOT_LOG_PATH,
+        STRUCTURAL_DESIGN_REPORT_PATH,
         build_runtime_state_from_scm_report_payload,
         resolve_bridge_mode,
         build_truth_context,
@@ -3054,6 +3058,16 @@ def build_pipeline_health_report(
         operator_control_report=operator_control_report,
         write_runtime=effective_write_runtime,
     )
+    structural_design_report = build_structural_design_report(
+        runtime_state=state,
+        reflection_context=reflection_context,
+        attention_proxy_report=attention_proxy_report,
+        signal_refinery_report=signal_refinery_report,
+        asset_durability_report=asset_durability_report,
+        execution_integrity_report=execution_integrity_report,
+        policy_veto=not bool(state.get("execution_policy", {}).get("allow_new_risk", False)),
+        write_runtime=effective_write_runtime,
+    )
 
     report = {
         "health_generated_at": _health_timestamp(),
@@ -3430,6 +3444,35 @@ def build_pipeline_health_report(
             "policy_veto_outranks_layer"
         ],
         "safety_state_intact": false_negative_casino_monopoly_report["safety_state_intact"],
+        "structural_design_state": {
+            "structure_state": structural_design_report["structure_state"],
+            "pressure_score": structural_design_report["pressure_score"],
+            "flow_score": structural_design_report["flow_score"],
+            "load_path_coherence": structural_design_report["load_path_coherence"],
+            "atmosphere_score": structural_design_report["atmosphere_score"],
+            "dominant_logic": structural_design_report["dominant_logic"],
+            "explanation": structural_design_report["explanation"],
+            "source": structural_design_report["source"],
+            "warnings": structural_design_report["warnings"],
+        },
+        "structural_design_pressure_score": structural_design_report["pressure_score"],
+        "structural_design_flow_score": structural_design_report["flow_score"],
+        "structural_design_structure_state": structural_design_report["structure_state"],
+        "structural_design_load_path_coherence": structural_design_report[
+            "load_path_coherence"
+        ],
+        "structural_design_atmosphere_score": structural_design_report["atmosphere_score"],
+        "structural_design_dominant_logic": structural_design_report["dominant_logic"],
+        "structural_design_architecture_score": structural_design_report[
+            "architecture_score"
+        ],
+        "structural_design_structural_coherence": structural_design_report[
+            "structural_coherence"
+        ],
+        "investable_structural_signal": structural_design_report[
+            "investable_structural_signal"
+        ],
+        "structural_design_report_path": repo_relative(STRUCTURAL_DESIGN_REPORT_PATH),
         "intelligence_summary": intelligence_summary,
         "extreme_state_logic": extreme_state_logic,
         "where_am_i_leaking_performance": where_am_i_leaking_performance,
@@ -3603,6 +3646,11 @@ def build_pipeline_health_report(
             false_negative_casino_monopoly_report,
             stamp=True,
         )
+        write_json_atomic(
+            STRUCTURAL_DESIGN_REPORT_PATH,
+            structural_design_report,
+            stamp=True,
+        )
 
     return report
 
@@ -3771,6 +3819,18 @@ def format_pipeline_health_summary(report: dict[str, Any]) -> str:
             f"cycle_state={report.get('cycle_state', 'UNKNOWN')}",
             "investable_signal_adjusted_score="
             f"{report.get('investable_signal_adjusted_score')}",
+            "structural_design_state="
+            f"{report.get('structural_design_structure_state', 'UNKNOWN')}",
+            "structural_design_pressure_score="
+            f"{report.get('structural_design_pressure_score')}",
+            "structural_design_flow_score="
+            f"{report.get('structural_design_flow_score')}",
+            "structural_design_load_path_coherence="
+            f"{report.get('structural_design_load_path_coherence')}",
+            "structural_design_atmosphere_score="
+            f"{report.get('structural_design_atmosphere_score')}",
+            "structural_design_dominant_logic="
+            f"{report.get('structural_design_dominant_logic', 'UNKNOWN')}",
             f"what_should_i_do_next={report['what_should_i_do_next']}",
             (
                 "scorecard="
