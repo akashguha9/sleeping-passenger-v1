@@ -66,6 +66,7 @@ try:
         CONTEXT_PROFILE_REPORT_PATH,
         CONTEXTUAL_INTERPRETATION_SUMMARY_PATH,
         HEDGE_TRADE_ENTRY_REPORT_PATH,
+        SIGNAL_SURFACE_REPORT_PATH,
         INTERPRETATION_DRIFT_REPORT_PATH,
         INTERPRETATION_FAILURE_LOG_PATH,
         INTERPRETATION_PACKET_REPORT_PATH,
@@ -170,6 +171,7 @@ except ModuleNotFoundError:
         CONTEXT_PROFILE_REPORT_PATH,
         CONTEXTUAL_INTERPRETATION_SUMMARY_PATH,
         HEDGE_TRADE_ENTRY_REPORT_PATH,
+        SIGNAL_SURFACE_REPORT_PATH,
         INTERPRETATION_DRIFT_REPORT_PATH,
         INTERPRETATION_FAILURE_LOG_PATH,
         INTERPRETATION_PACKET_REPORT_PATH,
@@ -521,6 +523,58 @@ def build_extreme_state_logic_summary(
         "downgraded_count": int(counts.get("downgraded_count", 0) or 0),
         "recommended_action": str(report.get("recommended_action") or "WAIT"),
         "report_path": str(report.get("report_path") or repo_relative(EXTREME_STATE_REPORT_PATH)),
+    }
+
+
+def build_signal_surface_summary(
+    signal_surface_report: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    report = signal_surface_report if isinstance(signal_surface_report, dict) else {}
+    counts = report.get("surface_counts", {}) if isinstance(report, dict) else {}
+    if not isinstance(counts, dict):
+        counts = {}
+    return {
+        "report_present": bool(report),
+        "signal_surface_state": str(
+            report.get("signal_surface_state") or "UNKNOWN_SURFACE_STATE"
+        ),
+        "signal_surface_decision": str(
+            report.get("signal_surface_decision") or "WAIT"
+        ),
+        "signal_surface_score": float(report.get("signal_surface_score", 0.0) or 0.0),
+        "signal_surface_damage_class": str(
+            report.get("signal_surface_damage_class") or "UNKNOWN"
+        ),
+        "signal_surface_repair_mode": str(
+            report.get("signal_surface_repair_mode") or "QUARANTINE"
+        ),
+        "signal_surface_bull_state": str(
+            report.get("signal_surface_bull_state") or "UNKNOWN_SURFACE_STATE"
+        ),
+        "signal_surface_action_permission": bool(
+            report.get("signal_surface_action_permission", False)
+        ),
+        "signal_surface_finish_honesty": str(
+            report.get("signal_surface_finish_honesty")
+            or "PRESENTATION_NOT_ALLOWED"
+        ),
+        "signal_surface_cure_gate": str(
+            report.get("signal_surface_cure_gate") or "SHOCK_RESET"
+        ),
+        "signals_evaluated": int(report.get("signals_evaluated", 0) or 0),
+        "quarantine_count": int(counts.get("quarantine_count", 0) or 0),
+        "reject_count": int(counts.get("reject_count", 0) or 0),
+        "wait_count": int(counts.get("wait_count", 0) or 0),
+        "repair_count": int(counts.get("repair_count", 0) or 0),
+        "validate_count": int(counts.get("validate_count", 0) or 0),
+        "promote_count": int(counts.get("promote_count", 0) or 0),
+        "execute_ready_count": int(counts.get("execute_ready_count", 0) or 0),
+        "diablo_count": int(counts.get("diablo_count", 0) or 0),
+        "islero_count": int(counts.get("islero_count", 0) or 0),
+        "huracan_count": int(counts.get("huracan_count", 0) or 0),
+        "report_path": str(
+            report.get("report_path") or repo_relative(SIGNAL_SURFACE_REPORT_PATH)
+        ),
     }
 
 
@@ -2479,6 +2533,7 @@ def build_pipeline_health_report(
     perception_control_report: dict[str, Any] | None = None,
     external_data_report: dict[str, Any] | None = None,
     external_observation_report: dict[str, Any] | None = None,
+    signal_surface_report: dict[str, Any] | None = None,
     grok_xai_report: dict[str, Any] | None = None,
     latest_snapshot_timestamp: str | None = None,
     simulate_gsce_clear: bool = False,
@@ -2765,6 +2820,12 @@ def build_pipeline_health_report(
             EXTREME_STATE_REPORT_PATH,
         )
     extreme_state_logic = build_extreme_state_logic_summary(extreme_state_report)
+    if not isinstance(signal_surface_report, dict) or not signal_surface_report:
+        signal_surface_report = _load_optional_runtime_artifact(
+            None,
+            SIGNAL_SURFACE_REPORT_PATH,
+        )
+    signal_surface_logic = build_signal_surface_summary(signal_surface_report)
     operator_control_report = build_operator_control_report(
         gate_summary=signal_refinery_report.get("signal_admission_gate", {}),
         test_status=test_status,
@@ -3170,6 +3231,8 @@ def build_pipeline_health_report(
             runtime_state=state,
             write_runtime=effective_write_runtime,
         )
+    if not isinstance(signal_surface_report, dict) or not signal_surface_report:
+        signal_surface_report = state.get("signal_surface_report")
     contextual_interpretation_report = state.get("contextual_interpretation")
     if not isinstance(contextual_interpretation_report, dict):
         contextual_interpretation_report = {}
@@ -3903,6 +3966,7 @@ def build_pipeline_health_report(
         "structural_design_report_path": repo_relative(STRUCTURAL_DESIGN_REPORT_PATH),
         "intelligence_summary": intelligence_summary,
         "extreme_state_logic": extreme_state_logic,
+        "signal_surface_logic": signal_surface_logic,
         "extreme_state_layer_available": bool(extreme_state_logic.get("report_present", False)),
         "extreme_state_signals_evaluated": extreme_state_logic.get("signals_evaluated", 0),
         "extreme_state_termination_required_count": extreme_state_logic.get(
@@ -3923,6 +3987,23 @@ def build_pipeline_health_report(
         "extreme_state_report_path": extreme_state_logic.get(
             "report_path",
             repo_relative(EXTREME_STATE_REPORT_PATH),
+        ),
+        "signal_surface_state": signal_surface_logic.get("signal_surface_state"),
+        "signal_surface_decision": signal_surface_logic.get("signal_surface_decision"),
+        "signal_surface_score": signal_surface_logic.get("signal_surface_score", 0.0),
+        "signal_surface_damage_class": signal_surface_logic.get("signal_surface_damage_class"),
+        "signal_surface_repair_mode": signal_surface_logic.get("signal_surface_repair_mode"),
+        "signal_surface_bull_state": signal_surface_logic.get("signal_surface_bull_state"),
+        "signal_surface_action_permission": signal_surface_logic.get(
+            "signal_surface_action_permission", False
+        ),
+        "signal_surface_finish_honesty": signal_surface_logic.get(
+            "signal_surface_finish_honesty"
+        ),
+        "signal_surface_cure_gate": signal_surface_logic.get("signal_surface_cure_gate"),
+        "signal_surface_report_path": signal_surface_logic.get(
+            "report_path",
+            repo_relative(SIGNAL_SURFACE_REPORT_PATH),
         ),
         "where_am_i_leaking_performance": where_am_i_leaking_performance,
         "what_should_i_do_next": what_should_i_do_next,
@@ -4532,6 +4613,16 @@ def format_pipeline_health_summary(report: dict[str, Any]) -> str:
             f"non_converting_equilibrium={extreme_state_logic.get('non_converting_equilibrium_count', 0)}, "
             f"promoted={extreme_state_logic.get('promoted_count', 0)}, "
             f"downgraded={extreme_state_logic.get('downgraded_count', 0)}"
+        )
+    signal_surface_logic = report.get("signal_surface_logic", {})
+    if isinstance(signal_surface_logic, dict) and signal_surface_logic.get("report_present"):
+        lines.append(
+            "signal_surface_logic="
+            f"state={signal_surface_logic.get('signal_surface_state', 'UNKNOWN_SURFACE_STATE')}, "
+            f"decision={signal_surface_logic.get('signal_surface_decision', 'WAIT')}, "
+            f"score={signal_surface_logic.get('signal_surface_score', 0.0)}, "
+            f"damage={signal_surface_logic.get('signal_surface_damage_class', 'UNKNOWN')}, "
+            f"bull={signal_surface_logic.get('signal_surface_bull_state', 'UNKNOWN_SURFACE_STATE')}"
         )
     intelligence_summary = report.get("intelligence_summary", {})
     if intelligence_summary.get("request_success"):

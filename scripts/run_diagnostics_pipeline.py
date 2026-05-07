@@ -38,6 +38,7 @@ try:
     )
     from scripts.extreme_state import build_extreme_state_report
     from scripts.hedge_trade_entry_playbook import build_hedge_trade_entry_report
+    from scripts.signal_surface_engine import build_signal_surface_report
     from scripts.tennis_archetype_execution import (
         load_runtime_compatible_signals,
         write_tennis_archetype_report,
@@ -93,6 +94,7 @@ except ModuleNotFoundError:
     from hedge_trade_entry_playbook import (  # type: ignore[no-redef]
         build_hedge_trade_entry_report,
     )
+    from signal_surface_engine import build_signal_surface_report  # type: ignore[no-redef]
     from tennis_archetype_execution import (  # type: ignore[no-redef]
         load_runtime_compatible_signals,
         write_tennis_archetype_report,
@@ -427,6 +429,12 @@ def run_diagnostics_pipeline(
         write_runtime=effective_write_runtime,
     )
     runtime_state["hedge_trade_entry"] = hedge_trade_entry_report
+    signal_surface_report = build_signal_surface_report(
+        tennis_signals,
+        runtime_state=runtime_state,
+        write_runtime=effective_write_runtime,
+    )
+    runtime_state["signal_surface_report"] = signal_surface_report
     extreme_state_report = build_extreme_state_report(
         tennis_signals,
         runtime_state=runtime_state,
@@ -452,6 +460,7 @@ def run_diagnostics_pipeline(
         perception_control_report=final_perception_control_report,
         external_data_report=external_data_report,
         external_observation_report=external_observation_report,
+        signal_surface_report=signal_surface_report,
         latest_snapshot_timestamp=latest_snapshot_timestamp,
         simulate_gsce_clear=simulate_gsce_clear,
         simulate_realm_bis_clear=simulate_realm_bis_clear,
