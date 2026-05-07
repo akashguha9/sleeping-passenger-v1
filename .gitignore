@@ -64,6 +64,15 @@ desktop.ini
 # =========================
 # DATA / TEMP / EXPORTS
 # =========================
+data/raw/*
+!data/raw/.gitkeep
+data/processed/*
+!data/processed/.gitkeep
+data/paper_trades/*
+!data/paper_trades/.gitkeep
+!data/logs/
+data/logs/*
+!data/logs/.gitkeep
 *.csv
 *.tsv
 *.parquet

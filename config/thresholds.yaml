@@ -1,0 +1,35 @@
+scoring_weights:
+  engagement:
+    emotional_intensity: 0.20
+    headline_extremity: 0.15
+    narrative_recycling: 0.15
+    virality_spike: 0.15
+    curiosity_gap: 0.15
+    evidence_density: 0.10
+    source_credibility: 0.10
+  evidence:
+    primary_source_weight: 0.25
+    source_credibility: 0.20
+    confirmation_count: 0.20
+    recency: 0.15
+    cross_source_diversity: 0.10
+    contradiction_penalty: 0.10
+  durability:
+    persistence: 0.25
+    stress_survival: 0.25
+    cross_source_confirmation: 0.20
+    time_stability: 0.15
+    contradiction_resistance: 0.15
+thresholds:
+  ignore_ems_high: 0.75
+  ignore_eqs_low: 0.45
+  watch_aps_min: 0.35
+  validate_aps_min: 0.55
+  paper_trade_aps_min: 0.70
+  paper_trade_eqs_min: 0.65
+  paper_trade_ds_min: 0.60
+  paper_trade_ls_min: 0.50
+  paper_trade_ems_max: 0.60
+  paper_trade_efs_max: 0.50
+  edge_threshold: 0.08
+  simulated_stake: 100.0

@@ -1,0 +1,14 @@
+polymarket:
+  gamma_base_url: "https://gamma-api.polymarket.com"
+  data_base_url: "https://data-api.polymarket.com"
+  clob_base_url: "https://clob.polymarket.com"
+  timeout_seconds: 10
+  retries: 2
+  backoff_seconds: 1.0
+  max_markets: 25
+  use_mock_on_failure: true
+  read_only: true
+system_defaults:
+  truth_origin: "public_or_mock"
+  external_reality_connected: false
+  paper_only: true

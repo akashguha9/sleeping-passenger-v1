@@ -158,6 +158,101 @@ python scripts\paper_reconciliation.py --summary
 - `seeded`: no external observation mode requested; SCM remains seeded.
 - `hybrid_observation`: external observations are attached as read-only context, but no external candidates are admitted into SCM.
 - `external_candidate_validation`: valid external observations are admitted as paper-safe SCM candidate rows.
+
+## Signal Refinery MVP_1
+
+This repo now includes an additive read-only public-data subsystem under `src/` for a geopolitical / narrative / prediction-market signal refinery MVP.
+
+### Doctrine
+
+- Detect widely.
+- Classify intent early.
+- Reject aggressively.
+- Validate durable signals.
+- Paper-trade before capital.
+- Execute only after proof.
+
+The edge is disciplined refusal, not speed.
+
+### What It Does
+
+- fetches public Polymarket market data through a read-only client with deterministic mock fallback
+- scores markets for engineered attention versus durable evidence
+- classifies each market into `IGNORE`, `WATCH`, `VALIDATE`, or `PAPER_TRADE`
+- stores raw snapshots, processed scores, attention clusters, rejected signals, and paper trades in SQLite
+- supports a paper-only dashboard and explanatory output layer
+
+### What It Does Not Do
+
+- live trading
+- wallet or private-key handling
+- authenticated order placement
+- signed Polymarket orders
+- broker integration
+- capital deployment logic
+
+This is a read-only signal-refinery MVP.
+It does not provide financial advice.
+It does not execute trades.
+It does not handle wallets or private keys.
+It uses public data to test signal classification and paper-trading logic.
+Real capital should not be connected until the paper system is validated.
+
+### Governing Formulas
+
+`Signal Problem ≠ Truth vs Falsehood`
+
+`Signal Problem = Durable Evidence vs Engineered Attention`
+
+`Detected Signal ≠ Valid Signal ≠ Actionable Signal`
+
+`AI Output = Explanation Layer`
+
+`Pipeline Score = Decision Layer`
+
+`MVP_1 = Public Data + Scoring + Dashboard + Paper Trade`
+
+`Alpha = Refusal Quality + Validation Discipline + Execution Patience`
+
+`False Claim ≠ Zero Value`
+
+`False Claim = Low Truth Value + Possible Attention Value`
+
+`Good MVP = Signal Refinery`
+
+`Bad MVP = Premature Trading Bot`
+
+`NetSignalValue = MarketMispricing × EvidenceQuality × Durability × Liquidity - EngagementManipulation - ExecutionFriction`
+
+`ReadyForLive = PaperAccuracy > θa AND Drawdown < θd AND APIStability = True AND WalletSecurity = True`
+
+`ReadyForLive` is roadmap only and is not implemented.
+
+### Scoring Stack
+
+- `EMS = 0.20*EmotionalIntensity + 0.15*HeadlineExtremity + 0.15*NarrativeRecycling + 0.15*ViralitySpike + 0.15*CuriosityGap - 0.10*EvidenceDensity - 0.10*SourceCredibility`
+- `EQS = 0.25*PrimarySourceWeight + 0.20*SourceCredibility + 0.20*ConfirmationCountNorm + 0.15*RecencyScore + 0.10*CrossSourceDiversity - 0.10*ContradictionPenalty`
+- `DS = 0.25*Persistence + 0.25*StressSurvival + 0.20*CrossSourceConfirmation + 0.15*TimeStability + 0.15*ContradictionResistance`
+- `LS = 0.35*LiquidityNorm + 0.30*VolumeNorm + 0.20*OrderBookDepthNorm - 0.15*SpreadPenalty`
+- `EFS = 0.25*SpreadPenalty + 0.25*LowLiquidityPenalty + 0.20*VolatilityPenalty + 0.20*TimingRisk + 0.10*APIUncertaintyPenalty`
+- `ModelProbability = clip(0.50 + 0.25*(EQS-0.50) + 0.20*(DS-0.50) - 0.15*EMS - 0.10*EFS, 0.01, 0.99)`
+- `APS = 0.30*EQS + 0.25*DS + 0.20*LS + 0.15*MarketMispricingEstimate - 0.20*EMS - 0.15*EFS`
+
+### State Classification
+
+- `IGNORE`: high manipulation / low evidence, or friction too high
+- `WATCH`: early but incomplete
+- `VALIDATE`: promising and durable enough for deeper review
+- `PAPER_TRADE`: strongest paper-only candidates with sufficient evidence, durability, liquidity, and manageable friction
+
+### Storage and Dashboard
+
+- SQLite path: `data/processed/signal_refinery.sqlite`
+- Streamlit app: `src/dashboard/streamlit_app.py`
+- Run ingestion: `python scripts\run_ingestion.py --summary`
+- Run scoring: `python scripts\run_scoring.py --summary`
+- Run paper trading: `python scripts\run_paper_trading.py --summary`
+- Run dashboard helper: `python scripts\run_dashboard.py`
 - `unavailable`: external mode was requested, but zero valid observations survived provider/data-quality checks; the system fails closed.
 
 All bridge modes remain advisory and paper-safe. They do not enable capital deployment or broker execution.
