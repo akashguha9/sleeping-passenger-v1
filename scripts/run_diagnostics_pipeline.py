@@ -33,6 +33,7 @@ try:
         build_latent_signal_release_bull_report,
     )
     from scripts.chess_archetype_decision_layer import write_chess_archetype_report
+    from scripts.hedge_trade_entry_playbook import build_hedge_trade_entry_report
     from scripts.tennis_archetype_execution import (
         load_runtime_compatible_signals,
         write_tennis_archetype_report,
@@ -80,6 +81,9 @@ except ModuleNotFoundError:
     )
     from chess_archetype_decision_layer import (  # type: ignore[no-redef]
         write_chess_archetype_report,
+    )
+    from hedge_trade_entry_playbook import (  # type: ignore[no-redef]
+        build_hedge_trade_entry_report,
     )
     from tennis_archetype_execution import (  # type: ignore[no-redef]
         load_runtime_compatible_signals,
@@ -387,6 +391,12 @@ def run_diagnostics_pipeline(
         write_runtime=effective_write_runtime,
     )
     runtime_state["chess_archetype"] = chess_archetype_report
+    hedge_trade_entry_report = build_hedge_trade_entry_report(
+        tennis_signals,
+        runtime_state=runtime_state,
+        write_runtime=effective_write_runtime,
+    )
+    runtime_state["hedge_trade_entry"] = hedge_trade_entry_report
     action_report = build_action_report(
         runtime_state=runtime_state,
         signal_refinery_report=final_signal_refinery_report,

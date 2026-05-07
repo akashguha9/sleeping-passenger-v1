@@ -52,6 +52,7 @@ try:
         build_latent_signal_release_bull_report,
     )
     from scripts.chess_archetype_decision_layer import write_chess_archetype_report
+    from scripts.hedge_trade_entry_playbook import build_hedge_trade_entry_report
     from scripts.tennis_archetype_execution import (
         write_tennis_archetype_report,
     )
@@ -62,6 +63,7 @@ try:
         BULL_STATE_REPORT_PATH,
         BULL_TRANSITION_LOG_PATH,
         CHESS_ARCHETYPE_REPORT_PATH,
+        HEDGE_TRADE_ENTRY_REPORT_PATH,
         COLLAPSE_ANALYSIS_REPORT_PATH,
         COMPLEXITY_LADDER_CONTROLLER_PATH,
         EXTREME_STATE_REPORT_PATH,
@@ -146,6 +148,9 @@ except ModuleNotFoundError:
     from chess_archetype_decision_layer import (  # type: ignore[no-redef]
         write_chess_archetype_report,
     )
+    from hedge_trade_entry_playbook import (  # type: ignore[no-redef]
+        build_hedge_trade_entry_report,
+    )
     from tennis_archetype_execution import (  # type: ignore[no-redef]
         write_tennis_archetype_report,
     )
@@ -156,6 +161,7 @@ except ModuleNotFoundError:
         BULL_STATE_REPORT_PATH,
         BULL_TRANSITION_LOG_PATH,
         CHESS_ARCHETYPE_REPORT_PATH,
+        HEDGE_TRADE_ENTRY_REPORT_PATH,
         COLLAPSE_ANALYSIS_REPORT_PATH,
         COMPLEXITY_LADDER_CONTROLLER_PATH,
         EXTREME_STATE_REPORT_PATH,
@@ -3142,6 +3148,13 @@ def build_pipeline_health_report(
             runtime_state=state,
             write_runtime=effective_write_runtime,
         )
+    hedge_trade_entry_report = state.get("hedge_trade_entry")
+    if not isinstance(hedge_trade_entry_report, dict) or not hedge_trade_entry_report:
+        hedge_trade_entry_report = build_hedge_trade_entry_report(
+            [],
+            runtime_state=state,
+            write_runtime=effective_write_runtime,
+        )
     structural_design_report = build_structural_design_report(
         runtime_state=state,
         reflection_context=reflection_context,
@@ -3765,6 +3778,40 @@ def build_pipeline_health_report(
             "average_multi_order_consequence_score"
         ],
         "chess_report_path": repo_relative(CHESS_ARCHETYPE_REPORT_PATH),
+        "hedge_trade_entry_report": hedge_trade_entry_report,
+        "hedge_trade_entry_state": {
+            "hedge_ratio": hedge_trade_entry_report["hedge_ratio"],
+            "hedge_classification": hedge_trade_entry_report["hedge_classification"],
+            "net_exposure": hedge_trade_entry_report["net_exposure"],
+            "net_exposure_ratio": hedge_trade_entry_report["net_exposure_ratio"],
+            "directional_exposure_state": hedge_trade_entry_report["directional_exposure_state"],
+            "position_conflict_state": hedge_trade_entry_report["position_conflict_state"],
+            "leverage_safety_state": hedge_trade_entry_report["leverage_safety_state"],
+            "recommended_hedge_range": hedge_trade_entry_report["recommended_hedge_range"],
+            "selected_mode": hedge_trade_entry_report["selected_mode"],
+            "tail_loss_state": hedge_trade_entry_report["tail_loss_state"],
+            "entry_gate_state": hedge_trade_entry_report["entry_gate_state"],
+            "entry_rejection_reasons": hedge_trade_entry_report["entry_rejection_reasons"],
+            "execution_quality_score": hedge_trade_entry_report["execution_quality_score"],
+            "annualized_projection": hedge_trade_entry_report["annualized_projection"],
+            "assumption_flags": hedge_trade_entry_report["assumption_flags"],
+        },
+        "hedge_ratio": hedge_trade_entry_report["hedge_ratio"],
+        "hedge_classification": hedge_trade_entry_report["hedge_classification"],
+        "net_exposure": hedge_trade_entry_report["net_exposure"],
+        "net_exposure_ratio": hedge_trade_entry_report["net_exposure_ratio"],
+        "directional_exposure_state": hedge_trade_entry_report["directional_exposure_state"],
+        "position_conflict_state": hedge_trade_entry_report["position_conflict_state"],
+        "leverage_safety_state": hedge_trade_entry_report["leverage_safety_state"],
+        "recommended_hedge_range": hedge_trade_entry_report["recommended_hedge_range"],
+        "selected_mode": hedge_trade_entry_report["selected_mode"],
+        "tail_loss_state": hedge_trade_entry_report["tail_loss_state"],
+        "entry_gate_state": hedge_trade_entry_report["entry_gate_state"],
+        "entry_rejection_reasons": hedge_trade_entry_report["entry_rejection_reasons"],
+        "execution_quality_score": hedge_trade_entry_report["execution_quality_score"],
+        "annualized_projection": hedge_trade_entry_report["annualized_projection"],
+        "assumption_flags": hedge_trade_entry_report["assumption_flags"],
+        "hedge_trade_entry_report_path": repo_relative(HEDGE_TRADE_ENTRY_REPORT_PATH),
         "structural_design_state": {
             "structure_state": structural_design_report["structure_state"],
             "pressure_score": structural_design_report["pressure_score"],
@@ -4203,6 +4250,18 @@ def format_pipeline_health_summary(report: dict[str, Any]) -> str:
             f"chess_recovery_activations={report.get('chess_recovery_activations')}",
             "chess_average_multi_order_consequence="
             f"{report.get('chess_average_multi_order_consequence')}",
+            f"hedge_ratio={report.get('hedge_ratio')}",
+            f"hedge_classification={report.get('hedge_classification', 'UNKNOWN')}",
+            f"net_exposure={report.get('net_exposure')}",
+            f"net_exposure_ratio={report.get('net_exposure_ratio')}",
+            f"directional_exposure_state={report.get('directional_exposure_state', 'UNKNOWN')}",
+            f"position_conflict_state={report.get('position_conflict_state', 'UNKNOWN')}",
+            f"leverage_safety_state={report.get('leverage_safety_state', 'UNKNOWN')}",
+            f"selected_mode={report.get('selected_mode', 'UNKNOWN')}",
+            f"tail_loss_state={report.get('tail_loss_state', 'UNKNOWN')}",
+            f"entry_gate_state={report.get('entry_gate_state', 'UNKNOWN')}",
+            f"execution_quality_score={report.get('execution_quality_score')}",
+            f"annualized_projection={report.get('annualized_projection')}",
             "structural_design_state="
             f"{report.get('structural_design_structure_state', 'UNKNOWN')}",
             "structural_design_pressure_score="
