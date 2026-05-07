@@ -32,6 +32,10 @@ try:
     from scripts.latent_signal_release_bull_layer import (
         build_latent_signal_release_bull_report,
     )
+    from scripts.tennis_archetype_execution import (
+        load_runtime_compatible_signals,
+        write_tennis_archetype_report,
+    )
     from scripts.runtime_common import (
         SNAPSHOT_LOG_PATH,
         persist_current_runtime_state,
@@ -72,6 +76,10 @@ except ModuleNotFoundError:
     from perception_control import build_perception_control_report
     from latent_signal_release_bull_layer import (  # type: ignore[no-redef]
         build_latent_signal_release_bull_report,
+    )
+    from tennis_archetype_execution import (  # type: ignore[no-redef]
+        load_runtime_compatible_signals,
+        write_tennis_archetype_report,
     )
     from runtime_common import (
         SNAPSHOT_LOG_PATH,
@@ -358,6 +366,17 @@ def run_diagnostics_pipeline(
         write_runtime=effective_write_runtime,
     )
     runtime_state["latent_signal_release_bull"] = latent_signal_release_bull_report
+    tennis_signals = load_runtime_compatible_signals(
+        runtime_state=runtime_state,
+        signal_refinery_report=final_signal_refinery_report,
+        perception_control_report=final_perception_control_report,
+    )
+    tennis_archetype_report = write_tennis_archetype_report(
+        tennis_signals,
+        runtime_state=runtime_state,
+        write_runtime=effective_write_runtime,
+    )
+    runtime_state["tennis_archetype"] = tennis_archetype_report
     action_report = build_action_report(
         runtime_state=runtime_state,
         signal_refinery_report=final_signal_refinery_report,

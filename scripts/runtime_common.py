@@ -521,6 +521,7 @@ AVENTADOR_PROMOTION_REPORT_PATH = RUNTIME_DIR / "aventador_promotion_report.json
 GALLARDO_EXECUTION_REPORT_PATH = RUNTIME_DIR / "gallardo_execution_report.json"
 BULL_STATE_REPORT_PATH = RUNTIME_DIR / "bull_state_report.json"
 BULL_TRANSITION_LOG_PATH = RUNTIME_DIR / "bull_transition_log.json"
+TENNIS_ARCHETYPE_REPORT_PATH = RUNTIME_DIR / "tennis_archetype_report.json"
 ARCHETYPE_PROFILE_REPORT_PATH = RUNTIME_DIR / "archetype_profile_report.json"
 CLOSURE_DEFICIT_REPORT_PATH = RUNTIME_DIR / "closure_deficit_report.json"
 EXPERIENCE_MODE_REPORT_PATH = RUNTIME_DIR / "experience_mode_report.json"

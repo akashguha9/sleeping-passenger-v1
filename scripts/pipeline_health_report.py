@@ -51,6 +51,9 @@ try:
     from scripts.latent_signal_release_bull_layer import (
         build_latent_signal_release_bull_report,
     )
+    from scripts.tennis_archetype_execution import (
+        write_tennis_archetype_report,
+    )
     from scripts.structural_admission_layer import build_structural_admission_report
     from scripts.structural_design_engine import build_structural_design_report
     from scripts.runtime_common import (
@@ -76,6 +79,7 @@ try:
         SNAPSHOT_LOG_PATH,
         STRUCTURAL_ADMISSION_REPORT_PATH,
         STRUCTURAL_DESIGN_REPORT_PATH,
+        TENNIS_ARCHETYPE_REPORT_PATH,
         VALIDATION_BUFFER_REPORT_PATH,
         build_runtime_state_from_scm_report_payload,
         resolve_bridge_mode,
@@ -137,6 +141,9 @@ except ModuleNotFoundError:
     from latent_signal_release_bull_layer import (  # type: ignore[no-redef]
         build_latent_signal_release_bull_report,
     )
+    from tennis_archetype_execution import (  # type: ignore[no-redef]
+        write_tennis_archetype_report,
+    )
     from structural_admission_layer import build_structural_admission_report
     from structural_design_engine import build_structural_design_report
     from runtime_common import (
@@ -162,6 +169,7 @@ except ModuleNotFoundError:
         SNAPSHOT_LOG_PATH,
         STRUCTURAL_ADMISSION_REPORT_PATH,
         STRUCTURAL_DESIGN_REPORT_PATH,
+        TENNIS_ARCHETYPE_REPORT_PATH,
         VALIDATION_BUFFER_REPORT_PATH,
         build_runtime_state_from_scm_report_payload,
         resolve_bridge_mode,
@@ -3114,6 +3122,13 @@ def build_pipeline_health_report(
             friction_report=friction_report,
             write_runtime=effective_write_runtime,
         )
+    tennis_archetype_report = state.get("tennis_archetype")
+    if not isinstance(tennis_archetype_report, dict) or not tennis_archetype_report:
+        tennis_archetype_report = write_tennis_archetype_report(
+            [],
+            runtime_state=state,
+            write_runtime=effective_write_runtime,
+        )
     structural_design_report = build_structural_design_report(
         runtime_state=state,
         reflection_context=reflection_context,
@@ -3651,6 +3666,52 @@ def build_pipeline_health_report(
         ),
         "bull_state_report_path": repo_relative(BULL_STATE_REPORT_PATH),
         "bull_transition_log_path": repo_relative(BULL_TRANSITION_LOG_PATH),
+        "tennis_archetype_state": {
+            "total_signals": tennis_archetype_report["total_signals"],
+            "dominant_execution_style": tennis_archetype_report[
+                "dominant_execution_style"
+            ],
+            "dominant_player_archetype": tennis_archetype_report[
+                "dominant_player_archetype"
+            ],
+            "dominant_bull_state": tennis_archetype_report["dominant_bull_state"],
+            "chaos_veto_count": tennis_archetype_report["chaos_veto_count"],
+            "fast_track_candidate_count": tennis_archetype_report[
+                "fast_track_candidate_count"
+            ],
+            "aesthetic_trap_count": tennis_archetype_report["aesthetic_trap_count"],
+            "high_variance_count": tennis_archetype_report["high_variance_count"],
+            "durability_pass_count": tennis_archetype_report["durability_pass_count"],
+            "execution_ready_simulation_only_count": tennis_archetype_report[
+                "execution_ready_simulation_only_count"
+            ],
+            "summary_recommendation": tennis_archetype_report[
+                "summary_recommendation"
+            ],
+        },
+        "tennis_dominant_execution_style": tennis_archetype_report[
+            "dominant_execution_style"
+        ],
+        "tennis_dominant_player_archetype": tennis_archetype_report[
+            "dominant_player_archetype"
+        ],
+        "tennis_dominant_bull_state": tennis_archetype_report["dominant_bull_state"],
+        "tennis_chaos_veto_count": tennis_archetype_report["chaos_veto_count"],
+        "tennis_fast_track_candidate_count": tennis_archetype_report[
+            "fast_track_candidate_count"
+        ],
+        "tennis_aesthetic_trap_count": tennis_archetype_report["aesthetic_trap_count"],
+        "tennis_high_variance_count": tennis_archetype_report["high_variance_count"],
+        "tennis_durability_pass_count": tennis_archetype_report[
+            "durability_pass_count"
+        ],
+        "tennis_execution_ready_simulation_only_count": tennis_archetype_report[
+            "execution_ready_simulation_only_count"
+        ],
+        "tennis_summary_recommendation": tennis_archetype_report[
+            "summary_recommendation"
+        ],
+        "tennis_archetype_report_path": repo_relative(TENNIS_ARCHETYPE_REPORT_PATH),
         "structural_design_state": {
             "structure_state": structural_design_report["structure_state"],
             "pressure_score": structural_design_report["pressure_score"],
@@ -4067,6 +4128,18 @@ def format_pipeline_health_summary(report: dict[str, Any]) -> str:
             f"promotion_ready={str(bool(report.get('promotion_ready', False))).lower()}",
             f"execution_ready={str(bool(report.get('execution_ready', False))).lower()}",
             f"recommended_next_action={report.get('recommended_next_action', 'UNKNOWN')}",
+            "tennis_dominant_execution_style="
+            f"{report.get('tennis_dominant_execution_style', 'UNKNOWN')}",
+            "tennis_dominant_player_archetype="
+            f"{report.get('tennis_dominant_player_archetype', 'UNKNOWN')}",
+            f"tennis_dominant_bull_state={report.get('tennis_dominant_bull_state', 'UNKNOWN')}",
+            f"tennis_chaos_veto_count={report.get('tennis_chaos_veto_count')}",
+            "tennis_fast_track_candidate_count="
+            f"{report.get('tennis_fast_track_candidate_count')}",
+            "tennis_execution_ready_simulation_only_count="
+            f"{report.get('tennis_execution_ready_simulation_only_count')}",
+            "tennis_summary_recommendation="
+            f"{report.get('tennis_summary_recommendation', 'UNKNOWN')}",
             "structural_design_state="
             f"{report.get('structural_design_structure_state', 'UNKNOWN')}",
             "structural_design_pressure_score="
