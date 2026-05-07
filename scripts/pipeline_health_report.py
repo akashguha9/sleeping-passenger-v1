@@ -20,6 +20,9 @@ try:
     from scripts.execution_integrity_audit import evaluate_execution_integrity_audit
     from scripts.external_data_runtime_sync import apply_external_observation_report
     from scripts.field_dynamics_engine import build_field_dynamics_report
+    from scripts.false_negative_casino_monopoly_layer import (
+        build_false_negative_casino_monopoly_report,
+    )
     from scripts.governance_feedback_report import build_governance_feedback_report
     from scripts.football_portfolio_archetype_engine import (
         build_football_portfolio_archetype_report,
@@ -50,6 +53,7 @@ try:
         EXTREME_STATE_REPORT_PATH,
         EXPERIENCE_MODE_REPORT_PATH,
         FIELD_DYNAMICS_REPORT_PATH,
+        FALSE_NEGATIVE_CASINO_MONOPOLY_REPORT_PATH,
         FOOTBALL_PORTFOLIO_ARCHETYPE_REPORT_PATH,
         HEALTH_REPORT_PATH,
         SIGNAL_METABOLISM_REPORT_PATH,
@@ -83,6 +87,9 @@ except ModuleNotFoundError:
     from execution_integrity_audit import evaluate_execution_integrity_audit
     from external_data_runtime_sync import apply_external_observation_report
     from field_dynamics_engine import build_field_dynamics_report
+    from false_negative_casino_monopoly_layer import (
+        build_false_negative_casino_monopoly_report,
+    )
     from governance_feedback_report import build_governance_feedback_report
     from football_portfolio_archetype_engine import (
         build_football_portfolio_archetype_report,
@@ -113,6 +120,7 @@ except ModuleNotFoundError:
         EXTREME_STATE_REPORT_PATH,
         EXPERIENCE_MODE_REPORT_PATH,
         FIELD_DYNAMICS_REPORT_PATH,
+        FALSE_NEGATIVE_CASINO_MONOPOLY_REPORT_PATH,
         FOOTBALL_PORTFOLIO_ARCHETYPE_REPORT_PATH,
         HEALTH_REPORT_PATH,
         SIGNAL_METABOLISM_REPORT_PATH,
@@ -3030,6 +3038,22 @@ def build_pipeline_health_report(
         open_positions_path=open_positions_path,
         write_runtime=effective_write_runtime,
     )
+    false_negative_casino_monopoly_report = build_false_negative_casino_monopoly_report(
+        runtime_state=state,
+        signal_refinery_report=signal_refinery_report,
+        attention_proxy_report=attention_proxy_report,
+        action_report=action_report,
+        trend_report=trend_report,
+        reflection_context=reflection_context,
+        narrative_filter_report=narrative_filter_report,
+        busquets_audit_report=busquets_audit_report,
+        execution_integrity_report=execution_integrity_report,
+        asset_durability_report=asset_durability_report,
+        temporal_integrity=temporal_integrity,
+        position_truth_summary=position_truth_summary,
+        operator_control_report=operator_control_report,
+        write_runtime=effective_write_runtime,
+    )
 
     report = {
         "health_generated_at": _health_timestamp(),
@@ -3245,6 +3269,167 @@ def build_pipeline_health_report(
         ],
         "optical_blocking_reason": optical_operating_system_report["blocking_reason"],
         "optical_state_log": optical_operating_system_report["optical_state_log"],
+        "false_negative_casino_monopoly_layer": false_negative_casino_monopoly_report,
+        "structural_stabilizer_score": false_negative_casino_monopoly_report["structural"][
+            "structural_stabilizer_score"
+        ],
+        "structural_stabilizer_state": false_negative_casino_monopoly_report["structural"][
+            "structural_stabilizer_state"
+        ],
+        "role_capability_fit_score": false_negative_casino_monopoly_report[
+            "role_capability"
+        ]["role_capability_fit_score"],
+        "current_role_fit_state": false_negative_casino_monopoly_report["role_capability"][
+            "current_role_fit_state"
+        ],
+        "false_negative_risk": false_negative_casino_monopoly_report["false_negative"][
+            "false_negative_risk"
+        ],
+        "false_negative_state": false_negative_casino_monopoly_report["false_negative"][
+            "false_negative_state"
+        ],
+        "blind_spot_risk": false_negative_casino_monopoly_report["blind_spot"][
+            "blind_spot_risk"
+        ],
+        "blind_spot_state": false_negative_casino_monopoly_report["blind_spot"][
+            "blind_spot_state"
+        ],
+        "double_blind_risk": false_negative_casino_monopoly_report["double_blind"][
+            "double_blind_risk"
+        ],
+        "double_blind_state": false_negative_casino_monopoly_report["double_blind"][
+            "double_blind_state"
+        ],
+        "decision_quality_score": false_negative_casino_monopoly_report["decision_quality"][
+            "decision_quality_score"
+        ],
+        "outcome_score": false_negative_casino_monopoly_report["decision_quality"][
+            "outcome_score"
+        ],
+        "variance_explanation": false_negative_casino_monopoly_report["decision_quality"][
+            "variance_explanation"
+        ],
+        "process_outcome_divergence": false_negative_casino_monopoly_report[
+            "decision_quality"
+        ]["process_outcome_divergence"],
+        "decision_quality_state": false_negative_casino_monopoly_report[
+            "decision_quality"
+        ]["decision_quality_state"],
+        "casino_role": false_negative_casino_monopoly_report["casino_role_classifier"][
+            "casino_role"
+        ],
+        "food_chain_rank": false_negative_casino_monopoly_report[
+            "casino_role_classifier"
+        ]["food_chain_rank"],
+        "table_quality_score": false_negative_casino_monopoly_report["casino_role_classifier"][
+            "table_quality_score"
+        ],
+        "predator_density": false_negative_casino_monopoly_report["casino_role_classifier"][
+            "predator_density"
+        ],
+        "edge_availability": false_negative_casino_monopoly_report[
+            "casino_role_classifier"
+        ]["edge_availability"],
+        "table_context_score": false_negative_casino_monopoly_report["table_context"][
+            "table_context_score"
+        ],
+        "table_context_state": false_negative_casino_monopoly_report["table_context"][
+            "table_context_state"
+        ],
+        "asset_cluster_score": false_negative_casino_monopoly_report["monopoly_cluster"][
+            "asset_cluster_score"
+        ],
+        "cluster_control_state": false_negative_casino_monopoly_report[
+            "monopoly_cluster"
+        ]["cluster_control_state"],
+        "scale_permission_score": false_negative_casino_monopoly_report[
+            "monopoly_cluster"
+        ]["scale_permission_score"],
+        "scale_permission_state": false_negative_casino_monopoly_report[
+            "monopoly_cluster"
+        ]["scale_permission_state"],
+        "jail_mode_active": false_negative_casino_monopoly_report["jail_mode"][
+            "jail_mode_active"
+        ],
+        "jail_mode_reason": false_negative_casino_monopoly_report["jail_mode"][
+            "jail_mode_reason"
+        ],
+        "jail_mode_state": false_negative_casino_monopoly_report["jail_mode"][
+            "jail_mode_state"
+        ],
+        "reentry_score": false_negative_casino_monopoly_report["reentry"][
+            "reentry_score"
+        ],
+        "reentry_state": false_negative_casino_monopoly_report["reentry"][
+            "reentry_state"
+        ],
+        "false_break_risk": false_negative_casino_monopoly_report["false_break"][
+            "false_break_risk"
+        ],
+        "break_quality_score": false_negative_casino_monopoly_report["false_break"][
+            "break_quality_score"
+        ],
+        "false_break_state": false_negative_casino_monopoly_report["false_break"][
+            "false_break_state"
+        ],
+        "bluff_risk": false_negative_casino_monopoly_report["bluff_truth"][
+            "bluff_risk"
+        ],
+        "truth_probability": false_negative_casino_monopoly_report["bluff_truth"][
+            "truth_probability"
+        ],
+        "truth_state": false_negative_casino_monopoly_report["bluff_truth"][
+            "truth_state"
+        ],
+        "joker_event_detected": false_negative_casino_monopoly_report["joker_shock"][
+            "joker_event_detected"
+        ],
+        "shock_score": false_negative_casino_monopoly_report["joker_shock"][
+            "shock_score"
+        ],
+        "prior_model_validity": false_negative_casino_monopoly_report["joker_shock"][
+            "prior_model_validity"
+        ],
+        "shock_state": false_negative_casino_monopoly_report["joker_shock"][
+            "shock_state"
+        ],
+        "forced_transition_command": false_negative_casino_monopoly_report[
+            "forced_transition"
+        ]["forced_transition_command"],
+        "forced_transition_reason": false_negative_casino_monopoly_report[
+            "forced_transition"
+        ]["forced_transition_reason"],
+        "bull_state": false_negative_casino_monopoly_report["bull_archetype"][
+            "bull_state"
+        ],
+        "bull_state_reason": false_negative_casino_monopoly_report["bull_archetype"][
+            "bull_state_reason"
+        ],
+        "bull_state_transition": false_negative_casino_monopoly_report[
+            "bull_archetype"
+        ]["bull_state_transition"],
+        "policy_veto_respected": false_negative_casino_monopoly_report[
+            "bull_archetype"
+        ]["policy_veto_respected"],
+        "recurrence_score": false_negative_casino_monopoly_report["recurrence"][
+            "recurrence_score"
+        ],
+        "cycle_strength": false_negative_casino_monopoly_report["recurrence"][
+            "cycle_strength"
+        ],
+        "cycle_state": false_negative_casino_monopoly_report["recurrence"][
+            "cycle_state"
+        ],
+        "investable_signal_adjusted_score": false_negative_casino_monopoly_report[
+            "investable_signal"
+        ]["investable_signal_adjusted_score"],
+        "false_negative_casino_monopoly_report_path": repo_relative(
+            FALSE_NEGATIVE_CASINO_MONOPOLY_REPORT_PATH
+        ),
+        "policy_veto_outranks_layer": false_negative_casino_monopoly_report[
+            "policy_veto_outranks_layer"
+        ],
+        "safety_state_intact": false_negative_casino_monopoly_report["safety_state_intact"],
         "intelligence_summary": intelligence_summary,
         "extreme_state_logic": extreme_state_logic,
         "where_am_i_leaking_performance": where_am_i_leaking_performance,
@@ -3413,6 +3598,11 @@ def build_pipeline_health_report(
             football_portfolio_archetype_report,
             stamp=True,
         )
+        write_json_atomic(
+            FALSE_NEGATIVE_CASINO_MONOPOLY_REPORT_PATH,
+            false_negative_casino_monopoly_report,
+            stamp=True,
+        )
 
     return report
 
@@ -3551,6 +3741,36 @@ def format_pipeline_health_summary(report: dict[str, Any]) -> str:
             f"{str(bool(report.get('optical_action_allowed', False))).lower()}",
             "optical_final_recommendation="
             f"{report.get('optical_final_recommendation', 'UNKNOWN')}",
+            f"structural_stabilizer_score={report.get('structural_stabilizer_score')}",
+            f"structural_stabilizer_state={report.get('structural_stabilizer_state', 'UNKNOWN')}",
+            f"role_capability_fit_score={report.get('role_capability_fit_score')}",
+            f"current_role_fit_state={report.get('current_role_fit_state', 'UNKNOWN')}",
+            f"false_negative_risk={report.get('false_negative_risk')}",
+            f"false_negative_state={report.get('false_negative_state', 'UNKNOWN')}",
+            f"blind_spot_risk={report.get('blind_spot_risk')}",
+            f"double_blind_risk={report.get('double_blind_risk')}",
+            f"double_blind_state={report.get('double_blind_state', 'UNKNOWN')}",
+            f"decision_quality_state={report.get('decision_quality_state', 'UNKNOWN')}",
+            f"casino_role={report.get('casino_role', 'UNKNOWN')}",
+            f"food_chain_rank={report.get('food_chain_rank')}",
+            f"table_context_state={report.get('table_context_state', 'UNKNOWN')}",
+            f"asset_cluster_score={report.get('asset_cluster_score')}",
+            f"cluster_control_state={report.get('cluster_control_state', 'UNKNOWN')}",
+            f"scale_permission_state={report.get('scale_permission_state', 'UNKNOWN')}",
+            f"jail_mode_active={str(bool(report.get('jail_mode_active', False))).lower()}",
+            f"jail_mode_state={report.get('jail_mode_state', 'UNKNOWN')}",
+            f"reentry_state={report.get('reentry_state', 'UNKNOWN')}",
+            f"false_break_risk={report.get('false_break_risk')}",
+            f"bluff_risk={report.get('bluff_risk')}",
+            f"truth_probability={report.get('truth_probability')}",
+            f"joker_event_detected={str(bool(report.get('joker_event_detected', False))).lower()}",
+            f"shock_state={report.get('shock_state', 'UNKNOWN')}",
+            f"forced_transition_command={report.get('forced_transition_command', 'NONE')}",
+            f"bull_state={report.get('bull_state', 'UNKNOWN')}",
+            f"recurrence_score={report.get('recurrence_score')}",
+            f"cycle_state={report.get('cycle_state', 'UNKNOWN')}",
+            "investable_signal_adjusted_score="
+            f"{report.get('investable_signal_adjusted_score')}",
             f"what_should_i_do_next={report['what_should_i_do_next']}",
             (
                 "scorecard="

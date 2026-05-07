@@ -504,6 +504,9 @@ HEALTH_REPORT_PATH = RUNTIME_DIR / "pipeline_health_report.json"
 FOOTBALL_PORTFOLIO_ARCHETYPE_REPORT_PATH = RUNTIME_DIR / "football_portfolio_archetype_report.json"
 FIELD_DYNAMICS_REPORT_PATH = RUNTIME_DIR / "field_dynamics_report.json"
 SIGNAL_METABOLISM_REPORT_PATH = RUNTIME_DIR / "signal_metabolism_report.json"
+FALSE_NEGATIVE_CASINO_MONOPOLY_REPORT_PATH = (
+    RUNTIME_DIR / "false_negative_casino_monopoly_layer_report.json"
+)
 ARCHETYPE_PROFILE_REPORT_PATH = RUNTIME_DIR / "archetype_profile_report.json"
 CLOSURE_DEFICIT_REPORT_PATH = RUNTIME_DIR / "closure_deficit_report.json"
 EXPERIENCE_MODE_REPORT_PATH = RUNTIME_DIR / "experience_mode_report.json"
