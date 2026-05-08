@@ -31,6 +31,8 @@ __pycache__/
 tests/.pytest_tmp/
 tests/pytest-cache-files-*/
 tests/_tmp_runtime/
+tests/fixtures/external_adapters/_generated_poly_data/
+tests/fixtures/external_adapters/_generated_*/
 
 # =========================
 # VIRTUAL ENVIRONMENTS
