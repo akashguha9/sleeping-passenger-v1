@@ -1,0 +1,87 @@
+# Source registry for the Global Signal Fabric.
+# Every source is read-only and advisory.
+sources:
+  polymarket:
+    enabled: true
+    type: prediction_market
+    endpoint: https://gamma-api.polymarket.com
+    auth_required: false
+    read_only: true
+  gdelt:
+    enabled: true
+    type: news_event
+    endpoint: https://api.gdeltproject.org/api/v2/doc/doc
+    auth_required: false
+    read_only: true
+  sec_edgar:
+    enabled: true
+    type: official_filing
+    endpoint: https://data.sec.gov
+    auth_required: false  # only User-Agent
+    read_only: true
+  etherscan:
+    enabled: true
+    type: onchain
+    endpoint: https://api.etherscan.io/api
+    auth_required: true
+    read_only: true
+  market_data:
+    enabled: true
+    type: market_data
+    endpoint: placeholder
+    auth_required: false
+    read_only: true
+  broker_csv:
+    enabled: true
+    type: portfolio_truth
+    endpoint: file
+    auth_required: false
+    read_only: true
+  newsapi:
+    enabled: false
+    type: news_event
+    placeholder: true
+  event_registry:
+    enabled: false
+    type: news_event
+    placeholder: true
+  grok:
+    enabled: false
+    type: interpretation
+    placeholder: true
+  india_nse_bse:
+    enabled: false
+    type: official_filing
+    placeholder: true
+  rbi_sebi:
+    enabled: false
+    type: regulator_disclosure
+    placeholder: true
+  eu_esef:
+    enabled: false
+    type: official_filing
+    placeholder: true
+  uk_companies_house:
+    enabled: false
+    type: official_filing
+    placeholder: true
+  japan_edinet:
+    enabled: false
+    type: official_filing
+    placeholder: true
+  singapore_acra_sgx:
+    enabled: false
+    type: official_filing
+    placeholder: true
+  china_disclosure:
+    enabled: false
+    type: official_filing
+    placeholder: true
+  solscan:
+    enabled: false
+    type: onchain
+    placeholder: true
+  evm_chain:
+    enabled: false
+    type: onchain
+    placeholder: true

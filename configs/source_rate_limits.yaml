@@ -1,0 +1,27 @@
+# Per-source rate limits in requests per minute and default timeouts in seconds.
+rate_limits:
+  polymarket:
+    rpm: 60
+    timeout_s: 15
+  gdelt:
+    rpm: 30
+    timeout_s: 20
+  sec_edgar:
+    rpm: 10            # SEC fair-use limit
+    timeout_s: 20
+  etherscan:
+    rpm: 30            # free-tier 5/sec ceiling
+    timeout_s: 15
+  market_data:
+    rpm: 30
+    timeout_s: 15
+  newsapi:
+    rpm: 30
+    timeout_s: 15
+  event_registry:
+    rpm: 30
+    timeout_s: 15
+default:
+  rpm: 20
+  timeout_s: 15
+  max_retries: 3

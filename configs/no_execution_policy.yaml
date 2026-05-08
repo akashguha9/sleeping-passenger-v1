@@ -1,0 +1,21 @@
+# Hard safety boundary for the Global Signal Fabric.
+# This file is the canonical source of truth: AI is advisory only.
+# Trade decisions are HUMAN_ONLY. No module may override these flags.
+execution_policy:
+  ai_can_execute: false
+  broker_order_placement_enabled: false
+  authenticated_trading_endpoints_allowed: false
+  human_confirmation_required: true
+  default_action_permission: ADVISORY_ONLY
+  forbidden_capabilities:
+    - place_order
+    - modify_order
+    - cancel_order
+    - redeem_position
+    - authenticated_trading
+    - auto_buy
+    - auto_sell
+    - execute_trade
+    - submit_order
+    - market_order
+    - limit_order

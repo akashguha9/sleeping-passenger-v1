@@ -1,0 +1,26 @@
+# Jurisdiction tagging used by SignalEvent.jurisdiction.
+jurisdictions:
+  US:
+    regulators: [SEC, FED, FINRA]
+    filing_sources: [sec_edgar]
+  EU:
+    regulators: [ESMA]
+    filing_sources: [eu_esef]
+  UK:
+    regulators: [FCA]
+    filing_sources: [uk_companies_house]
+  IN:
+    regulators: [SEBI, RBI]
+    filing_sources: [india_nse_bse, rbi_sebi]
+  JP:
+    regulators: [FSA]
+    filing_sources: [japan_edinet]
+  SG:
+    regulators: [MAS]
+    filing_sources: [singapore_acra_sgx]
+  CN:
+    regulators: [CSRC]
+    filing_sources: [china_disclosure]
+  GLOBAL:
+    regulators: []
+    filing_sources: [polymarket, gdelt, etherscan]
