@@ -1,6 +1,84 @@
 # Pipeline V5.7 Core
 
-This repo is a local decision shell for inspecting seeded signal state, blocker state, action posture, and transition readiness. It is not a live trading system.
+This repo is a **research/demo MVP** local decision shell for inspecting seeded signal state, blocker state, action posture, and transition readiness. It is **not a live trading system**, **not financial advice**, **not deployable**, and **not decision-ready**.
+
+> **Honest stance:** every diagnostic in this repo runs against seeded fixtures. Seeded/demo data is never external truth. Capital deployment, investment advice, and automated execution are explicitly forbidden by the canonical action-permission contract until external truth, calibration, and position reconciliation gates are passed.
+
+## Canonical Truth → Decision → Action-Permission Spine
+
+The repo carries a typed canonical contract (added in `scripts/runtime_contracts.py` and used by the health report):
+
+```
+truth origin → evidence ledger → validation status → calibration honesty
+            → state/veto logic → position reconciliation
+            → canonical action permission → decision ledger → health report honesty
+```
+
+Key invariants enforced by tests:
+
+- `SEEDED` and `DEMO` truth origins are never counted as external truth.
+- `external_signal_count == 0` ⇒ `canonical_action_permission = BLOCK_CAPITAL`.
+- `position_integrity_state == DIVERGED` ⇒ blocks capital.
+- `policy_state == RESTRICTED` ⇒ blocks capital unless demo/research only.
+- Active chaos veto ⇒ block capital or quarantine.
+- Missing calibration ⇒ no decision-ready claim.
+- Disabled contextual interpretation ⇒ confidence downgrade warning.
+- Forbidden state-machine transitions (e.g. `MIURA → GALLARDO` without `HURACAN` validation, `DIABLO → DEPLOY`, `JAIL → DEPLOY`, `HURACAN → DEPLOY` without validation floor) raise `StateMachineError`.
+
+The health report summary now exposes:
+
+```
+canonical_action_permission=...
+veto_reasons=[...]
+truth_origin_breakdown=...
+external_truth_status=...
+evidence_ledger_status=...
+decision_ledger_status=...
+calibration_status=...
+allowed_use=...
+forbidden_use=...
+canonical_position_integrity_state=...
+```
+
+In the seeded MVP runtime, the honest output is:
+
+```
+canonical_action_permission=BLOCK_CAPITAL
+veto_reasons=[NO_EXTERNAL_TRUTH, SEEDED_TRUTH_ONLY, POSITION_DIVERGED,
+              POLICY_RESTRICTED, CHAOS_VETO, CALIBRATION_MISSING,
+              INTERPRETATION_DISABLED, JAIL_MODE_ACTIVE]
+allowed_use=demo/research diagnostics only
+forbidden_use=capital deployment; investment advice; automated execution
+calibration_status=DEMO_ONLY
+```
+
+## Limitations (Seeded/Demo Mode)
+
+- All numeric scores and thresholds are heuristic. None are calibrated against external outcome labels and none support a decision-ready claim.
+- Position truth comes from the curated moltbook fixture; runtime paper positions diverge by default.
+- External truth integration is **incomplete unless explicitly configured**. `ExternalTruthSourceStub` reports `NOT_CONFIGURED` and never pretends live data exists.
+- Replay records without outcome labels do not validate outcomes.
+- Tests assert these invariants directly so they cannot be silently weakened.
+
+## Quickstart
+
+```bash
+# Compile
+python -m compileall scripts tests
+
+# Run the test suite (seeded; deterministic)
+python -m pytest tests -q
+
+# Honest health report (does not write runtime files)
+python scripts/pipeline_health_report.py --summary --no-write
+```
+
+## Health Report Interpretation Guide
+
+- `system_readiness_state=DO_NOT_DEPLOY` is the only honest value when `truth_origin=seeded` and `external_signal_count=0`.
+- `canonical_action_permission` is the canonical decision; `can_deploy_capital` and `system_readiness_state` must remain consistent with it (the test suite enforces no contradiction).
+- `veto_reasons` enumerates every active blocking gate. None of these can be "wished away" — they must be resolved by real structural state changes (external truth, calibration, reconciliation, etc.).
+- `calibration_status=DEMO_ONLY` means scores must not be used to claim decision-readiness or to support capital permission.
 
 ## Verified Now
 

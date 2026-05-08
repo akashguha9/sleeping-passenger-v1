@@ -112,6 +112,22 @@ try:
     from scripts.signal_refinery import build_signal_refinery_report
     from scripts.signal_conversion_monitor import build_signal_conversion_report
     from scripts.trend_engine import build_trend_report
+    from scripts.action_permission import (
+        format_action_permission_summary,
+        resolve_action_permission,
+    )
+    from scripts.calibration_status import (
+        CalibrationStatus,
+        aggregate_calibration_status,
+        classify_calibration_status,
+    )
+    from scripts.position_truth_resolver import resolve_position_integrity_contract
+    from scripts.runtime_contracts import (
+        ActionPermission,
+        VetoReason,
+        coerce_position_state,
+        coerce_truth_origin,
+    )
 except ModuleNotFoundError:
     from attention_proxy_engine import build_attention_proxy_report
     from action_engine import build_action_report
@@ -220,6 +236,24 @@ except ModuleNotFoundError:
     from signal_refinery import build_signal_refinery_report
     from signal_conversion_monitor import build_signal_conversion_report
     from trend_engine import build_trend_report
+    from action_permission import (  # type: ignore[no-redef]
+        format_action_permission_summary,
+        resolve_action_permission,
+    )
+    from calibration_status import (  # type: ignore[no-redef]
+        CalibrationStatus,
+        aggregate_calibration_status,
+        classify_calibration_status,
+    )
+    from position_truth_resolver import (  # type: ignore[no-redef]
+        resolve_position_integrity_contract,
+    )
+    from runtime_contracts import (  # type: ignore[no-redef]
+        ActionPermission,
+        VetoReason,
+        coerce_position_state,
+        coerce_truth_origin,
+    )
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -4412,6 +4446,123 @@ def build_pipeline_health_report(
         "temporal_integrity_violation_count"
     ]
     report["temporal_integrity_warnings"] = temporal_integrity["temporal_integrity_warnings"]
+
+    # ------------------------------------------------------------------
+    # Canonical truth/decision/action-permission spine.
+    # The fields produced here are the single source of truth for the
+    # honest health summary. They can never silently upgrade beyond what
+    # the typed contracts allow.
+    # ------------------------------------------------------------------
+    canonical_truth_origin = coerce_truth_origin(report.get("truth_origin"))
+    canonical_position_contract = resolve_position_integrity_contract(
+        report.get("position_truth_summary", {}) or {},
+        truth_origin=canonical_truth_origin,
+    )
+    canonical_position_state = coerce_position_state(
+        canonical_position_contract["canonical_position_integrity_state"]
+    )
+    chaos_veto_active = bool(
+        report.get("structural_admission_chaos_veto", False)
+        or int(report.get("interpretation_chaos_veto_count", 0) or 0) > 0
+        or int(report.get("chess_chaos_veto_count", 0) or 0) > 0
+        or int(report.get("baines_chaos_vetoed", 0) or 0) > 0
+        or int(report.get("tennis_chaos_veto_count", 0) or 0) > 0
+        or str(report.get("signal_surface_logic", {}).get("signal_surface_state", ""))
+        .upper()
+        .startswith("DIABLO")
+    )
+    chaos_veto_quarantine = (
+        str(report.get("signal_surface_logic", {}).get("signal_surface_decision", ""))
+        .upper()
+        == "QUARANTINE"
+    )
+    contextual_interpretation_enabled = bool(
+        report.get("contextual_interpretation_enabled", False)
+    )
+
+    # Honest calibration assessment: in seeded/demo runtimes there are
+    # no external outcome labels, so every score is DEMO_ONLY.
+    calibration_reports = [
+        classify_calibration_status(
+            score_name=name,
+            has_outcome_labels=False,
+            sample_count=0,
+            is_threshold=False,
+            runtime_mode=str(report.get("operating_mode", "")),
+        )
+        for name in (
+            "signal_refinery_score",
+            "structural_admission_score",
+            "execution_integrity_score",
+            "busquets_audit_score",
+        )
+    ]
+    calibration_summary = aggregate_calibration_status(calibration_reports)
+    calibration_missing = (
+        calibration_summary["calibration_status"]
+        != CalibrationStatus.CALIBRATED.value
+    )
+    calibration_heuristic_only = calibration_missing
+
+    action_permission_result = resolve_action_permission(
+        truth_origin=canonical_truth_origin,
+        external_signal_count=int(report.get("external_signal_count", 0) or 0),
+        position_integrity_state=canonical_position_state,
+        policy_state=report.get("policy", {}).get("policy_state", "UNKNOWN"),
+        chaos_veto_active=chaos_veto_active,
+        chaos_veto_quarantine=chaos_veto_quarantine,
+        calibration_missing=calibration_missing,
+        calibration_heuristic_only=calibration_heuristic_only,
+        contextual_interpretation_enabled=contextual_interpretation_enabled,
+        jail_mode_active=bool(report.get("jail_mode_active", False)),
+    )
+
+    truth_origin_breakdown = {
+        canonical_truth_origin.value: 1,
+    }
+    external_truth_status = (
+        "EXTERNAL_TRUTH_PRESENT"
+        if int(report.get("external_signal_count", 0) or 0) > 0
+        else "NO_EXTERNAL_TRUTH"
+    )
+    evidence_ledger_status = (
+        "EMPTY"
+        if int(report.get("seeded_signal_count", 0) or 0)
+        + int(report.get("external_signal_count", 0) or 0)
+        == 0
+        else (
+            "SEEDED_ONLY"
+            if int(report.get("external_signal_count", 0) or 0) == 0
+            else "MIXED_OR_EXTERNAL"
+        )
+    )
+    decision_ledger_status = "IN_MEMORY_ONLY"
+
+    canonical_block = {
+        "canonical_action_permission": action_permission_result.canonical_action_permission.value,
+        "veto_reasons": [reason.value for reason in action_permission_result.veto_reasons],
+        "action_permission_warnings": list(action_permission_result.warnings),
+        "allowed_use": list(action_permission_result.allowed_use),
+        "forbidden_use": list(action_permission_result.forbidden_use),
+        "action_permission_explanation": action_permission_result.explanation,
+        "action_permission_confidence_downgrade": action_permission_result.confidence_downgrade,
+        "canonical_position_integrity_state": canonical_position_contract[
+            "canonical_position_integrity_state"
+        ],
+        "canonical_position_blocks_capital": canonical_position_contract["blocks_capital"],
+        "canonical_position_rationale": canonical_position_contract["rationale"],
+        "canonical_truth_origin": canonical_truth_origin.value,
+        "truth_origin_breakdown": truth_origin_breakdown,
+        "evidence_ledger_status": evidence_ledger_status,
+        "decision_ledger_status": decision_ledger_status,
+        "calibration_status": calibration_summary["calibration_status"],
+        "calibration_summary": calibration_summary,
+        "external_truth_status": external_truth_status,
+        "chaos_veto_active": chaos_veto_active,
+        "chaos_veto_quarantine": chaos_veto_quarantine,
+    }
+    report.update(canonical_block)
+
     reproducibility_summary = build_reproducibility_summary(repo_root=base, report=report)
     report["reproducibility_summary"] = reproducibility_summary
     report["golden_health_snapshot"] = build_stable_health_snapshot(report)
@@ -4469,6 +4620,32 @@ def format_pipeline_health_summary(report: dict[str, Any]) -> str:
             f"tests_passed={str(tests_passed).lower() if isinstance(tests_passed, bool) else tests_passed}",
             f"system_readiness_state={report['system_readiness_state']}",
             f"can_deploy_capital={str(report['can_deploy_capital']).lower()}",
+            "canonical_action_permission="
+            f"{report.get('canonical_action_permission', 'BLOCK_CAPITAL')}",
+            "veto_reasons=["
+            + ",".join(report.get("veto_reasons", []) or ["NONE"])
+            + "]",
+            "truth_origin_breakdown="
+            + ",".join(
+                f"{origin}={count}"
+                for origin, count in sorted(
+                    (report.get("truth_origin_breakdown", {}) or {}).items()
+                )
+            ),
+            "external_truth_status="
+            f"{report.get('external_truth_status', 'NO_EXTERNAL_TRUTH')}",
+            "evidence_ledger_status="
+            f"{report.get('evidence_ledger_status', 'EMPTY')}",
+            "decision_ledger_status="
+            f"{report.get('decision_ledger_status', 'IN_MEMORY_ONLY')}",
+            "calibration_status="
+            f"{report.get('calibration_status', 'UNCALIBRATED_HEURISTIC')}",
+            "allowed_use="
+            + "; ".join(report.get("allowed_use", []) or ["none"]),
+            "forbidden_use="
+            + "; ".join(report.get("forbidden_use", []) or ["none"]),
+            "canonical_position_integrity_state="
+            f"{report.get('canonical_position_integrity_state', 'UNKNOWN')}",
             f"scm_state={report['scm']['scm_state']}",
             f"policy_state={report['policy']['policy_state']}",
             f"friction_band={report['friction']['friction_band']}",
