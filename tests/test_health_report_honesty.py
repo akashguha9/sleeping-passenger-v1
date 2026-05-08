@@ -79,7 +79,16 @@ class TestHealthReportHonesty:
         }
 
     def test_decision_ledger_status_present(self, report):
-        assert report.get("decision_ledger_status") == "IN_MEMORY_ONLY"
+        # Health report fixture is built with write_runtime=False, so the
+        # decision ledger is constructed but not persisted. The status
+        # must be derived from the ledger, not a hardcoded string.
+        assert report.get("decision_ledger_status") in {
+            "NO_WRITE_MODE",
+            "IN_MEMORY_ONLY",
+        }
+        assert report.get("decision_ledger_persist_status") == "NO_WRITE_MODE"
+        assert report.get("decision_ledger_record_count", 0) == 1
+        assert report.get("decision_ledger_path") is None
 
     def test_truth_origin_breakdown_present(self, report):
         breakdown = report.get("truth_origin_breakdown")

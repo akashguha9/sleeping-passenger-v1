@@ -167,17 +167,23 @@ def build_closure_deficit_report(
     if not isinstance(summary_payload, dict):
         summary_payload = {}
 
+    def _diagnostic_action(row: Any) -> str:
+        action_text = str((row or {}).get("action") or "").upper()
+        if action_text == "ADVISORY_ONLY":
+            action_text = str((row or {}).get("raw_action_signal") or "").upper()
+        return action_text
+
     insights_produced_count = _insight_ticker_count(refinery, packet_summary=packet_summary)
     actions_suggested_count = len(report.get("actions", []))
     decisive_action_count = sum(
         1
         for row in report.get("actions", [])
-        if str((row or {}).get("action") or "").upper() in DECISIVE_ACTIONS
+        if _diagnostic_action(row) in DECISIVE_ACTIONS
     )
     review_for_entry_suggestion_count = sum(
         1
         for row in report.get("actions", [])
-        if str((row or {}).get("action") or "").upper() == "REVIEW_FOR_ENTRY"
+        if _diagnostic_action(row) == "REVIEW_FOR_ENTRY"
     )
     decision_recorded_count = len(decision_rows)
     actions_approved_count = len(_approved_entry_rows(decision_rows))

@@ -1,0 +1,152 @@
+{
+  "fixture_kind": "replay_with_labels",
+  "fixture_version": 1,
+  "description": "Tiny deterministic replay slice for the runtime canonical-consistency tests. Each record has an outcome label; this dataset is replay-labelled and is NOT live external truth.",
+  "instrument_universe": ["RTX", "ZIM", "GLD", "TLT", "TIP", "UNG", "FCG"],
+  "records": [
+    {
+      "record_id": "replay-001",
+      "timestamp": "2026-04-01T12:00:00Z",
+      "instrument": "RTX",
+      "source": "replay_fixture",
+      "feature_value": 0.62,
+      "predicted_class": "review_for_entry",
+      "predicted_action": "REVIEW_FOR_ENTRY",
+      "outcome_label": "up_5pct_in_24h",
+      "outcome_timestamp": "2026-04-02T12:00:00Z",
+      "realized_result": 0.063
+    },
+    {
+      "record_id": "replay-002",
+      "timestamp": "2026-04-01T13:00:00Z",
+      "instrument": "ZIM",
+      "source": "replay_fixture",
+      "feature_value": 0.41,
+      "predicted_class": "review_for_entry",
+      "predicted_action": "REVIEW_FOR_ENTRY",
+      "outcome_label": "flat",
+      "outcome_timestamp": "2026-04-02T13:00:00Z",
+      "realized_result": 0.004
+    },
+    {
+      "record_id": "replay-003",
+      "timestamp": "2026-04-01T14:00:00Z",
+      "instrument": "GLD",
+      "source": "replay_fixture",
+      "feature_value": 0.27,
+      "predicted_class": "monitor",
+      "predicted_action": "MONITOR",
+      "outcome_label": "flat",
+      "outcome_timestamp": "2026-04-02T14:00:00Z",
+      "realized_result": -0.002
+    },
+    {
+      "record_id": "replay-004",
+      "timestamp": "2026-04-01T15:00:00Z",
+      "instrument": "TLT",
+      "source": "replay_fixture",
+      "feature_value": 0.18,
+      "predicted_class": "block_entry",
+      "predicted_action": "BLOCK_ENTRY",
+      "outcome_label": "down_2pct_in_24h",
+      "outcome_timestamp": "2026-04-02T15:00:00Z",
+      "realized_result": -0.024
+    },
+    {
+      "record_id": "replay-005",
+      "timestamp": "2026-04-01T16:00:00Z",
+      "instrument": "TIP",
+      "source": "replay_fixture",
+      "feature_value": 0.55,
+      "predicted_class": "reduce",
+      "predicted_action": "REDUCE",
+      "outcome_label": "down_2pct_in_24h",
+      "outcome_timestamp": "2026-04-02T16:00:00Z",
+      "realized_result": -0.031
+    },
+    {
+      "record_id": "replay-006",
+      "timestamp": "2026-04-01T17:00:00Z",
+      "instrument": "UNG",
+      "source": "replay_fixture",
+      "feature_value": 0.71,
+      "predicted_class": "exit_now",
+      "predicted_action": "EXIT_NOW",
+      "outcome_label": "down_5pct_in_24h",
+      "outcome_timestamp": "2026-04-02T17:00:00Z",
+      "realized_result": -0.071
+    },
+    {
+      "record_id": "replay-007",
+      "timestamp": "2026-04-01T18:00:00Z",
+      "instrument": "FCG",
+      "source": "replay_fixture",
+      "feature_value": 0.66,
+      "predicted_class": "exit_now",
+      "predicted_action": "EXIT_NOW",
+      "outcome_label": "up_2pct_in_24h",
+      "outcome_timestamp": "2026-04-02T18:00:00Z",
+      "realized_result": 0.022
+    },
+    {
+      "record_id": "replay-008",
+      "timestamp": "2026-04-02T12:00:00Z",
+      "instrument": "RTX",
+      "source": "replay_fixture",
+      "feature_value": 0.59,
+      "predicted_class": "review_for_entry",
+      "predicted_action": "REVIEW_FOR_ENTRY",
+      "outcome_label": "up_2pct_in_24h",
+      "outcome_timestamp": "2026-04-03T12:00:00Z",
+      "realized_result": 0.025
+    },
+    {
+      "record_id": "replay-009",
+      "timestamp": "2026-04-02T13:00:00Z",
+      "instrument": "ZIM",
+      "source": "replay_fixture",
+      "feature_value": 0.34,
+      "predicted_class": "monitor",
+      "predicted_action": "MONITOR",
+      "outcome_label": "flat",
+      "outcome_timestamp": "2026-04-03T13:00:00Z",
+      "realized_result": 0.001
+    },
+    {
+      "record_id": "replay-010",
+      "timestamp": "2026-04-02T14:00:00Z",
+      "instrument": "GLD",
+      "source": "replay_fixture",
+      "feature_value": 0.22,
+      "predicted_class": "block_entry",
+      "predicted_action": "BLOCK_ENTRY",
+      "outcome_label": "flat",
+      "outcome_timestamp": "2026-04-03T14:00:00Z",
+      "realized_result": 0.003
+    },
+    {
+      "record_id": "replay-011",
+      "timestamp": "2026-04-02T15:00:00Z",
+      "instrument": "TLT",
+      "source": "replay_fixture",
+      "feature_value": 0.49,
+      "predicted_class": "monitor",
+      "predicted_action": "MONITOR",
+      "outcome_label": "down_2pct_in_24h",
+      "outcome_timestamp": "2026-04-03T15:00:00Z",
+      "realized_result": -0.022
+    },
+    {
+      "record_id": "replay-012",
+      "timestamp": "2026-04-02T16:00:00Z",
+      "instrument": "TIP",
+      "source": "replay_fixture",
+      "feature_value": 0.43,
+      "predicted_class": "monitor",
+      "predicted_action": "MONITOR",
+      "outcome_label": "flat",
+      "outcome_timestamp": "2026-04-03T16:00:00Z",
+      "realized_result": -0.001
+    }
+  ]
+}

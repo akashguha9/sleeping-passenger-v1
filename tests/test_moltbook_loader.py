@@ -337,22 +337,27 @@ def test_pipeline_health_report_builder_shape() -> None:
         "states": {"OPEN": 3, "EXIT_PENDING": 1},
         "errors": [],
     }
-    assert payload["per_ticker_action_summary"] == {
-        "summary_by_action": {
-            "EXIT_NOW": 2,
-            "REDUCE": 1,
-            "HOLD": 0,
-            "MONITOR": 1,
-            "BLOCK_ENTRY": 3,
-        },
-        "highest_priority_actions": [
-            {"ticker": "UNG", "action": "EXIT_NOW", "priority_score": 0.91},
-            {"ticker": "FCG", "action": "EXIT_NOW", "priority_score": 0.88},
-            {"ticker": "TLT", "action": "MONITOR", "priority_score": 0.82},
-            {"ticker": "TIP", "action": "REDUCE", "priority_score": 0.79},
-            {"ticker": "RTX", "action": "BLOCK_ENTRY", "priority_score": 0.71},
-        ],
+    summary = payload["per_ticker_action_summary"]
+    # Canonical permission downgrades all visible actions to ADVISORY_ONLY
+    # in seeded mode; raw diagnostic signals are preserved on each row.
+    assert summary["summary_by_action"] == {
+        "EXIT_NOW": 0,
+        "REDUCE": 0,
+        "HOLD": 0,
+        "MONITOR": 0,
+        "BLOCK_ENTRY": 0,
+        "ADVISORY_ONLY": 7,
     }
+    assert summary["canonical_action_permission"] == "BLOCK_CAPITAL"
+    assert summary["execution_status"] == "DIAGNOSTIC_ONLY"
+    assert summary["canonical_block_capital"] is True
+    assert summary["highest_priority_actions"] == [
+        {"ticker": "UNG", "action": "ADVISORY_ONLY", "raw_action_signal": "EXIT_NOW", "priority_score": 0.91},
+        {"ticker": "FCG", "action": "ADVISORY_ONLY", "raw_action_signal": "EXIT_NOW", "priority_score": 0.88},
+        {"ticker": "TLT", "action": "ADVISORY_ONLY", "raw_action_signal": "MONITOR", "priority_score": 0.82},
+        {"ticker": "TIP", "action": "ADVISORY_ONLY", "raw_action_signal": "REDUCE", "priority_score": 0.79},
+        {"ticker": "RTX", "action": "ADVISORY_ONLY", "raw_action_signal": "BLOCK_ENTRY", "priority_score": 0.71},
+    ]
     assert payload["scorecard"] == {
         "logging_quality": {"score": 10, "max_score": 10},
         "schema_reliability": {"score": 8, "max_score": 10},

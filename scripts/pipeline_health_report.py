@@ -112,6 +112,9 @@ try:
     from scripts.signal_refinery import build_signal_refinery_report
     from scripts.signal_conversion_monitor import build_signal_conversion_report
     from scripts.trend_engine import build_trend_report
+    from scripts.action_engine import (
+        apply_canonical_permission_to_action_report,
+    )
     from scripts.action_permission import (
         format_action_permission_summary,
         resolve_action_permission,
@@ -121,11 +124,17 @@ try:
         aggregate_calibration_status,
         classify_calibration_status,
     )
+    from scripts.decision_ledger import DecisionLedger, build_decision_record
+    from scripts.evidence_ledger import EvidenceLedger
     from scripts.position_truth_resolver import resolve_position_integrity_contract
     from scripts.runtime_contracts import (
         ActionPermission,
+        SystemMode,
+        TruthOrigin,
+        ValidationStatus,
         VetoReason,
         coerce_position_state,
+        coerce_system_mode,
         coerce_truth_origin,
     )
 except ModuleNotFoundError:
@@ -236,6 +245,9 @@ except ModuleNotFoundError:
     from signal_refinery import build_signal_refinery_report
     from signal_conversion_monitor import build_signal_conversion_report
     from trend_engine import build_trend_report
+    from action_engine import (  # type: ignore[no-redef]
+        apply_canonical_permission_to_action_report,
+    )
     from action_permission import (  # type: ignore[no-redef]
         format_action_permission_summary,
         resolve_action_permission,
@@ -245,13 +257,22 @@ except ModuleNotFoundError:
         aggregate_calibration_status,
         classify_calibration_status,
     )
+    from decision_ledger import (  # type: ignore[no-redef]
+        DecisionLedger,
+        build_decision_record,
+    )
+    from evidence_ledger import EvidenceLedger  # type: ignore[no-redef]
     from position_truth_resolver import (  # type: ignore[no-redef]
         resolve_position_integrity_contract,
     )
     from runtime_contracts import (  # type: ignore[no-redef]
         ActionPermission,
+        SystemMode,
+        TruthOrigin,
+        ValidationStatus,
         VetoReason,
         coerce_position_state,
+        coerce_system_mode,
         coerce_truth_origin,
     )
 
@@ -1159,6 +1180,20 @@ def derive_performance_leak_summary(
     return leaks
 
 
+def _row_action_signal(row: dict[str, Any]) -> str:
+    """Return the diagnostic action signal for a per-ticker row.
+
+    The visible ``action`` field may be ``ADVISORY_ONLY`` once the
+    canonical permission downgrade has been applied. The diagnostic
+    signal is preserved on ``raw_action_signal``.
+    """
+
+    action_text = str(row.get("action") or "").upper()
+    if action_text == "ADVISORY_ONLY":
+        return str(row.get("raw_action_signal") or "").upper()
+    return action_text
+
+
 def derive_next_operational_action(
     execution_policy: dict[str, Any],
     action_report: dict[str, Any],
@@ -1167,11 +1202,19 @@ def derive_next_operational_action(
     blocked_promotable_candidate_queue = blocked_promotable_candidate_queue or []
     parts: list[str] = []
 
-    exit_now = [row["ticker"] for row in action_report["actions"] if row["action"] == "EXIT_NOW"]
+    exit_now = [
+        row["ticker"]
+        for row in action_report["actions"]
+        if _row_action_signal(row) == "EXIT_NOW"
+    ]
     if exit_now:
         parts.append(f"EXIT_NOW: {', '.join(exit_now)}")
     else:
-        reduce_positions = [row["ticker"] for row in action_report["actions"] if row["action"] == "REDUCE"]
+        reduce_positions = [
+            row["ticker"]
+            for row in action_report["actions"]
+            if _row_action_signal(row) == "REDUCE"
+        ]
         if reduce_positions:
             parts.append(f"REDUCE: {', '.join(reduce_positions)}")
 
@@ -1182,7 +1225,7 @@ def derive_next_operational_action(
         review_for_entry = [
             row["ticker"]
             for row in action_report["actions"]
-            if row["action"] == "REVIEW_FOR_ENTRY"
+            if _row_action_signal(row) == "REVIEW_FOR_ENTRY"
         ]
         if review_for_entry:
             parts.append(f"REVIEW_FOR_ENTRY: {', '.join(review_for_entry)}")
@@ -1440,7 +1483,11 @@ def _build_transition_preview_candidates(
                 ),
                 "policy_state": scenario_state.get("execution_policy", {}).get("policy_state"),
                 "active_blockers": list(scenario_state.get("active_blockers", [])),
-                "simulated_action": scenario_action.get("action"),
+                "simulated_action": (
+                    scenario_action.get("raw_action_signal")
+                    if str(scenario_action.get("action", "")).upper() == "ADVISORY_ONLY"
+                    else scenario_action.get("action")
+                ),
                 "simulated_action_reasons": scenario_action.get("reasons", []),
             }
         )
@@ -2391,7 +2438,7 @@ def build_entry_review_packets(
         if str(scenario_watchlist_row.get("pre_entry_state") or "").upper() != "CLEAN_ENTRY_ELIGIBLE":
             continue
         action_row = action_rows.get(ticker, {})
-        if action_row.get("action") != "REVIEW_FOR_ENTRY":
+        if _row_action_signal(action_row) != "REVIEW_FOR_ENTRY":
             continue
         live_watchlist_row = live_watchlist_rows.get(ticker, {})
         remaining_blockers = sorted(tracked_blockers.intersection(current_active_blockers))
@@ -2448,7 +2495,11 @@ def build_entry_review_packets(
             "sizing_cap_now": sizing_cap_now,
             "open_position_conflict": open_position_conflict,
             "existing_exposure_conflict": existing_exposure_conflict,
-            "recommended_action": action_row.get("action"),
+            "recommended_action": (
+                action_row.get("raw_action_signal")
+                if str(action_row.get("action", "")).upper() == "ADVISORY_ONLY"
+                else action_row.get("action")
+            ),
             "action_reasons": action_row.get("reasons", []),
         }
         checklist = _build_review_checklist(
@@ -2505,7 +2556,7 @@ def build_transition_review_packets(
         if str(scenario_watchlist_row.get("pre_entry_state") or "").upper() != "CLEAN_READY_PENDING_TRIGGER":
             continue
         action_row = action_rows.get(ticker, {})
-        if action_row.get("action") != "MONITOR":
+        if _row_action_signal(action_row) != "MONITOR":
             continue
         live_watchlist_row = live_watchlist_rows.get(ticker, {})
         remaining_blockers = sorted(tracked_blockers.intersection(current_active_blockers))
@@ -2564,7 +2615,11 @@ def build_transition_review_packets(
             "sizing_cap_now": sizing_cap_now,
             "open_position_conflict": open_position_conflict,
             "existing_exposure_conflict": existing_exposure_conflict,
-            "recommended_action": action_row.get("action"),
+            "recommended_action": (
+                action_row.get("raw_action_signal")
+                if str(action_row.get("action", "")).upper() == "ADVISORY_ONLY"
+                else action_row.get("action")
+            ),
             "action_reasons": action_row.get("reasons", []),
         }
         checklist = _build_review_checklist(
@@ -2852,7 +2907,8 @@ def build_pipeline_health_report(
     highest_priority_actions = [
         {
             "ticker": row["ticker"],
-            "action": row["action"],
+            "action": row.get("action"),
+            "raw_action_signal": row.get("raw_action_signal", row.get("action")),
             "priority_score": row["priority_score"],
         }
         for row in action_report["actions"][:5]
@@ -4517,26 +4573,119 @@ def build_pipeline_health_report(
         jail_mode_active=bool(report.get("jail_mode_active", False)),
     )
 
-    truth_origin_breakdown = {
-        canonical_truth_origin.value: 1,
-    }
+    # ------------------------------------------------------------------
+    # Build a real EvidenceLedger from the live per-signal attribution
+    # rows so truth_origin_breakdown / evidence_ledger_status are derived,
+    # not fabricated. SEEDED records can never be upgraded to external
+    # truth here — that contract lives inside EvidenceLedger itself.
+    # ------------------------------------------------------------------
+    evidence_ledger = EvidenceLedger()
+    seeded_origin = (
+        TruthOrigin.SEEDED
+        if canonical_truth_origin
+        in {TruthOrigin.SEEDED, TruthOrigin.UNKNOWN}
+        else canonical_truth_origin
+    )
+    seeded_validation = ValidationStatus.SEED_ONLY
+    external_validation = ValidationStatus.EXTERNALLY_CHECKED
+    for signal_row in state.get("per_signal_attribution", []) or []:
+        if not isinstance(signal_row, dict):
+            continue
+        origin_label = str(signal_row.get("signal_origin") or "").lower()
+        record_id = str(
+            signal_row.get("signal_id") or signal_row.get("ticker") or "unknown"
+        )
+        timestamp = str(
+            signal_row.get("signal_timestamp")
+            or signal_row.get("feature_timestamp")
+            or signal_row.get("observed_at_utc")
+            or ""
+        )
+        source_name = str(signal_row.get("source_name") or signal_row.get("source") or "")
+        if origin_label == "external":
+            evidence_ledger.add_raw(
+                record_id=record_id,
+                truth_origin=TruthOrigin.LIVE_EXTERNAL,
+                source=source_name or "external_adapter",
+                timestamp=timestamp,
+                confidence=float(signal_row.get("composite_edge_score", 0.0) or 0.0),
+                validation_status=external_validation,
+            )
+        else:
+            evidence_ledger.add_raw(
+                record_id=record_id,
+                truth_origin=seeded_origin,
+                source=source_name or "seed_runtime",
+                timestamp=timestamp,
+                confidence=float(signal_row.get("composite_edge_score", 0.0) or 0.0),
+                validation_status=seeded_validation,
+            )
+    evidence_summary = evidence_ledger.summary()
+    truth_origin_breakdown = dict(evidence_summary.truth_origin_breakdown)
+    if not truth_origin_breakdown:
+        # Empty fixture path — still surface the canonical origin honestly.
+        truth_origin_breakdown = {canonical_truth_origin.value: 0}
     external_truth_status = (
         "EXTERNAL_TRUTH_PRESENT"
-        if int(report.get("external_signal_count", 0) or 0) > 0
+        if evidence_summary.has_external_truth
         else "NO_EXTERNAL_TRUTH"
     )
-    evidence_ledger_status = (
-        "EMPTY"
-        if int(report.get("seeded_signal_count", 0) or 0)
-        + int(report.get("external_signal_count", 0) or 0)
-        == 0
-        else (
-            "SEEDED_ONLY"
-            if int(report.get("external_signal_count", 0) or 0) == 0
-            else "MIXED_OR_EXTERNAL"
-        )
+    if evidence_summary.record_count == 0:
+        evidence_ledger_status = "EMPTY"
+    elif evidence_summary.has_external_truth:
+        evidence_ledger_status = "MIXED_OR_EXTERNAL"
+    else:
+        evidence_ledger_status = "SEEDED_ONLY"
+
+    # ------------------------------------------------------------------
+    # Persist a DecisionLedger entry for this run. ``--no-write`` skips
+    # disk I/O entirely; the in-memory ledger is still constructed so the
+    # status is derived from it (never hardcoded). Persistence failures
+    # downgrade the status to PERSIST_FAILED rather than crashing the
+    # health report.
+    # ------------------------------------------------------------------
+    decision_ledger = DecisionLedger()
+    decision_id = (
+        f"decision-"
+        f"{report.get('artifact_written_at') or report.get('decision_timestamp') or ''}"
+        f"-{evidence_summary.payload_hash or canonical_truth_origin.value}"
     )
-    decision_ledger_status = "IN_MEMORY_ONLY"
+    decision_ledger.record(
+        decision_id=decision_id or "decision-unknown",
+        canonical_action_permission=action_permission_result.canonical_action_permission,
+        veto_reasons=action_permission_result.veto_reasons,
+        policy_state=report.get("policy", {}).get("policy_state", "UNKNOWN"),
+        position_integrity_state=canonical_position_contract[
+            "canonical_position_integrity_state"
+        ],
+        truth_origin=canonical_truth_origin,
+        system_mode=coerce_system_mode(report.get("operating_mode") or "UNKNOWN"),
+        state_archetype=str(report.get("optical_bull_state", "UNKNOWN")),
+        explanation=action_permission_result.explanation,
+        evidence_snapshot=evidence_summary.to_dict(),
+        evidence_ledger_summary=evidence_summary,
+        timestamp=report.get("artifact_written_at"),
+    )
+    decision_ledger_path = REPO_ROOT / "runtime" / "decision_ledger.jsonl"
+    decision_ledger_persist_status: str
+    if not effective_write_runtime:
+        decision_ledger_persist_status = "NO_WRITE_MODE"
+    else:
+        try:
+            decision_ledger.to_jsonl_path(decision_ledger_path)
+            decision_ledger_persist_status = "PERSISTED"
+        except OSError as exc:
+            decision_ledger_persist_status = f"PERSIST_FAILED:{exc.__class__.__name__}"
+    decision_ledger_status_payload = decision_ledger.status()
+    decision_record_count = decision_ledger_status_payload["decision_count"]
+    if decision_ledger_persist_status == "PERSISTED":
+        decision_ledger_status = f"{decision_record_count}_RECORDS_PERSISTED"
+    elif decision_ledger_persist_status == "NO_WRITE_MODE":
+        decision_ledger_status = "NO_WRITE_MODE"
+    elif decision_ledger_persist_status.startswith("PERSIST_FAILED"):
+        decision_ledger_status = decision_ledger_persist_status
+    else:
+        decision_ledger_status = "IN_MEMORY_ONLY"
 
     canonical_block = {
         "canonical_action_permission": action_permission_result.canonical_action_permission.value,
@@ -4554,7 +4703,19 @@ def build_pipeline_health_report(
         "canonical_truth_origin": canonical_truth_origin.value,
         "truth_origin_breakdown": truth_origin_breakdown,
         "evidence_ledger_status": evidence_ledger_status,
+        "evidence_ledger_summary": evidence_summary.to_dict(),
+        "evidence_ledger_record_count": evidence_summary.record_count,
+        "evidence_ledger_external_signal_count": evidence_summary.external_signal_count,
+        "evidence_ledger_payload_hash": evidence_summary.payload_hash,
         "decision_ledger_status": decision_ledger_status,
+        "decision_ledger_persist_status": decision_ledger_persist_status,
+        "decision_ledger_record_count": decision_record_count,
+        "decision_ledger_path": (
+            str(decision_ledger_path.relative_to(REPO_ROOT))
+            if decision_ledger_persist_status == "PERSISTED"
+            else None
+        ),
+        "decision_ledger_latest": decision_ledger_status_payload,
         "calibration_status": calibration_summary["calibration_status"],
         "calibration_summary": calibration_summary,
         "external_truth_status": external_truth_status,
@@ -4562,6 +4723,27 @@ def build_pipeline_health_report(
         "chaos_veto_quarantine": chaos_veto_quarantine,
     }
     report.update(canonical_block)
+
+    # Re-stamp the per-ticker action report with the canonical permission so
+    # the action engine cannot emit capital-deployable rows while the health
+    # report says BLOCK_CAPITAL. Diagnostic detail is preserved as
+    # ``raw_action_signal`` and ``execution_status``.
+    apply_canonical_permission_to_action_report(action_report, action_permission_result)
+    report["per_ticker_action_summary"] = {
+        "summary_by_action": action_report["summary_by_action"],
+        "highest_priority_actions": highest_priority_actions,
+        "canonical_action_permission": action_report.get(
+            "canonical_action_permission",
+            action_permission_result.canonical_action_permission.value,
+        ),
+        "execution_status": action_report.get(
+            "execution_status", "DIAGNOSTIC_ONLY"
+        ),
+        "canonical_block_capital": action_report.get(
+            "canonical_block_capital", True
+        ),
+    }
+    report["action_report_canonical_block"] = action_report.get("canonical_block", {})
 
     reproducibility_summary = build_reproducibility_summary(repo_root=base, report=report)
     report["reproducibility_summary"] = reproducibility_summary

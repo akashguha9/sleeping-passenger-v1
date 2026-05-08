@@ -20,19 +20,25 @@ def test_build_action_report_from_live_seed_state() -> None:
 
     assert report["policy_state"] == "RESTRICTED"
     assert report["active_blockers"] == ["GSCE_PHASE_LOCK", "REALM_BIS"]
-    assert report["summary_by_action"] == {
-        "EXIT_NOW": 2,
-        "REDUCE": 1,
-        "HOLD": 0,
-        "MONITOR": 1,
-        "BLOCK_ENTRY": 3,
-    }
+    # Under the canonical permission contract, seeded mode forces every
+    # row's executable ``action`` to ADVISORY_ONLY. The legacy decision
+    # is preserved on each row as ``raw_action_signal``.
+    assert report["canonical_action_permission"] == "BLOCK_CAPITAL"
+    assert report["execution_status"] == "DIAGNOSTIC_ONLY"
+    assert report["canonical_block_capital"] is True
+    assert report["summary_by_action"]["ADVISORY_ONLY"] == 7
     assert report["execution_governance_summary"]["human_execution_required_count"] == 7
     first = report["actions"][0]
     assert first["ticker"] == "UNG"
     assert first["signal_id"].startswith("SIG_")
-    assert first["action"] == "EXIT_NOW"
+    assert first["action"] == "ADVISORY_ONLY"
+    assert first["raw_action_signal"] == "EXIT_NOW"
+    assert first["execution_status"] == "DIAGNOSTIC_ONLY"
+    assert first["canonical_block_capital"] is True
+    assert first["action_executable"] is False
     assert first["reasons"] == ["Current price breached stop_loss"]
+    assert "canonical_block_capital=BLOCK_CAPITAL" in first["canonical_advisory_note"]
+    assert "raw_action_signal=EXIT_NOW" in first["canonical_advisory_note"]
     assert first["policy_state"] == "RESTRICTED"
     assert first["active_blockers"] == ["GSCE_PHASE_LOCK", "REALM_BIS"]
     assert first["has_open_position"] is True
@@ -55,11 +61,16 @@ def test_build_action_report_from_live_seed_state() -> None:
         "advisory_reason": "surface=trainer; seeded_trainer_surface; premium_blocked_by_gaps; degraded_mode_required; confidence_downgraded",
     }
     assert report["actions"][1]["ticker"] == "FCG"
-    assert report["actions"][1]["action"] == "EXIT_NOW"
+    assert report["actions"][1]["raw_action_signal"] == "EXIT_NOW"
+    assert report["actions"][1]["action"] == "ADVISORY_ONLY"
     assert report["actions"][2]["ticker"] == "TLT"
-    assert report["actions"][2]["action"] == "MONITOR"
+    assert report["actions"][2]["raw_action_signal"] == "MONITOR"
+    assert report["actions"][2]["action"] == "ADVISORY_ONLY"
     assert report["actions"][3]["ticker"] == "TIP"
-    assert report["actions"][3]["action"] == "REDUCE"
+    assert report["actions"][3]["raw_action_signal"] == "REDUCE"
+    assert report["actions"][3]["action"] == "ADVISORY_ONLY"
+    assert "capital deployment" in report["forbidden_use"]
+    assert any(reason for reason in report["canonical_veto_reasons"])
 
 
 def test_action_engine_cli_json_shape() -> None:
@@ -72,8 +83,14 @@ def test_action_engine_cli_json_shape() -> None:
     )
     payload = json.loads(result.stdout)
 
-    assert payload["summary_by_action"]["BLOCK_ENTRY"] == 3
-    assert payload["summary_by_action"]["EXIT_NOW"] == 2
+    # Under canonical BLOCK_CAPITAL, every action row is downgraded to
+    # ADVISORY_ONLY but keeps its diagnostic signal.
+    assert payload["canonical_action_permission"] == "BLOCK_CAPITAL"
+    assert payload["execution_status"] == "DIAGNOSTIC_ONLY"
+    assert payload["summary_by_action"]["ADVISORY_ONLY"] == 7
+    raw_signals = [row["raw_action_signal"] for row in payload["actions"]]
+    assert raw_signals.count("EXIT_NOW") == 2
+    assert raw_signals.count("BLOCK_ENTRY") == 3
 
 
 def test_action_engine_summary_cli() -> None:
@@ -85,12 +102,18 @@ def test_action_engine_summary_cli() -> None:
         check=True,
     )
 
-    assert result.stdout.strip().splitlines() == [
-        "Action Engine",
-        "policy_state=RESTRICTED",
-        "active_blockers=GSCE_PHASE_LOCK, REALM_BIS",
-        "summary=EXIT_NOW=2, REDUCE=1, HOLD=0, MONITOR=1, BLOCK_ENTRY=3",
-    ]
+    lines = result.stdout.strip().splitlines()
+    assert lines[0] == "Action Engine"
+    assert lines[1] == "policy_state=RESTRICTED"
+    assert lines[2] == "active_blockers=GSCE_PHASE_LOCK, REALM_BIS"
+    assert lines[3] == "canonical_action_permission=BLOCK_CAPITAL"
+    assert lines[4] == "execution_status=DIAGNOSTIC_ONLY"
+    assert lines[5].startswith("veto_reasons=[")
+    assert "NO_EXTERNAL_TRUTH" in lines[5]
+    assert lines[6].startswith("forbidden_use=")
+    assert "capital deployment" in lines[6]
+    assert lines[7].startswith("summary=")
+    assert "ADVISORY_ONLY=7" in lines[7]
 
 
 def test_build_action_report_from_simulated_gsce_clear_state() -> None:
@@ -102,12 +125,15 @@ def test_build_action_report_from_simulated_gsce_clear_state() -> None:
 
     assert report["policy_state"] == "RESTRICTED"
     assert report["active_blockers"] == ["REALM_BIS"]
-    assert rows["RTX"]["action"] == "MONITOR"
-    assert rows["RTX"]["reasons"] == [
-        "Promotable clean candidate advanced to CLEAN_READY_PENDING_TRIGGER after GSCE_PHASE_LOCK cleared; policy still forbids new risk"
-    ]
-    assert rows["ZIM"]["action"] == "MONITOR"
-    assert rows["GLD"]["action"] == "MONITOR"
+    assert report["canonical_action_permission"] == "BLOCK_CAPITAL"
+    # Raw diagnostic signal preserved; visible action downgraded.
+    assert rows["RTX"]["raw_action_signal"] == "MONITOR"
+    assert rows["RTX"]["action"] == "ADVISORY_ONLY"
+    assert "Promotable clean candidate advanced to CLEAN_READY_PENDING_TRIGGER after GSCE_PHASE_LOCK cleared; policy still forbids new risk" in rows["RTX"]["reasons"]
+    assert rows["ZIM"]["raw_action_signal"] == "MONITOR"
+    assert rows["ZIM"]["action"] == "ADVISORY_ONLY"
+    assert rows["GLD"]["raw_action_signal"] == "MONITOR"
+    assert rows["GLD"]["action"] == "ADVISORY_ONLY"
 
 
 def test_build_action_report_from_simulated_all_clear_state() -> None:
@@ -119,13 +145,16 @@ def test_build_action_report_from_simulated_all_clear_state() -> None:
 
     assert report["policy_state"] == "REVIEW_READY"
     assert report["active_blockers"] == []
-    assert report["summary_by_action"]["REVIEW_FOR_ENTRY"] == 2
-    assert rows["RTX"]["action"] == "REVIEW_FOR_ENTRY"
-    assert rows["RTX"]["reasons"] == [
-        "Promotable clean candidate is fully gate-cleared and ready for entry review"
-    ]
-    assert rows["ZIM"]["action"] == "REVIEW_FOR_ENTRY"
-    assert rows["GLD"]["action"] == "MONITOR"
+    # Even in the simulated all-clear state, seeded truth_origin and
+    # missing external evidence force BLOCK_CAPITAL → ADVISORY_ONLY.
+    assert report["canonical_action_permission"] == "BLOCK_CAPITAL"
+    assert report["execution_status"] == "DIAGNOSTIC_ONLY"
+    assert rows["RTX"]["raw_action_signal"] == "REVIEW_FOR_ENTRY"
+    assert rows["RTX"]["action"] == "ADVISORY_ONLY"
+    assert rows["ZIM"]["raw_action_signal"] == "REVIEW_FOR_ENTRY"
+    assert rows["ZIM"]["action"] == "ADVISORY_ONLY"
+    assert rows["GLD"]["raw_action_signal"] == "MONITOR"
+    assert rows["GLD"]["action"] == "ADVISORY_ONLY"
 
 
 def test_action_report_adds_advisory_annotations_without_changing_decisions(

@@ -58,7 +58,12 @@ def test_external_gamma_signal_merges_into_signal_pipeline() -> None:
     action_report = build_action_report(runtime_state=runtime_state, write_runtime=False)
     action_rows = {row["ticker"]: row for row in action_report["actions"]}
 
-    assert action_rows["PM_GAMMA_TEST"]["action"] == "BLOCK_ENTRY"
+    # External row exists in seeded runtime; canonical permission still
+    # downgrades to ADVISORY_ONLY because evidence ledger has no
+    # outcome-labelled records and policy/calibration gates remain shut.
+    assert action_rows["PM_GAMMA_TEST"]["action"] == "ADVISORY_ONLY"
+    assert action_rows["PM_GAMMA_TEST"]["raw_action_signal"] == "BLOCK_ENTRY"
+    assert action_rows["PM_GAMMA_TEST"]["execution_status"] == "DIAGNOSTIC_ONLY"
     assert action_rows["PM_GAMMA_TEST"]["execution_governance"]["suggestion_only"] is True
     assert action_rows["PM_GAMMA_TEST"]["execution_governance"]["human_execution_required"] is True
 

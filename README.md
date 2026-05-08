@@ -50,7 +50,85 @@ veto_reasons=[NO_EXTERNAL_TRUTH, SEEDED_TRUTH_ONLY, POSITION_DIVERGED,
 allowed_use=demo/research diagnostics only
 forbidden_use=capital deployment; investment advice; automated execution
 calibration_status=DEMO_ONLY
+truth_origin_breakdown=SEEDED=<real_count>
+evidence_ledger_status=SEEDED_ONLY
+decision_ledger_status=NO_WRITE_MODE | <N>_RECORDS_PERSISTED | PERSIST_FAILED:...
 ```
+
+## Canonical Permission is Now Enforced (not just reported)
+
+The second hackathon wave wired the canonical action-permission resolver
+into `scripts/action_engine.py`. Whenever the canonical permission is
+`BLOCK_CAPITAL`, `QUARANTINE`, `DEMO_ONLY`, or `RESEARCH_ONLY`:
+
+- Every per-ticker `action` field is downgraded to `ADVISORY_ONLY`.
+- The legacy decision is preserved on the same row as
+  `raw_action_signal` (`EXIT_NOW`, `REDUCE`, `HOLD`, `MONITOR`,
+  `BLOCK_ENTRY`, `REVIEW_FOR_ENTRY`).
+- The row carries `execution_status=DIAGNOSTIC_ONLY`,
+  `action_executable=False`, `canonical_block_capital=True`,
+  `allowed_use`, `forbidden_use`, and a `canonical_advisory_note`.
+- The action report top-level surfaces
+  `canonical_action_permission`, `canonical_veto_reasons`,
+  `execution_status`, `allowed_use`, and `forbidden_use`.
+- `tests/test_pipeline_canonical_consistency.py` fails if the action
+  report ever contradicts the health-report canonical block.
+
+## Decision Ledger Persistence
+
+`build_pipeline_health_report` now constructs a `DecisionLedger` per
+run, builds one `DecisionRecord` (with veto reasons and the evidence
+snapshot hash), and persists JSONL to `runtime/decision_ledger.jsonl`
+when `--no-write` is not passed.
+
+The status surfaced in the health summary is **derived**, never a
+hardcoded literal:
+
+```
+NO_WRITE_MODE          # --no-write was supplied
+1_RECORDS_PERSISTED    # write succeeded
+PERSIST_FAILED:OSError # I/O failure (does not crash the report)
+```
+
+## Real Evidence Ledger
+
+`truth_origin_breakdown`, `evidence_ledger_status`, and
+`external_signal_count` are now derived from a real `EvidenceLedger`
+populated from `state["per_signal_attribution"]`. SEEDED records can
+never be re-classified as external truth — the contract lives in
+`scripts/evidence_ledger.py` and is enforced by tests.
+
+## Replay-Labelled Scaffolding
+
+A tiny labelled replay fixture lives at
+`tests/fixtures/replay_with_labels/`:
+
+```
+tests/fixtures/replay_with_labels/sample_replay.json   # 12 labelled rows
+tests/fixtures/replay_with_labels/sample_unlabeled.json # 3 unlabelled rows
+```
+
+`scripts/replay_runner.py` loads the fixture, routes records through
+`ReplayTruthSource`, populates an `EvidenceLedger`, runs the canonical
+permission resolver, computes per-baseline outcome metrics, and emits a
+deterministic JSON summary. Replay-labelled records are typed as
+`REPLAY_LABELED` (externally checkable, but **never live external
+truth**). Capital deployment remains blocked.
+
+## Baseline Strategies & FP/FN Accounting
+
+- `scripts/baseline_strategies.py` provides three deterministic
+  baselines: `AlwaysHoldBaseline`, `RandomChoiceBaseline(seed=0)`,
+  `NaiveMomentumBaseline`. None of these are investment advice; they
+  are deterministic references for replay comparison.
+- `scripts/outcome_accounting.py` computes
+  `true_positive` / `false_positive` / `true_negative` / `false_negative`,
+  plus `precision`, `recall`, `false_positive_rate`,
+  `false_negative_rate`. Zero denominators return `None` (never
+  silently faked). Below 5 labelled samples the result is marked
+  `insufficient_sample`.
+- These metrics are explicitly labelled as **replay/sample metrics**.
+  They never claim live predictive validity.
 
 ## Limitations (Seeded/Demo Mode)
 
@@ -58,6 +136,11 @@ calibration_status=DEMO_ONLY
 - Position truth comes from the curated moltbook fixture; runtime paper positions diverge by default.
 - External truth integration is **incomplete unless explicitly configured**. `ExternalTruthSourceStub` reports `NOT_CONFIGURED` and never pretends live data exists.
 - Replay records without outcome labels do not validate outcomes.
+- Replay records with outcome labels are externally checkable for the labelled slice, but they are not live external truth and cannot upgrade `canonical_action_permission` past `BLOCK_CAPITAL` while position state, calibration, and policy gates remain shut.
+- Scientific validity is still bounded. Until a real
+  `LIVE_EXTERNAL` adapter, an out-of-sample split, real calibration
+  curves, and externally-derived outcome labels exist, all metrics are
+  replay/sample diagnostics, not validity proofs.
 - Tests assert these invariants directly so they cannot be silently weakened.
 
 ## Quickstart
@@ -71,6 +154,12 @@ python -m pytest tests -q
 
 # Honest health report (does not write runtime files)
 python scripts/pipeline_health_report.py --summary --no-write
+
+# Run the replay fixture through the canonical spine
+python scripts/replay_runner.py --fixture tests/fixtures/replay_with_labels
+
+# End-to-end consistency tests (action engine ↔ health report ↔ ledgers)
+python -m pytest tests/test_pipeline_canonical_consistency.py -q
 ```
 
 ## Health Report Interpretation Guide

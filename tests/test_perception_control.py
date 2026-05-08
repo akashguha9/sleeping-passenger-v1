@@ -194,8 +194,15 @@ def test_action_engine_contract_stays_review_ready_for_all_clear_strong_candidat
     )
     rows = {row["ticker"]: row for row in report["actions"]}
 
-    assert report["summary_by_action"]["REVIEW_FOR_ENTRY"] == 2
-    assert rows["RTX"]["action"] == "REVIEW_FOR_ENTRY"
+    # Canonical permission downgrades all visible actions to ADVISORY_ONLY
+    # in seeded runtime even when the underlying contract stays review-ready.
+    assert report["canonical_action_permission"] == "BLOCK_CAPITAL"
+    assert (
+        sum(1 for row in report["actions"] if row["raw_action_signal"] == "REVIEW_FOR_ENTRY")
+        == 2
+    )
+    assert rows["RTX"]["raw_action_signal"] == "REVIEW_FOR_ENTRY"
+    assert rows["RTX"]["action"] == "ADVISORY_ONLY"
     assert rows["RTX"]["gravity_pass"] is True
     assert rows["RTX"]["perception_control_state"] == "SURVIVED_CONSTRAINT"
 

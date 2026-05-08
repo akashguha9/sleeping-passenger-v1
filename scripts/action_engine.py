@@ -21,6 +21,11 @@ try:
         write_json_atomic,
     )
     from scripts.signal_conversion_monitor import build_signal_conversion_report
+    from scripts.action_permission import resolve_action_permission
+    from scripts.runtime_contracts import (
+        ActionPermission,
+        ActionPermissionResult,
+    )
 except ModuleNotFoundError:
     from execution_governance import assess_action_governance, summarize_action_governance
     from runtime_common import (
@@ -34,9 +39,158 @@ except ModuleNotFoundError:
         write_json_atomic,
     )
     from signal_conversion_monitor import build_signal_conversion_report
+    from action_permission import resolve_action_permission  # type: ignore[no-redef]
+    from runtime_contracts import (  # type: ignore[no-redef]
+        ActionPermission,
+        ActionPermissionResult,
+    )
 
 ACTION_ORDER = ["EXIT_NOW", "REDUCE", "HOLD", "MONITOR", "BLOCK_ENTRY"]
 OPTIONAL_ACTION_ORDER = ["REVIEW_FOR_ENTRY"]
+
+CAPITAL_BLOCKING_PERMISSIONS = frozenset(
+    {
+        ActionPermission.BLOCK_CAPITAL,
+        ActionPermission.QUARANTINE,
+        ActionPermission.DEMO_ONLY,
+        ActionPermission.RESEARCH_ONLY,
+    }
+)
+
+
+def _resolve_canonical_permission_from_state(
+    state: dict[str, Any],
+) -> ActionPermissionResult:
+    """Compute a deterministic, conservative canonical permission from
+    the runtime state available to the action engine.
+
+    The action engine cannot see the full health-report context (chaos
+    veto reports, calibration registry, jail mode, etc.) so this default
+    is intentionally pessimistic: missing inputs produce more restrictive
+    permissions, never less. The health report still re-stamps the
+    action report with its richer permission so the two cannot disagree.
+    """
+
+    truth_origin = (
+        state.get("truth_origin")
+        or state.get("scm_input_origin")
+        or "seeded"
+    )
+    external_signal_count = int(
+        state.get("external_signal_count", 0)
+        or state.get("scm_external_row_count", 0)
+        or 0
+    )
+    if external_signal_count == 0:
+        segmentation = state.get("signal_segmentation") or {}
+        if isinstance(segmentation, dict):
+            external_signal_count = int(
+                segmentation.get("external_signal_count", 0) or 0
+            )
+    policy_state = (
+        (state.get("execution_policy") or {}).get("policy_state", "UNKNOWN")
+    )
+    position_state = (
+        state.get("canonical_position_integrity_state")
+        or state.get("position_integrity_state")
+        or "UNKNOWN"
+    )
+    chaos_veto_active = bool(state.get("chaos_veto_active", False))
+    chaos_veto_quarantine = bool(state.get("chaos_veto_quarantine", False))
+    contextual_interpretation_enabled = bool(
+        state.get("contextual_interpretation_enabled", False)
+    )
+    jail_mode_active = bool(state.get("jail_mode_active", False))
+    return resolve_action_permission(
+        truth_origin=truth_origin,
+        external_signal_count=external_signal_count,
+        position_integrity_state=position_state,
+        policy_state=policy_state,
+        chaos_veto_active=chaos_veto_active,
+        chaos_veto_quarantine=chaos_veto_quarantine,
+        calibration_missing=True,
+        calibration_heuristic_only=True,
+        contextual_interpretation_enabled=contextual_interpretation_enabled,
+        jail_mode_active=jail_mode_active,
+    )
+
+
+def _format_forbidden_use(permission_result: ActionPermissionResult) -> str:
+    return "; ".join(permission_result.forbidden_use) or "none"
+
+
+def _format_allowed_use(permission_result: ActionPermissionResult) -> str:
+    return "; ".join(permission_result.allowed_use) or "none"
+
+
+def apply_canonical_permission_to_action_report(
+    report: dict[str, Any],
+    permission_result: ActionPermissionResult,
+) -> dict[str, Any]:
+    """Stamp a canonical permission onto an existing action report.
+
+    When permission blocks capital, every per-ticker action row is kept
+    as a diagnostic signal (``raw_action_signal``) but its visible
+    ``action`` field is downgraded to ``ADVISORY_ONLY`` and
+    ``execution_status`` is set to ``DIAGNOSTIC_ONLY``. The downgrade is
+    purely additive: no diagnostic detail is lost.
+    """
+
+    permission = permission_result.canonical_action_permission
+    blocks_capital = permission in CAPITAL_BLOCKING_PERMISSIONS
+    veto_reasons = [reason.value for reason in permission_result.veto_reasons]
+    allowed = list(permission_result.allowed_use)
+    forbidden = list(permission_result.forbidden_use)
+    execution_status = "DIAGNOSTIC_ONLY" if blocks_capital else "ADVISORY"
+    actions = report.get("actions") or []
+    downgraded_summary: dict[str, int] = {action: 0 for action in ACTION_ORDER}
+    for row in actions:
+        if not isinstance(row, dict):
+            continue
+        raw_action = row.get("action", "UNKNOWN")
+        row["raw_action_signal"] = raw_action
+        row["canonical_action_permission"] = permission.value
+        row["canonical_veto_reasons"] = list(veto_reasons)
+        row["canonical_block_capital"] = bool(blocks_capital)
+        row["execution_status"] = execution_status
+        row["allowed_use"] = list(allowed)
+        row["forbidden_use"] = list(forbidden)
+        if blocks_capital:
+            row["action"] = "ADVISORY_ONLY"
+            row["canonical_advisory_note"] = (
+                f"canonical_block_capital={permission.value}; "
+                f"raw_action_signal={raw_action}; "
+                f"forbidden_use={_format_forbidden_use(permission_result)}"
+            )
+            row["action_executable"] = False
+        else:
+            row["action_executable"] = True
+        effective_action = row["action"]
+        downgraded_summary[effective_action] = (
+            downgraded_summary.get(effective_action, 0) + 1
+        )
+    report["actions"] = actions
+    if blocks_capital:
+        report["summary_by_action"] = downgraded_summary
+    report["canonical_action_permission"] = permission.value
+    report["canonical_veto_reasons"] = list(veto_reasons)
+    report["canonical_block_capital"] = bool(blocks_capital)
+    report["execution_status"] = execution_status
+    report["allowed_use"] = list(allowed)
+    report["forbidden_use"] = list(forbidden)
+    report["action_permission_explanation"] = permission_result.explanation
+    report["action_permission_warnings"] = list(permission_result.warnings)
+    report["canonical_block"] = {
+        "canonical_action_permission": permission.value,
+        "canonical_veto_reasons": list(veto_reasons),
+        "canonical_block_capital": bool(blocks_capital),
+        "execution_status": execution_status,
+        "allowed_use": list(allowed),
+        "forbidden_use": list(forbidden),
+        "explanation": permission_result.explanation,
+        "warnings": list(permission_result.warnings),
+    }
+    return report
 
 
 def _load_optional_runtime_artifact(path: Path | None) -> dict[str, Any]:
@@ -351,6 +505,7 @@ def build_action_report(
     simulate_gsce_clear: bool = False,
     simulate_realm_bis_clear: bool = False,
     simulate_all_clear: bool = False,
+    canonical_action_permission_result: ActionPermissionResult | None = None,
 ) -> dict[str, Any]:
     simulation_requested = any(
         [simulate_gsce_clear, simulate_realm_bis_clear, simulate_all_clear]
@@ -491,6 +646,12 @@ def build_action_report(
         "open_positions_validation": validation,
         "external_observation_context": external_observation_context,
     }
+    permission_result = (
+        canonical_action_permission_result
+        if canonical_action_permission_result is not None
+        else _resolve_canonical_permission_from_state(state)
+    )
+    apply_canonical_permission_to_action_report(report, permission_result)
     if write_runtime:
         write_json_atomic(ACTION_REPORT_PATH, report)
     return report
@@ -501,12 +662,24 @@ def format_action_summary(report: dict[str, Any]) -> str:
     for action in OPTIONAL_ACTION_ORDER:
         if report["summary_by_action"].get(action, 0) > 0:
             action_order.append(action)
-    parts = [f"{action}={report['summary_by_action'][action]}" for action in action_order]
+    if report["summary_by_action"].get("ADVISORY_ONLY", 0) > 0:
+        action_order.append("ADVISORY_ONLY")
+    parts = [
+        f"{action}={report['summary_by_action'].get(action, 0)}"
+        for action in action_order
+    ]
     return "\n".join(
         [
             "Action Engine",
             f"policy_state={report['policy_state']}",
             f"active_blockers={', '.join(report['active_blockers']) or 'NONE'}",
+            f"canonical_action_permission={report.get('canonical_action_permission', 'BLOCK_CAPITAL')}",
+            f"execution_status={report.get('execution_status', 'DIAGNOSTIC_ONLY')}",
+            "veto_reasons=["
+            + ",".join(report.get("canonical_veto_reasons", []) or ["NONE"])
+            + "]",
+            "forbidden_use="
+            + ("; ".join(report.get("forbidden_use", []) or ["none"])),
             f"summary={', '.join(parts)}",
         ]
     )

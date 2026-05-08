@@ -1,0 +1,34 @@
+{
+  "fixture_kind": "replay_without_labels",
+  "fixture_version": 1,
+  "description": "Replay fixture without outcome labels. Records remain typed as REPLAY (not REPLAY_LABELED) and cannot count as external truth.",
+  "records": [
+    {
+      "record_id": "replay-unlabeled-001",
+      "timestamp": "2026-04-05T12:00:00Z",
+      "instrument": "RTX",
+      "source": "replay_fixture",
+      "feature_value": 0.51,
+      "predicted_class": "monitor",
+      "predicted_action": "MONITOR"
+    },
+    {
+      "record_id": "replay-unlabeled-002",
+      "timestamp": "2026-04-05T13:00:00Z",
+      "instrument": "ZIM",
+      "source": "replay_fixture",
+      "feature_value": 0.33,
+      "predicted_class": "block_entry",
+      "predicted_action": "BLOCK_ENTRY"
+    },
+    {
+      "record_id": "replay-unlabeled-003",
+      "timestamp": "2026-04-05T14:00:00Z",
+      "instrument": "GLD",
+      "source": "replay_fixture",
+      "feature_value": 0.21,
+      "predicted_class": "block_entry",
+      "predicted_action": "BLOCK_ENTRY"
+    }
+  ]
+}

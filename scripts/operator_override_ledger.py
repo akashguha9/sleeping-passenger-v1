@@ -152,9 +152,16 @@ def record_operator_override(
         raise ValueError("ticker is required")
 
     suggested_row = action_lookup.get(normalized_ticker, {})
+    raw_suggested_action = suggested_row.get("action")
+    # Override classification is computed against the diagnostic action
+    # signal; canonical permission downgrades the visible action to
+    # ADVISORY_ONLY but the operator is reasoning about the underlying
+    # raw recommendation.
+    if str(raw_suggested_action or "").upper() == "ADVISORY_ONLY":
+        raw_suggested_action = suggested_row.get("raw_action_signal") or raw_suggested_action
     resolved_suggested_action = (
         suggested_action
-        or suggested_row.get("action")
+        or raw_suggested_action
         or "UNKNOWN"
     )
     if not str(resolved_suggested_action).strip():

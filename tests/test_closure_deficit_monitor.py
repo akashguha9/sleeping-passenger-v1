@@ -81,15 +81,20 @@ def test_closure_deficit_monitor_counts_approvals_closes_and_reconciliation(
 
     decision_rows = []
     for index, row in enumerate(action_report["actions"], start=1):
+        diagnostic_action = (
+            row.get("raw_action_signal")
+            if str(row.get("action") or "").upper() == "ADVISORY_ONLY"
+            else row.get("action")
+        )
         decision_rows.append(
             {
                 "decision_id": f"decision_{index}",
                 "ticker": row["ticker"],
                 "signal_id": row["signal_id"],
-                "action_type": row["action"],
+                "action_type": diagnostic_action,
                 "approval_state": (
                     "APPROVED_BY_HUMAN_FOR_PAPER"
-                    if row["action"] == "REVIEW_FOR_ENTRY"
+                    if diagnostic_action == "REVIEW_FOR_ENTRY"
                     else "PENDING_HUMAN_APPROVAL"
                 ),
             }

@@ -234,7 +234,16 @@ def _build_decision_row(
     decision_type: str | None = None,
     approval_state: str = "PENDING_HUMAN_APPROVAL",
 ) -> dict[str, Any]:
-    action_type = decision_type or str(action_row.get("action") or "UNKNOWN").upper()
+    raw_action = str(action_row.get("action") or "UNKNOWN").upper()
+    # When canonical permission downgrades the visible action to
+    # ADVISORY_ONLY, paper execution still operates on the diagnostic
+    # ``raw_action_signal`` so paper sandboxes remain testable. Live
+    # capital deployment is blocked separately by the action engine.
+    if raw_action == "ADVISORY_ONLY":
+        raw_action = str(
+            action_row.get("raw_action_signal") or "UNKNOWN"
+        ).upper()
+    action_type = decision_type or raw_action
     signal_id = str((signal_row or {}).get("signal_id") or action_row.get("signal_id") or "")
     ticker = str(action_row.get("ticker") or (signal_row or {}).get("ticker") or "").upper()
     context_row = signal_context_row if isinstance(signal_context_row, dict) else {}
