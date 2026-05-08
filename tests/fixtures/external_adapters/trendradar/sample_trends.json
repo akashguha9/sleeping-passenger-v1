@@ -1,0 +1,22 @@
+[
+  {
+    "topic": "Oil shock narrative",
+    "title": "Oil supply fears spike",
+    "summary": "Narrative accelerating across macro feeds.",
+    "url": "https://example.invalid/oil",
+    "platform": "news",
+    "observed_at": "2026-05-08T00:00:00+00:00",
+    "attention_velocity": 0.82,
+    "sentiment_proxy": 0.66,
+    "emotional_intensity": 0.70,
+    "urgency_score": 0.75,
+    "evidence_absence": 0.40,
+    "repetition_score": 0.60,
+    "clickbait_score": 0.30,
+    "source_vagueness": 0.25,
+    "narrative_state": "ACCELERATING",
+    "matched_market_ids": ["MKT1"],
+    "matched_keywords": ["oil", "supply"],
+    "source_credibility_proxy": 0.72
+  }
+]

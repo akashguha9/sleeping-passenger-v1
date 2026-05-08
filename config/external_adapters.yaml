@@ -1,0 +1,48 @@
+external_adapters:
+  poly_data:
+    enabled: false
+    mode: csv_sidecar
+    path_env: POLY_DATA_PATH
+    fallback_path: external/poly_data
+    max_rows: 5000
+    real_execution_allowed: false
+
+  kronos:
+    enabled: false
+    mode: optional_python
+    lazy_import: true
+    mock_mode: true
+    real_execution_allowed: false
+
+  tradingagents:
+    enabled: false
+    mode: mock
+    dry_run: true
+    allow_api_keys_in_tests: false
+    sanitize_actions: true
+    force_paper_only: true
+    real_execution_allowed: false
+
+  trendradar:
+    enabled: false
+    mode: output_sidecar
+    path_env: TRENDRADAR_OUTPUT_PATH
+    fallback_path: external/trendradar/output
+    max_items: 1000
+    real_execution_allowed: false
+
+  apollo:
+    enabled: true
+    mode: internal_doctrine
+    chaos_threshold: 0.75
+    durability_threshold: 0.65
+    evidence_quality_threshold: 0.60
+    minimum_source_count: 2
+    real_execution_allowed: false
+
+  fincept_terminal:
+    enabled: false
+    mode: exported_analytics_sidecar
+    path_env: FINCEPT_EXPORT_PATH
+    fallback_path: external/fincept/exports
+    real_execution_allowed: false

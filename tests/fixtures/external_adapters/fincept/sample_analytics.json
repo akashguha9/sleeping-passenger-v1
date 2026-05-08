@@ -1,0 +1,9 @@
+[
+  {
+    "instrument_id": "CL_FUT",
+    "analytics_type": "correlation_snapshot",
+    "payload": {"beta": 0.42, "drawdown_risk": 0.18},
+    "data_sources": ["exported_terminal"],
+    "generated_at": "2026-05-08T00:00:00+00:00"
+  }
+]

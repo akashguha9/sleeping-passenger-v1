@@ -1,0 +1,11 @@
+{
+  "recommended_action": "BUY",
+  "confidence": 0.74,
+  "dissent_level": 0.18,
+  "validation_flags": true,
+  "agent_votes": [
+    {"agent": "macro", "vote": "BUY"},
+    {"agent": "risk", "vote": "WATCH"},
+    {"agent": "flow", "vote": "BUY"}
+  ]
+}
