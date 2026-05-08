@@ -1,0 +1,61 @@
+# Global Signal Fabric — No Execution Policy (Phase 2)
+# This policy document asserts that no source loader, ingestion module,
+# or Phase 2 component may participate in order execution of any kind.
+#
+# This config is machine-readable and enforced by:
+#   tests/test_no_execution_policy_config.py
+
+policy_name: no_execution_policy
+schema_version: "1.0"
+advisory_status: ADVISORY_ONLY
+execution_gate: LOCKED
+human_review_required: true
+
+prohibitions:
+  # These method names are FORBIDDEN in any ingestion loader
+  forbidden_methods:
+    - place_order
+    - modify_order
+    - cancel_order
+    - submit_order
+    - execute_trade
+    - auto_buy
+    - auto_sell
+
+  # These call patterns are FORBIDDEN in loader Python source
+  forbidden_literals:
+    - "place_order("
+    - "execute_trade("
+    - "submit_order("
+
+  # These imports are FORBIDDEN in any ingestion loader
+  forbidden_imports:
+    - paper_execution
+    - live_execution
+    - build_paper_order
+    - build_live_order
+
+output_contract:
+  every_record_must_have:
+    advisory_status: ADVISORY_ONLY
+    human_review_required: true
+    execution_gate: LOCKED
+
+  every_loader_result_must_have:
+    advisory_status: ADVISORY_ONLY
+    human_review_required: true
+    execution_gate: LOCKED
+
+api_credential_policy:
+  missing_key_behavior: skip_cleanly
+  missing_key_exception: SkipLoader
+  tests_must_not_fail_on_missing_key: true
+  do_not_hardcode_secrets: true
+  do_not_create_env_files: true
+
+enforcement:
+  tested_by: tests/test_no_execution_policy_config.py
+  audit_scope: scripts/ingestion/
+  note: >
+    This policy is enforced at test time via AST source inspection.
+    Any violation in scripts/ingestion/ causes a test failure.

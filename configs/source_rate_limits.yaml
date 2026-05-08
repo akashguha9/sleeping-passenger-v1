@@ -1,0 +1,112 @@
+# Rate limits for Global Signal Fabric source loaders (Phase 2).
+# All sources are read-only observers. These limits prevent accidental hammering.
+
+defaults:
+  requests_per_minute: 10
+  requests_per_hour: 100
+  burst_limit: 3
+  backoff_seconds: 1.0
+  retry_attempts: 2
+
+polymarket:
+  requests_per_minute: 30
+  requests_per_hour: 500
+  burst_limit: 5
+  backoff_seconds: 0.5
+
+gdelt:
+  requests_per_minute: 10
+  requests_per_hour: 200
+  burst_limit: 2
+  backoff_seconds: 2.0
+
+sec_edgar:
+  requests_per_minute: 10
+  requests_per_hour: 100
+  burst_limit: 2
+  backoff_seconds: 1.0
+  note: "SEC fair access policy: max 10 req/sec per IP"
+
+newsapi:
+  requests_per_minute: 5
+  requests_per_hour: 50
+  burst_limit: 2
+  backoff_seconds: 2.0
+
+event_registry:
+  requests_per_minute: 5
+  requests_per_hour: 50
+  burst_limit: 2
+  backoff_seconds: 2.0
+
+grok_xai:
+  requests_per_minute: 2
+  requests_per_hour: 20
+  burst_limit: 1
+  backoff_seconds: 5.0
+
+etherscan:
+  requests_per_minute: 5
+  requests_per_hour: 100
+  burst_limit: 2
+  backoff_seconds: 1.0
+
+market_data:
+  requests_per_minute: 20
+  requests_per_hour: 300
+  burst_limit: 5
+  backoff_seconds: 0.5
+
+india_nse_bse:
+  requests_per_minute: 5
+  requests_per_hour: 50
+  burst_limit: 2
+  backoff_seconds: 3.0
+
+rbi_sebi:
+  requests_per_minute: 3
+  requests_per_hour: 30
+  burst_limit: 1
+  backoff_seconds: 5.0
+
+eu_esef:
+  requests_per_minute: 5
+  requests_per_hour: 50
+  burst_limit: 2
+  backoff_seconds: 2.0
+
+uk_companies_house:
+  requests_per_minute: 10
+  requests_per_hour: 100
+  burst_limit: 3
+  backoff_seconds: 1.0
+
+japan_edinet:
+  requests_per_minute: 5
+  requests_per_hour: 50
+  burst_limit: 2
+  backoff_seconds: 2.0
+
+singapore_acra_sgx:
+  requests_per_minute: 10
+  requests_per_hour: 100
+  burst_limit: 3
+  backoff_seconds: 1.0
+
+china_disclosure:
+  requests_per_minute: 5
+  requests_per_hour: 50
+  burst_limit: 2
+  backoff_seconds: 3.0
+
+solscan:
+  requests_per_minute: 10
+  requests_per_hour: 100
+  burst_limit: 3
+  backoff_seconds: 1.0
+
+evm_chain:
+  requests_per_minute: 20
+  requests_per_hour: 300
+  burst_limit: 5
+  backoff_seconds: 0.5

@@ -1,0 +1,129 @@
+# Jurisdictions covered by Global Signal Fabric source loaders (Phase 2).
+# Maps jurisdiction codes to loader names and regulatory context.
+
+advisory_note: >
+  All jurisdiction data is read-only and advisory only.
+  No data from any jurisdiction loader constitutes investment advice,
+  legal compliance confirmation, or trade authorization.
+
+jurisdictions:
+  US:
+    loaders:
+      - sec_edgar
+      - market_data
+      - polymarket
+      - newsapi
+      - etherscan
+      - evm_chain
+    regulatory_bodies:
+      - SEC
+      - CFTC
+      - FINRA
+      - Federal Reserve
+    primary_currency: USD
+    exchange_codes:
+      - NYSE
+      - NASDAQ
+      - CBOE
+
+  EU:
+    loaders:
+      - eu_esef
+      - gdelt
+      - event_registry
+    regulatory_bodies:
+      - ESMA
+      - ECB
+      - EBA
+    primary_currency: EUR
+    exchange_codes:
+      - XETRA
+      - EURONEXT
+    notes: "ESEF mandatory for listed companies from 2020"
+
+  IN:
+    loaders:
+      - india_nse_bse
+      - rbi_sebi
+    regulatory_bodies:
+      - SEBI
+      - RBI
+      - BSE
+      - NSE
+    primary_currency: INR
+    exchange_codes:
+      - BSE
+      - NSE
+
+  UK:
+    loaders:
+      - uk_companies_house
+      - gdelt
+    regulatory_bodies:
+      - FCA
+      - PRA
+      - Companies House
+    primary_currency: GBP
+    exchange_codes:
+      - LSE
+      - AIM
+
+  JP:
+    loaders:
+      - japan_edinet
+    regulatory_bodies:
+      - FSA
+      - TSE
+    primary_currency: JPY
+    exchange_codes:
+      - TSE
+      - OSE
+
+  SG:
+    loaders:
+      - singapore_acra_sgx
+    regulatory_bodies:
+      - MAS
+      - SGX
+      - ACRA
+    primary_currency: SGD
+    exchange_codes:
+      - SGX
+
+  CN:
+    loaders:
+      - china_disclosure
+    regulatory_bodies:
+      - CSRC
+      - PBOC
+      - SSE
+      - SZSE
+    primary_currency: CNY
+    exchange_codes:
+      - SSE
+      - SZSE
+
+  BLOCKCHAIN:
+    loaders:
+      - etherscan
+      - solscan
+      - evm_chain
+      - polymarket
+    chains:
+      - ethereum
+      - polygon
+      - solana
+      - arbitrum
+      - optimism
+      - base
+    notes: "On-chain data only. No private key access. Read-only RPC calls."
+
+  GLOBAL:
+    loaders:
+      - gdelt
+      - newsapi
+      - event_registry
+      - grok_xai
+      - market_data
+      - broker_csv
+    notes: "These loaders span multiple jurisdictions"
