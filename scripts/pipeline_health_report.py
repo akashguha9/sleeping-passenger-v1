@@ -64,6 +64,7 @@ try:
         BULL_TRANSITION_LOG_PATH,
         CHESS_ARCHETYPE_REPORT_PATH,
         CONTEXT_PROFILE_REPORT_PATH,
+        CONTEXTUAL_INTERPRETATION_REPORT_PATH,
         CONTEXTUAL_INTERPRETATION_SUMMARY_PATH,
         HEDGE_TRADE_ENTRY_REPORT_PATH,
         SIGNAL_SURFACE_REPORT_PATH,
@@ -171,6 +172,7 @@ except ModuleNotFoundError:
         BULL_TRANSITION_LOG_PATH,
         CHESS_ARCHETYPE_REPORT_PATH,
         CONTEXT_PROFILE_REPORT_PATH,
+        CONTEXTUAL_INTERPRETATION_REPORT_PATH,
         CONTEXTUAL_INTERPRETATION_SUMMARY_PATH,
         HEDGE_TRADE_ENTRY_REPORT_PATH,
         SIGNAL_SURFACE_REPORT_PATH,
@@ -4063,9 +4065,34 @@ def build_pipeline_health_report(
             "render_operator_mode",
             "validate",
         ),
+        "contextual_meaning_type": contextual_interpretation_report.get(
+            "contextual_meaning_type",
+            "UNKNOWN",
+        ),
+        "contextual_meaning_confidence": contextual_interpretation_report.get(
+            "contextual_meaning_confidence",
+            0.0,
+        ),
+        "contextual_latent_capability_state": contextual_interpretation_report.get(
+            "contextual_latent_capability_state",
+            "UNOBSERVED",
+        ),
+        "contextual_recommended_action": contextual_interpretation_report.get(
+            "contextual_recommended_action",
+            "HOLD_FOR_REPEATABILITY",
+        ),
+        "contextual_bull_state": contextual_interpretation_report.get(
+            "contextual_bull_state",
+            "MIURA",
+        ),
+        "contextual_main_guardrail": contextual_interpretation_report.get(
+            "contextual_main_guardrail",
+            "no_signals",
+        ),
         "contextual_interpretation_report_path": repo_relative(
             CONTEXTUAL_INTERPRETATION_SUMMARY_PATH
         ),
+        "contextual_report_path": repo_relative(CONTEXTUAL_INTERPRETATION_REPORT_PATH),
         "context_profile_report_path": repo_relative(CONTEXT_PROFILE_REPORT_PATH),
         "interpretation_packet_report_path": repo_relative(INTERPRETATION_PACKET_REPORT_PATH),
         "interpretation_drift_report_path": repo_relative(INTERPRETATION_DRIFT_REPORT_PATH),
@@ -4676,6 +4703,18 @@ def format_pipeline_health_summary(report: dict[str, Any]) -> str:
             f"{report.get('interpretation_reduce_size_count', 0)}",
             "interpretation_render_operator_mode="
             f"{report.get('interpretation_render_operator_mode', 'validate')}",
+            "contextual_meaning_type="
+            f"{report.get('contextual_meaning_type', 'UNKNOWN')}",
+            "contextual_meaning_confidence="
+            f"{report.get('contextual_meaning_confidence')}",
+            "contextual_latent_capability_state="
+            f"{report.get('contextual_latent_capability_state', 'UNOBSERVED')}",
+            "contextual_recommended_action="
+            f"{report.get('contextual_recommended_action', 'HOLD_FOR_REPEATABILITY')}",
+            "contextual_bull_state="
+            f"{report.get('contextual_bull_state', 'MIURA')}",
+            "contextual_main_guardrail="
+            f"{report.get('contextual_main_guardrail', 'no_signals')}",
             "structural_design_state="
             f"{report.get('structural_design_structure_state', 'UNKNOWN')}",
             "structural_design_pressure_score="

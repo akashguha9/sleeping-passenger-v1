@@ -7,6 +7,7 @@ from typing import Any
 
 try:
     from scripts.contextual_interpretation.context_profile import ContextProfile, build_context_profile
+    from scripts.contextual_interpretation_engine import build_contextual_interpretation_report
     from scripts.contextual_interpretation.interpretation_drift import (
         InterpretationDriftReport,
         compute_interpretation_drift,
@@ -21,6 +22,7 @@ try:
     from scripts.contextual_interpretation.reality_renderer import render_reality_packet
     from scripts.runtime_common import (
         CONTEXT_PROFILE_REPORT_PATH,
+        CONTEXTUAL_INTERPRETATION_REPORT_PATH,
         CONTEXTUAL_INTERPRETATION_SUMMARY_PATH,
         INTERPRETATION_DRIFT_REPORT_PATH,
         INTERPRETATION_FAILURE_LOG_PATH,
@@ -36,6 +38,9 @@ try:
     )
 except ModuleNotFoundError:
     from contextual_interpretation.context_profile import ContextProfile, build_context_profile  # type: ignore[no-redef]
+    from contextual_interpretation_engine import (  # type: ignore[no-redef]
+        build_contextual_interpretation_report,
+    )
     from contextual_interpretation.interpretation_drift import (  # type: ignore[no-redef]
         InterpretationDriftReport,
         compute_interpretation_drift,
@@ -50,6 +55,7 @@ except ModuleNotFoundError:
     from contextual_interpretation.reality_renderer import render_reality_packet  # type: ignore[no-redef]
     from runtime_common import (  # type: ignore[no-redef]
         CONTEXT_PROFILE_REPORT_PATH,
+        CONTEXTUAL_INTERPRETATION_REPORT_PATH,
         CONTEXTUAL_INTERPRETATION_SUMMARY_PATH,
         INTERPRETATION_DRIFT_REPORT_PATH,
         INTERPRETATION_FAILURE_LOG_PATH,
@@ -245,6 +251,7 @@ def build_contextual_interpretation_summary(
     truths = build_truth_context(state)
     path_map = {
         "context_profile": CONTEXT_PROFILE_REPORT_PATH,
+        "meaning_report": CONTEXTUAL_INTERPRETATION_REPORT_PATH,
         "interpretation_packet": INTERPRETATION_PACKET_REPORT_PATH,
         "interpretation_drift": INTERPRETATION_DRIFT_REPORT_PATH,
         "reality_rendering": REALITY_RENDERING_REPORT_PATH,
@@ -270,6 +277,12 @@ def build_contextual_interpretation_summary(
         for packet, failure in zip(packets, failures)
     ]
     interpreted_signals = [_merge_interpreted_signal(signal, packet) for signal, packet in zip(signals, packets)]
+    meaning_report = build_contextual_interpretation_report(
+        signals,
+        runtime_state=state,
+        write_runtime=False,
+        artifact_path=path_map["meaning_report"],
+    )
 
     action_counts = Counter(packet.recommended_action for packet in packets)
     reason_counts = Counter(reason for packet in packets for reason in packet.reason_codes)
@@ -301,6 +314,19 @@ def build_contextual_interpretation_summary(
         "allow_count": action_counts.get("ALLOW", 0),
         "average_interpretation_drift": avg_drift,
         "average_interpretation_confidence": avg_confidence,
+        "contextual_meaning_type": meaning_report.get("contextual_meaning_type", "UNKNOWN"),
+        "contextual_meaning_confidence": meaning_report.get("contextual_meaning_confidence", 0.0),
+        "contextual_latent_capability_state": meaning_report.get(
+            "contextual_latent_capability_state",
+            "UNOBSERVED",
+        ),
+        "contextual_recommended_action": meaning_report.get(
+            "contextual_recommended_action",
+            "HOLD_FOR_REPEATABILITY",
+        ),
+        "contextual_bull_state": meaning_report.get("contextual_bull_state", "MIURA"),
+        "contextual_main_guardrail": meaning_report.get("contextual_main_guardrail", "no_signals"),
+        "contextual_meaning_report": meaning_report,
         "example_interpretation_packet": packets[0].to_dict() if packets else None,
         "operating_mode": classify_operating_mode(state),
         "truth_origin": truths["truth_origin"],
@@ -311,6 +337,7 @@ def build_contextual_interpretation_summary(
             "interpretation_packet": repo_relative(path_map["interpretation_packet"]),
             "interpretation_drift": repo_relative(path_map["interpretation_drift"]),
             "reality_rendering": repo_relative(path_map["reality_rendering"]),
+            "meaning_report": repo_relative(path_map["meaning_report"]),
             "failure_log": repo_relative(path_map["failure_log"]),
             "summary": repo_relative(path_map["summary"]),
         },
@@ -380,6 +407,27 @@ def build_contextual_interpretation_summary(
             "data_quality": summary["data_quality"],
             "live_ready": False,
         }
+        meaning_payload = {
+            "run_id": summary["run_id"],
+            "generated_at": summary["generated_at"],
+            "module": "contextual_interpretation_report",
+            "schema_version": "1.0",
+            "inputs": {"signal_count": len(signals)},
+            "scores": {
+                "contextual_meaning_confidence": summary["contextual_meaning_confidence"],
+                "average_interpretation_confidence": avg_confidence,
+            },
+            "state": summary["contextual_recommended_action"],
+            "vetoes": ["CHAOS_HOLD"] if summary["contextual_recommended_action"] == "CHAOS_HOLD" else [],
+            "recommendation": summary["contextual_recommended_action"],
+            "rationale": [
+                "Raw Signal does not equal Meaning.",
+                "Holding for repeatability is a healthy result, not failure.",
+            ],
+            "report": meaning_report,
+            "data_quality": summary["data_quality"],
+            "live_ready": False,
+        }
         summary_payload = {
             "run_id": summary["run_id"],
             "generated_at": summary["generated_at"],
@@ -399,6 +447,7 @@ def build_contextual_interpretation_summary(
             "live_ready": False,
         }
         write_json_atomic(path_map["context_profile"], context_payload, stamp=False)
+        write_json_atomic(path_map["meaning_report"], meaning_payload, stamp=False)
         write_json_atomic(path_map["interpretation_packet"], packet_payload, stamp=False)
         write_json_atomic(path_map["interpretation_drift"], drift_payload, stamp=False)
         write_json_atomic(path_map["reality_rendering"], rendering_payload, stamp=False)
