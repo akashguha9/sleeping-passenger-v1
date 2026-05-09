@@ -424,3 +424,108 @@ npm run start
 ### Data
 
 Step 1 uses mock data in `frontend/src/lib/mockData.ts` that mirrors the FastAPI response shapes from `scripts/signal_inbox_api.py` and `scripts/moltbook_api.py`. Live backend connection is Step 2.
+
+---
+
+## Serious Local MVP Runbook
+
+> **This MVP is advisory-only. It does not place trades. It has no broker execution path.**
+>
+> `advisory_status = ADVISORY_ONLY` | `execution_mode = HUMAN_ONLY` | `ai_execution_count = 0` | `broker_api_called = False`
+
+### Prerequisites
+
+```powershell
+pip install fastapi uvicorn requests
+cd frontend
+npm install
+cd ..
+```
+
+### Start the full local stack
+
+Open **three separate terminals** in the repo root.
+
+**Terminal 1 — FastAPI advisory server**
+
+```powershell
+uvicorn scripts.api_server:app --reload
+# Server starts at http://localhost:8000
+# Docs: http://localhost:8000/docs
+```
+
+**Terminal 2 — Next.js frontend**
+
+```powershell
+cd frontend
+npm run dev
+# Dashboard at http://localhost:3000
+```
+
+**Terminal 3 — Phase 1 live source ingestion**
+
+```powershell
+# Dry-run first (fetch only — no DB write):
+python scripts/run_live_sources_phase1.py --dry-run --json
+
+# Write run (fetch and persist to SQLite):
+python scripts/run_live_sources_phase1.py --write
+```
+
+### Browser
+
+| URL | Description |
+|---|---|
+| `http://localhost:3000` | Dashboard — fabric state, status breakdown, top signals |
+| `http://localhost:3000/live-signals` | Live signal events from Phase 1 sources |
+| `http://localhost:3000/signal-inbox` | Filterable signal inbox |
+| `http://localhost:3000/reflection-desk` | Human reflections and AI advisory context |
+| `http://localhost:3000/manual-trade-log` | Record trades placed manually (HUMAN_ONLY) |
+| `http://localhost:3000/moltbook` | Mistake-learning entries |
+| `http://localhost:3000/reconciliation` | Match logged trades to actual outcomes |
+| `http://localhost:3000/exports` | Download JSON/CSV exports |
+
+### Run the smoke test
+
+```powershell
+# Quick local verification (mocks Phase 1 runner):
+python scripts/local_mvp_smoke_test.py --skip-live-source
+
+# Full check including Phase 1 dry-run (requires internet for Polymarket / GDELT):
+python scripts/local_mvp_smoke_test.py
+
+# JSON report:
+python scripts/local_mvp_smoke_test.py --json
+```
+
+### Run the full test suite
+
+```powershell
+python -m pytest tests -q
+python -m pytest tests/test_local_mvp_smoke_test.py -v
+python -m pytest tests/test_persistence.py -v
+```
+
+### Compile-check all scripts and tests
+
+```powershell
+python -m compileall scripts tests
+```
+
+### Reset the local DB
+
+```powershell
+# Wipe the SQLite DB — auto-recreated on next API call or source run
+Remove-Item runtime\mvp_local.db -ErrorAction SilentlyContinue
+```
+
+### Advisory safety rules (permanent — never change)
+
+- No Buy, Sell, Execute, or Auto-trade button or endpoint exists anywhere.
+- `execution_mode = HUMAN_ONLY` on every trade record.
+- `advisory_status = ADVISORY_ONLY` on every record.
+- `ai_execution_count = 0` always.
+- `broker_api_called = False` always.
+- `broker_order_id = NONE` always.
+- `execution_gate = LOCKED` on every signal event.
+- No `.env` contains broker credentials. No broker API is imported.
