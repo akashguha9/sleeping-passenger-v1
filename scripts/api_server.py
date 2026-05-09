@@ -23,6 +23,7 @@ from __future__ import annotations
 
 try:
     from fastapi import FastAPI, Response
+    from fastapi.middleware.cors import CORSMiddleware
     from pydantic import BaseModel
 except ImportError as _exc:  # pragma: no cover
     import sys
@@ -92,6 +93,14 @@ app = FastAPI(
         "No order placement."
     ),
     version=_VERSION,
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000"],
+    allow_credentials=False,
+    allow_methods=["GET", "POST"],
+    allow_headers=["Content-Type"],
 )
 
 

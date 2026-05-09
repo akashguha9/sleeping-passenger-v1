@@ -1,0 +1,170 @@
+import { API_BASE } from './config';
+import {
+  MOCK_INBOX_RESPONSE,
+  MOCK_MOLTBOOK_ENTRIES,
+  getMockSignalDetail,
+} from './mockData';
+import type { InboxListResponse, SignalDetailResponse, MoltbookEntry } from '@/types';
+
+export interface HealthResponse {
+  status: string;
+  advisory_status: string;
+  execution_mode: string;
+  ai_execution_count: number;
+  human_review_required: boolean;
+  version: string;
+}
+
+export interface ApiResult<T> {
+  data: T;
+  isMock: boolean;
+}
+
+export interface MoltbookListResponse {
+  items: MoltbookEntry[];
+  item_count: number;
+}
+
+async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(`${API_BASE}${path}`, {
+    ...init,
+    headers: { 'Content-Type': 'application/json', ...init?.headers },
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json() as Promise<T>;
+}
+
+export async function checkHealth(): Promise<HealthResponse | null> {
+  try {
+    return await apiFetch<HealthResponse>('/health');
+  } catch {
+    return null;
+  }
+}
+
+export async function getSignals(): Promise<ApiResult<InboxListResponse>> {
+  try {
+    const data = await apiFetch<InboxListResponse>('/signals');
+    return { data, isMock: false };
+  } catch {
+    return { data: MOCK_INBOX_RESPONSE, isMock: true };
+  }
+}
+
+export async function getSignalDetail(eventId: string): Promise<ApiResult<SignalDetailResponse>> {
+  try {
+    const data = await apiFetch<SignalDetailResponse>(`/signals/${encodeURIComponent(eventId)}`);
+    return { data, isMock: false };
+  } catch {
+    return { data: getMockSignalDetail(eventId), isMock: true };
+  }
+}
+
+export async function validateSignal(eventId: string): Promise<unknown> {
+  return apiFetch(`/signals/${encodeURIComponent(eventId)}/validate`, { method: 'POST' });
+}
+
+export async function postReflection(
+  eventId: string,
+  reflection_text: string,
+  conviction_level: string,
+  author = 'human',
+): Promise<unknown> {
+  return apiFetch(`/signals/${encodeURIComponent(eventId)}/reflection`, {
+    method: 'POST',
+    body: JSON.stringify({ reflection_text, author, conviction_level }),
+  });
+}
+
+export async function postAiSummary(
+  eventId: string,
+  summary_text: string,
+  model_label = 'AI_ADVISORY',
+): Promise<unknown> {
+  return apiFetch(`/signals/${encodeURIComponent(eventId)}/ai-summary`, {
+    method: 'POST',
+    body: JSON.stringify({ summary_text, model_label }),
+  });
+}
+
+export async function postDecision(eventId: string, status: string): Promise<unknown> {
+  return apiFetch(`/signals/${encodeURIComponent(eventId)}/decision`, {
+    method: 'POST',
+    body: JSON.stringify({ status }),
+  });
+}
+
+export async function postManualTrade(body: {
+  event_id: string;
+  ticker: string;
+  side: string;
+  quantity: number;
+  price: number;
+  thesis: string;
+  notes?: string;
+  logged_by?: string;
+}): Promise<unknown> {
+  return apiFetch('/manual-trades', {
+    method: 'POST',
+    body: JSON.stringify({ logged_by: 'human', ...body }),
+  });
+}
+
+export async function reconcileTrade(
+  tradeId: string,
+  body: {
+    actual_fill_price: number;
+    actual_quantity: number;
+    outcome_notes?: string;
+    pnl_estimate?: number;
+    outcome_status?: string;
+  },
+): Promise<unknown> {
+  return apiFetch(`/manual-trades/${encodeURIComponent(tradeId)}/reconcile`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+export async function getMoltbook(): Promise<ApiResult<MoltbookListResponse>> {
+  try {
+    const raw = await apiFetch<Record<string, unknown>>('/moltbook');
+    const items = (raw.items as MoltbookEntry[]) ?? [];
+    return { data: { items, item_count: items.length }, isMock: false };
+  } catch {
+    return {
+      data: { items: MOCK_MOLTBOOK_ENTRIES, item_count: MOCK_MOLTBOOK_ENTRIES.length },
+      isMock: true,
+    };
+  }
+}
+
+export async function postMoltbook(body: {
+  event_id: string;
+  ticker: string;
+  original_signal_thesis: string;
+  ai_interpretation: string;
+  user_reflection: string;
+  final_human_decision: string;
+  manual_trade_log_id?: string;
+  outcome?: string;
+  mistake_type: string;
+  lesson_learned: string;
+  bias_detected?: string;
+  recalibration_note?: string;
+  future_rule_update?: string;
+}): Promise<unknown> {
+  return apiFetch('/moltbook', { method: 'POST', body: JSON.stringify(body) });
+}
+
+export function getCsvExportUrl(
+  type:
+    | 'signal-inbox'
+    | 'reflections'
+    | 'manual-trades'
+    | 'reconciliation'
+    | 'moltbook'
+    | 'source-health',
+): string {
+  return `${API_BASE}/exports/${type}.csv`;
+}

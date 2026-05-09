@@ -1,3 +1,9 @@
+'use client';
+
+import { useState, useEffect } from 'react';
+import { checkHealth } from '@/lib/apiClient';
+import type { HealthResponse } from '@/lib/apiClient';
+import { API_BASE } from '@/lib/config';
 import { AdvisoryOnlyBadge } from '@/components/AdvisoryOnlyBadge';
 import { HumanOnlyBadge } from '@/components/HumanOnlyBadge';
 
@@ -11,6 +17,18 @@ const SYSTEM_CONSTANTS = [
 ];
 
 export default function SettingsPage() {
+  const [health, setHealth] = useState<HealthResponse | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    checkHealth().then((h) => {
+      setHealth(h);
+      setIsLoading(false);
+    });
+  }, []);
+
+  const isOnline = !isLoading && health !== null;
+
   return (
     <div className="max-w-3xl mx-auto space-y-5">
       <div className="flex items-start justify-between">
@@ -24,10 +42,54 @@ export default function SettingsPage() {
         </div>
       </div>
 
+      {/* Backend status */}
+      <div className="bg-slate-800/60 border border-slate-700/60 rounded-lg p-5">
+        <h2 className="text-sm font-semibold text-slate-300 mb-4">Backend Status</h2>
+        <div className="flex items-center gap-3 mb-3">
+          {isLoading ? (
+            <span className="text-xs text-slate-500">Checking backend…</span>
+          ) : (
+            <>
+              <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${isOnline ? 'bg-emerald-400' : 'bg-amber-400'}`} />
+              <span className={`text-sm font-semibold ${isOnline ? 'text-emerald-400' : 'text-amber-400'}`}>
+                {isOnline ? 'Connected' : 'Offline — mock data active'}
+              </span>
+            </>
+          )}
+        </div>
+        {isOnline && health && (
+          <div className="space-y-2">
+            {[
+              { key: 'status', value: health.status },
+              { key: 'advisory_status', value: health.advisory_status },
+              { key: 'execution_mode', value: health.execution_mode },
+              { key: 'ai_execution_count', value: String(health.ai_execution_count) },
+              { key: 'human_review_required', value: String(health.human_review_required) },
+              { key: 'version', value: health.version },
+            ].map(({ key, value }) => (
+              <div key={key} className="flex items-center justify-between px-3 py-2 rounded bg-slate-900/60 border border-slate-700/40">
+                <span className="text-xs font-mono text-slate-400">{key}</span>
+                <span className="text-xs font-mono text-emerald-400">{value}</span>
+              </div>
+            ))}
+          </div>
+        )}
+        {!isLoading && !isOnline && (
+          <p className="text-xs text-slate-500">
+            Start the server:{' '}
+            <span className="font-mono text-slate-300">python scripts/api_server.py</span>
+            {' '}· Listening at{' '}
+            <span className="font-mono text-slate-300">{API_BASE}</span>
+          </p>
+        )}
+      </div>
+
       {/* Safety constants (read-only) */}
       <div className="bg-slate-800/60 border border-slate-700/60 rounded-lg p-5">
         <h2 className="text-sm font-semibold text-slate-300 mb-1">Safety Constants</h2>
-        <p className="text-xs text-slate-500 mb-4">These values are immutable and enforced at the API layer. They cannot be changed from this UI.</p>
+        <p className="text-xs text-slate-500 mb-4">
+          These values are immutable and enforced at the API layer. They cannot be changed from this UI.
+        </p>
         <div className="space-y-2">
           {SYSTEM_CONSTANTS.map((c) => (
             <div key={c.key} className="flex items-center justify-between px-3 py-2.5 rounded bg-slate-900/60 border border-slate-700/40">
@@ -44,8 +106,11 @@ export default function SettingsPage() {
         <div className="space-y-3 text-sm">
           <InfoRow label="System" value="Signal Intelligence Cockpit v5.7" />
           <InfoRow label="Backend" value="FastAPI — pipeline-v5.7-core" />
-          <InfoRow label="Data mode" value="Mock data (Step 1 scaffold)" />
-          <InfoRow label="API connection" value="Not connected (Step 2)" />
+          <InfoRow label="API base URL" value={API_BASE} />
+          <InfoRow
+            label="API connection"
+            value={isLoading ? 'Checking…' : isOnline && health ? `Connected (v${health.version})` : 'Offline — mock data fallback active'}
+          />
           <InfoRow label="Broker connection" value="None — not applicable" />
           <InfoRow label="Auto-execution" value="Disabled permanently" />
         </div>
