@@ -1,9 +1,9 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { getSignals, checkHealth, getSourceHealth } from '@/lib/apiClient';
+import { getSignals, checkHealth, getSourceHealth, getLiveSignals } from '@/lib/apiClient';
 import type { HealthResponse } from '@/lib/apiClient';
-import type { InboxListResponse, SourceHealthResponse } from '@/types';
+import type { InboxListResponse, LiveSignalsResponse, SourceHealthResponse } from '@/types';
 import { MOCK_INBOX_RESPONSE } from '@/lib/mockData';
 import { BullStateBadge } from '@/components/BullStateBadge';
 import { AdvisoryOnlyBadge } from '@/components/AdvisoryOnlyBadge';
@@ -15,16 +15,20 @@ export default function DashboardPage() {
   const [isMock, setIsMock] = useState(true);
   const [health, setHealth] = useState<HealthResponse | null>(null);
   const [sourceHealth, setSourceHealth] = useState<SourceHealthResponse | null>(null);
+  const [liveSignals, setLiveSignals] = useState<LiveSignalsResponse | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    Promise.all([getSignals(), checkHealth(), getSourceHealth()]).then(([signals, h, sh]) => {
-      setResponse(signals.data);
-      setIsMock(signals.isMock);
-      setHealth(h);
-      setSourceHealth(sh);
-      setLoading(false);
-    });
+    Promise.all([getSignals(), checkHealth(), getSourceHealth(), getLiveSignals(undefined, 200)]).then(
+      ([signals, h, sh, ls]) => {
+        setResponse(signals.data);
+        setIsMock(signals.isMock);
+        setHealth(h);
+        setSourceHealth(sh);
+        setLiveSignals(ls);
+        setLoading(false);
+      },
+    );
   }, []);
 
   const { items, fabric_bull_state, fabric_stats, generated_at } = response;
@@ -112,6 +116,9 @@ export default function DashboardPage() {
             <StatCard label="Human Review" value={humanReview} highlight />
           </div>
 
+          {/* Live Signals summary */}
+          <LiveSignalsSummaryCard data={liveSignals} />
+
           {/* Status breakdown */}
           <div className="bg-slate-800/60 border border-slate-700/60 rounded-lg p-5">
             <h2 className="text-sm font-semibold text-slate-300 mb-4">Inbox Status Breakdown</h2>
@@ -161,6 +168,51 @@ export default function DashboardPage() {
           </div>
         </>
       )}
+    </div>
+  );
+}
+
+function LiveSignalsSummaryCard({ data }: { data: LiveSignalsResponse | null }) {
+  if (!data) return null;
+
+  const sourceCounts = data.live_signal_events
+    ? data.live_signal_events.reduce<Record<string, number>>((acc, ev) => {
+        acc[ev.source_name] = (acc[ev.source_name] ?? 0) + 1;
+        return acc;
+      }, {})
+    : {};
+  const sourceCount = Object.keys(sourceCounts).length;
+  const latestTs = data.live_signal_events?.[0]?.fetched_at;
+
+  return (
+    <div className="bg-slate-800/60 border border-slate-700/60 rounded-lg p-5">
+      <div className="flex items-center justify-between mb-3">
+        <h2 className="text-sm font-semibold text-slate-300">Live Signals (Phase 1)</h2>
+        <Link href="/live-signals" className="text-xs text-slate-500 hover:text-slate-300">
+          View all →
+        </Link>
+      </div>
+      <div className="grid grid-cols-3 gap-4">
+        <div>
+          <div className="text-xs text-slate-500 mb-1">Total</div>
+          <div className="text-xl font-bold font-mono text-white">{data.count}</div>
+        </div>
+        <div>
+          <div className="text-xs text-slate-500 mb-1">Sources</div>
+          <div className="text-xl font-bold font-mono text-white">{sourceCount}</div>
+        </div>
+        <div>
+          <div className="text-xs text-slate-500 mb-1">Latest</div>
+          <div className="text-xs font-mono text-slate-300 mt-1">
+            {latestTs ? formatTs(latestTs) : '—'}
+          </div>
+        </div>
+      </div>
+      <div className="mt-3 pt-3 border-t border-slate-700/40 flex items-center gap-2 text-xs text-slate-600 font-mono">
+        <span className="text-amber-500/80">ADVISORY_ONLY</span>
+        <span>·</span>
+        <span className="text-red-500/70">EXECUTION LOCKED</span>
+      </div>
     </div>
   );
 }

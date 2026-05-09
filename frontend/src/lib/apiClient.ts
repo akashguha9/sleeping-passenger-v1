@@ -11,6 +11,7 @@ import type {
   ManualTradeListResponse,
   SourceHealthResponse,
   DbStatusResponse,
+  LiveSignalsResponse,
 } from '@/types';
 
 export interface HealthResponse {
@@ -183,6 +184,20 @@ export async function getSourceHealth(): Promise<SourceHealthResponse | null> {
 export async function getDbStatus(): Promise<DbStatusResponse | null> {
   try {
     return await apiFetch<DbStatusResponse>('/db/status');
+  } catch {
+    return null;
+  }
+}
+
+export async function getLiveSignals(
+  source?: string,
+  limit = 100,
+): Promise<LiveSignalsResponse | null> {
+  try {
+    const params = new URLSearchParams();
+    if (source) params.set('source', source);
+    params.set('limit', String(limit));
+    return await apiFetch<LiveSignalsResponse>(`/live-signals?${params.toString()}`);
   } catch {
     return null;
   }

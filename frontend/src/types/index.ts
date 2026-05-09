@@ -217,3 +217,52 @@ export interface DbStatusResponse {
   broker_api_called: boolean;
   generated_at: string;
 }
+
+export type LiveSignalSource = 'polymarket' | 'gdelt' | 'sec_edgar';
+
+export interface LiveSignalRawPayload {
+  event_id?: string;
+  source_name?: string;
+  signal_type?: string;
+  title?: string;
+  // polymarket
+  market_id?: string;
+  volume?: number;
+  liquidity?: number;
+  end_date?: string;
+  active?: boolean;
+  // gdelt
+  url?: string;
+  seendate?: string;
+  domain?: string;
+  language?: string;
+  sourcecountry?: string;
+  // sec_edgar
+  cik?: string;
+  form_type?: string;
+  filing_date?: string;
+  accession_number?: string;
+  [key: string]: unknown;
+}
+
+export interface LiveSignalEvent {
+  id: number;
+  event_id: string;
+  source_name: LiveSignalSource | string;
+  raw_payload: LiveSignalRawPayload;
+  fetched_at: string;
+  advisory_status: string;
+  human_review_required: boolean;
+  execution_gate: string;
+  ai_execution_count: number;
+}
+
+export interface LiveSignalsResponse {
+  live_signal_events: LiveSignalEvent[];
+  count: number;
+  advisory_status: string;
+  execution_mode: string;
+  ai_execution_count: number;
+  human_review_required: boolean;
+  error?: string;
+}
