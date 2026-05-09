@@ -1,8 +1,19 @@
 'use client';
 
 import { MOCK_INBOX_ITEMS, MOCK_MANUAL_TRADES, MOCK_RECONCILIATIONS, MOCK_MOLTBOOK_ENTRIES } from '@/lib/mockData';
+import { getCsvExportUrl } from '@/lib/apiClient';
+import { API_BASE } from '@/lib/config';
 import { ExportButton } from '@/components/ExportButton';
 import { AdvisoryOnlyBadge } from '@/components/AdvisoryOnlyBadge';
+
+const BACKEND_CSV_EXPORTS = [
+  { type: 'signal-inbox' as const, label: 'Signal Inbox' },
+  { type: 'reflections' as const, label: 'Reflections' },
+  { type: 'manual-trades' as const, label: 'Manual Trades' },
+  { type: 'reconciliation' as const, label: 'Reconciliations' },
+  { type: 'moltbook' as const, label: 'Moltbook' },
+  { type: 'source-health' as const, label: 'Source Health' },
+];
 
 export default function ExportsPage() {
   return (
@@ -16,11 +27,43 @@ export default function ExportsPage() {
       </div>
 
       <div className="bg-slate-900 border border-slate-700 rounded-lg px-4 py-3 text-xs text-slate-400">
-        All exports are advisory-only records. Exports do not contain broker credentials, execution instructions, or any automated trigger. AI executions: <span className="text-emerald-400 font-mono font-bold">0</span>.
+        All exports are advisory-only records. Exports do not contain broker credentials, execution instructions,
+        or any automated trigger. AI executions:{' '}
+        <span className="text-emerald-400 font-mono font-bold">0</span>.
       </div>
 
-      {/* Export groups */}
+      {/* Backend CSV downloads */}
+      <div className="bg-slate-800/60 border border-slate-700/60 rounded-lg p-5">
+        <div className="mb-3">
+          <h2 className="text-sm font-semibold text-slate-300">Backend CSV Downloads</h2>
+          <p className="text-xs text-slate-500 mt-0.5">
+            Live data from FastAPI server at{' '}
+            <span className="font-mono">{API_BASE}</span>. Requires backend to be running.
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {BACKEND_CSV_EXPORTS.map(({ type, label }) => (
+            <a
+              key={type}
+              href={getCsvExportUrl(type)}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-2 px-4 py-2 rounded text-sm font-medium bg-slate-700 hover:bg-slate-600 text-slate-200 transition-colors"
+            >
+              <span>↓</span>
+              <span>{label}</span>
+              <span className="text-xs text-slate-500 uppercase">csv</span>
+            </a>
+          ))}
+        </div>
+      </div>
+
+      {/* Mock data exports (offline fallback) */}
       <div className="space-y-4">
+        <p className="text-xs text-slate-500 px-1">
+          Mock data exports — available offline, reflect scaffold data only.
+        </p>
+
         <ExportGroup
           title="Signal Inbox"
           description={`${MOCK_INBOX_ITEMS.length} signals from the current fabric window`}

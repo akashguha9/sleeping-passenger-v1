@@ -307,6 +307,64 @@ python scripts\operator_control.py report --summary
 
 Copy `.env.example` into your local environment management flow if you want to test paper/live-prepared mode flags later. The checked-in verified path does not require secrets.
 
+## Local Advisory MVP — SQLite Persistence (Step 3)
+
+The local advisory MVP persists signal events, reflections, AI summaries, decisions, manual trades, reconciliations, and Moltbook entries in a local SQLite database.
+
+**DB path:** `runtime/mvp_local.db` (auto-created; `runtime/` is gitignored)
+
+### Start the advisory API server
+
+```powershell
+pip install fastapi uvicorn
+uvicorn scripts.api_server:app --reload
+# or
+python scripts/api_server.py
+```
+
+### New endpoints (Step 3)
+
+| Endpoint | Description |
+|---|---|
+| `GET /manual-trades` | List all persisted manual trade records |
+| `GET /source-health` | Fabric health snapshot (also logs to source_health table) |
+| `GET /db/status` | Table row counts and DB file info |
+
+### DB tables
+
+`signal_decisions`, `user_reflections`, `ai_discussion_summaries`, `manual_trades`, `reconciliation_results`, `moltbook_entries`, `source_health`, `export_logs`
+
+### Reset the local DB
+
+```powershell
+# Delete the DB — it will be auto-recreated on next API call
+Remove-Item runtime\mvp_local.db -ErrorAction SilentlyContinue
+```
+
+### Run the advisory MVP frontend
+
+```powershell
+cd frontend
+npm install
+npm run dev
+# open http://localhost:3000
+```
+
+### Run persistence tests
+
+```powershell
+python -m pytest tests/test_persistence.py -v
+```
+
+### Advisory safety rules (never change)
+
+- `advisory_status = "ADVISORY_ONLY"` on every record
+- `execution_mode = "HUMAN_ONLY"` on every trade record
+- `ai_execution_count = 0` always
+- `broker_api_called = False` always
+- `broker_order_id = "NONE"` always (unless human-entered external reference)
+- No buy/sell/execute endpoint exists. No broker API. No order placement.
+
 ## Offline-First Notes
 
 - The verified path runs fully local.

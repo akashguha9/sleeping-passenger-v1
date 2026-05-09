@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { postManualTrade } from '@/lib/apiClient';
 import { HumanOnlyBadge } from './HumanOnlyBadge';
 import { AdvisoryOnlyBadge } from './AdvisoryOnlyBadge';
 
@@ -31,6 +32,7 @@ export function ManualTradeLogForm({ defaultEventId = '', defaultTicker = '', on
     notes: '',
   });
   const [logged, setLogged] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
 
   function set(field: keyof FormState, value: string) {
@@ -38,7 +40,7 @@ export function ManualTradeLogForm({ defaultEventId = '', defaultTicker = '', on
     setError('');
   }
 
-  function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!form.ticker.trim()) { setError('Ticker is required.'); return; }
     if (!form.event_id.trim()) { setError('Signal Event ID is required.'); return; }
@@ -48,9 +50,25 @@ export function ManualTradeLogForm({ defaultEventId = '', defaultTicker = '', on
     if (isNaN(price) || price <= 0) { setError('Price must be a positive number.'); return; }
     if (!form.thesis.trim()) { setError('Thesis is required.'); return; }
 
-    setLogged(true);
-    onLogged?.();
-    setTimeout(() => setLogged(false), 4000);
+    setSubmitting(true);
+    try {
+      await postManualTrade({
+        event_id: form.event_id.trim(),
+        ticker: form.ticker.trim(),
+        side: form.side,
+        quantity: qty,
+        price,
+        thesis: form.thesis.trim(),
+        notes: form.notes.trim(),
+      });
+      setLogged(true);
+      onLogged?.();
+      setTimeout(() => setLogged(false), 4000);
+    } catch {
+      setError('Failed to log trade — backend may be offline. Start the FastAPI server and try again.');
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   if (logged) {
@@ -59,7 +77,8 @@ export function ManualTradeLogForm({ defaultEventId = '', defaultTicker = '', on
         <div className="text-emerald-400 text-2xl mb-2">✓</div>
         <div className="text-sm font-semibold text-white mb-1">Manual Trade Logged</div>
         <div className="text-xs text-slate-400 mb-3">
-          Trade recorded for human review. No broker API was called. AI executions: <span className="text-emerald-400 font-mono font-bold">0</span>
+          Trade recorded for human review. No broker API was called. AI executions:{' '}
+          <span className="text-emerald-400 font-mono font-bold">0</span>
         </div>
         <div className="flex justify-center gap-2">
           <HumanOnlyBadge size="md" />
@@ -79,7 +98,9 @@ export function ManualTradeLogForm({ defaultEventId = '', defaultTicker = '', on
 
       <div className="bg-amber-950/30 border border-amber-900/40 rounded p-3 mb-4 text-xs text-amber-400">
         This form records a trade you have already placed manually. It does not submit orders to any broker.
-        Broker API calls: <span className="font-mono font-bold">DISABLED</span>. AI executions: <span className="font-mono font-bold text-emerald-400">0</span>.
+        Broker API calls:{' '}
+        <span className="font-mono font-bold">DISABLED</span>. AI executions:{' '}
+        <span className="font-mono font-bold text-emerald-400">0</span>.
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-3">
@@ -174,9 +195,10 @@ export function ManualTradeLogForm({ defaultEventId = '', defaultTicker = '', on
 
         <button
           type="submit"
-          className="w-full py-2.5 rounded bg-sky-700 hover:bg-sky-600 text-white text-sm font-semibold transition-colors"
+          disabled={submitting}
+          className="w-full py-2.5 rounded bg-sky-700 hover:bg-sky-600 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-semibold transition-colors"
         >
-          Log Manual Trade
+          {submitting ? 'Logging…' : 'Log Manual Trade'}
         </button>
       </form>
     </div>

@@ -179,3 +179,41 @@ export interface SourceHealth {
   last_seen: string;
   status: 'active' | 'stale' | 'unknown';
 }
+
+export interface ManualTradeListResponse {
+  operation: string;
+  trade_count: number;
+  trades: ManualTradeLog[];
+  advisory_status: string;
+  execution_mode: string;
+  ai_execution_count: number;
+  human_review_required: boolean;
+  broker_api_called: boolean;
+  generated_at: string;
+}
+
+export interface SourceHealthResponse {
+  operation: string;
+  fabric_stats: {
+    total_snapshot_rows?: number;
+    total_signal_events?: number;
+    total_tickers_observed?: number;
+    [key: string]: number | undefined;
+  };
+  fabric_bull_state: string;
+  advisory_status: string;
+  execution_mode: string;
+  ai_execution_count: number;
+  human_review_required: boolean;
+  generated_at: string;
+}
+
+export interface DbStatusResponse {
+  db_path: string;
+  db_exists: boolean;
+  table_row_counts: Record<string, number>;
+  advisory_status: string;
+  ai_execution_count: number;
+  broker_api_called: boolean;
+  generated_at: string;
+}

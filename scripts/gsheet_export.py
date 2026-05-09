@@ -50,6 +50,35 @@ except ModuleNotFoundError:
     from moltbook_api import MOLTBOOK_LOG  # type: ignore[no-redef]
     from runtime_common import utc_timestamp  # type: ignore[no-redef]
 
+_DB_AVAILABLE = False
+_persistence = None
+try:
+    try:
+        import scripts.persistence as _persistence
+    except ModuleNotFoundError:
+        import persistence as _persistence  # type: ignore[no-redef]
+    _DB_AVAILABLE = True
+except Exception:
+    pass
+
+# Baseline paths captured at import time — used to detect monkeypatching in tests
+_ORIG_REFLECTIONS_LOG: Path = REFLECTIONS_LOG
+_ORIG_MANUAL_TRADE_LOG: Path = MANUAL_TRADE_LOG
+_ORIG_RECONCILIATIONS_LOG: Path = RECONCILIATIONS_LOG
+_ORIG_MOLTBOOK_LOG: Path = MOLTBOOK_LOG
+
+
+def _db_or_jsonl(db_fn: Any, jsonl_path: Path, default_path: Path) -> list[dict[str, Any]]:
+    """Try SQLite when the JSONL path is the production default; otherwise use JSONL."""
+    if _DB_AVAILABLE and _persistence is not None and jsonl_path == default_path:
+        try:
+            rows = db_fn()
+            if rows:
+                return rows
+        except Exception:
+            pass
+    return _load_jsonl(jsonl_path)
+
 _ADVISORY_STATUS = "ADVISORY_ONLY"
 _EXECUTION_MODE = "HUMAN_ONLY"
 _AI_EXECUTION_COUNT = 0
@@ -239,7 +268,13 @@ def export_signal_inbox_log(output_path: Path | None = None) -> str:
 
 def export_reflection_log(output_path: Path | None = None) -> str:
     """Export user reflections as a Google-Sheets-compatible CSV string."""
-    content = _to_csv(REFLECTION_HEADERS, _load_jsonl(REFLECTIONS_LOG))
+    rows = _db_or_jsonl(lambda: _persistence.get_all_reflections(), REFLECTIONS_LOG, _ORIG_REFLECTIONS_LOG)
+    content = _to_csv(REFLECTION_HEADERS, rows)
+    if _DB_AVAILABLE and _persistence is not None:
+        try:
+            _persistence.log_export("reflection_log", len(rows))
+        except Exception:
+            pass
     if output_path:
         _save(content, output_path)
     return content
@@ -252,7 +287,13 @@ def export_reflection_log(output_path: Path | None = None) -> str:
 
 def export_manual_trade_log(output_path: Path | None = None) -> str:
     """Export manual trade log as a Google-Sheets-compatible CSV string."""
-    content = _to_csv(MANUAL_TRADE_HEADERS, _load_jsonl(MANUAL_TRADE_LOG))
+    rows = _db_or_jsonl(lambda: _persistence.get_all_manual_trades(), MANUAL_TRADE_LOG, _ORIG_MANUAL_TRADE_LOG)
+    content = _to_csv(MANUAL_TRADE_HEADERS, rows)
+    if _DB_AVAILABLE and _persistence is not None:
+        try:
+            _persistence.log_export("manual_trade_log", len(rows))
+        except Exception:
+            pass
     if output_path:
         _save(content, output_path)
     return content
@@ -265,7 +306,13 @@ def export_manual_trade_log(output_path: Path | None = None) -> str:
 
 def export_reconciliation_log(output_path: Path | None = None) -> str:
     """Export trade reconciliations as a Google-Sheets-compatible CSV string."""
-    content = _to_csv(RECONCILIATION_HEADERS, _load_jsonl(RECONCILIATIONS_LOG))
+    rows = _db_or_jsonl(lambda: _persistence.get_all_reconciliations(), RECONCILIATIONS_LOG, _ORIG_RECONCILIATIONS_LOG)
+    content = _to_csv(RECONCILIATION_HEADERS, rows)
+    if _DB_AVAILABLE and _persistence is not None:
+        try:
+            _persistence.log_export("reconciliation_log", len(rows))
+        except Exception:
+            pass
     if output_path:
         _save(content, output_path)
     return content
@@ -278,7 +325,13 @@ def export_reconciliation_log(output_path: Path | None = None) -> str:
 
 def export_moltbook_mistake_log(output_path: Path | None = None) -> str:
     """Export Moltbook mistake-learning entries as a Google-Sheets-compatible CSV string."""
-    content = _to_csv(MOLTBOOK_HEADERS, _load_jsonl(MOLTBOOK_LOG))
+    rows = _db_or_jsonl(lambda: _persistence.get_moltbook_entries(), MOLTBOOK_LOG, _ORIG_MOLTBOOK_LOG)
+    content = _to_csv(MOLTBOOK_HEADERS, rows)
+    if _DB_AVAILABLE and _persistence is not None:
+        try:
+            _persistence.log_export("moltbook_mistake_log", len(rows))
+        except Exception:
+            pass
     if output_path:
         _save(content, output_path)
     return content

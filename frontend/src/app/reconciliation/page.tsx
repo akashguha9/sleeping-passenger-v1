@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { reconcileTrade } from '@/lib/apiClient';
 import { MOCK_MANUAL_TRADES, MOCK_RECONCILIATIONS } from '@/lib/mockData';
 import { ReconciliationCard } from '@/components/ReconciliationCard';
 import { HumanOnlyBadge } from '@/components/HumanOnlyBadge';
@@ -17,12 +18,35 @@ export default function ReconciliationPage() {
     pnl_estimate: '',
     outcome_status: 'UNKNOWN' as OutcomeStatus,
   });
+  const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
+  const [error, setError] = useState('');
 
-  function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    setSubmitted(true);
-    setTimeout(() => setSubmitted(false), 3000);
+    if (!form.trade_id.trim()) { setError('Trade ID is required.'); return; }
+    const fillPrice = parseFloat(form.actual_fill_price);
+    const qty = parseFloat(form.actual_quantity);
+    if (isNaN(fillPrice) || fillPrice <= 0) { setError('Actual fill price must be a positive number.'); return; }
+    if (isNaN(qty) || qty <= 0) { setError('Actual quantity must be a positive number.'); return; }
+
+    setSubmitting(true);
+    setError('');
+    try {
+      await reconcileTrade(form.trade_id.trim(), {
+        actual_fill_price: fillPrice,
+        actual_quantity: qty,
+        outcome_notes: form.outcome_notes,
+        pnl_estimate: parseFloat(form.pnl_estimate) || 0,
+        outcome_status: form.outcome_status,
+      });
+      setSubmitted(true);
+      setTimeout(() => setSubmitted(false), 4000);
+    } catch {
+      setError('Failed to log reconciliation — backend may be offline. Start the FastAPI server and try again.');
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   const reconciledTradeIds = new Set(MOCK_RECONCILIATIONS.map((r) => r.trade_id));
@@ -42,7 +66,9 @@ export default function ReconciliationPage() {
       </div>
 
       <div className="bg-slate-900 border border-slate-700 rounded-lg px-4 py-3 text-xs text-slate-400">
-        Reconciliation is for record-keeping only. Broker API: <span className="text-emerald-400 font-mono font-semibold">NOT CONNECTED</span>. AI executions: <span className="text-emerald-400 font-mono font-bold">0</span>. All data is ADVISORY_ONLY.
+        Reconciliation is for record-keeping only. Broker API:{' '}
+        <span className="text-emerald-400 font-mono font-semibold">NOT CONNECTED</span>. AI executions:{' '}
+        <span className="text-emerald-400 font-mono font-bold">0</span>. All data is ADVISORY_ONLY.
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
@@ -94,7 +120,9 @@ export default function ReconciliationPage() {
               <div className="text-center py-4">
                 <div className="text-emerald-400 text-xl mb-1">✓</div>
                 <p className="text-sm text-white font-semibold">Reconciliation Logged</p>
-                <p className="text-xs text-slate-400 mt-1">AI executions: <span className="text-emerald-400 font-mono font-bold">0</span></p>
+                <p className="text-xs text-slate-400 mt-1">
+                  AI executions: <span className="text-emerald-400 font-mono font-bold">0</span>
+                </p>
               </div>
             ) : (
               <form onSubmit={handleSubmit} className="space-y-3">
@@ -163,11 +191,19 @@ export default function ReconciliationPage() {
                     onChange={(e) => setForm((f) => ({ ...f, outcome_notes: e.target.value }))}
                   />
                 </div>
+
+                {error && (
+                  <div className="text-xs text-red-400 bg-red-950/30 border border-red-900/40 rounded px-3 py-2">
+                    {error}
+                  </div>
+                )}
+
                 <button
                   type="submit"
-                  className="w-full py-2.5 rounded bg-sky-700 hover:bg-sky-600 text-white text-sm font-semibold transition-colors"
+                  disabled={submitting}
+                  className="w-full py-2.5 rounded bg-sky-700 hover:bg-sky-600 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-semibold transition-colors"
                 >
-                  Log Reconciliation
+                  {submitting ? 'Logging…' : 'Log Reconciliation'}
                 </button>
               </form>
             )}

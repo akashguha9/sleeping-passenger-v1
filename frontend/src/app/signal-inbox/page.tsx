@@ -1,11 +1,12 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { getSignals } from '@/lib/apiClient';
+import type { InboxListResponse, UserStatus } from '@/types';
 import { MOCK_INBOX_RESPONSE } from '@/lib/mockData';
 import { SignalCard } from '@/components/SignalCard';
 import { BullStateBadge } from '@/components/BullStateBadge';
 import { AdvisoryOnlyBadge } from '@/components/AdvisoryOnlyBadge';
-import type { UserStatus } from '@/types';
 
 const STATUSES: { value: UserStatus | 'all'; label: string }[] = [
   { value: 'all', label: 'All' },
@@ -24,10 +25,22 @@ const SORT_OPTIONS = [
 ];
 
 export default function SignalInboxPage() {
-  const { items, fabric_bull_state } = MOCK_INBOX_RESPONSE;
+  const [response, setResponse] = useState<InboxListResponse>(MOCK_INBOX_RESPONSE);
+  const [isMock, setIsMock] = useState(true);
+  const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState<UserStatus | 'all'>('all');
   const [stateFilter, setStateFilter] = useState<string>('all');
   const [sortBy, setSortBy] = useState('priority');
+
+  useEffect(() => {
+    getSignals().then(({ data, isMock: mock }) => {
+      setResponse(data);
+      setIsMock(mock);
+      setLoading(false);
+    });
+  }, []);
+
+  const { items, fabric_bull_state } = response;
 
   const filtered = items
     .filter((i) => statusFilter === 'all' || i.user_status === statusFilter)
@@ -40,14 +53,31 @@ export default function SignalInboxPage() {
 
   return (
     <div className="max-w-4xl mx-auto space-y-5">
+      {/* Mock fallback banner */}
+      {!loading && isMock && (
+        <div className="bg-slate-900 border border-amber-800/60 rounded-lg px-4 py-2.5 flex items-center gap-3 text-xs">
+          <span className="text-amber-400 font-semibold shrink-0">BACKEND OFFLINE</span>
+          <span className="text-slate-400">
+            Showing mock data.{' '}
+            <span className="font-mono text-slate-300">python scripts/api_server.py</span>
+          </span>
+        </div>
+      )}
+
       {/* Header */}
       <div className="flex items-start justify-between">
         <div>
           <h1 className="text-xl font-bold text-white">Signal Inbox</h1>
           <div className="flex items-center gap-2 mt-1">
             <span className="text-sm text-slate-500">Fabric state:</span>
-            <BullStateBadge state={fabric_bull_state} size="md" />
-            <span className="text-sm text-slate-500">· {items.length} signals</span>
+            {loading ? (
+              <span className="text-sm text-slate-600">…</span>
+            ) : (
+              <>
+                <BullStateBadge state={fabric_bull_state} size="md" />
+                <span className="text-sm text-slate-500">· {items.length} signals</span>
+              </>
+            )}
           </div>
         </div>
         <AdvisoryOnlyBadge size="md" />
@@ -114,7 +144,9 @@ export default function SignalInboxPage() {
       </div>
 
       {/* Signal cards */}
-      {filtered.length === 0 ? (
+      {loading ? (
+        <div className="text-center py-12 text-slate-500 text-sm">Loading signals…</div>
+      ) : filtered.length === 0 ? (
         <div className="text-center py-12 text-slate-500 text-sm">No signals match the current filters.</div>
       ) : (
         <div className="space-y-3">

@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import type { UserReflection, AiSummary } from '@/types';
+import { postReflection } from '@/lib/apiClient';
 import { AdvisoryOnlyBadge } from './AdvisoryOnlyBadge';
 
 interface Props {
@@ -15,18 +16,42 @@ const CONVICTION_OPTIONS = ['LOW', 'MODERATE', 'HIGH', 'VERY_HIGH'];
 export function ReflectionChatPanel({ eventId, reflections, aiSummaries }: Props) {
   const [text, setText] = useState('');
   const [conviction, setConviction] = useState('MODERATE');
-  const [saved, setSaved] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState('');
+  const [localReflections, setLocalReflections] = useState<UserReflection[]>([]);
 
-  function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!text.trim()) return;
-    setSaved(true);
-    setText('');
-    setTimeout(() => setSaved(false), 3000);
+    setSubmitting(true);
+    setError('');
+    try {
+      await postReflection(eventId, text.trim(), conviction);
+      const newEntry: UserReflection = {
+        reflection_id: `REF_local_${Date.now()}`,
+        event_id: eventId,
+        author: 'human',
+        conviction_level: conviction,
+        reflection_text: text.trim(),
+        reflected_at: new Date().toISOString(),
+        advisory_status: 'ADVISORY_ONLY',
+        human_review_required: true,
+      };
+      setLocalReflections((prev) => [...prev, newEntry]);
+      setText('');
+    } catch {
+      setError('Backend offline — reflection not saved to server. Start FastAPI to persist.');
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   const allEntries = [
-    ...reflections.map((r) => ({ kind: 'reflection' as const, ts: r.reflected_at, data: r })),
+    ...[...reflections, ...localReflections].map((r) => ({
+      kind: 'reflection' as const,
+      ts: r.reflected_at,
+      data: r,
+    })),
     ...aiSummaries.map((s) => ({ kind: 'ai' as const, ts: s.summarized_at, data: s })),
   ].sort((a, b) => new Date(a.ts).getTime() - new Date(b.ts).getTime());
 
@@ -89,9 +114,9 @@ export function ReflectionChatPanel({ eventId, reflections, aiSummaries }: Props
 
       {/* Input */}
       <form onSubmit={handleSubmit} className="p-4 border-t border-slate-700/60">
-        {saved && (
-          <div className="mb-3 text-xs text-emerald-400 bg-emerald-950/40 border border-emerald-900/40 rounded px-3 py-2">
-            Reflection logged (mock — connect to backend to persist).
+        {error && (
+          <div className="mb-3 text-xs text-amber-400 bg-amber-950/40 border border-amber-900/40 rounded px-3 py-2">
+            {error}
           </div>
         )}
         <textarea
@@ -116,10 +141,10 @@ export function ReflectionChatPanel({ eventId, reflections, aiSummaries }: Props
           </div>
           <button
             type="submit"
-            disabled={!text.trim()}
+            disabled={!text.trim() || submitting}
             className="px-4 py-1.5 rounded bg-purple-700 hover:bg-purple-600 disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs font-medium transition-colors"
           >
-            Log Reflection
+            {submitting ? 'Saving…' : 'Log Reflection'}
           </button>
         </div>
       </form>

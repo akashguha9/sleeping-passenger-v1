@@ -1,9 +1,26 @@
-import { MOCK_MANUAL_TRADES } from '@/lib/mockData';
+'use client';
+
+import { useState, useEffect } from 'react';
+import { getManualTrades } from '@/lib/apiClient';
+import type { ManualTradeListResponse } from '@/types';
 import { ManualTradeLogForm } from '@/components/ManualTradeLogForm';
 import { HumanOnlyBadge } from '@/components/HumanOnlyBadge';
 import { AdvisoryOnlyBadge } from '@/components/AdvisoryOnlyBadge';
 
 export default function ManualTradeLogPage() {
+  const [result, setResult] = useState<ManualTradeListResponse | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    getManualTrades().then((data) => {
+      setResult(data);
+      setLoading(false);
+    });
+  }, []);
+
+  const trades = result?.trades ?? [];
+  const isOffline = !loading && result === null;
+
   return (
     <div className="max-w-4xl mx-auto space-y-5">
       <div className="flex items-start justify-between">
@@ -16,6 +33,16 @@ export default function ManualTradeLogPage() {
           <AdvisoryOnlyBadge size="md" />
         </div>
       </div>
+
+      {isOffline && (
+        <div className="bg-slate-900 border border-amber-800/60 rounded-lg px-4 py-2.5 flex items-center gap-3 text-xs">
+          <span className="text-amber-400 font-semibold shrink-0">BACKEND OFFLINE</span>
+          <span className="text-slate-400">
+            Trade log unavailable. Start the FastAPI server:{' '}
+            <span className="font-mono text-slate-300">python scripts/api_server.py</span>
+          </span>
+        </div>
+      )}
 
       {/* Safety notice */}
       <div className="bg-slate-900 border border-amber-900/40 rounded-lg p-4 space-y-2">
@@ -39,15 +66,20 @@ export default function ManualTradeLogPage() {
         {/* Logged trades */}
         <div>
           <h2 className="text-sm font-semibold text-slate-300 mb-3">
-            Previously Logged Trades ({MOCK_MANUAL_TRADES.length})
+            {loading ? 'Loading trades…' : `Previously Logged Trades (${trades.length})`}
           </h2>
-          {MOCK_MANUAL_TRADES.length === 0 ? (
+
+          {loading ? (
             <div className="text-sm text-slate-500 text-center py-8 bg-slate-800/40 rounded-lg border border-slate-700/40">
-              No trades logged yet.
+              Loading…
+            </div>
+          ) : trades.length === 0 ? (
+            <div className="text-sm text-slate-500 text-center py-8 bg-slate-800/40 rounded-lg border border-slate-700/40">
+              {isOffline ? 'Backend offline — trade data unavailable.' : 'No trades logged yet.'}
             </div>
           ) : (
             <div className="space-y-3">
-              {MOCK_MANUAL_TRADES.map((t) => (
+              {trades.map((t) => (
                 <div key={t.trade_id} className="bg-slate-800/60 border border-slate-700/60 rounded-lg p-4">
                   <div className="flex items-center justify-between gap-3 mb-2">
                     <div className="flex items-center gap-2">
@@ -65,7 +97,7 @@ export default function ManualTradeLogPage() {
 
                   <div className="grid grid-cols-3 gap-2 text-xs mb-2">
                     <div className="bg-slate-900/40 rounded p-2">
-                      <span className="text-slate-500 block">Qty</span>
+                      <span className="text-slate-500 block">Size</span>
                       <span className="font-mono text-slate-200">{t.quantity}</span>
                     </div>
                     <div className="bg-slate-900/40 rounded p-2">
@@ -73,15 +105,17 @@ export default function ManualTradeLogPage() {
                       <span className="font-mono text-slate-200">${t.price.toFixed(2)}</span>
                     </div>
                     <div className="bg-slate-900/40 rounded p-2">
-                      <span className="text-slate-500 block">Executed</span>
+                      <span className="text-slate-500 block">Timestamp</span>
                       <span className="font-mono text-slate-400 text-xs">{formatTs(t.executed_at)}</span>
                     </div>
                   </div>
 
-                  <p className="text-xs text-slate-400 leading-relaxed mb-2">{t.thesis}</p>
+                  {t.thesis && (
+                    <p className="text-xs text-slate-400 leading-relaxed mb-2">{t.thesis}</p>
+                  )}
 
-                  <div className="flex items-center gap-3 text-xs text-slate-600">
-                    <span>{t.trade_id}</span>
+                  <div className="flex items-center gap-3 text-xs text-slate-600 flex-wrap">
+                    <span className="font-mono truncate">{t.trade_id}</span>
                     <span>·</span>
                     <span>Broker order: {t.broker_order_id}</span>
                     <span>·</span>

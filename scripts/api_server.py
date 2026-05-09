@@ -23,6 +23,7 @@ from __future__ import annotations
 
 try:
     from fastapi import FastAPI, Response
+    from fastapi.middleware.cors import CORSMiddleware
     from pydantic import BaseModel
 except ImportError as _exc:  # pragma: no cover
     import sys
@@ -40,6 +41,7 @@ try:
         add_user_reflection,
         get_signal_detail,
         list_inbox_items,
+        list_manual_trades,
         log_manual_trade,
         mark_signal,
         reconcile_trade,
@@ -60,6 +62,7 @@ except ModuleNotFoundError:
         add_user_reflection,
         get_signal_detail,
         list_inbox_items,
+        list_manual_trades,
         log_manual_trade,
         mark_signal,
         reconcile_trade,
@@ -74,6 +77,40 @@ except ModuleNotFoundError:
         export_signal_inbox_log,
         export_source_health_log,
     )
+
+# DB status helper — imported lazily so server starts even if persistence unavailable
+def _get_db_status() -> dict:
+    try:
+        try:
+            from scripts.persistence import get_db_status
+        except ModuleNotFoundError:
+            from persistence import get_db_status  # type: ignore
+        return get_db_status()
+    except Exception as exc:
+        return {
+            "db_status": "unavailable",
+            "error": str(exc),
+            "advisory_status": _ADVISORY_STATUS,
+            "ai_execution_count": _AI_EXECUTION_COUNT,
+        }
+
+
+def _log_source_health(stats: dict, bull_state: str) -> None:
+    try:
+        try:
+            from scripts.persistence import insert_source_health
+        except ModuleNotFoundError:
+            from persistence import insert_source_health  # type: ignore
+        insert_source_health(
+            snapshot_count=int(stats.get("total_snapshot_rows", 0)),
+            signal_event_count=int(stats.get("total_signal_events", 0)),
+            ticker_count=int(stats.get("total_tickers_observed", 0)),
+            killed_count=int(stats.get("killed_signal_count", 0)),
+            blocked_count=int(stats.get("blocked_signal_count", 0)),
+            fabric_bull_state=str(bull_state),
+        )
+    except Exception:
+        pass
 
 _CSV_MEDIA_TYPE = "text/csv; charset=utf-8"
 _ADVISORY_STATUS = "ADVISORY_ONLY"
@@ -92,6 +129,14 @@ app = FastAPI(
         "No order placement."
     ),
     version=_VERSION,
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000"],
+    allow_credentials=False,
+    allow_methods=["GET", "POST"],
+    allow_headers=["Content-Type"],
 )
 
 
@@ -240,6 +285,49 @@ def post_reconcile(trade_id: str, body: ReconcileBody) -> dict:
         pnl_estimate=body.pnl_estimate,
         outcome_status=body.outcome_status,
     )
+
+
+# ---------------------------------------------------------------------------
+# Manual trades — list all
+# ---------------------------------------------------------------------------
+
+
+@app.get("/manual-trades")
+def get_manual_trades() -> dict:
+    return list_manual_trades()
+
+
+# ---------------------------------------------------------------------------
+# Source health
+# ---------------------------------------------------------------------------
+
+
+@app.get("/source-health")
+def get_source_health() -> dict:
+    result = list_inbox_items(write_runtime=False)
+    stats = result.get("fabric_stats", {})
+    bull_state = result.get("fabric_bull_state", "UNKNOWN")
+    _log_source_health(stats, bull_state)
+    return {
+        "operation": "get_source_health",
+        "fabric_stats": stats,
+        "fabric_bull_state": bull_state,
+        "advisory_status": _ADVISORY_STATUS,
+        "execution_mode": _EXECUTION_MODE,
+        "ai_execution_count": _AI_EXECUTION_COUNT,
+        "human_review_required": True,
+        "generated_at": result.get("generated_at", ""),
+    }
+
+
+# ---------------------------------------------------------------------------
+# DB status
+# ---------------------------------------------------------------------------
+
+
+@app.get("/db/status")
+def get_db_status() -> dict:
+    return _get_db_status()
 
 
 # ---------------------------------------------------------------------------

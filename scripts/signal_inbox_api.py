@@ -37,6 +37,18 @@ except ModuleNotFoundError:
     from runtime_common import LOG_DIR, append_jsonl, utc_timestamp  # type: ignore[no-redef]
     from global_signal_fabric import build_global_signal_fabric_report  # type: ignore[no-redef]
 
+# Optional SQLite persistence — falls back gracefully to JSONL if unavailable
+_DB_AVAILABLE = False
+_persistence = None
+try:
+    try:
+        import scripts.persistence as _persistence
+    except ModuleNotFoundError:
+        import persistence as _persistence  # type: ignore[no-redef]
+    _DB_AVAILABLE = True
+except Exception:
+    pass
+
 # ---------------------------------------------------------------------------
 # Storage paths — append-only JSONL logs
 # ---------------------------------------------------------------------------
@@ -177,6 +189,13 @@ def _load_jsonl(path: Path) -> list[dict[str, Any]]:
 
 
 def _build_inbox_overlay() -> dict[str, dict[str, Any]]:
+    if _DB_AVAILABLE and _persistence is not None:
+        try:
+            decisions = _persistence.get_all_signal_decisions()
+            if decisions:
+                return {eid: {"user_status": status} for eid, status in decisions.items()}
+        except Exception:
+            pass
     overlay: dict[str, dict[str, Any]] = {}
     for row in _load_jsonl(INBOX_STATES_LOG):
         eid = str(row.get("event_id", ""))
@@ -186,10 +205,20 @@ def _build_inbox_overlay() -> dict[str, dict[str, Any]]:
 
 
 def _has_reflection(event_id: str) -> bool:
+    if _DB_AVAILABLE and _persistence is not None:
+        try:
+            return _persistence.has_reflection(event_id)
+        except Exception:
+            pass
     return any(r.get("event_id") == event_id for r in _load_jsonl(REFLECTIONS_LOG))
 
 
 def _has_ai_summary(event_id: str) -> bool:
+    if _DB_AVAILABLE and _persistence is not None:
+        try:
+            return _persistence.has_ai_summary(event_id)
+        except Exception:
+            pass
     return any(r.get("event_id") == event_id for r in _load_jsonl(AI_SUMMARIES_LOG))
 
 
@@ -302,9 +331,23 @@ def get_signal_detail(event_id: str) -> dict[str, Any]:
 
     overlay = _build_inbox_overlay()
     item = _build_item_from_event(event_dict, overlay)
-    reflections = [r for r in _load_jsonl(REFLECTIONS_LOG) if r.get("event_id") == event_id]
-    ai_summaries = [s for s in _load_jsonl(AI_SUMMARIES_LOG) if s.get("event_id") == event_id]
-    manual_trades = [t for t in _load_jsonl(MANUAL_TRADE_LOG) if t.get("event_id") == event_id]
+
+    reflections: list[dict[str, Any]] = []
+    ai_summaries: list[dict[str, Any]] = []
+    manual_trades: list[dict[str, Any]] = []
+    if _DB_AVAILABLE and _persistence is not None:
+        try:
+            reflections = _persistence.get_reflections_for_event(event_id)
+            ai_summaries = _persistence.get_ai_summaries_for_event(event_id)
+            manual_trades = _persistence.get_trades_for_event(event_id)
+        except Exception:
+            pass
+    if not reflections:
+        reflections = [r for r in _load_jsonl(REFLECTIONS_LOG) if r.get("event_id") == event_id]
+    if not ai_summaries:
+        ai_summaries = [s for s in _load_jsonl(AI_SUMMARIES_LOG) if s.get("event_id") == event_id]
+    if not manual_trades:
+        manual_trades = [t for t in _load_jsonl(MANUAL_TRADE_LOG) if t.get("event_id") == event_id]
 
     return {
         "operation": "get_signal_detail",
@@ -414,6 +457,15 @@ def add_user_reflection(
         "ai_execution_count": _AI_EXECUTION_COUNT,
     }
     append_jsonl(REFLECTIONS_LOG, entry, stamp=False)
+    if _DB_AVAILABLE and _persistence is not None:
+        try:
+            _persistence.insert_reflection(
+                entry["reflection_id"], event_id, str(author),
+                str(conviction_level).upper(), str(reflection_text),
+                entry["reflected_at"],
+            )
+        except Exception:
+            pass
 
     return {
         "operation": "add_user_reflection",
@@ -459,6 +511,14 @@ def add_ai_discussion_summary(
         ),
     }
     append_jsonl(AI_SUMMARIES_LOG, entry, stamp=False)
+    if _DB_AVAILABLE and _persistence is not None:
+        try:
+            _persistence.insert_ai_summary(
+                entry["summary_id"], event_id, str(model_label),
+                str(summary_text), entry["summarized_at"],
+            )
+        except Exception:
+            pass
 
     return {
         "operation": "add_ai_discussion_summary",
@@ -491,6 +551,11 @@ def mark_signal(event_id: str, status: str) -> dict[str, Any]:
         "human_review_required": True,
     }
     append_jsonl(INBOX_STATES_LOG, entry, stamp=False)
+    if _DB_AVAILABLE and _persistence is not None:
+        try:
+            _persistence.insert_signal_decision(event_id, normalized, entry["marked_at"])
+        except Exception:
+            pass
 
     return {
         "operation": "mark_signal",
@@ -545,6 +610,15 @@ def log_manual_trade(
         logged_by=str(logged_by),
     )
     append_jsonl(MANUAL_TRADE_LOG, trade.to_dict(), stamp=False)
+    if _DB_AVAILABLE and _persistence is not None:
+        try:
+            _persistence.insert_manual_trade(
+                trade.trade_id, trade.event_id, trade.ticker, trade.side,
+                trade.quantity, trade.price, trade.executed_at,
+                trade.thesis, trade.notes, trade.logged_by,
+            )
+        except Exception:
+            pass
 
     return {
         "operation": "log_manual_trade",
@@ -578,11 +652,18 @@ def reconcile_trade(
     if not trade_id or not isinstance(trade_id, str):
         return _error_response("reconcile_trade", "trade_id must be a non-empty string")
 
-    event_id = next(
-        (str(r.get("event_id", "")) for r in _load_jsonl(MANUAL_TRADE_LOG)
-         if r.get("trade_id") == trade_id),
-        "",
-    )
+    event_id = ""
+    if _DB_AVAILABLE and _persistence is not None:
+        try:
+            event_id = _persistence.get_event_id_for_trade(trade_id)
+        except Exception:
+            pass
+    if not event_id:
+        event_id = next(
+            (str(r.get("event_id", "")) for r in _load_jsonl(MANUAL_TRADE_LOG)
+             if r.get("trade_id") == trade_id),
+            "",
+        )
 
     normalized_status = str(outcome_status).upper().strip()
     if normalized_status not in VALID_RECONCILIATION_STATUSES:
@@ -600,6 +681,15 @@ def reconcile_trade(
         outcome_status=normalized_status,
     )
     append_jsonl(RECONCILIATIONS_LOG, rec.to_dict(), stamp=False)
+    if _DB_AVAILABLE and _persistence is not None:
+        try:
+            _persistence.insert_reconciliation(
+                rec.reconciliation_id, rec.trade_id, rec.event_id,
+                rec.reconciled_at, rec.actual_fill_price, rec.actual_quantity,
+                rec.outcome_notes, rec.pnl_estimate, rec.outcome_status,
+            )
+        except Exception:
+            pass
 
     return {
         "operation": "reconcile_trade",
@@ -613,6 +703,29 @@ def reconcile_trade(
         "ai_execution_count": _AI_EXECUTION_COUNT,
         "advisory_status": _ADVISORY_STATUS,
         "human_review_required": True,
+        "generated_at": utc_timestamp(),
+    }
+
+
+def list_manual_trades() -> dict[str, Any]:
+    """List all logged manual trades (SQLite-first, JSONL fallback)."""
+    trades: list[dict[str, Any]] = []
+    if _DB_AVAILABLE and _persistence is not None:
+        try:
+            trades = _persistence.get_all_manual_trades()
+        except Exception:
+            pass
+    if not trades:
+        trades = _load_jsonl(MANUAL_TRADE_LOG)
+    return {
+        "operation": "list_manual_trades",
+        "trade_count": len(trades),
+        "trades": trades,
+        "advisory_status": _ADVISORY_STATUS,
+        "execution_mode": _EXECUTION_MODE,
+        "ai_execution_count": _AI_EXECUTION_COUNT,
+        "human_review_required": True,
+        "broker_api_called": False,
         "generated_at": utc_timestamp(),
     }
 
@@ -637,4 +750,5 @@ __all__ = [
     "mark_signal",
     "log_manual_trade",
     "reconcile_trade",
+    "list_manual_trades",
 ]

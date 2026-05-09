@@ -39,11 +39,23 @@ try:
 except ModuleNotFoundError:
     from runtime_common import LOG_DIR, append_jsonl, utc_timestamp  # type: ignore[no-redef]
 
+_DB_AVAILABLE = False
+_persistence = None
+try:
+    try:
+        import scripts.persistence as _persistence
+    except ModuleNotFoundError:
+        import persistence as _persistence  # type: ignore[no-redef]
+    _DB_AVAILABLE = True
+except Exception:
+    pass
+
 # ---------------------------------------------------------------------------
 # Storage path
 # ---------------------------------------------------------------------------
 
 MOLTBOOK_LOG: Path = LOG_DIR / "moltbook_entries.jsonl"
+_MOLTBOOK_LOG_ORIG: Path = MOLTBOOK_LOG  # baseline for test-isolation detection
 
 # ---------------------------------------------------------------------------
 # Mistake categories
@@ -191,6 +203,19 @@ def log_moltbook_entry(
         logged_at=utc_timestamp(),
     )
     append_jsonl(MOLTBOOK_LOG, entry.to_dict(), stamp=False)
+    if _DB_AVAILABLE and _persistence is not None:
+        try:
+            _persistence.insert_moltbook_entry(
+                entry.entry_id, entry.event_id, entry.ticker,
+                entry.original_signal_thesis, entry.ai_interpretation,
+                entry.user_reflection, entry.final_human_decision,
+                entry.manual_trade_log_id, entry.outcome,
+                entry.mistake_type, entry.lesson_learned,
+                entry.bias_detected, entry.recalibration_note,
+                entry.future_rule_update, entry.logged_at,
+            )
+        except Exception:
+            pass
 
     return {
         "operation": "log_moltbook_entry",
@@ -212,11 +237,19 @@ def list_moltbook_entries(
     mistake_type: str | None = None,
 ) -> dict[str, Any]:
     """List Moltbook entries, optionally filtered by ticker or mistake_type."""
-    rows = _load_jsonl(MOLTBOOK_LOG)
-    if ticker:
-        rows = [r for r in rows if r.get("ticker") == str(ticker).upper()]
-    if mistake_type:
-        rows = [r for r in rows if r.get("mistake_type") == mistake_type]
+    rows: list[dict[str, Any]] = []
+    # Only use SQLite when the JSONL path is the production default (not monkeypatched)
+    if _DB_AVAILABLE and _persistence is not None and MOLTBOOK_LOG == _MOLTBOOK_LOG_ORIG:
+        try:
+            rows = _persistence.get_moltbook_entries(ticker=ticker, mistake_type=mistake_type)
+        except Exception:
+            pass
+    if not rows:
+        rows = _load_jsonl(MOLTBOOK_LOG)
+        if ticker:
+            rows = [r for r in rows if r.get("ticker") == str(ticker).upper()]
+        if mistake_type:
+            rows = [r for r in rows if r.get("mistake_type") == mistake_type]
     return {
         "operation": "list_moltbook_entries",
         "entry_count": len(rows),
