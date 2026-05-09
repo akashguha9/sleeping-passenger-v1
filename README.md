@@ -312,3 +312,57 @@ Copy `.env.example` into your local environment management flow if you want to t
 - The verified path runs fully local.
 - Do not treat placeholder adapters as live integrations.
 - Keep external contact bounded and explicit if real data or execution is added later.
+
+## Frontend — Signal Intelligence Cockpit
+
+A Next.js frontend scaffold lives in `frontend/`. It is an advisory-only intelligence dashboard — no broker connection, no execution UI, no API keys.
+
+### Requirements
+
+- Node.js 18+ and npm
+
+### Install and run
+
+```powershell
+cd frontend
+npm install
+npm run dev
+```
+
+Open `http://localhost:3000` in your browser.
+
+### Build for production
+
+```powershell
+cd frontend
+npm run build
+npm run start
+```
+
+### Pages
+
+| Route | Description |
+|---|---|
+| `/` | Dashboard — fabric state, status breakdown, top signals |
+| `/signal-inbox` | Filterable signal list with state badges |
+| `/signal-inbox/[id]` | Signal detail, score panel, evidence timeline, reflection |
+| `/reflection-desk` | Human reflections and AI advisory context per signal |
+| `/moltbook` | Self-correction and mistake-learning entries |
+| `/manual-trade-log` | Record trades placed manually (HUMAN_ONLY) |
+| `/reconciliation` | Match logged trades to actual outcomes |
+| `/exports` | Download JSON/CSV exports of all advisory data |
+| `/settings` | System constants and safety information |
+
+### Safety rules enforced in the UI
+
+- No Buy, Sell, Execute, or Auto-trade buttons exist anywhere in the UI.
+- All trade actions are labelled **Log Manual Trade**.
+- All signal actions carry **ADVISORY_ONLY** and **HUMAN_REVIEW_REQUIRED**.
+- All trade-related UI carries **HUMAN_ONLY**.
+- AI execution count displays `0` on every page and in every response shape.
+- A persistent top banner states: **"This system does not place trades."**
+- `EXECUTION_GATE: LOCKED` is shown in the header on every page.
+
+### Data
+
+Step 1 uses mock data in `frontend/src/lib/mockData.ts` that mirrors the FastAPI response shapes from `scripts/signal_inbox_api.py` and `scripts/moltbook_api.py`. Live backend connection is Step 2.
