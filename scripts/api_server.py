@@ -78,6 +78,42 @@ except ModuleNotFoundError:
         export_source_health_log,
     )
 
+def _get_live_signals(source_name: str | None = None, limit: int = 100) -> dict:
+    try:
+        try:
+            from scripts.persistence import get_signal_events
+        except ModuleNotFoundError:
+            from persistence import get_signal_events  # type: ignore
+        events = get_signal_events(source_name=source_name, limit=limit)
+        return {
+            "live_signal_events": events,
+            "count": len(events),
+            "advisory_status": _ADVISORY_STATUS,
+            "execution_mode": _EXECUTION_MODE,
+            "ai_execution_count": _AI_EXECUTION_COUNT,
+            "human_review_required": True,
+        }
+    except Exception as exc:
+        return {
+            "live_signal_events": [],
+            "count": 0,
+            "error": str(exc),
+            "advisory_status": _ADVISORY_STATUS,
+            "ai_execution_count": _AI_EXECUTION_COUNT,
+        }
+
+
+def _get_source_run_log(limit: int = 50) -> list:
+    try:
+        try:
+            from scripts.persistence import get_source_run_log
+        except ModuleNotFoundError:
+            from persistence import get_source_run_log  # type: ignore
+        return get_source_run_log(limit=limit)
+    except Exception:
+        return []
+
+
 # DB status helper — imported lazily so server starts even if persistence unavailable
 def _get_db_status() -> dict:
     try:
@@ -312,12 +348,23 @@ def get_source_health() -> dict:
         "operation": "get_source_health",
         "fabric_stats": stats,
         "fabric_bull_state": bull_state,
+        "source_run_log": _get_source_run_log(limit=20),
         "advisory_status": _ADVISORY_STATUS,
         "execution_mode": _EXECUTION_MODE,
         "ai_execution_count": _AI_EXECUTION_COUNT,
         "human_review_required": True,
         "generated_at": result.get("generated_at", ""),
     }
+
+
+# ---------------------------------------------------------------------------
+# Live signals (Phase 1 live source ingestion results)
+# ---------------------------------------------------------------------------
+
+
+@app.get("/live-signals")
+def get_live_signals(source: str | None = None, limit: int = 100) -> dict:
+    return _get_live_signals(source_name=source, limit=limit)
 
 
 # ---------------------------------------------------------------------------

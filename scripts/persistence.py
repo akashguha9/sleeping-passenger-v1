@@ -13,6 +13,7 @@ Advisory invariants enforced on every write and read:
 """
 from __future__ import annotations
 
+import json
 import sqlite3
 from pathlib import Path
 from typing import Any
@@ -139,6 +140,32 @@ CREATE TABLE IF NOT EXISTS export_logs (
     row_count INTEGER NOT NULL DEFAULT 0,
     advisory_status TEXT NOT NULL DEFAULT 'ADVISORY_ONLY'
 );
+CREATE TABLE IF NOT EXISTS signal_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_id TEXT NOT NULL UNIQUE,
+    source_name TEXT NOT NULL,
+    raw_payload TEXT NOT NULL,
+    fetched_at TEXT NOT NULL,
+    advisory_status TEXT NOT NULL DEFAULT 'ADVISORY_ONLY',
+    human_review_required INTEGER NOT NULL DEFAULT 1,
+    execution_gate TEXT NOT NULL DEFAULT 'LOCKED',
+    ai_execution_count INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_se_source ON signal_events(source_name);
+CREATE INDEX IF NOT EXISTS idx_se_fetched ON signal_events(fetched_at);
+CREATE TABLE IF NOT EXISTS source_run_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    source_name TEXT NOT NULL,
+    status TEXT NOT NULL,
+    fetched_count INTEGER NOT NULL DEFAULT 0,
+    skipped_reason TEXT NOT NULL DEFAULT '',
+    error_message TEXT NOT NULL DEFAULT '',
+    timestamp_utc TEXT NOT NULL,
+    duration_ms INTEGER NOT NULL DEFAULT 0,
+    advisory_status TEXT NOT NULL DEFAULT 'ADVISORY_ONLY'
+);
+CREATE INDEX IF NOT EXISTS idx_srl_source ON source_run_log(source_name);
+CREATE INDEX IF NOT EXISTS idx_srl_ts ON source_run_log(timestamp_utc);
 """
 
 # Track which DB paths have been initialized this process (avoids repeat schema runs)
@@ -696,6 +723,125 @@ def get_db_status(db_path: Path = DB_PATH) -> dict[str, Any]:
     }
 
 
+# ---------------------------------------------------------------------------
+# Signal events (live-fetched, normalized)
+# ---------------------------------------------------------------------------
+
+
+def insert_signal_event(
+    event_id: str,
+    source_name: str,
+    raw_payload: dict[str, Any],
+    fetched_at: str,
+    db_path: Path = DB_PATH,
+) -> bool:
+    """Insert a normalized signal event. Returns True if new, False if duplicate."""
+    conn = _get_conn(db_path)
+    try:
+        cursor = conn.execute(
+            "INSERT OR IGNORE INTO signal_events"
+            " (event_id, source_name, raw_payload, fetched_at,"
+            "  advisory_status, human_review_required, execution_gate, ai_execution_count)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                event_id, source_name, json.dumps(raw_payload), fetched_at,
+                _ADVISORY_STATUS, 1, "LOCKED", _AI_EXECUTION_COUNT,
+            ),
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+    finally:
+        conn.close()
+
+
+def get_signal_events(
+    source_name: str | None = None,
+    limit: int = 100,
+    db_path: Path = DB_PATH,
+) -> list[dict[str, Any]]:
+    """Return recent signal events, optionally filtered by source."""
+    conn = _get_conn(db_path)
+    try:
+        if source_name:
+            rows = conn.execute(
+                "SELECT * FROM signal_events WHERE source_name=?"
+                " ORDER BY fetched_at DESC LIMIT ?",
+                (source_name, limit),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM signal_events ORDER BY fetched_at DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+    finally:
+        conn.close()
+
+    result = []
+    for row in rows:
+        d = dict(row)
+        d["advisory_status"] = _ADVISORY_STATUS
+        d["ai_execution_count"] = _AI_EXECUTION_COUNT
+        if isinstance(d.get("human_review_required"), int):
+            d["human_review_required"] = bool(d["human_review_required"])
+        try:
+            d["raw_payload"] = json.loads(d["raw_payload"])
+        except (json.JSONDecodeError, TypeError):
+            pass
+        result.append(d)
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Source run log (per-source ingestion health)
+# ---------------------------------------------------------------------------
+
+
+def log_source_run(
+    source_name: str,
+    status: str,
+    fetched_count: int,
+    skipped_reason: str,
+    error_message: str,
+    timestamp_utc: str,
+    duration_ms: int,
+    db_path: Path = DB_PATH,
+) -> None:
+    """Record a source ingestion run result."""
+    conn = _get_conn(db_path)
+    try:
+        conn.execute(
+            "INSERT INTO source_run_log"
+            " (source_name, status, fetched_count, skipped_reason, error_message,"
+            "  timestamp_utc, duration_ms, advisory_status)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                source_name, status, fetched_count, skipped_reason,
+                error_message, timestamp_utc, duration_ms, _ADVISORY_STATUS,
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_source_run_log(limit: int = 50, db_path: Path = DB_PATH) -> list[dict[str, Any]]:
+    """Return recent source run log entries, newest first."""
+    conn = _get_conn(db_path)
+    try:
+        rows = conn.execute(
+            "SELECT * FROM source_run_log ORDER BY id DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+    finally:
+        conn.close()
+    result = []
+    for row in rows:
+        d = dict(row)
+        d["advisory_status"] = _ADVISORY_STATUS
+        result.append(d)
+    return result
+
+
 __all__ = [
     "DB_PATH",
     "init_schema",
@@ -723,4 +869,8 @@ __all__ = [
     "get_latest_source_health",
     "log_export",
     "get_db_status",
+    "insert_signal_event",
+    "get_signal_events",
+    "log_source_run",
+    "get_source_run_log",
 ]
