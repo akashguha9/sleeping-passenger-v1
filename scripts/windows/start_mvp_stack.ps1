@@ -36,7 +36,7 @@ Write-Host "Backend  : http://localhost:8000 (window launched)"
 # Port 3000 is required: the sleepingpassenger reverse proxy forwards port 80 -> 3000.
 # If port 3000 is busy the window exits with a clear message instead of silently
 # falling back to 3001 (which would break the proxy).
-$frontendCmd = "Set-Location '$RepoRoot\frontend'; Write-Host '[frontend] Checking port 3000...'; `$busy = netstat -ano 2>`$null | Select-String ':3000 '; if (`$busy) { Write-Host '[frontend] ERROR: Port 3000 is already in use.'; Write-Host '[frontend] Stop the existing Next.js process first: Get-Process node | Stop-Process'; Read-Host 'Press Enter to exit'; exit 1 }; Write-Host '[frontend] Starting on port 3000...'; npm run dev -- -p 3000"
+$frontendCmd = "Set-Location '$RepoRoot\frontend'; Write-Host '[frontend] Checking port 3000...'; `$busy = netstat -ano 2>`$null | Select-String ':3000 '; if (`$busy) { Write-Host '[frontend] ERROR: Port 3000 is already in use.'; Write-Host '[frontend] Stop the existing Next.js process first: Get-Process node | Stop-Process'; Read-Host 'Press Enter to exit'; exit 1 }; Write-Host '[frontend] Starting on port 3000...'; npx next dev -p 3000"
 $frontendEncoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($frontendCmd))
 Start-Process powershell.exe `
     -ArgumentList @("-NoExit", "-EncodedCommand", $frontendEncoded) `
