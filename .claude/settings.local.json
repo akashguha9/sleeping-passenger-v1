@@ -1,0 +1,27 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -m compileall scripts/persistence.py scripts/live_source_runner.py scripts/run_live_sources_phase1.py scripts/api_server.py tests/test_live_source_runner_phase1.py)",
+      "Bash(python -m pytest tests/test_live_source_runner_phase1.py -v)",
+      "Bash(python -m pytest tests/test_persistence.py tests/test_readonly_source_loaders.py tests/test_signal_inbox_api.py tests/test_api_server.py -v --tb=short)",
+      "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\akash\\\\pipeline-v5.7-core\" -Directory)",
+      "Bash(Select-Object -ExpandProperty Name)",
+      "PowerShell(tree *)",
+      "Bash(xargs grep -l \"FastAPI\\\\|from fastapi\\\\|import fastapi\")",
+      "Bash(python -m compileall scripts tests -q)",
+      "Bash(python *)",
+      "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\akash\\\\pipeline-v5.7-core\\\\scripts\\\\ingestion\" -ErrorAction SilentlyContinue)",
+      "Bash(Select-Object Name)",
+      "Bash(npm run *)",
+      "PowerShell(python -m pytest tests -q 2>&1 | Select-Object -Last 5)",
+      "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\akash\\\\pipeline-v5.7-core\\\\scripts\\\\ingestion\" -File)",
+      "Bash(Sort-Object Name)",
+      "Bash(dir C:\\\\Users\\\\akash\\\\pipeline-v5.7-core\\\\*.md /b)",
+      "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\akash\\\\pipeline-v5.7-core\\\\frontend\\\\src\\\\app\" -Recurse)",
+      "Bash(Select-Object FullName)",
+      "Bash(ConvertTo-Csv -NoTypeInformation)",
+      "Bash(Select-Object -Skip 1)",
+      "Bash(\\\\.ts\")"
+    ]
+  }
+}
