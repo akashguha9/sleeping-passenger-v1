@@ -1,6 +1,6 @@
 """
 Phase 2 Live Source Runner — read-only ingestion for NewsAPI, Event Registry,
-Etherscan, and Grok/xAI interpretation.
+Etherscan, Grok/xAI interpretation, Market Data, India, and Global Filings.
 
 Safety contract
 ---------------
@@ -11,12 +11,14 @@ Safety contract
 - execution_gate="LOCKED" on every record.
 - AI execution count is always 0.
 - broker_api_called is always False.
+- broker_order_id is always "NONE".
 - Dry-run mode fetches and normalizes but does NOT persist anything.
 - NewsAPI skips cleanly when NEWS_API_KEY env var is unset.
 - Event Registry skips cleanly when EVENT_REGISTRY_API_KEY env var is unset.
 - Etherscan skips cleanly when ETHERSCAN_API_KEY env var is unset or no address given.
 - Grok/xAI skips cleanly when XAI_API_KEY env var is unset.
 - Grok/xAI output is hypothesis/interpretation only, never truth.
+- Global Filings skips cleanly when no active providers reachable.
 
 Rate-limit-safe defaults
 ------------------------
@@ -24,6 +26,7 @@ Rate-limit-safe defaults
 - Event Registry: 20 articles per call, 15 s timeout
 - Etherscan: 25 transactions per call, 15 s timeout
 - Grok/xAI: 1 interpretation per call, 30 s timeout
+- Global Filings: 50 records per call, 15 s timeout
 - Up to 2 retries on transient network errors, 2 s back-off
 """
 from __future__ import annotations
@@ -41,6 +44,7 @@ try:
     from scripts.ingestion.grok_interpreter import GrokInterpreter
     from scripts.ingestion.market_data_loader import MarketDataLoader
     from scripts.ingestion.india_loader import IndiaLoader
+    from scripts.ingestion.global_filings_loader import GlobalFilingsLoader
     from scripts.ingestion.base_loader import LoaderResult, SkipLoader
 except ModuleNotFoundError:
     from runtime_common import utc_timestamp  # type: ignore[no-redef]
@@ -50,6 +54,7 @@ except ModuleNotFoundError:
     from ingestion.grok_interpreter import GrokInterpreter  # type: ignore[no-redef]
     from ingestion.market_data_loader import MarketDataLoader  # type: ignore[no-redef]
     from ingestion.india_loader import IndiaLoader  # type: ignore[no-redef]
+    from ingestion.global_filings_loader import GlobalFilingsLoader  # type: ignore[no-redef]
     from ingestion.base_loader import LoaderResult, SkipLoader  # type: ignore[no-redef]
 
 _ADVISORY_STATUS = "ADVISORY_ONLY"
@@ -321,6 +326,54 @@ def _normalize_india_record(rec: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _normalize_global_filings_record(rec: dict[str, Any]) -> dict[str, Any]:
+    provider = str(rec.get("provider") or "global_filings")
+    issuer_name = str(rec.get("issuer_name") or "")
+    ticker = str(rec.get("ticker_or_identifier") or "")
+    exchange = str(rec.get("exchange_or_regulator") or "")
+    jurisdiction = str(rec.get("jurisdiction") or "")
+    # Keep raw value for title (don't apply fallback label to empty input)
+    _raw_disclosure_type = rec.get("disclosure_type") or ""
+    disclosure_type = _raw_disclosure_type or "regulatory_disclosure"
+    published_at = str(rec.get("published_at") or "")
+    url = str(rec.get("url") or "")
+    summary = str(rec.get("summary") or "")
+
+    title_parts: list[str] = []
+    if issuer_name:
+        title_parts.append(issuer_name)
+    if ticker and ticker != issuer_name:
+        title_parts.append(f"({ticker})")
+    if _raw_disclosure_type:
+        title_parts.append(f"— {_raw_disclosure_type.replace('_', ' ').title()}")
+    title = " ".join(title_parts) if title_parts else summary or "Global Regulatory Filing"
+
+    return {
+        "event_id": _stable_event_id(
+            "global_filings", provider, ticker or issuer_name, published_at, url
+        ),
+        "source_name": "global_filings",
+        "signal_type": "regulatory_disclosure",
+        "title": title,
+        "issuer_name": issuer_name,
+        "ticker_or_identifier": ticker,
+        "exchange_or_regulator": exchange,
+        "jurisdiction": jurisdiction,
+        "disclosure_type": disclosure_type,
+        "published_at": published_at,
+        "url": url,
+        "summary": summary,
+        "provider": provider,
+        "raw_payload": rec.get("raw_payload") or {},
+        "advisory_status": _ADVISORY_STATUS,
+        "human_review_required": True,
+        "execution_gate": _EXECUTION_GATE,
+        "ai_execution_count": _AI_EXECUTION_COUNT,
+        "broker_api_called": _BROKER_API_CALLED,
+        "broker_order_id": "NONE",
+    }
+
+
 _NORMALIZERS: dict[str, Any] = {
     "newsapi": _normalize_newsapi_record,
     "event_registry": _normalize_event_registry_record,
@@ -328,6 +381,7 @@ _NORMALIZERS: dict[str, Any] = {
     "grok_xai": _normalize_grok_record,
     "market_data": _normalize_market_data_record,
     "india": _normalize_india_record,
+    "global_filings": _normalize_global_filings_record,
 }
 
 
@@ -436,11 +490,15 @@ def run_phase2(
     india_symbols: list[str] | None = None,
     india_date: str | None = None,
     india_max_items: int = 50,
+    global_filings_providers: list[str] | None = None,
+    global_filings_query: str | None = None,
+    global_filings_region: str | None = None,
+    global_filings_max_items: int = 50,
     sources: list[str] | None = None,
 ) -> Phase2RunReport:
     """
     Run Phase 2 live source ingestion: NewsAPI, Event Registry, Etherscan, Grok/xAI,
-    Market Data (Phase C.5), and India sources (Phase C.6, read-only).
+    Market Data (Phase C.5), India sources (Phase C.6), and Global Filings (Phase C.7).
 
     Parameters
     ----------
@@ -471,6 +529,15 @@ def run_phase2(
         Informational date filter (ISO string). NSE API always returns latest data.
     india_max_items:
         Maximum India records to return (default 50).
+    global_filings_providers:
+        Specific provider names to use (e.g. ["asx"]). Defaults to all configured
+        providers. Unsupported or inactive providers skip cleanly.
+    global_filings_query:
+        Filter string applied to issuer name and disclosure description.
+    global_filings_region:
+        Jurisdiction code to filter providers (e.g. "AU", "HK", "SG"). Defaults to all.
+    global_filings_max_items:
+        Maximum global filings records to return (default 50).
     sources:
         Subset of Phase 2 sources to run. Defaults to ["newsapi"].
         Missing API keys / unavailable dependencies skip cleanly.
@@ -518,6 +585,12 @@ def run_phase2(
             symbols=india_symbols,
             date=india_date,
             max_items=india_max_items,
+        ),
+        "global_filings": GlobalFilingsLoader(
+            providers=global_filings_providers,
+            query=global_filings_query,
+            region=global_filings_region,
+            max_items=global_filings_max_items,
         ),
     }
 
@@ -577,6 +650,7 @@ __all__ = [
     "_normalize_grok_record",
     "_normalize_market_data_record",
     "_normalize_india_record",
+    "_normalize_global_filings_record",
     "_persist_events",
     "_log_run",
 ]

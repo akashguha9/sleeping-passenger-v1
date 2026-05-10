@@ -18,6 +18,11 @@ Usage
   python scripts/run_live_sources_phase2.py --source india --dry-run --json
   python scripts/run_live_sources_phase2.py --source india --write
   python scripts/run_live_sources_phase2.py --source india --india-symbols "NIFTY 50,NIFTY BANK" --dry-run
+  python scripts/run_live_sources_phase2.py --source global_filings --dry-run --json
+  python scripts/run_live_sources_phase2.py --source global_filings --write
+  python scripts/run_live_sources_phase2.py --source global_filings --global-provider asx --dry-run
+  python scripts/run_live_sources_phase2.py --source global_filings --global-region AU --dry-run
+  python scripts/run_live_sources_phase2.py --source global_filings --global-query "quarterly report" --dry-run
 
 Optional flags (NewsAPI)
 ------------------------
@@ -56,6 +61,15 @@ Optional flags (India — Phase C.6)
   --india-date <date>       ISO date filter e.g. 2026-05-10 (informational; NSE always returns latest).
   --india-max-items <N>     Max India records to return (default: 50).
 
+Optional flags (Global Filings — Phase C.7)
+--------------------------------------------
+  --global-provider <prov>  Comma-separated provider names (default: all configured).
+                            Supported: asx, hkex, sgx, uk_rns, esma, sedar, tdnet.
+                            Inactive/placeholder providers skip cleanly.
+  --global-query <query>    Filter by issuer name or disclosure description.
+  --global-region <region>  Filter providers by jurisdiction (AU, HK, SG, UK, EU, CA, JP).
+  --global-max-items <N>    Max global filings records to return (default: 50).
+
 Common flags
 ------------
   --json                    Output full report as JSON.
@@ -64,6 +78,7 @@ Safety
 ------
   ALL outputs are ADVISORY_ONLY.  Execution is HUMAN_ONLY.  AI execution count = 0.
   No broker API calls.  No order placement.  No private keys.  No wallet signing.
+  broker_order_id is always NONE on all global_filings outputs.
   NEWS_API_KEY env var must be set; missing key skips NewsAPI cleanly.
   EVENT_REGISTRY_API_KEY env var must be set; missing key skips Event Registry cleanly.
   ETHERSCAN_API_KEY env var must be set; missing key or address skips Etherscan cleanly.
@@ -72,6 +87,7 @@ Safety
   Market data is read-only price confirmation; no execution path exists.
   yfinance skips cleanly if the package is unavailable.
   India sources (NSE/RBI/SEBI) require no API key. Public endpoints skip cleanly on failure.
+  Global Filings: ASX requires no API key. All other providers are placeholders that skip cleanly.
 """
 from __future__ import annotations
 
@@ -86,7 +102,7 @@ if str(_REPO_ROOT) not in sys.path:
 
 from scripts.live_source_runner_phase2 import run_phase2  # noqa: E402
 
-_SUPPORTED_SOURCES = ["newsapi", "event_registry", "etherscan", "grok_xai", "market_data", "india"]
+_SUPPORTED_SOURCES = ["newsapi", "event_registry", "etherscan", "grok_xai", "market_data", "india", "global_filings"]
 
 
 def _parse_args() -> argparse.Namespace:
@@ -253,6 +269,41 @@ def _parse_args() -> argparse.Namespace:
         help="Max India records to return (default: 50).",
     )
     parser.add_argument(
+        "--global-provider",
+        default=None,
+        dest="global_provider",
+        metavar="PROVIDER",
+        help=(
+            "Comma-separated global filings provider names "
+            "(default: all configured). E.g. asx,hkex."
+        ),
+    )
+    parser.add_argument(
+        "--global-query",
+        default=None,
+        dest="global_query",
+        metavar="QUERY",
+        help="Filter global filings by issuer name or disclosure description.",
+    )
+    parser.add_argument(
+        "--global-region",
+        default=None,
+        dest="global_region",
+        metavar="REGION",
+        help=(
+            "Filter global filings providers by jurisdiction code "
+            "(e.g. AU, HK, SG, UK, EU, CA, JP)."
+        ),
+    )
+    parser.add_argument(
+        "--global-max-items",
+        type=int,
+        default=50,
+        dest="global_max_items",
+        metavar="N",
+        help="Max global filings records to return (default: 50).",
+    )
+    parser.add_argument(
         "--json",
         action="store_true",
         dest="output_json",
@@ -276,6 +327,11 @@ def main() -> int:
         if args.india_symbols
         else None
     )
+    global_providers = (
+        [p.strip() for p in args.global_provider.split(",") if p.strip()]
+        if args.global_provider
+        else None
+    )
 
     if not args.output_json:
         print(f"[Phase 2 Source Runner] mode={'dry-run' if dry_run else 'write'}")
@@ -287,6 +343,8 @@ def main() -> int:
             print("  Market data: read-only price confirmation — no execution path")
         if args.source == "india":
             print("  India: NSE/RBI/SEBI read-only — advisory only, no execution path")
+        if args.source == "global_filings":
+            print("  Global Filings: public exchange/regulator disclosures — advisory only, no execution path")
         print()
 
     report = run_phase2(
@@ -310,6 +368,10 @@ def main() -> int:
         india_symbols=india_syms,
         india_date=args.india_date,
         india_max_items=args.india_max_items,
+        global_filings_providers=global_providers,
+        global_filings_query=args.global_query,
+        global_filings_region=args.global_region,
+        global_filings_max_items=args.global_max_items,
         sources=[args.source],
     )
 

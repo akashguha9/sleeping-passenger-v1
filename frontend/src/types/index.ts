@@ -218,7 +218,7 @@ export interface DbStatusResponse {
   generated_at: string;
 }
 
-export type LiveSignalSource = 'polymarket' | 'gdelt' | 'sec_edgar' | 'newsapi' | 'event_registry' | 'etherscan' | 'grok_xai' | 'market_data' | 'india';
+export type LiveSignalSource = 'polymarket' | 'gdelt' | 'sec_edgar' | 'newsapi' | 'event_registry' | 'etherscan' | 'grok_xai' | 'market_data' | 'india' | 'global_filings';
 
 export interface LiveSignalRawPayload {
   event_id?: string;
@@ -291,6 +291,14 @@ export interface LiveSignalRawPayload {
   regulatory_source?: string;
   regulatory_url?: string;
   regulatory_note?: string | null;
+  // global_filings (Phase C.7 — global exchange/regulator disclosures, no execution)
+  issuer_name?: string;
+  ticker_or_identifier?: string;
+  exchange_or_regulator?: string;
+  jurisdiction?: string;
+  disclosure_type?: string;
+  summary?: string;
+  broker_order_id?: string;
   [key: string]: unknown;
 }
 
