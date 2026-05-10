@@ -11,18 +11,21 @@ const SOURCE_OPTIONS: { value: '' | LiveSignalSource; label: string }[] = [
   { value: 'polymarket', label: 'Polymarket' },
   { value: 'gdelt', label: 'GDELT' },
   { value: 'sec_edgar', label: 'SEC EDGAR' },
+  { value: 'newsapi', label: 'NewsAPI' },
 ];
 
 const SOURCE_COLORS: Record<string, string> = {
   polymarket: 'text-violet-400 bg-violet-900/30 border-violet-700/40',
   gdelt: 'text-sky-400 bg-sky-900/30 border-sky-700/40',
   sec_edgar: 'text-amber-400 bg-amber-900/30 border-amber-700/40',
+  newsapi: 'text-emerald-400 bg-emerald-900/30 border-emerald-700/40',
 };
 
 const SOURCE_LABELS: Record<string, string> = {
   polymarket: 'Polymarket',
   gdelt: 'GDELT',
   sec_edgar: 'SEC EDGAR',
+  newsapi: 'NewsAPI',
 };
 
 function getTitle(ev: LiveSignalEvent): string {
@@ -55,6 +58,13 @@ function getSubtitle(ev: LiveSignalEvent): string {
     if (p.accession_number) parts.push(p.accession_number as string);
     return parts.join(' · ');
   }
+  if (ev.source_name === 'newsapi') {
+    const parts: string[] = [];
+    if (p.publisher) parts.push(p.publisher as string);
+    if (p.published_at) parts.push(`Published: ${p.published_at}`);
+    if (p.url) parts.push(p.url as string);
+    return parts.join(' · ');
+  }
   return ev.event_id;
 }
 
@@ -73,6 +83,9 @@ function matchesSearch(ev: LiveSignalEvent, query: string): boolean {
     p.accession_number,
     p.sourcecountry,
     p.language,
+    p.publisher,
+    p.description,
+    p.url,
   ]
     .filter(Boolean)
     .some((v) => String(v).toLowerCase().includes(q));
@@ -200,7 +213,7 @@ export default function LiveSignalsPage() {
         <div>
           <h1 className="text-xl font-bold text-white">Live Signals</h1>
           <p className="text-sm text-slate-500 mt-0.5">
-            Real-time ingestion from Polymarket, GDELT, and SEC EDGAR — advisory only
+            Real-time ingestion from Polymarket, GDELT, SEC EDGAR, and NewsAPI — advisory only
           </p>
         </div>
         <div className="flex items-center gap-2">

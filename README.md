@@ -472,12 +472,30 @@ python scripts/run_live_sources_phase1.py --dry-run --json
 python scripts/run_live_sources_phase1.py --write
 ```
 
+**Terminal 4 — Phase 2 live source ingestion (NewsAPI)**
+
+Requires `NEWS_API_KEY` environment variable. Skips cleanly if unset.
+
+```powershell
+# Dry-run — fetch and normalize, no DB write:
+python scripts/run_live_sources_phase2.py --source newsapi --dry-run --json
+
+# Write run — fetch, normalize, and persist to SQLite:
+python scripts/run_live_sources_phase2.py --source newsapi --write
+
+# Custom query:
+python scripts/run_live_sources_phase2.py --source newsapi --dry-run --query "AI semiconductors"
+```
+
+All NewsAPI signals are `ADVISORY_ONLY`, `HUMAN_REVIEW_REQUIRED`, `execution_gate=LOCKED`,
+`ai_execution_count=0`, `broker_api_called=false`.
+
 ### Browser
 
 | URL | Description |
 |---|---|
 | `http://localhost:3000` | Dashboard — fabric state, status breakdown, top signals |
-| `http://localhost:3000/live-signals` | Live signal events from Phase 1 sources |
+| `http://localhost:3000/live-signals` | Live signal events from Phase 1 + Phase 2 sources |
 | `http://localhost:3000/signal-inbox` | Filterable signal inbox |
 | `http://localhost:3000/reflection-desk` | Human reflections and AI advisory context |
 | `http://localhost:3000/manual-trade-log` | Record trades placed manually (HUMAN_ONLY) |

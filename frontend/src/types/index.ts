@@ -218,7 +218,7 @@ export interface DbStatusResponse {
   generated_at: string;
 }
 
-export type LiveSignalSource = 'polymarket' | 'gdelt' | 'sec_edgar';
+export type LiveSignalSource = 'polymarket' | 'gdelt' | 'sec_edgar' | 'newsapi';
 
 export interface LiveSignalRawPayload {
   event_id?: string;
@@ -242,6 +242,10 @@ export interface LiveSignalRawPayload {
   form_type?: string;
   filing_date?: string;
   accession_number?: string;
+  // newsapi
+  description?: string;
+  published_at?: string;
+  publisher?: string;
   [key: string]: unknown;
 }
 
