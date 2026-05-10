@@ -635,6 +635,34 @@ python -m compileall scripts tests
 Remove-Item runtime\mvp_local.db -ErrorAction SilentlyContinue
 ```
 
+### Phase C Integrated Source Matrix
+
+All sources are `execution_permission = ADVISORY_ONLY`. No auto-trading path exists for any source.
+
+| Source | Phase | Env var (if any) | Status | CLI dry-run | CLI write | Frontend filter | Persistence |
+|---|---|---|---|---|---|---|---|
+| `polymarket` | 1 | — | Active | `run_live_sources_phase1.py --source polymarket --dry-run --json` | `--write` | Polymarket | signal_events / source_run_log |
+| `gdelt` | 1 | — | Active | `run_live_sources_phase1.py --source gdelt --dry-run --json` | `--write` | GDELT | signal_events / source_run_log |
+| `sec_edgar` | 1 | `SEC_USER_AGENT` | Skips cleanly if unset | `run_live_sources_phase1.py --source sec_edgar --dry-run --json` | `--write` | SEC EDGAR | signal_events / source_run_log |
+| `newsapi` | 2 | `NEWS_API_KEY` | Skips cleanly if unset | `run_live_sources_phase2.py --source newsapi --dry-run --json` | `--write` | NewsAPI | signal_events / source_run_log |
+| `event_registry` | 2 | `EVENT_REGISTRY_API_KEY` | Skips cleanly if unset | `run_live_sources_phase2.py --source event_registry --dry-run --json` | `--write` | Event Registry | signal_events / source_run_log |
+| `etherscan` | 2 | `ETHERSCAN_API_KEY` | Skips cleanly if unset or no address | `run_live_sources_phase2.py --source etherscan --dry-run --json` | `--write` | Etherscan | signal_events / source_run_log |
+| `grok_xai` | 2 | `XAI_API_KEY` | Skips cleanly if unset | `run_live_sources_phase2.py --source grok_xai --dry-run --json` | `--write` | Grok/xAI | signal_events / source_run_log |
+| `market_data` | 2 | — (yfinance) | Active | `run_live_sources_phase2.py --source market_data --dry-run --json` | `--write` | Market Data | signal_events / source_run_log |
+| `india` | 2 | — | Active (NSE/RBI/SEBI public) | `run_live_sources_phase2.py --source india --dry-run --json` | `--write` | India | signal_events / source_run_log |
+| `global_filings` | 2 | — (ASX active; others placeholder) | ASX active, rest skip cleanly | `run_live_sources_phase2.py --source global_filings --dry-run --json` | `--write` | Global Filings | signal_events / source_run_log |
+| `asia_disclosure` | 2 | — (all placeholder) | All skip cleanly | `run_live_sources_phase2.py --source asia_disclosure --dry-run --json` | `--write` | Asia Disclosure | signal_events / source_run_log |
+
+All 11 sources set `advisory_status = ADVISORY_ONLY`, `execution_gate = LOCKED`,
+`human_review_required = True`, `ai_execution_count = 0`, and `broker_api_called = False` on
+every normalized record. `broker_order_id = NONE` on global_filings and asia_disclosure records.
+
+Run the static integration audit at any time:
+
+```powershell
+python scripts/phase_c_final_audit.py --verbose
+```
+
 ### Advisory safety rules (permanent — never change)
 
 - No Buy, Sell, Execute, or Auto-trade button or endpoint exists anywhere.

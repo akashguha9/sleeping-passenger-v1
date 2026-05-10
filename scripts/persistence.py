@@ -697,6 +697,8 @@ def get_db_status(db_path: Path = DB_PATH) -> dict[str, Any]:
         "moltbook_entries",
         "source_health",
         "export_logs",
+        "signal_events",
+        "source_run_log",
     ]
     counts: dict[str, int] = {}
     try:
