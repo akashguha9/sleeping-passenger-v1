@@ -874,13 +874,13 @@ class TestNoLiveInternet:
 # ===========================================================================
 
 class TestNoBackendFrontendChanges:
-    def test_api_server_unchanged(self):
+    def test_api_server_has_chart_structure_wired(self):
+        # Phase D.3 has landed: api_server.py MUST import chart_structure_engine
         api_path = _REPO / "scripts" / "api_server.py"
         if api_path.exists():
             source = api_path.read_text(encoding="utf-8")
-            # chart_structure_engine must not be imported in api_server yet (that's D.3)
-            assert "chart_structure_engine" not in source, (
-                "api_server.py must not import chart_structure_engine until Phase D.3"
+            assert "chart_structure_engine" in source, (
+                "api_server.py must import chart_structure_engine (Phase D.3 complete)"
             )
 
     def test_frontend_unchanged(self):

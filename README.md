@@ -226,6 +226,85 @@ GET http://localhost:8000/live-signals?source=event_registry
 GET http://localhost:8000/live-signals?source=etherscan
 ```
 
+## Phase D.3 — Chart Structure API (Backend, Advisory-Only)
+
+The `GET /chart-structure` endpoint exposes the chart structure engine as an advisory-only signal context. It reads OHLCV candles from the SQLite `signal_events` table (populated by `market_data` ingestion) and returns a full chart structure report. No orders are placed. No broker API is called.
+
+All responses carry:
+- `advisory_status = ADVISORY_ONLY`
+- `execution_gate = LOCKED`
+- `human_review_required = true`
+- `ai_execution_count = 0`
+- `broker_api_called = false`
+- `broker_order_id = NONE`
+
+### Prerequisite: ingest market data
+
+```powershell
+python scripts\run_live_sources_phase2.py --source market_data --write
+```
+
+### Request examples
+
+**Chart structure for a symbol (basic):**
+```
+GET http://localhost:8000/chart-structure?symbol=AAPL
+```
+
+**Chart structure with a limit on how many recent events to scan:**
+```
+GET http://localhost:8000/chart-structure?symbol=AAPL&limit=50
+```
+
+**Chart structure linked to a specific signal event:**
+```
+GET http://localhost:8000/chart-structure?symbol=AAPL&source_event_id=EVT_market_data_AAPL_20260101
+```
+
+### Response shape
+
+```json
+{
+  "symbol": "AAPL",
+  "source_event_id": null,
+  "candle_count": 5,
+  "advisory_status": "ADVISORY_ONLY",
+  "execution_gate": "LOCKED",
+  "human_review_required": true,
+  "ai_execution_count": 0,
+  "broker_api_called": false,
+  "broker_order_id": "NONE",
+  "report": {
+    "advisory_status": "ADVISORY_ONLY",
+    "execution_gate": "LOCKED",
+    "human_review_required": true,
+    "ai_execution_count": 0,
+    "broker_api_called": false,
+    "broker_order_id": "NONE",
+    "summary": { ... },
+    "candle_anatomy": { ... },
+    "trend": { ... },
+    "volatility": { ... },
+    "support_resistance": { ... },
+    "context": { "chart_state": "TRENDING_UP", ... },
+    "advisory": {
+      "advisory_summary": "Chart structure shows an upward trend. Human review required.",
+      "suggested_next_step": "WATCH_ONLY"
+    }
+  }
+}
+```
+
+If no OHLCV data is available for the symbol, `chart_state` is `INSUFFICIENT_DATA` and `report` is `null` — the endpoint never crashes.
+
+### What it does not do
+
+- Does not place orders
+- Does not connect to any broker API
+- Does not produce buy/sell/execute instructions
+- Does not depend on TradingView, paid charting, or wallet APIs
+- Does not require live internet (reads from local SQLite only)
+
 ### View signals in the frontend
 
 1. Start the backend: `python scripts\api_server.py`

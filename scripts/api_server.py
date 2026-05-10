@@ -21,6 +21,8 @@ Start server
 """
 from __future__ import annotations
 
+import json
+
 try:
     from fastapi import FastAPI, Response
     from fastapi.middleware.cors import CORSMiddleware
@@ -147,6 +149,133 @@ def _log_source_health(stats: dict, bull_state: str) -> None:
         )
     except Exception:
         pass
+
+def _candles_from_market_events(events: list[dict]) -> list[dict]:
+    """Extract OHLCV candle dicts from market_data signal_events raw_payload.
+
+    Each event's raw_payload may already be a dict (parsed by get_signal_events)
+    or a JSON string. Missing or non-numeric fields are silently skipped.
+    """
+    candles: list[dict] = []
+    for ev in events:
+        payload = ev.get("raw_payload") or {}
+        if isinstance(payload, str):
+            try:
+                payload = json.loads(payload)
+            except (json.JSONDecodeError, TypeError):
+                continue
+        if not isinstance(payload, dict):
+            continue
+        o = payload.get("open")
+        h = payload.get("high")
+        lo = payload.get("low")
+        c = payload.get("close") if payload.get("close") is not None else payload.get("latest_price")
+        v = payload.get("volume")
+        ts = payload.get("timestamp") or ev.get("fetched_at", "")
+        if any(x is None for x in (o, h, lo, c, v)) or not ts:
+            continue
+        candles.append({
+            "timestamp": str(ts),
+            "open": o,
+            "high": h,
+            "low": lo,
+            "close": c,
+            "volume": v,
+        })
+    return candles
+
+
+def _get_chart_structure(
+    symbol: str,
+    source_event_id: str | None = None,
+    limit: int = 100,
+) -> dict:
+    """Fetch market_data signal events for *symbol*, adapt to candles, run engine.
+
+    Returns an advisory-only chart structure report. Never places orders.
+    Safety invariants are always present in the returned dict.
+    """
+    _safe_base = {
+        "advisory_status": _ADVISORY_STATUS,
+        "execution_gate": "LOCKED",
+        "human_review_required": True,
+        "ai_execution_count": _AI_EXECUTION_COUNT,
+        "broker_api_called": False,
+        "broker_order_id": "NONE",
+    }
+    try:
+        try:
+            from scripts.persistence import get_signal_events
+        except ModuleNotFoundError:
+            from persistence import get_signal_events  # type: ignore
+
+        try:
+            from scripts.chart_structure_engine import analyze_chart_structure
+        except ModuleNotFoundError:
+            from chart_structure_engine import analyze_chart_structure  # type: ignore
+
+        symbol_upper = symbol.strip().upper()
+        all_events = get_signal_events(source_name="market_data", limit=limit)
+
+        events = [
+            ev for ev in all_events
+            if (
+                ev.get("raw_payload")
+                if isinstance(ev.get("raw_payload"), dict)
+                else {}
+            ).get("symbol", "").upper() == symbol_upper
+        ]
+
+        linked_event_id: str | None = None
+        if source_event_id:
+            matched = [ev for ev in events if ev.get("event_id") == source_event_id]
+            if not matched:
+                broader = get_signal_events(limit=limit * 5)
+                matched = [ev for ev in broader if ev.get("event_id") == source_event_id]
+            if matched:
+                linked_event_id = matched[0].get("event_id")
+
+        candles = _candles_from_market_events(events)
+
+        if not candles:
+            return {
+                **_safe_base,
+                "symbol": symbol_upper,
+                "source_event_id": linked_event_id,
+                "candle_count": 0,
+                "chart_state": "INSUFFICIENT_DATA",
+                "advisory_summary": (
+                    "No OHLCV candle data available for this symbol. "
+                    "Run market_data ingestion first: "
+                    "python scripts/run_live_sources_phase2.py --source market_data --write"
+                ),
+                "report": None,
+            }
+
+        report = analyze_chart_structure(
+            candles, symbol=symbol_upper, source="market_data"
+        )
+        report_dict = report.to_dict()
+
+        return {
+            **_safe_base,
+            "symbol": symbol_upper,
+            "source_event_id": linked_event_id,
+            "candle_count": len(candles),
+            "report": report_dict,
+        }
+
+    except Exception as exc:
+        return {
+            **_safe_base,
+            "symbol": symbol,
+            "source_event_id": source_event_id,
+            "candle_count": 0,
+            "chart_state": "ERROR",
+            "error": str(exc),
+            "report": None,
+        }
+
 
 _CSV_MEDIA_TYPE = "text/csv; charset=utf-8"
 _ADVISORY_STATUS = "ADVISORY_ONLY"
@@ -365,6 +494,20 @@ def get_source_health() -> dict:
 @app.get("/live-signals")
 def get_live_signals(source: str | None = None, limit: int = 100) -> dict:
     return _get_live_signals(source_name=source, limit=limit)
+
+
+# ---------------------------------------------------------------------------
+# Chart structure (Phase D.3) — advisory-only, read-only, no execution
+# ---------------------------------------------------------------------------
+
+
+@app.get("/chart-structure")
+def get_chart_structure(
+    symbol: str,
+    source_event_id: str | None = None,
+    limit: int = 100,
+) -> dict:
+    return _get_chart_structure(symbol=symbol, source_event_id=source_event_id, limit=limit)
 
 
 # ---------------------------------------------------------------------------
