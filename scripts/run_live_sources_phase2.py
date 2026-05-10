@@ -12,6 +12,9 @@ Usage
   python scripts/run_live_sources_phase2.py --source grok_xai --dry-run --json
   python scripts/run_live_sources_phase2.py --source grok_xai --write
   python scripts/run_live_sources_phase2.py --source grok_xai --grok-query "What macro themes dominate?" --dry-run
+  python scripts/run_live_sources_phase2.py --source market_data --dry-run --json
+  python scripts/run_live_sources_phase2.py --source market_data --write
+  python scripts/run_live_sources_phase2.py --source market_data --symbols AAPL,MSFT,BTC-USD --period 5d --dry-run
 
 Optional flags (NewsAPI)
 ------------------------
@@ -37,6 +40,13 @@ Optional flags (Grok/xAI)
   --grok-max-items <N>      Max interpretation items per call (default: 1).
   --grok-model <model>      xAI model name (default: grok-beta).
 
+Optional flags (Market Data — Phase C.5)
+-----------------------------------------
+  --symbols <sym>           Comma-separated ticker symbols (default: SPY,QQQ,GLD,TLT).
+  --period <period>         yfinance history period (default: 5d). E.g. 1d, 5d, 1mo.
+  --interval <interval>     yfinance bar interval (default: 1d). E.g. 1h, 1d, 1wk.
+  --market-provider <prov>  Data provider (default: yahoo). Paid providers skip cleanly.
+
 Common flags
 ------------
   --json                    Output full report as JSON.
@@ -50,6 +60,8 @@ Safety
   ETHERSCAN_API_KEY env var must be set; missing key or address skips Etherscan cleanly.
   XAI_API_KEY env var must be set; missing key skips Grok/xAI cleanly.
   Grok/xAI output is hypothesis/interpretation only, never truth.
+  Market data is read-only price confirmation; no execution path exists.
+  yfinance skips cleanly if the package is unavailable.
 """
 from __future__ import annotations
 
@@ -64,21 +76,24 @@ if str(_REPO_ROOT) not in sys.path:
 
 from scripts.live_source_runner_phase2 import run_phase2  # noqa: E402
 
-_SUPPORTED_SOURCES = ["newsapi", "event_registry", "etherscan", "grok_xai"]
+_SUPPORTED_SOURCES = ["newsapi", "event_registry", "etherscan", "grok_xai", "market_data"]
 
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
             "Phase 2 live source ingestion — "
-            "NewsAPI, Event Registry, Etherscan, and Grok/xAI interpretation."
+            "NewsAPI, Event Registry, Etherscan, Grok/xAI, and Market Data (Phase C.5)."
         )
     )
     parser.add_argument(
         "--source",
         required=True,
         choices=_SUPPORTED_SOURCES,
-        help="Source to run. Supported: newsapi, event_registry, etherscan, grok_xai.",
+        help=(
+            "Source to run. Supported: newsapi, event_registry, "
+            "etherscan, grok_xai, market_data."
+        ),
     )
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument(
@@ -172,6 +187,34 @@ def _parse_args() -> argparse.Namespace:
         help="xAI model name (default: grok-beta).",
     )
     parser.add_argument(
+        "--symbols",
+        default=None,
+        metavar="SYMBOLS",
+        help=(
+            "Comma-separated ticker symbols for market_data "
+            "(default: SPY,QQQ,GLD,TLT). E.g. AAPL,MSFT,RELIANCE.NS,BTC-USD,ETH-USD."
+        ),
+    )
+    parser.add_argument(
+        "--period",
+        default="5d",
+        metavar="PERIOD",
+        help="yfinance history period for market_data (default: 5d). E.g. 1d, 5d, 1mo.",
+    )
+    parser.add_argument(
+        "--interval",
+        default="1d",
+        metavar="INTERVAL",
+        help="yfinance bar interval for market_data (default: 1d). E.g. 1h, 1d, 1wk.",
+    )
+    parser.add_argument(
+        "--market-provider",
+        default="yahoo",
+        dest="market_provider",
+        metavar="PROVIDER",
+        help="Market data provider (default: yahoo). Paid providers skip cleanly.",
+    )
+    parser.add_argument(
         "--json",
         action="store_true",
         dest="output_json",
@@ -185,6 +228,11 @@ def main() -> int:
     dry_run: bool = args.dry_run
 
     er_keywords = [kw.strip() for kw in args.er_keywords.split(",") if kw.strip()]
+    market_symbols = (
+        [s.strip() for s in args.symbols.split(",") if s.strip()]
+        if args.symbols
+        else None
+    )
 
     if not args.output_json:
         print(f"[Phase 2 Source Runner] mode={'dry-run' if dry_run else 'write'}")
@@ -192,6 +240,8 @@ def main() -> int:
         print("  Advisory policy: ADVISORY_ONLY | HUMAN_ONLY | AI_EXECUTION=0 | BROKER_API=false")
         if args.source == "grok_xai":
             print("  Grok/xAI: interpretation only — hypothesis, not truth")
+        if args.source == "market_data":
+            print("  Market data: read-only price confirmation — no execution path")
         print()
 
     report = run_phase2(
@@ -208,6 +258,10 @@ def main() -> int:
         grok_query=args.grok_query,
         grok_max_items=args.grok_max_items,
         grok_model=args.grok_model,
+        market_data_tickers=market_symbols,
+        market_data_period=args.period,
+        market_data_interval=args.interval,
+        market_data_provider=args.market_provider,
         sources=[args.source],
     )
 

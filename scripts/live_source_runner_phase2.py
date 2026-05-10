@@ -39,6 +39,7 @@ try:
     from scripts.ingestion.event_registry_loader import EventRegistryLoader
     from scripts.ingestion.etherscan_loader import EtherscanLoader
     from scripts.ingestion.grok_interpreter import GrokInterpreter
+    from scripts.ingestion.market_data_loader import MarketDataLoader
     from scripts.ingestion.base_loader import LoaderResult, SkipLoader
 except ModuleNotFoundError:
     from runtime_common import utc_timestamp  # type: ignore[no-redef]
@@ -46,6 +47,7 @@ except ModuleNotFoundError:
     from ingestion.event_registry_loader import EventRegistryLoader  # type: ignore[no-redef]
     from ingestion.etherscan_loader import EtherscanLoader  # type: ignore[no-redef]
     from ingestion.grok_interpreter import GrokInterpreter  # type: ignore[no-redef]
+    from ingestion.market_data_loader import MarketDataLoader  # type: ignore[no-redef]
     from ingestion.base_loader import LoaderResult, SkipLoader  # type: ignore[no-redef]
 
 _ADVISORY_STATUS = "ADVISORY_ONLY"
@@ -205,6 +207,51 @@ def _normalize_etherscan_record(rec: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _normalize_market_data_record(rec: dict[str, Any]) -> dict[str, Any]:
+    symbol = str(rec.get("symbol") or rec.get("ticker") or "").upper()
+    ts = str(rec.get("timestamp", ""))
+    provider = str(rec.get("provider") or "yahoo")
+    latest_price = rec.get("latest_price") if rec.get("latest_price") is not None else rec.get("close")
+
+    title_parts = [symbol or "MARKET"]
+    if latest_price is not None:
+        try:
+            title_parts.append(f"@ {float(latest_price):.4f}")
+        except (TypeError, ValueError):
+            pass
+    if provider:
+        title_parts.append(f"({provider})")
+
+    return {
+        "event_id": _stable_event_id("market_data", symbol, ts),
+        "source_name": "market_data",
+        "signal_type": "market_price",
+        "title": " ".join(title_parts),
+        "symbol": symbol,
+        "provider": provider,
+        "period": rec.get("period"),
+        "interval": rec.get("interval"),
+        "latest_price": latest_price,
+        "previous_close": rec.get("previous_close"),
+        "price_change": rec.get("price_change"),
+        "price_change_pct": rec.get("price_change_pct"),
+        "volume": rec.get("volume"),
+        "average_volume": rec.get("average_volume"),
+        "volume_change_ratio": rec.get("volume_change_ratio"),
+        "high": rec.get("high"),
+        "low": rec.get("low"),
+        "open": rec.get("open"),
+        "close": rec.get("close"),
+        "timestamp": ts,
+        "market_confirmation_score": rec.get("market_confirmation_score", 0.0),
+        "advisory_status": _ADVISORY_STATUS,
+        "human_review_required": True,
+        "execution_gate": _EXECUTION_GATE,
+        "ai_execution_count": _AI_EXECUTION_COUNT,
+        "broker_api_called": _BROKER_API_CALLED,
+    }
+
+
 def _normalize_grok_record(rec: dict[str, Any]) -> dict[str, Any]:
     created_at = str(rec.get("created_at", ""))
     prompt = str(rec.get("source_prompt", ""))
@@ -236,6 +283,7 @@ _NORMALIZERS: dict[str, Any] = {
     "event_registry": _normalize_event_registry_record,
     "etherscan": _normalize_etherscan_record,
     "grok_xai": _normalize_grok_record,
+    "market_data": _normalize_market_data_record,
 }
 
 
@@ -337,10 +385,15 @@ def run_phase2(
     grok_query: str | None = None,
     grok_max_items: int = _GROK_MAX_ITEMS,
     grok_model: str = "grok-beta",
+    market_data_tickers: list[str] | None = None,
+    market_data_period: str = "5d",
+    market_data_interval: str = "1d",
+    market_data_provider: str = "yahoo",
     sources: list[str] | None = None,
 ) -> Phase2RunReport:
     """
-    Run Phase 2 live source ingestion: NewsAPI, Event Registry, Etherscan, and Grok/xAI.
+    Run Phase 2 live source ingestion: NewsAPI, Event Registry, Etherscan, Grok/xAI,
+    and Market Data (Phase C.5, read-only price confirmation).
 
     Parameters
     ----------
@@ -355,9 +408,18 @@ def run_phase2(
         Maximum interpretation items to request per call (default 1).
     grok_model:
         xAI model name (default "grok-beta").
+    market_data_tickers:
+        List of ticker symbols (e.g. ["SPY", "AAPL", "BTC-USD"]). Defaults to
+        ["SPY", "QQQ", "GLD", "TLT"] when None.
+    market_data_period:
+        yfinance history period (default "5d").
+    market_data_interval:
+        yfinance bar interval (default "1d").
+    market_data_provider:
+        Data provider — only "yahoo" is active; paid-provider names skip cleanly.
     sources:
         Subset of Phase 2 sources to run. Defaults to ["newsapi"].
-        Missing API keys skip cleanly.
+        Missing API keys / unavailable dependencies skip cleanly.
     """
     if sources is None:
         sources = ["newsapi"]
@@ -391,6 +453,12 @@ def run_phase2(
             model=grok_model,
             max_items=grok_max_items,
             timeout=_GROK_TIMEOUT,
+        ),
+        "market_data": MarketDataLoader(
+            tickers=market_data_tickers,
+            period=market_data_period,
+            interval=market_data_interval,
+            provider=market_data_provider,
         ),
     }
 
@@ -448,6 +516,7 @@ __all__ = [
     "_normalize_event_registry_record",
     "_normalize_etherscan_record",
     "_normalize_grok_record",
+    "_normalize_market_data_record",
     "_persist_events",
     "_log_run",
 ]

@@ -15,6 +15,7 @@ const SOURCE_OPTIONS: { value: '' | LiveSignalSource; label: string }[] = [
   { value: 'event_registry', label: 'Event Registry' },
   { value: 'etherscan', label: 'Etherscan' },
   { value: 'grok_xai', label: 'Grok/xAI' },
+  { value: 'market_data', label: 'Market Data' },
 ];
 
 const SOURCE_COLORS: Record<string, string> = {
@@ -25,6 +26,7 @@ const SOURCE_COLORS: Record<string, string> = {
   event_registry: 'text-teal-400 bg-teal-900/30 border-teal-700/40',
   etherscan: 'text-orange-400 bg-orange-900/30 border-orange-700/40',
   grok_xai: 'text-indigo-400 bg-indigo-900/30 border-indigo-700/40',
+  market_data: 'text-blue-400 bg-blue-900/30 border-blue-700/40',
 };
 
 const SOURCE_LABELS: Record<string, string> = {
@@ -35,6 +37,7 @@ const SOURCE_LABELS: Record<string, string> = {
   event_registry: 'Event Registry',
   etherscan: 'Etherscan',
   grok_xai: 'Grok/xAI',
+  market_data: 'Market Data',
 };
 
 function getTitle(ev: LiveSignalEvent): string {
@@ -97,6 +100,19 @@ function getSubtitle(ev: LiveSignalEvent): string {
     if (p.created_at) parts.push(`At: ${p.created_at as string}`);
     return parts.join(' · ');
   }
+  if (ev.source_name === 'market_data') {
+    const parts: string[] = [];
+    if (p.symbol) parts.push(String(p.symbol));
+    if (p.latest_price != null) parts.push(`$${Number(p.latest_price).toFixed(2)}`);
+    if (p.price_change_pct != null) {
+      const pct = Number(p.price_change_pct);
+      parts.push(`${pct >= 0 ? '+' : ''}${pct.toFixed(2)}%`);
+    }
+    if (p.volume != null) parts.push(`Vol: ${Number(p.volume).toLocaleString()}`);
+    if (p.market_confirmation_score != null) parts.push(`Score: ${Number(p.market_confirmation_score).toFixed(2)}`);
+    if (p.provider) parts.push(`(${p.provider as string})`);
+    return parts.join(' · ');
+  }
   return ev.event_id;
 }
 
@@ -129,6 +145,10 @@ function matchesSearch(ev: LiveSignalEvent, query: string): boolean {
     p.summary_text,
     p.source_prompt,
     p.model_name,
+    p.symbol,
+    p.provider,
+    p.period,
+    p.interval,
   ]
     .filter(Boolean)
     .some((v) => String(v).toLowerCase().includes(q));
@@ -256,7 +276,7 @@ export default function LiveSignalsPage() {
         <div>
           <h1 className="text-xl font-bold text-white">Live Signals</h1>
           <p className="text-sm text-slate-500 mt-0.5">
-            Real-time ingestion from Polymarket, GDELT, SEC EDGAR, NewsAPI, Event Registry, Etherscan, and Grok/xAI — advisory only
+            Real-time ingestion from Polymarket, GDELT, SEC EDGAR, NewsAPI, Event Registry, Etherscan, Grok/xAI, and Market Data — advisory only
           </p>
         </div>
         <div className="flex items-center gap-2">

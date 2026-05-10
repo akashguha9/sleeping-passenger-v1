@@ -218,7 +218,7 @@ export interface DbStatusResponse {
   generated_at: string;
 }
 
-export type LiveSignalSource = 'polymarket' | 'gdelt' | 'sec_edgar' | 'newsapi' | 'event_registry' | 'etherscan' | 'grok_xai';
+export type LiveSignalSource = 'polymarket' | 'gdelt' | 'sec_edgar' | 'newsapi' | 'event_registry' | 'etherscan' | 'grok_xai' | 'market_data';
 
 export interface LiveSignalRawPayload {
   event_id?: string;
@@ -267,6 +267,22 @@ export interface LiveSignalRawPayload {
   summary_text?: string;
   grok_response?: string;
   created_at?: string;
+  // market_data (Phase C.5 — read-only price confirmation, no execution)
+  symbol?: string;
+  provider?: string;
+  period?: string;
+  interval?: string;
+  latest_price?: number | null;
+  previous_close?: number | null;
+  price_change?: number | null;
+  price_change_pct?: number | null;
+  average_volume?: number | null;
+  volume_change_ratio?: number | null;
+  high?: number | null;
+  low?: number | null;
+  open?: number | null;
+  close?: number | null;
+  market_confirmation_score?: number | null;
   [key: string]: unknown;
 }
 
