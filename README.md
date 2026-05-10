@@ -805,3 +805,109 @@ python scripts/phase_c_final_audit.py --verbose
 - `broker_order_id = NONE` always.
 - `execution_gate = LOCKED` on every signal event.
 - No `.env` contains broker credentials. No broker API is imported.
+
+## Local Auto-Start, 5-Minute Refresh, and sleepingpassenger URL
+
+These Windows helper scripts auto-start the full local advisory MVP stack at logon, refresh live signals every 5 minutes, and serve the frontend at `http://sleepingpassenger`.
+
+**Local-only setup.** This uses a Windows hosts-file alias pointing `sleepingpassenger` at `127.0.0.1`. It does not configure public DNS, cloud hosting, or internet access.
+
+### One-time setup
+
+**1. Add local host aliases (requires Administrator):**
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\windows\add_sleepingpassenger_host_alias.ps1
+```
+
+Adds to `C:\Windows\System32\drivers\etc\hosts`:
+
+```
+127.0.0.1 sleepingpassenger
+127.0.0.1 sleepingpassenger.local
+```
+
+**2. Register startup task (runs at logon):**
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\windows\register_mvp_startup_task.ps1
+```
+
+Registers Windows Scheduled Task `PipelineV57LocalMVP` to launch `start_mvp_stack.ps1` at user logon with highest privileges (required for the port-80 proxy).
+
+### Manual run
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\windows\start_mvp_stack.ps1
+```
+
+Opens four separate PowerShell windows:
+
+| Window | Command | URL |
+|---|---|---|
+| Backend | `uvicorn scripts.api_server:app --reload` | `http://localhost:8000` |
+| Frontend | `npm run dev` (in `frontend/`) | `http://localhost:3000` |
+| Poller | `poll_live_sources.ps1` | runs every 300 s |
+| Proxy | `start_sleepingpassenger_proxy.ps1` | port 80 → port 3000 |
+
+### URLs
+
+| URL | Notes |
+|---|---|
+| `http://sleepingpassenger` | Requires host alias + port-80 proxy (Administrator) |
+| `http://sleepingpassenger.local` | Requires host alias + port-80 proxy (Administrator) |
+| `http://localhost:3000` | Direct frontend — always available, no proxy needed |
+| `http://localhost:8000` | Backend API |
+| `http://localhost:8000/docs` | API docs (Swagger UI) |
+
+Backend remains `http://localhost:8000` in all cases.
+
+### Stop / unregister
+
+```powershell
+# Unregister the startup task:
+powershell -ExecutionPolicy Bypass -File scripts\windows\unregister_mvp_startup_task.ps1
+
+# Remove host aliases (requires Administrator):
+powershell -ExecutionPolicy Bypass -File scripts\windows\remove_sleepingpassenger_host_alias.ps1
+```
+
+### Logs
+
+All logs write to `runtime/logs/` (gitignored):
+
+| File | Content |
+|---|---|
+| `runtime/logs/live_source_poller.log` | Timestamped poller runs (polymarket, gdelt, market_data) |
+| `runtime/logs/sleepingpassenger_proxy.log` | Reverse proxy activity and errors |
+
+### Port 80 and Administrator privileges
+
+The reverse proxy (`local_frontend_reverse_proxy.py`) binds port 80 so the frontend is reachable at `http://sleepingpassenger` without a port number. On Windows, port 80 requires Administrator or a `netsh` port-sharing rule. If the proxy cannot bind, it prints a clear message and you can use `http://localhost:3000` instead.
+
+The startup task runs with highest privileges so the proxy can bind port 80 at logon.
+
+### Scripts added
+
+| Script | Purpose |
+|---|---|
+| `scripts/windows/start_mvp_stack.ps1` | Launch all four processes |
+| `scripts/windows/poll_live_sources.ps1` | 300-second advisory signal poller |
+| `scripts/windows/register_mvp_startup_task.ps1` | Register logon auto-start task |
+| `scripts/windows/unregister_mvp_startup_task.ps1` | Remove logon auto-start task |
+| `scripts/windows/add_sleepingpassenger_host_alias.ps1` | Add hosts-file aliases |
+| `scripts/windows/remove_sleepingpassenger_host_alias.ps1` | Remove hosts-file aliases |
+| `scripts/windows/start_sleepingpassenger_proxy.ps1` | Start port-80 reverse proxy |
+| `scripts/windows/local_frontend_reverse_proxy.py` | Python HTTP reverse proxy (stdlib only) |
+
+### Safety invariant
+
+The poller runs only these advisory/read-only commands — no broker API, no order placement:
+
+```powershell
+python scripts\run_live_sources_phase1.py --source polymarket --write
+python scripts\run_live_sources_phase1.py --source gdelt --write
+python scripts\run_live_sources_phase2.py --source market_data --write
+```
+
+`advisory_status = ADVISORY_ONLY` on every ingested record.
