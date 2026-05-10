@@ -9,6 +9,9 @@ Usage
   python scripts/run_live_sources_phase2.py --source event_registry --write
   python scripts/run_live_sources_phase2.py --source etherscan --address 0xABCD... --dry-run --json
   python scripts/run_live_sources_phase2.py --source etherscan --address 0xABCD... --write
+  python scripts/run_live_sources_phase2.py --source grok_xai --dry-run --json
+  python scripts/run_live_sources_phase2.py --source grok_xai --write
+  python scripts/run_live_sources_phase2.py --source grok_xai --grok-query "What macro themes dominate?" --dry-run
 
 Optional flags (NewsAPI)
 ------------------------
@@ -28,6 +31,12 @@ Optional flags (Etherscan)
   --max-transactions <N>    Max transactions to fetch (default: 25).
   --chain <chain>           Chain name (default: ethereum). Currently only ethereum is supported.
 
+Optional flags (Grok/xAI)
+--------------------------
+  --grok-query <query>      Custom prompt for Grok/xAI interpretation. Uses built-in default if omitted.
+  --grok-max-items <N>      Max interpretation items per call (default: 1).
+  --grok-model <model>      xAI model name (default: grok-beta).
+
 Common flags
 ------------
   --json                    Output full report as JSON.
@@ -39,6 +48,8 @@ Safety
   NEWS_API_KEY env var must be set; missing key skips NewsAPI cleanly.
   EVENT_REGISTRY_API_KEY env var must be set; missing key skips Event Registry cleanly.
   ETHERSCAN_API_KEY env var must be set; missing key or address skips Etherscan cleanly.
+  XAI_API_KEY env var must be set; missing key skips Grok/xAI cleanly.
+  Grok/xAI output is hypothesis/interpretation only, never truth.
 """
 from __future__ import annotations
 
@@ -53,18 +64,21 @@ if str(_REPO_ROOT) not in sys.path:
 
 from scripts.live_source_runner_phase2 import run_phase2  # noqa: E402
 
-_SUPPORTED_SOURCES = ["newsapi", "event_registry", "etherscan"]
+_SUPPORTED_SOURCES = ["newsapi", "event_registry", "etherscan", "grok_xai"]
 
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Phase 2 live source ingestion — NewsAPI, Event Registry, and Etherscan."
+        description=(
+            "Phase 2 live source ingestion — "
+            "NewsAPI, Event Registry, Etherscan, and Grok/xAI interpretation."
+        )
     )
     parser.add_argument(
         "--source",
         required=True,
         choices=_SUPPORTED_SOURCES,
-        help="Source to run. Supported: newsapi, event_registry, etherscan.",
+        help="Source to run. Supported: newsapi, event_registry, etherscan, grok_xai.",
     )
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument(
@@ -136,6 +150,28 @@ def _parse_args() -> argparse.Namespace:
         help="Chain for Etherscan (default: ethereum). Currently only ethereum is supported.",
     )
     parser.add_argument(
+        "--grok-query",
+        default=None,
+        dest="grok_query",
+        metavar="QUERY",
+        help="Custom prompt for Grok/xAI interpretation. Uses built-in default if omitted.",
+    )
+    parser.add_argument(
+        "--grok-max-items",
+        type=int,
+        default=1,
+        dest="grok_max_items",
+        metavar="N",
+        help="Max interpretation items per Grok call (default: 1).",
+    )
+    parser.add_argument(
+        "--grok-model",
+        default="grok-beta",
+        dest="grok_model",
+        metavar="MODEL",
+        help="xAI model name (default: grok-beta).",
+    )
+    parser.add_argument(
         "--json",
         action="store_true",
         dest="output_json",
@@ -154,6 +190,8 @@ def main() -> int:
         print(f"[Phase 2 Source Runner] mode={'dry-run' if dry_run else 'write'}")
         print(f"  Sources: {args.source}")
         print("  Advisory policy: ADVISORY_ONLY | HUMAN_ONLY | AI_EXECUTION=0 | BROKER_API=false")
+        if args.source == "grok_xai":
+            print("  Grok/xAI: interpretation only — hypothesis, not truth")
         print()
 
     report = run_phase2(
@@ -167,6 +205,9 @@ def main() -> int:
         etherscan_address=args.address,
         etherscan_max_transactions=args.max_transactions,
         etherscan_chain=args.chain,
+        grok_query=args.grok_query,
+        grok_max_items=args.grok_max_items,
+        grok_model=args.grok_model,
         sources=[args.source],
     )
 

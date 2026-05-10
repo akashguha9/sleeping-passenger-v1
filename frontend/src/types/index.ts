@@ -218,7 +218,7 @@ export interface DbStatusResponse {
   generated_at: string;
 }
 
-export type LiveSignalSource = 'polymarket' | 'gdelt' | 'sec_edgar' | 'newsapi' | 'event_registry' | 'etherscan';
+export type LiveSignalSource = 'polymarket' | 'gdelt' | 'sec_edgar' | 'newsapi' | 'event_registry' | 'etherscan' | 'grok_xai';
 
 export interface LiveSignalRawPayload {
   event_id?: string;
@@ -257,6 +257,16 @@ export interface LiveSignalRawPayload {
   block_number?: string;
   timestamp?: string;
   gas_used?: string;
+  // grok_xai
+  interpreted_topic?: string;
+  narrative_frame?: string;
+  contradiction_flags?: string[];
+  confidence_score?: number | null;
+  source_prompt?: string;
+  model_name?: string;
+  summary_text?: string;
+  grok_response?: string;
+  created_at?: string;
   [key: string]: unknown;
 }
 

@@ -14,6 +14,7 @@ const SOURCE_OPTIONS: { value: '' | LiveSignalSource; label: string }[] = [
   { value: 'newsapi', label: 'NewsAPI' },
   { value: 'event_registry', label: 'Event Registry' },
   { value: 'etherscan', label: 'Etherscan' },
+  { value: 'grok_xai', label: 'Grok/xAI' },
 ];
 
 const SOURCE_COLORS: Record<string, string> = {
@@ -23,6 +24,7 @@ const SOURCE_COLORS: Record<string, string> = {
   newsapi: 'text-emerald-400 bg-emerald-900/30 border-emerald-700/40',
   event_registry: 'text-teal-400 bg-teal-900/30 border-teal-700/40',
   etherscan: 'text-orange-400 bg-orange-900/30 border-orange-700/40',
+  grok_xai: 'text-indigo-400 bg-indigo-900/30 border-indigo-700/40',
 };
 
 const SOURCE_LABELS: Record<string, string> = {
@@ -32,6 +34,7 @@ const SOURCE_LABELS: Record<string, string> = {
   newsapi: 'NewsAPI',
   event_registry: 'Event Registry',
   etherscan: 'Etherscan',
+  grok_xai: 'Grok/xAI',
 };
 
 function getTitle(ev: LiveSignalEvent): string {
@@ -86,6 +89,14 @@ function getSubtitle(ev: LiveSignalEvent): string {
     if (p.block_number) parts.push(`Block: ${p.block_number}`);
     return parts.join(' · ');
   }
+  if (ev.source_name === 'grok_xai') {
+    const parts: string[] = [];
+    if (p.narrative_frame) parts.push(`Frame: ${p.narrative_frame as string}`);
+    if (p.confidence_score != null) parts.push(`Confidence: ${Number(p.confidence_score).toFixed(2)}`);
+    if (p.model_name) parts.push(`Model: ${p.model_name as string}`);
+    if (p.created_at) parts.push(`At: ${p.created_at as string}`);
+    return parts.join(' · ');
+  }
   return ev.event_id;
 }
 
@@ -113,6 +124,11 @@ function matchesSearch(ev: LiveSignalEvent, query: string): boolean {
     p.from_address,
     p.to_address,
     p.block_number,
+    p.interpreted_topic,
+    p.narrative_frame,
+    p.summary_text,
+    p.source_prompt,
+    p.model_name,
   ]
     .filter(Boolean)
     .some((v) => String(v).toLowerCase().includes(q));
@@ -240,7 +256,7 @@ export default function LiveSignalsPage() {
         <div>
           <h1 className="text-xl font-bold text-white">Live Signals</h1>
           <p className="text-sm text-slate-500 mt-0.5">
-            Real-time ingestion from Polymarket, GDELT, SEC EDGAR, NewsAPI, Event Registry, and Etherscan — advisory only
+            Real-time ingestion from Polymarket, GDELT, SEC EDGAR, NewsAPI, Event Registry, Etherscan, and Grok/xAI — advisory only
           </p>
         </div>
         <div className="flex items-center gap-2">

@@ -1,5 +1,6 @@
 """
-Phase 2 Live Source Runner — read-only ingestion for NewsAPI, Event Registry, and Etherscan.
+Phase 2 Live Source Runner — read-only ingestion for NewsAPI, Event Registry,
+Etherscan, and Grok/xAI interpretation.
 
 Safety contract
 ---------------
@@ -14,12 +15,15 @@ Safety contract
 - NewsAPI skips cleanly when NEWS_API_KEY env var is unset.
 - Event Registry skips cleanly when EVENT_REGISTRY_API_KEY env var is unset.
 - Etherscan skips cleanly when ETHERSCAN_API_KEY env var is unset or no address given.
+- Grok/xAI skips cleanly when XAI_API_KEY env var is unset.
+- Grok/xAI output is hypothesis/interpretation only, never truth.
 
 Rate-limit-safe defaults
 ------------------------
 - NewsAPI: 20 articles per call, 15 s timeout
 - Event Registry: 20 articles per call, 15 s timeout
 - Etherscan: 25 transactions per call, 15 s timeout
+- Grok/xAI: 1 interpretation per call, 30 s timeout
 - Up to 2 retries on transient network errors, 2 s back-off
 """
 from __future__ import annotations
@@ -34,12 +38,14 @@ try:
     from scripts.ingestion.newsapi_loader import NewsAPILoader
     from scripts.ingestion.event_registry_loader import EventRegistryLoader
     from scripts.ingestion.etherscan_loader import EtherscanLoader
+    from scripts.ingestion.grok_interpreter import GrokInterpreter
     from scripts.ingestion.base_loader import LoaderResult, SkipLoader
 except ModuleNotFoundError:
     from runtime_common import utc_timestamp  # type: ignore[no-redef]
     from ingestion.newsapi_loader import NewsAPILoader  # type: ignore[no-redef]
     from ingestion.event_registry_loader import EventRegistryLoader  # type: ignore[no-redef]
     from ingestion.etherscan_loader import EtherscanLoader  # type: ignore[no-redef]
+    from ingestion.grok_interpreter import GrokInterpreter  # type: ignore[no-redef]
     from ingestion.base_loader import LoaderResult, SkipLoader  # type: ignore[no-redef]
 
 _ADVISORY_STATUS = "ADVISORY_ONLY"
@@ -50,7 +56,9 @@ _BROKER_API_CALLED = False
 _NEWSAPI_MAX_ARTICLES = 20
 _ER_MAX_ARTICLES = 20
 _ETHERSCAN_MAX_TRANSACTIONS = 25
+_GROK_MAX_ITEMS = 1
 _DEFAULT_TIMEOUT = 15
+_GROK_TIMEOUT = 30
 _MAX_RETRIES = 2
 _RETRY_BACKOFF_S = 2.0
 
@@ -197,10 +205,37 @@ def _normalize_etherscan_record(rec: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _normalize_grok_record(rec: dict[str, Any]) -> dict[str, Any]:
+    created_at = str(rec.get("created_at", ""))
+    prompt = str(rec.get("source_prompt", ""))
+    topic = str(rec.get("interpreted_topic", ""))
+    return {
+        "event_id": _stable_event_id("grok_xai", prompt, created_at),
+        "source_name": "grok_xai",
+        "signal_type": "ai_interpretation",
+        "title": topic or "Grok Market Interpretation",
+        "model_name": str(rec.get("model_name", "")),
+        "source_prompt": prompt,
+        "interpreted_topic": topic,
+        "narrative_frame": str(rec.get("narrative_frame", "")),
+        "contradiction_flags": rec.get("contradiction_flags", []),
+        "confidence_score": rec.get("confidence_score"),
+        "summary_text": str(rec.get("summary_text", "")),
+        "grok_response": str(rec.get("grok_response", "")),
+        "created_at": created_at,
+        "advisory_status": _ADVISORY_STATUS,
+        "human_review_required": True,
+        "execution_gate": _EXECUTION_GATE,
+        "ai_execution_count": _AI_EXECUTION_COUNT,
+        "broker_api_called": _BROKER_API_CALLED,
+    }
+
+
 _NORMALIZERS: dict[str, Any] = {
     "newsapi": _normalize_newsapi_record,
     "event_registry": _normalize_event_registry_record,
     "etherscan": _normalize_etherscan_record,
+    "grok_xai": _normalize_grok_record,
 }
 
 
@@ -299,10 +334,13 @@ def run_phase2(
     etherscan_address: str | None = None,
     etherscan_max_transactions: int = _ETHERSCAN_MAX_TRANSACTIONS,
     etherscan_chain: str = "ethereum",
+    grok_query: str | None = None,
+    grok_max_items: int = _GROK_MAX_ITEMS,
+    grok_model: str = "grok-beta",
     sources: list[str] | None = None,
 ) -> Phase2RunReport:
     """
-    Run Phase 2 live source ingestion: NewsAPI, Event Registry, and Etherscan.
+    Run Phase 2 live source ingestion: NewsAPI, Event Registry, Etherscan, and Grok/xAI.
 
     Parameters
     ----------
@@ -311,14 +349,15 @@ def run_phase2(
         and do NOT write source_run_log entries.
     etherscan_address:
         Ethereum address to fetch transactions for. If None, Etherscan skips cleanly.
-    etherscan_max_transactions:
-        Maximum number of transactions to fetch (default 25).
-    etherscan_chain:
-        Chain name. Currently only "ethereum" is supported. Unknown chains fall back
-        to ethereum URL.
+    grok_query:
+        Custom prompt for Grok/xAI. Uses GrokInterpreter default if None.
+    grok_max_items:
+        Maximum interpretation items to request per call (default 1).
+    grok_model:
+        xAI model name (default "grok-beta").
     sources:
         Subset of Phase 2 sources to run. Defaults to ["newsapi"].
-        Pass ["etherscan"] or any combination. Missing API keys skip cleanly.
+        Missing API keys skip cleanly.
     """
     if sources is None:
         sources = ["newsapi"]
@@ -346,6 +385,12 @@ def run_phase2(
             address=etherscan_address,
             max_records=etherscan_max_transactions,
             base_url=etherscan_base_url,
+        ),
+        "grok_xai": GrokInterpreter(
+            prompt=grok_query,
+            model=grok_model,
+            max_items=grok_max_items,
+            timeout=_GROK_TIMEOUT,
         ),
     }
 
@@ -402,6 +447,7 @@ __all__ = [
     "_normalize_newsapi_record",
     "_normalize_event_registry_record",
     "_normalize_etherscan_record",
+    "_normalize_grok_record",
     "_persist_events",
     "_log_run",
 ]

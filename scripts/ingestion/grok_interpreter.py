@@ -2,11 +2,27 @@
 xAI Grok read-only interpreter — Phase 2 Global Signal Fabric.
 
 Requires XAI_API_KEY env var. Skips cleanly if missing.
-Returns structured textual observations from Grok as advisory signals.
+Returns structured interpretation observations from Grok as advisory signals.
 This module only reads/interprets — it never executes or places orders.
+
+Grok output is hypothesis/interpretation only, never truth.
+All outputs carry advisory_status="ADVISORY_ONLY", human_review_required=True,
+execution_gate="LOCKED", ai_execution_count=0, broker_api_called=False.
+
+Safety invariants
+-----------------
+- advisory_status must remain ADVISORY_ONLY.
+- human_review_required must remain true.
+- execution_gate must remain LOCKED.
+- ai_execution_count must remain 0.
+- broker_api_called must remain false.
+- No broker order path. No buy/sell/execute endpoint. No auto-trading.
+- No private-key, wallet, signing, transaction, approval, transfer, or broadcast logic.
 """
 from __future__ import annotations
 
+import json
+from datetime import datetime, timezone
 from typing import Any
 
 from scripts.ingestion.base_loader import BaseSourceLoader, LoaderResult, SkipLoader
@@ -14,11 +30,21 @@ from scripts.ingestion.base_loader import BaseSourceLoader, LoaderResult, SkipLo
 _XAI_BASE = "https://api.x.ai/v1/chat/completions"
 _TIMEOUT = 30
 _DEFAULT_MODEL = "grok-beta"
+_DEFAULT_MAX_ITEMS = 1
+
 _ADVISORY_SYSTEM_PROMPT = (
     "You are a read-only market observation assistant. "
     "Provide factual, observational summaries only. "
-    "Never recommend actions. "
-    "All outputs are advisory and require human review."
+    "Never recommend actions, trades, buy/sell signals, or execution of any kind. "
+    "All outputs are advisory hypotheses and require human review. "
+    "Respond ONLY with a valid JSON object (no markdown, no code blocks) "
+    "with these exact keys: "
+    '"interpreted_topic" (string — the main subject), '
+    '"narrative_frame" (string — the dominant narrative lens), '
+    '"contradiction_flags" (array of strings — any contradictions or uncertainties), '
+    '"confidence_score" (float 0.0 to 1.0 — your confidence in the interpretation), '
+    '"summary_text" (string — 2-3 sentence observational summary). '
+    "Do not include any text outside the JSON object."
 )
 
 
@@ -30,18 +56,21 @@ class GrokInterpreter(BaseSourceLoader):
         self,
         prompt: str | None = None,
         model: str = _DEFAULT_MODEL,
+        max_items: int = _DEFAULT_MAX_ITEMS,
         timeout: int = _TIMEOUT,
         base_url: str = _XAI_BASE,
     ) -> None:
         self._prompt = prompt or (
-            "Summarize current macro market conditions in 3 bullet points."
+            "Summarize current macro market conditions: identify the main theme, "
+            "the dominant narrative, any visible contradictions, and your confidence level."
         )
         self._model = model
+        self._max_items = max(1, max_items)
         self._timeout = timeout
         self._base_url = base_url
 
     def fetch(self) -> LoaderResult:
-        """Query xAI Grok for advisory market observations. Requires XAI_API_KEY."""
+        """Query xAI Grok for advisory interpretation. Requires XAI_API_KEY."""
         api_key = self._require_env_key("XAI_API_KEY")
 
         try:
@@ -70,16 +99,48 @@ class GrokInterpreter(BaseSourceLoader):
         except Exception as exc:
             raise SkipLoader(f"xAI Grok API unreachable: {exc}") from exc
 
-        content = ""
+        raw_content = ""
         choices = data.get("choices", []) if isinstance(data, dict) else []
         if choices and isinstance(choices[0], dict):
-            content = (choices[0].get("message") or {}).get("content", "")
+            raw_content = (choices[0].get("message") or {}).get("content", "")
 
-        rec: dict[str, Any] = {
-            "model": self._model,
-            "prompt": self._prompt,
-            "response": content,
-            "source": "grok_xai",
-        }
+        created_at = datetime.now(timezone.utc).isoformat()
+        rec = self._parse_grok_response(raw_content, created_at)
         self._stamp_record(rec)
         return LoaderResult(source_name=self.source_name, records=[rec])
+
+    def _parse_grok_response(self, raw_content: str, created_at: str) -> dict[str, Any]:
+        """Parse Grok JSON response; fall back gracefully on parse failure."""
+        interpreted_topic = ""
+        narrative_frame = ""
+        contradiction_flags: list[str] = []
+        confidence_score: float | None = None
+        summary_text = raw_content.strip()
+
+        if raw_content.strip():
+            try:
+                parsed = json.loads(raw_content.strip())
+                if isinstance(parsed, dict):
+                    interpreted_topic = str(parsed.get("interpreted_topic", ""))
+                    narrative_frame = str(parsed.get("narrative_frame", ""))
+                    cf = parsed.get("contradiction_flags", [])
+                    contradiction_flags = [str(f) for f in cf] if isinstance(cf, list) else []
+                    cs = parsed.get("confidence_score")
+                    if isinstance(cs, (int, float)):
+                        confidence_score = float(max(0.0, min(1.0, float(cs))))
+                    summary_text = str(parsed.get("summary_text", raw_content.strip()))
+            except (json.JSONDecodeError, ValueError):
+                pass
+
+        return {
+            "source": "grok_xai",
+            "model_name": self._model,
+            "source_prompt": self._prompt,
+            "interpreted_topic": interpreted_topic,
+            "narrative_frame": narrative_frame,
+            "contradiction_flags": contradiction_flags,
+            "confidence_score": confidence_score,
+            "summary_text": summary_text,
+            "grok_response": raw_content,
+            "created_at": created_at,
+        }
