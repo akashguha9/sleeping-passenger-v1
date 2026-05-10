@@ -1,17 +1,26 @@
 """
-Phase E.2 — Deterministic local OHLCV seed for chart structure demo.
+Phase E.2 — DEMO-ONLY deterministic OHLCV seed for offline chart structure demo.
 
-Generates 120 daily candles per symbol into the local SQLite DB
+*** THIS SCRIPT CREATES SYNTHETIC SAMPLE DATA, NOT REAL MARKET HISTORY. ***
+Candles are generated with a deterministic LCG random number generator seeded per
+symbol. They are NOT real historical prices and must NOT be used for any analysis,
+research, or decision-making beyond UI/demo purposes.
+
+For real historical OHLCV data use:
+    python scripts/backfill_ohlcv_history.py --symbols AAPL,GLD,TLT,BTC-USD,SPY --period max --interval 1d --write
+
+Generates 120 synthetic daily candles per symbol into the local SQLite DB
 (signal_events table, source_name='market_data').
+Event IDs: seed_ohlcv_{symbol}_{YYYY-MM-DD}  (distinct from real backfill IDs ohlcv_*)
 
-Idempotent: stable event IDs "seed_ohlcv_{symbol}_{YYYY-MM-DD}" combined with
-INSERT OR IGNORE ensure a second run inserts nothing new.
+Idempotent: stable event IDs combined with INSERT OR IGNORE ensure a second run
+inserts nothing new.
 
 No internet dependency. No broker logic. Advisory-only.
 
 Usage
 -----
-    python scripts/seed_chart_ohlcv_history.py --write   # persist to DB
+    python scripts/seed_chart_ohlcv_history.py --write   # persist demo data to DB
     python scripts/seed_chart_ohlcv_history.py           # dry-run, print JSON
 """
 from __future__ import annotations

@@ -793,6 +793,45 @@ def get_signal_events(
     return result
 
 
+def get_signal_events_for_symbol(
+    symbol: str,
+    source_name: str = "market_data",
+    limit: int = 200,
+    db_path: Path = DB_PATH,
+) -> list[dict[str, Any]]:
+    """Return signal events for a specific symbol, filtered via JSON payload field.
+
+    Uses SQLite json_extract to filter by raw_payload.symbol at the DB level.
+    This avoids the per-symbol cap issue when multiple symbols share source_name
+    and the table has many rows (e.g., after a full historical backfill).
+    """
+    conn = _get_conn(db_path)
+    try:
+        rows = conn.execute(
+            "SELECT * FROM signal_events"
+            " WHERE source_name = ?"
+            " AND json_extract(raw_payload, '$.symbol') = ?"
+            " ORDER BY fetched_at DESC LIMIT ?",
+            (source_name, symbol.upper(), limit),
+        ).fetchall()
+    finally:
+        conn.close()
+
+    result = []
+    for row in rows:
+        d = dict(row)
+        d["advisory_status"] = _ADVISORY_STATUS
+        d["ai_execution_count"] = _AI_EXECUTION_COUNT
+        if isinstance(d.get("human_review_required"), int):
+            d["human_review_required"] = bool(d["human_review_required"])
+        try:
+            d["raw_payload"] = json.loads(d["raw_payload"])
+        except (json.JSONDecodeError, TypeError):
+            pass
+        result.append(d)
+    return result
+
+
 # ---------------------------------------------------------------------------
 # Source run log (per-source ingestion health)
 # ---------------------------------------------------------------------------

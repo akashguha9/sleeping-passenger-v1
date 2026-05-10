@@ -910,6 +910,96 @@ The poller runs only these advisory/read-only commands — no broker API, no ord
 python scripts\run_live_sources_phase1.py --source polymarket --write
 python scripts\run_live_sources_phase1.py --source gdelt --write
 python scripts\run_live_sources_phase2.py --source market_data --write
+python scripts\update_ohlcv_latest.py --symbols AAPL,GLD,TLT,BTC-USD,SPY --interval 1d --lookback-days 10 --write
 ```
 
 `advisory_status = ADVISORY_ONLY` on every ingested record.
+
+---
+
+## Phase E.3 — Real OHLCV History + Incremental Candle Updater
+
+### OHLCV data modes
+
+| Mode | Script | Data | Use |
+|---|---|---|---|
+| Demo seed (offline) | `scripts/seed_chart_ohlcv_history.py` | **Synthetic, NOT real market prices** | UI demo without internet |
+| Real historical backfill | `scripts/backfill_ohlcv_history.py` | Real OHLCV via yfinance (free) | Full history for chart analysis |
+| Incremental refresh | `scripts/update_ohlcv_latest.py` | Real recent candles via yfinance | 5-minute poller, keeps DB current |
+
+> **Important:** `seed_chart_ohlcv_history.py` creates deterministic **synthetic** sample candles
+> generated with a random number generator. They are **not real market prices** and must not be
+> used for analysis or decision-making. Use `backfill_ohlcv_history.py` for real data.
+
+### Commands
+
+**Demo-only seed (synthetic, no internet required):**
+
+```bash
+python scripts/seed_chart_ohlcv_history.py --write
+```
+
+**Real historical backfill (requires yfinance + internet):**
+
+```bash
+# Install dependency if needed:
+python -m pip install yfinance
+
+# Backfill full history (may fetch several years per symbol):
+python scripts/backfill_ohlcv_history.py --symbols AAPL,GLD,TLT,BTC-USD,SPY --period max --interval 1d --write
+
+# Dry-run (prints JSON, no DB write):
+python scripts/backfill_ohlcv_history.py --symbols AAPL,GLD,TLT,BTC-USD,SPY --period max --interval 1d
+```
+
+**Incremental update (safe to run every 5 minutes):**
+
+```bash
+python scripts/update_ohlcv_latest.py --symbols AAPL,GLD,TLT,BTC-USD,SPY --interval 1d --lookback-days 10 --write
+```
+
+**Start full local stack:**
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\windows\start_mvp_stack.ps1
+```
+
+### Chart Structure data preference
+
+The `/chart-structure` API endpoint:
+1. Queries candles for the requested symbol directly (symbol-filtered DB query — no per-symbol cap)
+2. Prefers **real backfill** candles (`ohlcv_*` event IDs) over demo seed (`seed_ohlcv_*`) for the same date
+3. Returns up to `limit` (default 100) candles in chronological order
+4. Falls back to seed candles for dates not covered by real data
+
+### Event ID scheme
+
+| Source | Event ID format | Example |
+|---|---|---|
+| Demo seed | `seed_ohlcv_{symbol}_{YYYY-MM-DD}` | `seed_ohlcv_aapl_2024-01-15` |
+| Real backfill / incremental | `ohlcv_{symbol}_{interval}_{YYYY-MM-DD}` | `ohlcv_aapl_1d_2024-01-15` |
+
+Both use `INSERT OR IGNORE` — re-running either script is fully idempotent.
+
+### Dependency
+
+yfinance is required for real data. The seed script has no external dependencies.
+
+```bash
+python -m pip install yfinance
+```
+
+### Safety invariant (unchanged)
+
+All OHLCV records carry:
+
+```
+advisory_status    = ADVISORY_ONLY
+execution_gate     = LOCKED
+human_review_required = True
+ai_execution_count = 0
+broker_api_called  = False
+broker_order_id    = NONE
+```
+
+No broker API is called. No orders are placed. No private keys are used.

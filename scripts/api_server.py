@@ -186,16 +186,20 @@ def _get_chart_structure(
             from chart_structure_engine import analyze_chart_structure  # type: ignore
 
         symbol_upper = symbol.strip().upper()
-        all_events = get_signal_events(source_name="market_data", limit=limit)
 
-        events = [
-            ev for ev in all_events
-            if (
-                ev.get("raw_payload")
-                if isinstance(ev.get("raw_payload"), dict)
-                else {}
-            ).get("symbol", "").upper() == symbol_upper
-        ]
+        # Symbol-filtered query: returns up to limit*6 events for this symbol only.
+        # Avoids the per-symbol under-count when many symbols share source_name='market_data'
+        # and the table has hundreds of candles per symbol after a full backfill.
+        try:
+            from scripts.persistence import get_signal_events_for_symbol
+        except ModuleNotFoundError:
+            from persistence import get_signal_events_for_symbol  # type: ignore
+
+        events = get_signal_events_for_symbol(
+            symbol=symbol_upper,
+            source_name="market_data",
+            limit=max(limit * 6, 600),
+        )
 
         linked_event_id: str | None = None
         if source_event_id:
@@ -206,7 +210,27 @@ def _get_chart_structure(
             if matched:
                 linked_event_id = matched[0].get("event_id")
 
-        candles = _candles_from_market_events(events)
+        # Prefer real backfill candles (ohlcv_*) over demo seed (seed_ohlcv_*).
+        # If both exist for the same date, the real candle replaces the seed candle.
+        real_evts = [ev for ev in events if str(ev.get("event_id", "")).startswith("ohlcv_")]
+        seed_evts = [ev for ev in events if not str(ev.get("event_id", "")).startswith("ohlcv_")]
+
+        if real_evts:
+            real_candles = _candles_from_market_events(real_evts)
+            real_dates = {c["timestamp"][:10] for c in real_candles}
+            extra_seed = [
+                c for c in _candles_from_market_events(seed_evts)
+                if c["timestamp"][:10] not in real_dates
+            ]
+            merged = sorted(real_candles + extra_seed, key=lambda c: c["timestamp"])
+        else:
+            merged = sorted(
+                _candles_from_market_events(seed_evts or events),
+                key=lambda c: c["timestamp"],
+            )
+
+        # Latest `limit` candles for the engine (chronological order)
+        candles = merged[-limit:] if len(merged) > limit else merged
 
         if not candles:
             return {
@@ -217,8 +241,8 @@ def _get_chart_structure(
                 "chart_state": "INSUFFICIENT_DATA",
                 "advisory_summary": (
                     "No OHLCV candle data available for this symbol. "
-                    "Run market_data ingestion first: "
-                    "python scripts/run_live_sources_phase2.py --source market_data --write"
+                    "Run real historical backfill: "
+                    "python scripts/backfill_ohlcv_history.py --symbols AAPL,GLD,TLT,BTC-USD,SPY --period max --interval 1d --write"
                 ),
                 "report": None,
             }

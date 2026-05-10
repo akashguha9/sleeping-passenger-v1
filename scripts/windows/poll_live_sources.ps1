@@ -36,6 +36,11 @@ $Sources = @(
     [pscustomobject]@{ Label = "market_data"; Script = "run_live_sources_phase2.py"; Source = "market_data" }
 )
 
+$OhlcvUpdateScript = Join-Path $RepoRoot "scripts\update_ohlcv_latest.py"
+$OhlcvSymbols      = "AAPL,GLD,TLT,BTC-USD,SPY"
+$OhlcvInterval     = "1d"
+$OhlcvLookbackDays = 10
+
 while ($true) {
     Write-Log "--- Poll run starting ---"
 
@@ -56,6 +61,28 @@ while ($true) {
         } catch {
             Write-Log "$($entry.Label): FAILED - $_"
         }
+    }
+
+    # Incremental OHLCV candle refresh - advisory read-only, no broker API.
+    # Failure is logged but does not kill the poller loop.
+    Write-Log "Running ohlcv_update ..."
+    try {
+        $output   = & python $OhlcvUpdateScript `
+            --symbols $OhlcvSymbols `
+            --interval $OhlcvInterval `
+            --lookback-days $OhlcvLookbackDays `
+            --write
+        $exitCode = $LASTEXITCODE
+        foreach ($line in $output) {
+            Write-Log "  [ohlcv_update] $line"
+        }
+        if ($exitCode -ne 0) {
+            Write-Log "ohlcv_update: exited with code $exitCode"
+        } else {
+            Write-Log "ohlcv_update: OK"
+        }
+    } catch {
+        Write-Log "ohlcv_update: FAILED - $_ (poller continues)"
     }
 
     Write-Log "--- Poll run complete. Sleeping $PollIntervalSeconds s. ---"
