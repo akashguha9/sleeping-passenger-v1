@@ -18,6 +18,7 @@ const SOURCE_OPTIONS: { value: '' | LiveSignalSource; label: string }[] = [
   { value: 'market_data', label: 'Market Data' },
   { value: 'india', label: 'India' },
   { value: 'global_filings', label: 'Global Filings' },
+  { value: 'asia_disclosure', label: 'Asia Disclosure' },
 ];
 
 const SOURCE_COLORS: Record<string, string> = {
@@ -31,6 +32,7 @@ const SOURCE_COLORS: Record<string, string> = {
   market_data: 'text-blue-400 bg-blue-900/30 border-blue-700/40',
   india: 'text-yellow-500 bg-yellow-900/30 border-yellow-700/40',
   global_filings: 'text-rose-400 bg-rose-900/30 border-rose-700/40',
+  asia_disclosure: 'text-red-400 bg-red-900/30 border-red-700/40',
 };
 
 const SOURCE_LABELS: Record<string, string> = {
@@ -44,6 +46,7 @@ const SOURCE_LABELS: Record<string, string> = {
   market_data: 'Market Data',
   india: 'India (NSE/RBI/SEBI)',
   global_filings: 'Global Filings',
+  asia_disclosure: 'Asia Disclosure',
 };
 
 function getTitle(ev: LiveSignalEvent): string {
@@ -139,6 +142,17 @@ function getSubtitle(ev: LiveSignalEvent): string {
     if (p.issuer_name) parts.push(String(p.issuer_name));
     if (p.ticker_or_identifier) parts.push(`[${String(p.ticker_or_identifier)}]`);
     if (p.published_at) parts.push(`Filed: ${String(p.published_at)}`);
+    return parts.join(' · ');
+  }
+  if (ev.source_name === 'asia_disclosure') {
+    const parts: string[] = [];
+    if (p.jurisdiction) parts.push(String(p.jurisdiction));
+    if (p.exchange_or_regulator) parts.push(String(p.exchange_or_regulator));
+    if (p.disclosure_type) parts.push(String(p.disclosure_type).replace(/_/g, ' '));
+    if (p.issuer_name) parts.push(String(p.issuer_name));
+    if (p.ticker_or_identifier) parts.push(`[${String(p.ticker_or_identifier)}]`);
+    if (p.published_at) parts.push(`Filed: ${String(p.published_at)}`);
+    if (p.language) parts.push(`Lang: ${String(p.language)}`);
     return parts.join(' · ');
   }
   return ev.event_id;
@@ -314,7 +328,7 @@ export default function LiveSignalsPage() {
         <div>
           <h1 className="text-xl font-bold text-white">Live Signals</h1>
           <p className="text-sm text-slate-500 mt-0.5">
-            Real-time ingestion from Polymarket, GDELT, SEC EDGAR, NewsAPI, Event Registry, Etherscan, Grok/xAI, Market Data, India (NSE/RBI/SEBI), and Global Filings — advisory only
+            Real-time ingestion from Polymarket, GDELT, SEC EDGAR, NewsAPI, Event Registry, Etherscan, Grok/xAI, Market Data, India (NSE/RBI/SEBI), Global Filings, and Asia Disclosure — advisory only
           </p>
         </div>
         <div className="flex items-center gap-2">

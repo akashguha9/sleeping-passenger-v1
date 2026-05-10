@@ -218,7 +218,7 @@ export interface DbStatusResponse {
   generated_at: string;
 }
 
-export type LiveSignalSource = 'polymarket' | 'gdelt' | 'sec_edgar' | 'newsapi' | 'event_registry' | 'etherscan' | 'grok_xai' | 'market_data' | 'india' | 'global_filings';
+export type LiveSignalSource = 'polymarket' | 'gdelt' | 'sec_edgar' | 'newsapi' | 'event_registry' | 'etherscan' | 'grok_xai' | 'market_data' | 'india' | 'global_filings' | 'asia_disclosure';
 
 export interface LiveSignalRawPayload {
   event_id?: string;
@@ -299,6 +299,9 @@ export interface LiveSignalRawPayload {
   disclosure_type?: string;
   summary?: string;
   broker_order_id?: string;
+  // asia_disclosure (Phase C.8 — China/HK/Japan/Singapore/Korea disclosures, no execution)
+  // Re-uses issuer_name, ticker_or_identifier, exchange_or_regulator, jurisdiction,
+  // disclosure_type, published_at, url, summary, provider, language (all already declared above)
   [key: string]: unknown;
 }
 

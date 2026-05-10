@@ -23,6 +23,11 @@ Usage
   python scripts/run_live_sources_phase2.py --source global_filings --global-provider asx --dry-run
   python scripts/run_live_sources_phase2.py --source global_filings --global-region AU --dry-run
   python scripts/run_live_sources_phase2.py --source global_filings --global-query "quarterly report" --dry-run
+  python scripts/run_live_sources_phase2.py --source asia_disclosure --dry-run --json
+  python scripts/run_live_sources_phase2.py --source asia_disclosure --write
+  python scripts/run_live_sources_phase2.py --source asia_disclosure --asia-provider hkex,sse --dry-run
+  python scripts/run_live_sources_phase2.py --source asia_disclosure --asia-jurisdiction HK --dry-run
+  python scripts/run_live_sources_phase2.py --source asia_disclosure --asia-query "earnings" --dry-run
 
 Optional flags (NewsAPI)
 ------------------------
@@ -70,6 +75,16 @@ Optional flags (Global Filings — Phase C.7)
   --global-region <region>  Filter providers by jurisdiction (AU, HK, SG, UK, EU, CA, JP).
   --global-max-items <N>    Max global filings records to return (default: 50).
 
+Optional flags (Asia Disclosure — Phase C.8)
+---------------------------------------------
+  --asia-provider <prov>    Comma-separated Asia provider names (default: all configured).
+                            Supported: sse, szse, hkex, tdnet, sgx, dart.
+                            All are currently placeholders; they skip cleanly.
+  --asia-query <query>      Filter by issuer name, ticker, title, or disclosure description.
+  --asia-jurisdiction <jur> Filter providers by jurisdiction code (CN, HK, JP, SG, KR).
+  --asia-max-items <N>      Max Asia disclosure records to return (default: 50).
+  --asia-date <date>        Informational date filter (ISO string, e.g. 2026-05-10).
+
 Common flags
 ------------
   --json                    Output full report as JSON.
@@ -78,7 +93,7 @@ Safety
 ------
   ALL outputs are ADVISORY_ONLY.  Execution is HUMAN_ONLY.  AI execution count = 0.
   No broker API calls.  No order placement.  No private keys.  No wallet signing.
-  broker_order_id is always NONE on all global_filings outputs.
+  broker_order_id is always NONE on all asia_disclosure outputs.
   NEWS_API_KEY env var must be set; missing key skips NewsAPI cleanly.
   EVENT_REGISTRY_API_KEY env var must be set; missing key skips Event Registry cleanly.
   ETHERSCAN_API_KEY env var must be set; missing key or address skips Etherscan cleanly.
@@ -88,6 +103,8 @@ Safety
   yfinance skips cleanly if the package is unavailable.
   India sources (NSE/RBI/SEBI) require no API key. Public endpoints skip cleanly on failure.
   Global Filings: ASX requires no API key. All other providers are placeholders that skip cleanly.
+  Asia Disclosure: All providers are currently placeholders — they skip cleanly.
+  SGX and DART require API keys; missing keys skip cleanly.
 """
 from __future__ import annotations
 
@@ -102,7 +119,7 @@ if str(_REPO_ROOT) not in sys.path:
 
 from scripts.live_source_runner_phase2 import run_phase2  # noqa: E402
 
-_SUPPORTED_SOURCES = ["newsapi", "event_registry", "etherscan", "grok_xai", "market_data", "india", "global_filings"]
+_SUPPORTED_SOURCES = ["newsapi", "event_registry", "etherscan", "grok_xai", "market_data", "india", "global_filings", "asia_disclosure"]
 
 
 def _parse_args() -> argparse.Namespace:
@@ -304,6 +321,52 @@ def _parse_args() -> argparse.Namespace:
         help="Max global filings records to return (default: 50).",
     )
     parser.add_argument(
+        "--asia-provider",
+        default=None,
+        dest="asia_provider",
+        metavar="PROVIDER",
+        help=(
+            "Comma-separated Asia disclosure provider names "
+            "(default: all configured). E.g. hkex,sse,dart. "
+            "All are currently placeholders that skip cleanly."
+        ),
+    )
+    parser.add_argument(
+        "--asia-query",
+        default=None,
+        dest="asia_query",
+        metavar="QUERY",
+        help="Filter Asia disclosures by issuer name, ticker, title, or disclosure description.",
+    )
+    parser.add_argument(
+        "--asia-jurisdiction",
+        default=None,
+        dest="asia_jurisdiction",
+        metavar="JURISDICTION",
+        help=(
+            "Filter Asia disclosure providers by jurisdiction code "
+            "(e.g. CN, HK, JP, SG, KR)."
+        ),
+    )
+    parser.add_argument(
+        "--asia-max-items",
+        type=int,
+        default=50,
+        dest="asia_max_items",
+        metavar="N",
+        help="Max Asia disclosure records to return (default: 50).",
+    )
+    parser.add_argument(
+        "--asia-date",
+        default=None,
+        dest="asia_date",
+        metavar="DATE",
+        help=(
+            "Informational date filter for Asia disclosures e.g. 2026-05-10 "
+            "(passed through as metadata; provider availability determines actual data)."
+        ),
+    )
+    parser.add_argument(
         "--json",
         action="store_true",
         dest="output_json",
@@ -332,6 +395,11 @@ def main() -> int:
         if args.global_provider
         else None
     )
+    asia_providers = (
+        [p.strip() for p in args.asia_provider.split(",") if p.strip()]
+        if args.asia_provider
+        else None
+    )
 
     if not args.output_json:
         print(f"[Phase 2 Source Runner] mode={'dry-run' if dry_run else 'write'}")
@@ -345,6 +413,8 @@ def main() -> int:
             print("  India: NSE/RBI/SEBI read-only — advisory only, no execution path")
         if args.source == "global_filings":
             print("  Global Filings: public exchange/regulator disclosures — advisory only, no execution path")
+        if args.source == "asia_disclosure":
+            print("  Asia Disclosure: China/HK/Japan/Singapore/Korea exchange disclosures — advisory only, all providers placeholder")
         print()
 
     report = run_phase2(
@@ -372,6 +442,10 @@ def main() -> int:
         global_filings_query=args.global_query,
         global_filings_region=args.global_region,
         global_filings_max_items=args.global_max_items,
+        asia_disclosure_providers=asia_providers,
+        asia_disclosure_query=args.asia_query,
+        asia_disclosure_jurisdiction=args.asia_jurisdiction,
+        asia_disclosure_max_items=args.asia_max_items,
         sources=[args.source],
     )
 

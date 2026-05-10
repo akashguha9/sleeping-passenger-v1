@@ -1,6 +1,7 @@
 """
 Phase 2 Live Source Runner — read-only ingestion for NewsAPI, Event Registry,
-Etherscan, Grok/xAI interpretation, Market Data, India, and Global Filings.
+Etherscan, Grok/xAI interpretation, Market Data, India, Global Filings,
+and Asia Disclosure.
 
 Safety contract
 ---------------
@@ -19,6 +20,7 @@ Safety contract
 - Grok/xAI skips cleanly when XAI_API_KEY env var is unset.
 - Grok/xAI output is hypothesis/interpretation only, never truth.
 - Global Filings skips cleanly when no active providers reachable.
+- Asia Disclosure skips cleanly when no active providers reachable (all are placeholders).
 
 Rate-limit-safe defaults
 ------------------------
@@ -27,6 +29,7 @@ Rate-limit-safe defaults
 - Etherscan: 25 transactions per call, 15 s timeout
 - Grok/xAI: 1 interpretation per call, 30 s timeout
 - Global Filings: 50 records per call, 15 s timeout
+- Asia Disclosure: 50 records per call, 15 s timeout
 - Up to 2 retries on transient network errors, 2 s back-off
 """
 from __future__ import annotations
@@ -45,6 +48,7 @@ try:
     from scripts.ingestion.market_data_loader import MarketDataLoader
     from scripts.ingestion.india_loader import IndiaLoader
     from scripts.ingestion.global_filings_loader import GlobalFilingsLoader
+    from scripts.ingestion.asia_disclosure_loader import AsiaDisclosureLoader
     from scripts.ingestion.base_loader import LoaderResult, SkipLoader
 except ModuleNotFoundError:
     from runtime_common import utc_timestamp  # type: ignore[no-redef]
@@ -55,6 +59,7 @@ except ModuleNotFoundError:
     from ingestion.market_data_loader import MarketDataLoader  # type: ignore[no-redef]
     from ingestion.india_loader import IndiaLoader  # type: ignore[no-redef]
     from ingestion.global_filings_loader import GlobalFilingsLoader  # type: ignore[no-redef]
+    from ingestion.asia_disclosure_loader import AsiaDisclosureLoader  # type: ignore[no-redef]
     from ingestion.base_loader import LoaderResult, SkipLoader  # type: ignore[no-redef]
 
 _ADVISORY_STATUS = "ADVISORY_ONLY"
@@ -374,6 +379,59 @@ def _normalize_global_filings_record(rec: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _normalize_asia_disclosure_record(rec: dict[str, Any]) -> dict[str, Any]:
+    provider = str(rec.get("provider") or "asia_disclosure")
+    issuer_name = str(rec.get("issuer_name") or "")
+    ticker = str(rec.get("ticker_or_identifier") or "")
+    exchange = str(rec.get("exchange_or_regulator") or "")
+    jurisdiction = str(rec.get("jurisdiction") or "")
+    _raw_disclosure_type = rec.get("disclosure_type") or ""
+    disclosure_type = _raw_disclosure_type or "asia_regulatory_disclosure"
+    published_at = str(rec.get("published_at") or "")
+    url = str(rec.get("url") or "")
+    title_raw = str(rec.get("title") or "")
+    summary = str(rec.get("summary") or "")
+    language = str(rec.get("language") or "")
+
+    title_parts: list[str] = []
+    if issuer_name:
+        title_parts.append(issuer_name)
+    if ticker and ticker != issuer_name:
+        title_parts.append(f"({ticker})")
+    if _raw_disclosure_type:
+        title_parts.append(f"— {_raw_disclosure_type.replace('_', ' ').title()}")
+    title = (
+        " ".join(title_parts) if title_parts
+        else title_raw or summary or "Asia Regulatory Disclosure"
+    )
+
+    return {
+        "event_id": _stable_event_id(
+            "asia_disclosure", provider, ticker or issuer_name, published_at, url
+        ),
+        "source_name": "asia_disclosure",
+        "signal_type": "asia_regulatory_disclosure",
+        "title": title,
+        "issuer_name": issuer_name,
+        "ticker_or_identifier": ticker,
+        "exchange_or_regulator": exchange,
+        "jurisdiction": jurisdiction,
+        "disclosure_type": disclosure_type,
+        "published_at": published_at,
+        "url": url,
+        "summary": summary,
+        "provider": provider,
+        "language": language,
+        "raw_payload": rec.get("raw_payload") or {},
+        "advisory_status": _ADVISORY_STATUS,
+        "human_review_required": True,
+        "execution_gate": _EXECUTION_GATE,
+        "ai_execution_count": _AI_EXECUTION_COUNT,
+        "broker_api_called": _BROKER_API_CALLED,
+        "broker_order_id": "NONE",
+    }
+
+
 _NORMALIZERS: dict[str, Any] = {
     "newsapi": _normalize_newsapi_record,
     "event_registry": _normalize_event_registry_record,
@@ -382,6 +440,7 @@ _NORMALIZERS: dict[str, Any] = {
     "market_data": _normalize_market_data_record,
     "india": _normalize_india_record,
     "global_filings": _normalize_global_filings_record,
+    "asia_disclosure": _normalize_asia_disclosure_record,
 }
 
 
@@ -494,11 +553,16 @@ def run_phase2(
     global_filings_query: str | None = None,
     global_filings_region: str | None = None,
     global_filings_max_items: int = 50,
+    asia_disclosure_providers: list[str] | None = None,
+    asia_disclosure_query: str | None = None,
+    asia_disclosure_jurisdiction: str | None = None,
+    asia_disclosure_max_items: int = 50,
     sources: list[str] | None = None,
 ) -> Phase2RunReport:
     """
     Run Phase 2 live source ingestion: NewsAPI, Event Registry, Etherscan, Grok/xAI,
-    Market Data (Phase C.5), India sources (Phase C.6), and Global Filings (Phase C.7).
+    Market Data (Phase C.5), India sources (Phase C.6), Global Filings (Phase C.7),
+    and Asia Disclosure (Phase C.8).
 
     Parameters
     ----------
@@ -538,6 +602,15 @@ def run_phase2(
         Jurisdiction code to filter providers (e.g. "AU", "HK", "SG"). Defaults to all.
     global_filings_max_items:
         Maximum global filings records to return (default 50).
+    asia_disclosure_providers:
+        Specific Asia provider names (e.g. ["hkex", "sse"]). Defaults to all configured.
+        All are currently placeholders; any active provider would be used automatically.
+    asia_disclosure_query:
+        Filter string applied to issuer name, ticker, title, and disclosure description.
+    asia_disclosure_jurisdiction:
+        Jurisdiction code to filter providers (e.g. "CN", "HK", "JP", "SG", "KR").
+    asia_disclosure_max_items:
+        Maximum Asia disclosure records to return (default 50).
     sources:
         Subset of Phase 2 sources to run. Defaults to ["newsapi"].
         Missing API keys / unavailable dependencies skip cleanly.
@@ -591,6 +664,12 @@ def run_phase2(
             query=global_filings_query,
             region=global_filings_region,
             max_items=global_filings_max_items,
+        ),
+        "asia_disclosure": AsiaDisclosureLoader(
+            providers=asia_disclosure_providers,
+            query=asia_disclosure_query,
+            jurisdiction=asia_disclosure_jurisdiction,
+            max_items=asia_disclosure_max_items,
         ),
     }
 
@@ -651,6 +730,7 @@ __all__ = [
     "_normalize_market_data_record",
     "_normalize_india_record",
     "_normalize_global_filings_record",
+    "_normalize_asia_disclosure_record",
     "_persist_events",
     "_log_run",
 ]
