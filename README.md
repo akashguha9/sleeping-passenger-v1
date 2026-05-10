@@ -315,6 +315,59 @@ If no OHLCV data is available for the symbol, `chart_state` is `INSUFFICIENT_DAT
 
 All signals display `ADVISORY_ONLY`, `HUMAN_REVIEW_REQUIRED`, and `EXECUTION LOCKED` badges.
 
+## Phase D.4 — Chart Structure Frontend Panel (Advisory-Only)
+
+**Route:** `/chart-structure`
+
+**Sidebar nav item:** Chart Structure (◫)
+
+### What it does
+
+- Renders an interactive symbol-lookup panel in the frontend
+- Calls `GET /chart-structure?symbol=<symbol>&limit=<limit>` from the browser
+- Displays: symbol, chart state, candle count, trend direction + strength, volatility regime, latest close, support/resistance proximity, confirmation score with reasons, advisory summary, suggested next step
+- All execution invariants are always visible: `ADVISORY_ONLY`, `execution_gate=LOCKED`, `HUMAN_REVIEW_REQUIRED`, `AI_EXECUTION_COUNT=0`, `broker_api_called=false`, `broker_order_id=NONE`
+- Handles empty / backend-offline / insufficient-data states with clear messaging
+
+### What it does not do
+
+- No buy button, sell button, execute button, place order button
+- No auto-trade wording or broker order UI
+- No broker API connection of any kind
+- No order placement, wallet signing, or live execution
+
+### Usage
+
+1. Start the backend: `python scripts\api_server.py`
+2. Ingest market data (required for candles): `python scripts\run_live_sources_phase2.py --source market_data --write`
+3. Start the frontend: `cd frontend && npm run dev`
+4. Navigate to `/chart-structure`
+5. Enter a symbol such as `AAPL`, `BTC-USD`, or `RELIANCE.NS`
+6. Set candle limit (default 100, max 500)
+7. Click **Fetch**
+
+### Safety banner
+
+Every page load shows:
+
+> **Chart structure is advisory-only. No execution. Human review required.**
+
+All results carry `ADVISORY_ONLY`, `execution_gate=LOCKED`, and `HUMAN_REVIEW_REQUIRED` badges.
+
+### New files
+
+| File | Purpose |
+|---|---|
+| `frontend/src/app/chart-structure/page.tsx` | Chart Structure page |
+
+### Modified files
+
+| File | Change |
+|---|---|
+| `frontend/src/types/index.ts` | Added `ChartStructureResponse`, `ChartStructureReport`, and supporting types |
+| `frontend/src/lib/apiClient.ts` | Added `getChartStructure(symbol, limit?, sourceEventId?)` |
+| `frontend/src/components/layout/Sidebar.tsx` | Added Chart Structure nav item |
+
 ## Yahoo-Assisted Retirement Limits
 
 - Yahoo Finance marks are external observation for paper workflows only.

@@ -326,3 +326,105 @@ export interface LiveSignalsResponse {
   human_review_required: boolean;
   error?: string;
 }
+
+// ---------------------------------------------------------------------------
+// Chart Structure (Phase D.3 / D.4) — advisory-only, no execution
+// ---------------------------------------------------------------------------
+
+export interface ChartOHLCVSummary {
+  symbol: string;
+  source: string;
+  candle_count: number;
+  first_timestamp: string | null;
+  latest_timestamp: string | null;
+  latest_close: number | null;
+  latest_volume: number | null;
+  price_change_abs: number | null;
+  price_change_pct: number | null;
+  high_low_range_pct: number | null;
+  average_volume: number | null;
+  volume_ratio_latest_to_average: number | null;
+}
+
+export interface ChartCandleAnatomy {
+  candle_direction: string;
+  candle_shape: string;
+  body_pct: number | null;
+  upper_wick_pct: number | null;
+  lower_wick_pct: number | null;
+  close_position_in_range: number | null;
+}
+
+export interface ChartTrend {
+  short_sma: number | null;
+  medium_sma: number | null;
+  long_sma: number | null;
+  trend_direction: string;
+  trend_strength_score: number;
+  consecutive_up_closes: number;
+  consecutive_down_closes: number;
+  distance_from_short_sma_pct: number | null;
+}
+
+export interface ChartVolatility {
+  average_true_range: number | null;
+  atr_pct: number | null;
+  realized_volatility_proxy: number | null;
+  volatility_regime: string;
+  range_expansion_flag: boolean;
+  gap_flag: boolean;
+  large_move_flag: boolean;
+}
+
+export interface ChartSupportResistance {
+  rolling_high: number | null;
+  rolling_low: number | null;
+  distance_to_rolling_high_pct: number | null;
+  distance_to_rolling_low_pct: number | null;
+  breakout_proximity: string;
+}
+
+export interface ChartMarketContext {
+  chart_confirmation_score: number;
+  confirmation_reasons: string[];
+  contradiction_reasons: string[];
+  chart_state: string;
+}
+
+export interface ChartAdvisory {
+  advisory_summary: string;
+  suggested_next_step: string;
+}
+
+export interface ChartStructureReport {
+  advisory_status: string;
+  execution_gate: string;
+  human_review_required: boolean;
+  ai_execution_count: number;
+  broker_api_called: boolean;
+  broker_order_id: string;
+  summary: ChartOHLCVSummary | null;
+  candle_anatomy: ChartCandleAnatomy | null;
+  trend: ChartTrend | null;
+  volatility: ChartVolatility | null;
+  support_resistance: ChartSupportResistance | null;
+  context: ChartMarketContext | null;
+  advisory: ChartAdvisory | null;
+}
+
+export interface ChartStructureResponse {
+  advisory_status: string;
+  execution_gate: string;
+  human_review_required: boolean;
+  ai_execution_count: number;
+  broker_api_called: boolean;
+  broker_order_id: string;
+  symbol: string;
+  source_event_id: string | null;
+  candle_count: number;
+  chart_state?: string;
+  advisory_summary?: string;
+  run_ingestion?: string;
+  report: ChartStructureReport | null;
+  error?: string;
+}

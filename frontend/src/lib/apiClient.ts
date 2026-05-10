@@ -12,6 +12,7 @@ import type {
   SourceHealthResponse,
   DbStatusResponse,
   LiveSignalsResponse,
+  ChartStructureResponse,
 } from '@/types';
 
 export interface HealthResponse {
@@ -198,6 +199,22 @@ export async function getLiveSignals(
     if (source) params.set('source', source);
     params.set('limit', String(limit));
     return await apiFetch<LiveSignalsResponse>(`/live-signals?${params.toString()}`);
+  } catch {
+    return null;
+  }
+}
+
+export async function getChartStructure(
+  symbol: string,
+  limit = 100,
+  sourceEventId?: string,
+): Promise<ChartStructureResponse | null> {
+  try {
+    const params = new URLSearchParams();
+    params.set('symbol', symbol);
+    params.set('limit', String(limit));
+    if (sourceEventId) params.set('source_event_id', sourceEventId);
+    return await apiFetch<ChartStructureResponse>(`/chart-structure?${params.toString()}`);
   } catch {
     return null;
   }
