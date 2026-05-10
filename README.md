@@ -138,6 +138,104 @@ python scripts\paper_trade_retirement.py --summary
 python scripts\paper_reconciliation.py --summary
 ```
 
+## Live Signal Ingestion Runbook
+
+All live signals are ADVISORY_ONLY. No execution. No broker API. No order placement.
+
+### Phase 1 — Polymarket, GDELT, SEC EDGAR
+
+**Dry-run Polymarket (fetch only, no SQLite write):**
+```powershell
+python scripts\run_live_sources_phase1.py --source polymarket --dry-run
+python scripts\run_live_sources_phase1.py --source polymarket --dry-run --json
+```
+
+**Write Polymarket signals to SQLite:**
+```powershell
+python scripts\run_live_sources_phase1.py --source polymarket --write
+```
+
+**Run all Phase 1 sources:**
+```powershell
+python scripts\run_live_sources_phase1.py --dry-run
+python scripts\run_live_sources_phase1.py --write
+```
+
+SEC EDGAR requires `$env:SEC_USER_AGENT = "YourName your@email.com"`.
+
+### Phase 2 — NewsAPI, Event Registry, Etherscan
+
+**Dry-run NewsAPI:**
+```powershell
+$env:NEWS_API_KEY = "your-key"
+python scripts\run_live_sources_phase2.py --source newsapi --dry-run --json
+```
+
+**Write NewsAPI signals to SQLite:**
+```powershell
+python scripts\run_live_sources_phase2.py --source newsapi --write
+```
+
+**Dry-run Event Registry:**
+```powershell
+$env:EVENT_REGISTRY_API_KEY = "your-key"
+python scripts\run_live_sources_phase2.py --source event_registry --dry-run --json
+```
+
+**Write Event Registry signals to SQLite:**
+```powershell
+python scripts\run_live_sources_phase2.py --source event_registry --write
+```
+
+**Dry-run Etherscan (fetch public transactions for an address, no SQLite write):**
+```powershell
+$env:ETHERSCAN_API_KEY = "your-key"
+python scripts\run_live_sources_phase2.py --source etherscan --address 0xde0b295669a9fd93d5f28d9ec85e40f4cb697bae --dry-run --json
+```
+
+**Write Etherscan signals to SQLite:**
+```powershell
+$env:ETHERSCAN_API_KEY = "your-key"
+python scripts\run_live_sources_phase2.py --source etherscan --address 0xde0b295669a9fd93d5f28d9ec85e40f4cb697bae --write
+```
+
+**Etherscan with optional parameters:**
+```powershell
+python scripts\run_live_sources_phase2.py --source etherscan --address 0x... --max-transactions 10 --chain ethereum --dry-run
+```
+
+Etherscan is read-only. It fetches public transaction data only. No private keys, no wallet signing, no transaction broadcasting. Missing `ETHERSCAN_API_KEY` or `--address` skips cleanly with a logged reason.
+
+Missing API keys skip cleanly with a logged reason — no crash.
+
+### View signals via API
+
+**Start the backend:**
+```powershell
+python scripts\api_server.py
+```
+
+**Query all signals:**
+```
+GET http://localhost:8000/live-signals
+GET http://localhost:8000/live-signals?source=polymarket
+GET http://localhost:8000/live-signals?source=gdelt
+GET http://localhost:8000/live-signals?source=sec_edgar
+GET http://localhost:8000/live-signals?source=newsapi
+GET http://localhost:8000/live-signals?source=event_registry
+GET http://localhost:8000/live-signals?source=etherscan
+```
+
+### View signals in the frontend
+
+1. Start the backend: `python scripts\api_server.py`
+2. Start the frontend: `cd frontend && npm run dev`
+3. Navigate to `/live-signals`
+4. Use the source filter buttons: All Sources / Polymarket / GDELT / SEC EDGAR / NewsAPI / Event Registry / Etherscan
+5. Use the search bar to filter by title, market ID, domain, publisher, etc.
+
+All signals display `ADVISORY_ONLY`, `HUMAN_REVIEW_REQUIRED`, and `EXECUTION LOCKED` badges.
+
 ## Yahoo-Assisted Retirement Limits
 
 - Yahoo Finance marks are external observation for paper workflows only.

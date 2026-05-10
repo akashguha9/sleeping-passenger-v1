@@ -282,6 +282,7 @@ def run_phase1(
     sec_cik: str | None = None,
     sec_form_type: str = "10-K",
     sec_max_filings: int = _SEC_MAX_FILINGS,
+    sources: list[str] | None = None,
 ) -> Phase1RunReport:
     """
     Run Phase 1 live source ingestion: Polymarket, GDELT, SEC EDGAR.
@@ -291,21 +292,28 @@ def run_phase1(
     dry_run:
         When True, fetch and normalize signals but do NOT persist to SQLite
         and do NOT write source_run_log entries.
+    sources:
+        Subset of Phase 1 sources to run. Defaults to all
+        (["polymarket", "gdelt", "sec_edgar"]).
     """
+    if sources is None:
+        sources = ["polymarket", "gdelt", "sec_edgar"]
+
     report = Phase1RunReport(dry_run=dry_run, run_at=utc_timestamp())
 
-    loaders: list[tuple[str, Any]] = [
-        ("polymarket", PolymarketLoader(limit=polymarket_limit, timeout=_DEFAULT_TIMEOUT)),
-        ("gdelt", GDELTLoader(max_records=gdelt_max_records, timeout=_DEFAULT_TIMEOUT)),
-        (
-            "sec_edgar",
-            SECEdgarLoader(
-                cik=sec_cik,
-                form_type=sec_form_type,
-                max_filings=sec_max_filings,
-                timeout=_DEFAULT_TIMEOUT,
-            ),
+    all_loaders: dict[str, Any] = {
+        "polymarket": PolymarketLoader(limit=polymarket_limit, timeout=_DEFAULT_TIMEOUT),
+        "gdelt": GDELTLoader(max_records=gdelt_max_records, timeout=_DEFAULT_TIMEOUT),
+        "sec_edgar": SECEdgarLoader(
+            cik=sec_cik,
+            form_type=sec_form_type,
+            max_filings=sec_max_filings,
+            timeout=_DEFAULT_TIMEOUT,
         ),
+    }
+
+    loaders: list[tuple[str, Any]] = [
+        (name, all_loaders[name]) for name in sources if name in all_loaders
     ]
 
     for source_name, loader in loaders:
@@ -350,6 +358,8 @@ def run_phase1(
     return report
 
 
+_PHASE1_SOURCES = ["polymarket", "gdelt", "sec_edgar"]
+
 __all__ = [
     "SourceRunResult",
     "Phase1RunReport",
@@ -360,4 +370,5 @@ __all__ = [
     "_normalize_sec_record",
     "_persist_events",
     "_log_run",
+    "_PHASE1_SOURCES",
 ]

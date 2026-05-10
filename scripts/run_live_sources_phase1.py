@@ -3,11 +3,16 @@ Phase 1 live source ingestion CLI.
 
 Usage
 -----
-  python scripts/run_live_sources_phase1.py --dry-run    # fetch only, no DB write
-  python scripts/run_live_sources_phase1.py --write      # fetch and persist to SQLite
+  python scripts/run_live_sources_phase1.py --dry-run                        # all sources, fetch only
+  python scripts/run_live_sources_phase1.py --write                          # all sources, persist to SQLite
+  python scripts/run_live_sources_phase1.py --source polymarket --dry-run    # Polymarket only, fetch only
+  python scripts/run_live_sources_phase1.py --source polymarket --write      # Polymarket only, persist
+  python scripts/run_live_sources_phase1.py --source polymarket --dry-run --json  # JSON output
 
 Optional flags
 --------------
+  --source <src>           Run a single source only. Choices: polymarket, gdelt, sec_edgar.
+                           Omit to run all three.
   --sec-cik <CIK>          SEC EDGAR entity CIK (e.g. 0000320193). Requires SEC_USER_AGENT env var.
   --sec-form <form>        SEC EDGAR form type (default: 10-K).
   --polymarket-limit <N>   Max Polymarket markets to fetch (default: 20).
@@ -30,12 +35,20 @@ _REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from scripts.live_source_runner import run_phase1  # noqa: E402
+from scripts.live_source_runner import run_phase1, _PHASE1_SOURCES  # noqa: E402
+
+_SUPPORTED_SOURCES = _PHASE1_SOURCES
 
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Phase 1 live source ingestion — Polymarket, GDELT, SEC EDGAR."
+    )
+    parser.add_argument(
+        "--source",
+        default=None,
+        choices=_SUPPORTED_SOURCES,
+        help="Run a single source only. Omit to run all (polymarket, gdelt, sec_edgar).",
     )
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument(
@@ -87,10 +100,12 @@ def _parse_args() -> argparse.Namespace:
 def main() -> int:
     args = _parse_args()
     dry_run: bool = args.dry_run
+    sources = [args.source] if args.source else None
 
     if not args.output_json:
+        src_label = args.source or "Polymarket, GDELT, SEC EDGAR"
         print(f"[Phase 1 Source Runner] mode={'dry-run' if dry_run else 'write'}")
-        print("  Sources: Polymarket, GDELT, SEC EDGAR")
+        print(f"  Sources: {src_label}")
         print("  Advisory policy: ADVISORY_ONLY | HUMAN_ONLY | AI_EXECUTION=0")
         print()
 
@@ -100,6 +115,7 @@ def main() -> int:
         gdelt_max_records=args.gdelt_max,
         sec_cik=args.sec_cik,
         sec_form_type=args.sec_form,
+        sources=sources,
     )
 
     if args.output_json:

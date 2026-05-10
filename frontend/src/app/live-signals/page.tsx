@@ -12,6 +12,8 @@ const SOURCE_OPTIONS: { value: '' | LiveSignalSource; label: string }[] = [
   { value: 'gdelt', label: 'GDELT' },
   { value: 'sec_edgar', label: 'SEC EDGAR' },
   { value: 'newsapi', label: 'NewsAPI' },
+  { value: 'event_registry', label: 'Event Registry' },
+  { value: 'etherscan', label: 'Etherscan' },
 ];
 
 const SOURCE_COLORS: Record<string, string> = {
@@ -19,6 +21,8 @@ const SOURCE_COLORS: Record<string, string> = {
   gdelt: 'text-sky-400 bg-sky-900/30 border-sky-700/40',
   sec_edgar: 'text-amber-400 bg-amber-900/30 border-amber-700/40',
   newsapi: 'text-emerald-400 bg-emerald-900/30 border-emerald-700/40',
+  event_registry: 'text-teal-400 bg-teal-900/30 border-teal-700/40',
+  etherscan: 'text-orange-400 bg-orange-900/30 border-orange-700/40',
 };
 
 const SOURCE_LABELS: Record<string, string> = {
@@ -26,6 +30,8 @@ const SOURCE_LABELS: Record<string, string> = {
   gdelt: 'GDELT',
   sec_edgar: 'SEC EDGAR',
   newsapi: 'NewsAPI',
+  event_registry: 'Event Registry',
+  etherscan: 'Etherscan',
 };
 
 function getTitle(ev: LiveSignalEvent): string {
@@ -65,6 +71,21 @@ function getSubtitle(ev: LiveSignalEvent): string {
     if (p.url) parts.push(p.url as string);
     return parts.join(' · ');
   }
+  if (ev.source_name === 'event_registry') {
+    const parts: string[] = [];
+    if (p.publisher) parts.push(p.publisher as string);
+    if (p.date_time) parts.push(`Date: ${p.date_time}`);
+    if (p.url) parts.push(p.url as string);
+    return parts.join(' · ');
+  }
+  if (ev.source_name === 'etherscan') {
+    const parts: string[] = [];
+    if (p.hash) parts.push(`Hash: ${(p.hash as string).slice(0, 14)}…`);
+    if (p.from_address) parts.push(`From: ${(p.from_address as string).slice(0, 10)}…`);
+    if (p.to_address) parts.push(`To: ${(p.to_address as string).slice(0, 10)}…`);
+    if (p.block_number) parts.push(`Block: ${p.block_number}`);
+    return parts.join(' · ');
+  }
   return ev.event_id;
 }
 
@@ -86,6 +107,12 @@ function matchesSearch(ev: LiveSignalEvent, query: string): boolean {
     p.publisher,
     p.description,
     p.url,
+    p.body,
+    p.date_time,
+    p.hash,
+    p.from_address,
+    p.to_address,
+    p.block_number,
   ]
     .filter(Boolean)
     .some((v) => String(v).toLowerCase().includes(q));
@@ -213,7 +240,7 @@ export default function LiveSignalsPage() {
         <div>
           <h1 className="text-xl font-bold text-white">Live Signals</h1>
           <p className="text-sm text-slate-500 mt-0.5">
-            Real-time ingestion from Polymarket, GDELT, SEC EDGAR, and NewsAPI — advisory only
+            Real-time ingestion from Polymarket, GDELT, SEC EDGAR, NewsAPI, Event Registry, and Etherscan — advisory only
           </p>
         </div>
         <div className="flex items-center gap-2">

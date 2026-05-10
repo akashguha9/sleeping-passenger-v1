@@ -1,20 +1,25 @@
 """
-Phase 2 Live Source Runner — read-only ingestion for NewsAPI.
+Phase 2 Live Source Runner — read-only ingestion for NewsAPI, Event Registry, and Etherscan.
 
 Safety contract
 ---------------
 - READ-ONLY. No write to any external system.
 - No broker API calls. No order placement. No CLOB trading.
+- No private keys, wallet signing, transaction broadcasting, or token approvals.
 - All signals carry advisory_status="ADVISORY_ONLY" and human_review_required=True.
 - execution_gate="LOCKED" on every record.
 - AI execution count is always 0.
 - broker_api_called is always False.
 - Dry-run mode fetches and normalizes but does NOT persist anything.
 - NewsAPI skips cleanly when NEWS_API_KEY env var is unset.
+- Event Registry skips cleanly when EVENT_REGISTRY_API_KEY env var is unset.
+- Etherscan skips cleanly when ETHERSCAN_API_KEY env var is unset or no address given.
 
 Rate-limit-safe defaults
 ------------------------
 - NewsAPI: 20 articles per call, 15 s timeout
+- Event Registry: 20 articles per call, 15 s timeout
+- Etherscan: 25 transactions per call, 15 s timeout
 - Up to 2 retries on transient network errors, 2 s back-off
 """
 from __future__ import annotations
@@ -27,10 +32,14 @@ from typing import Any
 try:
     from scripts.runtime_common import utc_timestamp
     from scripts.ingestion.newsapi_loader import NewsAPILoader
+    from scripts.ingestion.event_registry_loader import EventRegistryLoader
+    from scripts.ingestion.etherscan_loader import EtherscanLoader
     from scripts.ingestion.base_loader import LoaderResult, SkipLoader
 except ModuleNotFoundError:
     from runtime_common import utc_timestamp  # type: ignore[no-redef]
     from ingestion.newsapi_loader import NewsAPILoader  # type: ignore[no-redef]
+    from ingestion.event_registry_loader import EventRegistryLoader  # type: ignore[no-redef]
+    from ingestion.etherscan_loader import EtherscanLoader  # type: ignore[no-redef]
     from ingestion.base_loader import LoaderResult, SkipLoader  # type: ignore[no-redef]
 
 _ADVISORY_STATUS = "ADVISORY_ONLY"
@@ -39,9 +48,15 @@ _AI_EXECUTION_COUNT = 0
 _BROKER_API_CALLED = False
 
 _NEWSAPI_MAX_ARTICLES = 20
+_ER_MAX_ARTICLES = 20
+_ETHERSCAN_MAX_TRANSACTIONS = 25
 _DEFAULT_TIMEOUT = 15
 _MAX_RETRIES = 2
 _RETRY_BACKOFF_S = 2.0
+
+_ETHERSCAN_CHAIN_URLS: dict[str, str] = {
+    "ethereum": "https://api.etherscan.io/api",
+}
 
 
 # ---------------------------------------------------------------------------
@@ -140,8 +155,52 @@ def _normalize_newsapi_record(rec: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _normalize_event_registry_record(rec: dict[str, Any]) -> dict[str, Any]:
+    url = str(rec.get("url", ""))
+    return {
+        "event_id": _stable_event_id("event_registry", url),
+        "source_name": "event_registry",
+        "signal_type": "news_article",
+        "title": str(rec.get("title", "")),
+        "url": url,
+        "date_time": rec.get("date_time"),
+        "publisher": rec.get("source_name"),
+        "body": rec.get("body"),
+        "advisory_status": _ADVISORY_STATUS,
+        "human_review_required": True,
+        "execution_gate": _EXECUTION_GATE,
+        "ai_execution_count": _AI_EXECUTION_COUNT,
+        "broker_api_called": _BROKER_API_CALLED,
+    }
+
+
+def _normalize_etherscan_record(rec: dict[str, Any]) -> dict[str, Any]:
+    tx_hash = str(rec.get("hash", ""))
+    short_hash = (tx_hash[:12] + "...") if len(tx_hash) > 12 else tx_hash
+    return {
+        "event_id": _stable_event_id("etherscan", tx_hash),
+        "source_name": "etherscan",
+        "signal_type": "blockchain_transaction",
+        "title": f"Tx {short_hash}" if tx_hash else "Ethereum Transaction",
+        "hash": tx_hash,
+        "from_address": str(rec.get("from_address", "")),
+        "to_address": str(rec.get("to_address", "")),
+        "value_wei": str(rec.get("value_wei", "0")),
+        "block_number": str(rec.get("block_number", "")),
+        "timestamp": str(rec.get("timestamp", "")),
+        "gas_used": str(rec.get("gas_used", "")),
+        "advisory_status": _ADVISORY_STATUS,
+        "human_review_required": True,
+        "execution_gate": _EXECUTION_GATE,
+        "ai_execution_count": _AI_EXECUTION_COUNT,
+        "broker_api_called": _BROKER_API_CALLED,
+    }
+
+
 _NORMALIZERS: dict[str, Any] = {
     "newsapi": _normalize_newsapi_record,
+    "event_registry": _normalize_event_registry_record,
+    "etherscan": _normalize_etherscan_record,
 }
 
 
@@ -234,23 +293,41 @@ def run_phase2(
     newsapi_query: str = "markets economy finance",
     newsapi_max_articles: int = _NEWSAPI_MAX_ARTICLES,
     newsapi_language: str = "en",
+    event_registry_keywords: list[str] | None = None,
+    event_registry_max_articles: int = _ER_MAX_ARTICLES,
+    event_registry_language: str = "eng",
+    etherscan_address: str | None = None,
+    etherscan_max_transactions: int = _ETHERSCAN_MAX_TRANSACTIONS,
+    etherscan_chain: str = "ethereum",
     sources: list[str] | None = None,
 ) -> Phase2RunReport:
     """
-    Run Phase 2 live source ingestion: NewsAPI.
+    Run Phase 2 live source ingestion: NewsAPI, Event Registry, and Etherscan.
 
     Parameters
     ----------
     dry_run:
         When True, fetch and normalize signals but do NOT persist to SQLite
         and do NOT write source_run_log entries.
+    etherscan_address:
+        Ethereum address to fetch transactions for. If None, Etherscan skips cleanly.
+    etherscan_max_transactions:
+        Maximum number of transactions to fetch (default 25).
+    etherscan_chain:
+        Chain name. Currently only "ethereum" is supported. Unknown chains fall back
+        to ethereum URL.
     sources:
-        Subset of Phase 2 sources to run. Defaults to all (["newsapi"]).
+        Subset of Phase 2 sources to run. Defaults to ["newsapi"].
+        Pass ["etherscan"] or any combination. Missing API keys skip cleanly.
     """
     if sources is None:
         sources = ["newsapi"]
 
     report = Phase2RunReport(dry_run=dry_run, run_at=utc_timestamp())
+
+    etherscan_base_url = _ETHERSCAN_CHAIN_URLS.get(
+        etherscan_chain, _ETHERSCAN_CHAIN_URLS["ethereum"]
+    )
 
     all_loaders: dict[str, Any] = {
         "newsapi": NewsAPILoader(
@@ -258,6 +335,17 @@ def run_phase2(
             max_articles=newsapi_max_articles,
             language=newsapi_language,
             timeout=_DEFAULT_TIMEOUT,
+        ),
+        "event_registry": EventRegistryLoader(
+            keywords=event_registry_keywords,
+            max_articles=event_registry_max_articles,
+            language=event_registry_language,
+            timeout=_DEFAULT_TIMEOUT,
+        ),
+        "etherscan": EtherscanLoader(
+            address=etherscan_address,
+            max_records=etherscan_max_transactions,
+            base_url=etherscan_base_url,
         ),
     }
 
@@ -312,6 +400,8 @@ __all__ = [
     "run_phase2",
     "_stable_event_id",
     "_normalize_newsapi_record",
+    "_normalize_event_registry_record",
+    "_normalize_etherscan_record",
     "_persist_events",
     "_log_run",
 ]
