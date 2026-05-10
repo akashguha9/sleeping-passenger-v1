@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-Phase E.1 — Add sleepingpassenger host aliases to the Windows hosts file.
+Phase E.1 - Add sleepingpassenger host aliases to the Windows hosts file.
 Requires Administrator privileges.
 Idempotent: skips any alias that is already present.
 

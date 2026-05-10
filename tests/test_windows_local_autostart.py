@@ -81,3 +81,37 @@ def test_reverse_proxy_targets():
 def test_readme_documents_sleepingpassenger():
     content = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
     assert "http://sleepingpassenger" in content
+
+
+def test_no_em_dash_in_ps1_scripts():
+    """Em-dash (U+2014) inside double-quoted PowerShell strings causes parse errors."""
+    em_dash = "—"
+    for name in _SCRIPTS:
+        if not name.endswith(".ps1"):
+            continue
+        content = (WINDOWS_DIR / name).read_text(encoding="utf-8", errors="replace")
+        assert em_dash not in content, (
+            f"Em-dash found in scripts/windows/{name} -- replace with ' - '"
+        )
+
+
+def test_backend_uses_python_m_uvicorn():
+    content = (WINDOWS_DIR / "start_mvp_stack.ps1").read_text(encoding="utf-8")
+    assert "python -m uvicorn" in content, (
+        "start_mvp_stack.ps1 must launch backend with 'python -m uvicorn', not bare 'uvicorn'"
+    )
+    assert "uvicorn scripts.api_server:app" in content
+
+
+def test_frontend_pinned_to_port_3000():
+    content = (WINDOWS_DIR / "start_mvp_stack.ps1").read_text(encoding="utf-8")
+    assert "-p 3000" in content, (
+        "start_mvp_stack.ps1 must pin frontend to port 3000 (proxy expects this port)"
+    )
+
+
+def test_chart_structure_api_context_importable():
+    """_candles_from_market_events must be importable without fastapi installed."""
+    import importlib
+    mod = importlib.import_module("scripts.chart_structure_api_context")
+    assert callable(getattr(mod, "_candles_from_market_events", None))

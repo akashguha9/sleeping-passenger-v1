@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-Phase E.1 — Live source poller. Runs advisory ingestion every 300 seconds.
+Phase E.1 - Live source poller. Runs advisory ingestion every 300 seconds.
 Advisory only. No broker API. No order placement.
 Sources: polymarket, gdelt, market_data.
 #>
@@ -54,7 +54,7 @@ while ($true) {
                 Write-Log "$($entry.Label): OK"
             }
         } catch {
-            Write-Log "$($entry.Label): FAILED — $_"
+            Write-Log "$($entry.Label): FAILED - $_"
         }
     }
 

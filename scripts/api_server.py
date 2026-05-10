@@ -80,6 +80,12 @@ except ModuleNotFoundError:
         export_source_health_log,
     )
 
+try:
+    from scripts.chart_structure_api_context import _candles_from_market_events
+except ModuleNotFoundError:
+    from chart_structure_api_context import _candles_from_market_events  # type: ignore[no-redef]
+
+
 def _get_live_signals(source_name: str | None = None, limit: int = 100) -> dict:
     try:
         try:
@@ -149,41 +155,6 @@ def _log_source_health(stats: dict, bull_state: str) -> None:
         )
     except Exception:
         pass
-
-def _candles_from_market_events(events: list[dict]) -> list[dict]:
-    """Extract OHLCV candle dicts from market_data signal_events raw_payload.
-
-    Each event's raw_payload may already be a dict (parsed by get_signal_events)
-    or a JSON string. Missing or non-numeric fields are silently skipped.
-    """
-    candles: list[dict] = []
-    for ev in events:
-        payload = ev.get("raw_payload") or {}
-        if isinstance(payload, str):
-            try:
-                payload = json.loads(payload)
-            except (json.JSONDecodeError, TypeError):
-                continue
-        if not isinstance(payload, dict):
-            continue
-        o = payload.get("open")
-        h = payload.get("high")
-        lo = payload.get("low")
-        c = payload.get("close") if payload.get("close") is not None else payload.get("latest_price")
-        v = payload.get("volume")
-        ts = payload.get("timestamp") or ev.get("fetched_at", "")
-        if any(x is None for x in (o, h, lo, c, v)) or not ts:
-            continue
-        candles.append({
-            "timestamp": str(ts),
-            "open": o,
-            "high": h,
-            "low": lo,
-            "close": c,
-            "volume": v,
-        })
-    return candles
-
 
 def _get_chart_structure(
     symbol: str,

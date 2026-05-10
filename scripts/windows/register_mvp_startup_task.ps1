@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-Phase E.1 — Register Windows Scheduled Task: PipelineV57LocalMVP.
+Phase E.1 - Register Windows Scheduled Task: PipelineV57LocalMVP.
 Triggers start_mvp_stack.ps1 at user logon with highest privileges
 so the port-80 reverse proxy can bind.
 #>
@@ -35,7 +35,7 @@ Register-ScheduledTask `
     -Trigger     $trigger `
     -Principal   $principal `
     -Settings    $settings `
-    -Description "Pipeline V5.7 local advisory MVP stack — auto-start at logon." `
+    -Description "Pipeline V5.7 local advisory MVP stack - auto-start at logon." `
     -Force | Out-Null
 
 Write-Host "Registered : $TaskName"

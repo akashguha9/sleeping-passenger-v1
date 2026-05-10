@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-Phase E.1 — Start the sleepingpassenger reverse proxy.
+Phase E.1 - Start the sleepingpassenger reverse proxy.
 Forwards http://127.0.0.1:80 to http://127.0.0.1:3000 (Next.js frontend).
 Advisory frontend mirror only. No backend or financial logic.
 

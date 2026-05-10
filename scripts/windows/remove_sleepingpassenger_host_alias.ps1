@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-Phase E.1 — Remove sleepingpassenger host aliases from the Windows hosts file.
+Phase E.1 - Remove sleepingpassenger host aliases from the Windows hosts file.
 Requires Administrator privileges.
 Idempotent: no-ops if aliases are already absent.
 #>

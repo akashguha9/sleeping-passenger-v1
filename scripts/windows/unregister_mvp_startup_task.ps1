@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-Phase E.1 — Unregister scheduled task PipelineV57LocalMVP.
+Phase E.1 - Unregister scheduled task PipelineV57LocalMVP.
 Idempotent: no-ops if the task does not exist.
 #>
 

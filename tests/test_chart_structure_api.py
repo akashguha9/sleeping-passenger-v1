@@ -369,7 +369,7 @@ def _flatten_values(obj, depth: int = 0) -> list:
 # ---------------------------------------------------------------------------
 
 def test_candles_from_market_events_parses_valid_payload():
-    from scripts.api_server import _candles_from_market_events
+    from scripts.chart_structure_api_context import _candles_from_market_events
 
     events = [
         {
@@ -390,7 +390,7 @@ def test_candles_from_market_events_parses_valid_payload():
 
 
 def test_candles_from_market_events_skips_missing_close():
-    from scripts.api_server import _candles_from_market_events
+    from scripts.chart_structure_api_context import _candles_from_market_events
 
     events = [
         {
@@ -410,7 +410,7 @@ def test_candles_from_market_events_skips_missing_close():
 
 
 def test_candles_from_market_events_skips_none_ohlcv():
-    from scripts.api_server import _candles_from_market_events
+    from scripts.chart_structure_api_context import _candles_from_market_events
 
     events = [
         {
@@ -429,7 +429,7 @@ def test_candles_from_market_events_skips_none_ohlcv():
 
 
 def test_candles_from_market_events_handles_pre_parsed_dict():
-    from scripts.api_server import _candles_from_market_events
+    from scripts.chart_structure_api_context import _candles_from_market_events
 
     # raw_payload is already a dict (as returned by get_signal_events)
     events = [
@@ -450,7 +450,7 @@ def test_candles_from_market_events_handles_pre_parsed_dict():
 
 
 def test_candles_from_market_events_uses_latest_price_as_close_fallback():
-    from scripts.api_server import _candles_from_market_events
+    from scripts.chart_structure_api_context import _candles_from_market_events
 
     events = [
         {

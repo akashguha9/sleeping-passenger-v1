@@ -546,8 +546,8 @@ The local advisory MVP persists signal events, reflections, AI summaries, decisi
 ### Start the advisory API server
 
 ```powershell
-pip install fastapi uvicorn
-uvicorn scripts.api_server:app --reload
+python -m pip install fastapi uvicorn
+python -m uvicorn scripts.api_server:app --reload
 # or
 python scripts/api_server.py
 ```
@@ -666,7 +666,7 @@ Step 1 uses mock data in `frontend/src/lib/mockData.ts` that mirrors the FastAPI
 ### Prerequisites
 
 ```powershell
-pip install fastapi uvicorn requests
+python -m pip install fastapi uvicorn requests
 cd frontend
 npm install
 cd ..
@@ -679,7 +679,7 @@ Open **three separate terminals** in the repo root.
 **Terminal 1 — FastAPI advisory server**
 
 ```powershell
-uvicorn scripts.api_server:app --reload
+python -m uvicorn scripts.api_server:app --reload
 # Server starts at http://localhost:8000
 # Docs: http://localhost:8000/docs
 ```
@@ -688,8 +688,10 @@ uvicorn scripts.api_server:app --reload
 
 ```powershell
 cd frontend
-npm run dev
+npm run dev -- -p 3000
 # Dashboard at http://localhost:3000
+# Note: port 3000 is required -- the sleepingpassenger proxy forwards port 80 -> 3000.
+# If port 3000 is busy, stop the existing Next.js process first.
 ```
 
 **Terminal 3 — Phase 1 live source ingestion**
@@ -845,8 +847,8 @@ Opens four separate PowerShell windows:
 
 | Window | Command | URL |
 |---|---|---|
-| Backend | `uvicorn scripts.api_server:app --reload` | `http://localhost:8000` |
-| Frontend | `npm run dev` (in `frontend/`) | `http://localhost:3000` |
+| Backend | `python -m uvicorn scripts.api_server:app --reload` | `http://localhost:8000` |
+| Frontend | `npm run dev -- -p 3000` (in `frontend/`, port pinned) | `http://localhost:3000` |
 | Poller | `poll_live_sources.ps1` | runs every 300 s |
 | Proxy | `start_sleepingpassenger_proxy.ps1` | port 80 → port 3000 |
 
