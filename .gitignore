@@ -115,3 +115,6 @@ frontend/.next/
 frontend/node_modules/
 frontend/tsconfig.tsbuildinfo
 frontend/*.tsbuildinfo
+
+# Local Claude Code project settings
+.claude/
