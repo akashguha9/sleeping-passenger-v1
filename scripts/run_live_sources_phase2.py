@@ -15,6 +15,9 @@ Usage
   python scripts/run_live_sources_phase2.py --source market_data --dry-run --json
   python scripts/run_live_sources_phase2.py --source market_data --write
   python scripts/run_live_sources_phase2.py --source market_data --symbols AAPL,MSFT,BTC-USD --period 5d --dry-run
+  python scripts/run_live_sources_phase2.py --source india --dry-run --json
+  python scripts/run_live_sources_phase2.py --source india --write
+  python scripts/run_live_sources_phase2.py --source india --india-symbols "NIFTY 50,NIFTY BANK" --dry-run
 
 Optional flags (NewsAPI)
 ------------------------
@@ -47,6 +50,12 @@ Optional flags (Market Data — Phase C.5)
   --interval <interval>     yfinance bar interval (default: 1d). E.g. 1h, 1d, 1wk.
   --market-provider <prov>  Data provider (default: yahoo). Paid providers skip cleanly.
 
+Optional flags (India — Phase C.6)
+------------------------------------
+  --india-symbols <sym>     Comma-separated NSE index names (default: NIFTY 50,NIFTY BANK,INDIA VIX).
+  --india-date <date>       ISO date filter e.g. 2026-05-10 (informational; NSE always returns latest).
+  --india-max-items <N>     Max India records to return (default: 50).
+
 Common flags
 ------------
   --json                    Output full report as JSON.
@@ -62,6 +71,7 @@ Safety
   Grok/xAI output is hypothesis/interpretation only, never truth.
   Market data is read-only price confirmation; no execution path exists.
   yfinance skips cleanly if the package is unavailable.
+  India sources (NSE/RBI/SEBI) require no API key. Public endpoints skip cleanly on failure.
 """
 from __future__ import annotations
 
@@ -76,7 +86,7 @@ if str(_REPO_ROOT) not in sys.path:
 
 from scripts.live_source_runner_phase2 import run_phase2  # noqa: E402
 
-_SUPPORTED_SOURCES = ["newsapi", "event_registry", "etherscan", "grok_xai", "market_data"]
+_SUPPORTED_SOURCES = ["newsapi", "event_registry", "etherscan", "grok_xai", "market_data", "india"]
 
 
 def _parse_args() -> argparse.Namespace:
@@ -215,6 +225,34 @@ def _parse_args() -> argparse.Namespace:
         help="Market data provider (default: yahoo). Paid providers skip cleanly.",
     )
     parser.add_argument(
+        "--india-symbols",
+        default=None,
+        dest="india_symbols",
+        metavar="SYMBOLS",
+        help=(
+            "Comma-separated NSE index names for india source "
+            "(default: NIFTY 50,NIFTY BANK,INDIA VIX)."
+        ),
+    )
+    parser.add_argument(
+        "--india-date",
+        default=None,
+        dest="india_date",
+        metavar="DATE",
+        help=(
+            "ISO date for India source e.g. 2026-05-10 "
+            "(informational; NSE API always returns latest data)."
+        ),
+    )
+    parser.add_argument(
+        "--india-max-items",
+        type=int,
+        default=50,
+        dest="india_max_items",
+        metavar="N",
+        help="Max India records to return (default: 50).",
+    )
+    parser.add_argument(
         "--json",
         action="store_true",
         dest="output_json",
@@ -233,6 +271,11 @@ def main() -> int:
         if args.symbols
         else None
     )
+    india_syms = (
+        [s.strip() for s in args.india_symbols.split(",") if s.strip()]
+        if args.india_symbols
+        else None
+    )
 
     if not args.output_json:
         print(f"[Phase 2 Source Runner] mode={'dry-run' if dry_run else 'write'}")
@@ -242,6 +285,8 @@ def main() -> int:
             print("  Grok/xAI: interpretation only — hypothesis, not truth")
         if args.source == "market_data":
             print("  Market data: read-only price confirmation — no execution path")
+        if args.source == "india":
+            print("  India: NSE/RBI/SEBI read-only — advisory only, no execution path")
         print()
 
     report = run_phase2(
@@ -262,6 +307,9 @@ def main() -> int:
         market_data_period=args.period,
         market_data_interval=args.interval,
         market_data_provider=args.market_provider,
+        india_symbols=india_syms,
+        india_date=args.india_date,
+        india_max_items=args.india_max_items,
         sources=[args.source],
     )
 

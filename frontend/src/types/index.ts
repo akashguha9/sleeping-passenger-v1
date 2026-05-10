@@ -218,7 +218,7 @@ export interface DbStatusResponse {
   generated_at: string;
 }
 
-export type LiveSignalSource = 'polymarket' | 'gdelt' | 'sec_edgar' | 'newsapi' | 'event_registry' | 'etherscan' | 'grok_xai' | 'market_data';
+export type LiveSignalSource = 'polymarket' | 'gdelt' | 'sec_edgar' | 'newsapi' | 'event_registry' | 'etherscan' | 'grok_xai' | 'market_data' | 'india';
 
 export interface LiveSignalRawPayload {
   event_id?: string;
@@ -283,6 +283,14 @@ export interface LiveSignalRawPayload {
   open?: number | null;
   close?: number | null;
   market_confirmation_score?: number | null;
+  // india (Phase C.6 — NSE/RBI/SEBI read-only, no execution)
+  index_name?: string;
+  last_price?: number | null;
+  change?: number | null;
+  percent_change?: number | null;
+  regulatory_source?: string;
+  regulatory_url?: string;
+  regulatory_note?: string | null;
   [key: string]: unknown;
 }
 

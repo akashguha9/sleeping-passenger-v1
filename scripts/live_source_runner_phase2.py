@@ -40,6 +40,7 @@ try:
     from scripts.ingestion.etherscan_loader import EtherscanLoader
     from scripts.ingestion.grok_interpreter import GrokInterpreter
     from scripts.ingestion.market_data_loader import MarketDataLoader
+    from scripts.ingestion.india_loader import IndiaLoader
     from scripts.ingestion.base_loader import LoaderResult, SkipLoader
 except ModuleNotFoundError:
     from runtime_common import utc_timestamp  # type: ignore[no-redef]
@@ -48,6 +49,7 @@ except ModuleNotFoundError:
     from ingestion.etherscan_loader import EtherscanLoader  # type: ignore[no-redef]
     from ingestion.grok_interpreter import GrokInterpreter  # type: ignore[no-redef]
     from ingestion.market_data_loader import MarketDataLoader  # type: ignore[no-redef]
+    from ingestion.india_loader import IndiaLoader  # type: ignore[no-redef]
     from ingestion.base_loader import LoaderResult, SkipLoader  # type: ignore[no-redef]
 
 _ADVISORY_STATUS = "ADVISORY_ONLY"
@@ -278,12 +280,54 @@ def _normalize_grok_record(rec: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _normalize_india_record(rec: dict[str, Any]) -> dict[str, Any]:
+    regulatory_source = str(rec.get("regulatory_source") or rec.get("source") or "india")
+    index_name = str(rec.get("index_name", ""))
+    url = str(rec.get("regulatory_url", ""))
+    last_price = rec.get("last_price")
+    pct = rec.get("percent_change")
+
+    title_parts = [index_name or "India Signal"]
+    if last_price is not None:
+        try:
+            title_parts.append(f"@ {float(last_price):.2f}")
+        except (TypeError, ValueError):
+            pass
+    if pct is not None:
+        try:
+            pct_f = float(pct)
+            sign = "+" if pct_f >= 0 else ""
+            title_parts.append(f"({sign}{pct_f:.2f}%)")
+        except (TypeError, ValueError):
+            pass
+
+    return {
+        "event_id": _stable_event_id("india", regulatory_source, index_name or url),
+        "source_name": "india",
+        "signal_type": "india_market_signal",
+        "title": " ".join(title_parts),
+        "index_name": index_name,
+        "last_price": last_price,
+        "change": rec.get("change"),
+        "percent_change": pct,
+        "regulatory_source": regulatory_source,
+        "regulatory_url": url,
+        "regulatory_note": rec.get("regulatory_note"),
+        "advisory_status": _ADVISORY_STATUS,
+        "human_review_required": True,
+        "execution_gate": _EXECUTION_GATE,
+        "ai_execution_count": _AI_EXECUTION_COUNT,
+        "broker_api_called": _BROKER_API_CALLED,
+    }
+
+
 _NORMALIZERS: dict[str, Any] = {
     "newsapi": _normalize_newsapi_record,
     "event_registry": _normalize_event_registry_record,
     "etherscan": _normalize_etherscan_record,
     "grok_xai": _normalize_grok_record,
     "market_data": _normalize_market_data_record,
+    "india": _normalize_india_record,
 }
 
 
@@ -389,11 +433,14 @@ def run_phase2(
     market_data_period: str = "5d",
     market_data_interval: str = "1d",
     market_data_provider: str = "yahoo",
+    india_symbols: list[str] | None = None,
+    india_date: str | None = None,
+    india_max_items: int = 50,
     sources: list[str] | None = None,
 ) -> Phase2RunReport:
     """
     Run Phase 2 live source ingestion: NewsAPI, Event Registry, Etherscan, Grok/xAI,
-    and Market Data (Phase C.5, read-only price confirmation).
+    Market Data (Phase C.5), and India sources (Phase C.6, read-only).
 
     Parameters
     ----------
@@ -417,6 +464,13 @@ def run_phase2(
         yfinance bar interval (default "1d").
     market_data_provider:
         Data provider — only "yahoo" is active; paid-provider names skip cleanly.
+    india_symbols:
+        NSE index names to fetch (e.g. ["NIFTY 50", "NIFTY BANK"]). Defaults to
+        ["NIFTY 50", "NIFTY BANK", "INDIA VIX"] when None.
+    india_date:
+        Informational date filter (ISO string). NSE API always returns latest data.
+    india_max_items:
+        Maximum India records to return (default 50).
     sources:
         Subset of Phase 2 sources to run. Defaults to ["newsapi"].
         Missing API keys / unavailable dependencies skip cleanly.
@@ -459,6 +513,11 @@ def run_phase2(
             period=market_data_period,
             interval=market_data_interval,
             provider=market_data_provider,
+        ),
+        "india": IndiaLoader(
+            symbols=india_symbols,
+            date=india_date,
+            max_items=india_max_items,
         ),
     }
 
@@ -517,6 +576,7 @@ __all__ = [
     "_normalize_etherscan_record",
     "_normalize_grok_record",
     "_normalize_market_data_record",
+    "_normalize_india_record",
     "_persist_events",
     "_log_run",
 ]

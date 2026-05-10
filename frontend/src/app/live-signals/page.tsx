@@ -16,6 +16,7 @@ const SOURCE_OPTIONS: { value: '' | LiveSignalSource; label: string }[] = [
   { value: 'etherscan', label: 'Etherscan' },
   { value: 'grok_xai', label: 'Grok/xAI' },
   { value: 'market_data', label: 'Market Data' },
+  { value: 'india', label: 'India' },
 ];
 
 const SOURCE_COLORS: Record<string, string> = {
@@ -27,6 +28,7 @@ const SOURCE_COLORS: Record<string, string> = {
   etherscan: 'text-orange-400 bg-orange-900/30 border-orange-700/40',
   grok_xai: 'text-indigo-400 bg-indigo-900/30 border-indigo-700/40',
   market_data: 'text-blue-400 bg-blue-900/30 border-blue-700/40',
+  india: 'text-yellow-500 bg-yellow-900/30 border-yellow-700/40',
 };
 
 const SOURCE_LABELS: Record<string, string> = {
@@ -38,6 +40,7 @@ const SOURCE_LABELS: Record<string, string> = {
   etherscan: 'Etherscan',
   grok_xai: 'Grok/xAI',
   market_data: 'Market Data',
+  india: 'India (NSE/RBI/SEBI)',
 };
 
 function getTitle(ev: LiveSignalEvent): string {
@@ -113,6 +116,18 @@ function getSubtitle(ev: LiveSignalEvent): string {
     if (p.provider) parts.push(`(${p.provider as string})`);
     return parts.join(' · ');
   }
+  if (ev.source_name === 'india') {
+    const parts: string[] = [];
+    if (p.regulatory_source) parts.push(String(p.regulatory_source).toUpperCase());
+    if (p.index_name) parts.push(String(p.index_name));
+    if (p.last_price != null) parts.push(`₹${Number(p.last_price).toLocaleString()}`);
+    if (p.percent_change != null) {
+      const pct = Number(p.percent_change);
+      parts.push(`${pct >= 0 ? '+' : ''}${pct.toFixed(2)}%`);
+    }
+    if (p.regulatory_note) parts.push(String(p.regulatory_note));
+    return parts.join(' · ');
+  }
   return ev.event_id;
 }
 
@@ -149,6 +164,10 @@ function matchesSearch(ev: LiveSignalEvent, query: string): boolean {
     p.provider,
     p.period,
     p.interval,
+    p.index_name,
+    p.regulatory_source,
+    p.regulatory_url,
+    p.regulatory_note,
   ]
     .filter(Boolean)
     .some((v) => String(v).toLowerCase().includes(q));
@@ -276,7 +295,7 @@ export default function LiveSignalsPage() {
         <div>
           <h1 className="text-xl font-bold text-white">Live Signals</h1>
           <p className="text-sm text-slate-500 mt-0.5">
-            Real-time ingestion from Polymarket, GDELT, SEC EDGAR, NewsAPI, Event Registry, Etherscan, Grok/xAI, and Market Data — advisory only
+            Real-time ingestion from Polymarket, GDELT, SEC EDGAR, NewsAPI, Event Registry, Etherscan, Grok/xAI, Market Data, and India (NSE/RBI/SEBI) — advisory only
           </p>
         </div>
         <div className="flex items-center gap-2">
