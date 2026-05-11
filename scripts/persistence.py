@@ -166,6 +166,50 @@ CREATE TABLE IF NOT EXISTS source_run_log (
 );
 CREATE INDEX IF NOT EXISTS idx_srl_source ON source_run_log(source_name);
 CREATE INDEX IF NOT EXISTS idx_srl_ts ON source_run_log(timestamp_utc);
+CREATE TABLE IF NOT EXISTS global_securities (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    canonical_symbol TEXT NOT NULL UNIQUE,
+    provider_symbol TEXT NOT NULL DEFAULT '',
+    yahoo_symbol TEXT NOT NULL DEFAULT '',
+    isin TEXT,
+    name TEXT NOT NULL DEFAULT '',
+    exchange_code TEXT NOT NULL DEFAULT '',
+    exchange_name TEXT NOT NULL DEFAULT '',
+    country TEXT NOT NULL DEFAULT '',
+    economy_rank INTEGER,
+    currency TEXT,
+    asset_type TEXT NOT NULL DEFAULT 'EQUITY',
+    sector TEXT,
+    industry TEXT,
+    active INTEGER NOT NULL DEFAULT 1,
+    first_seen_at TEXT NOT NULL,
+    last_seen_at TEXT NOT NULL,
+    delisted_at TEXT,
+    source TEXT NOT NULL DEFAULT '',
+    raw_payload TEXT NOT NULL DEFAULT '{}',
+    advisory_status TEXT NOT NULL DEFAULT 'ADVISORY_ONLY',
+    execution_gate TEXT NOT NULL DEFAULT 'LOCKED',
+    human_review_required INTEGER NOT NULL DEFAULT 1,
+    ai_execution_count INTEGER NOT NULL DEFAULT 0,
+    broker_api_called INTEGER NOT NULL DEFAULT 0,
+    broker_order_id TEXT NOT NULL DEFAULT 'NONE'
+);
+CREATE INDEX IF NOT EXISTS idx_gs_canonical ON global_securities(canonical_symbol);
+CREATE INDEX IF NOT EXISTS idx_gs_yahoo ON global_securities(yahoo_symbol);
+CREATE INDEX IF NOT EXISTS idx_gs_exchange ON global_securities(exchange_code);
+CREATE INDEX IF NOT EXISTS idx_gs_country ON global_securities(country);
+CREATE INDEX IF NOT EXISTS idx_gs_active ON global_securities(active);
+CREATE INDEX IF NOT EXISTS idx_gs_asset_type ON global_securities(asset_type);
+CREATE TABLE IF NOT EXISTS global_security_aliases (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    alias TEXT NOT NULL UNIQUE,
+    canonical_symbol TEXT NOT NULL,
+    confidence REAL NOT NULL DEFAULT 1.0,
+    source TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_gsa_alias ON global_security_aliases(alias);
+CREATE INDEX IF NOT EXISTS idx_gsa_canonical ON global_security_aliases(canonical_symbol);
 """
 
 # Track which DB paths have been initialized this process (avoids repeat schema runs)
@@ -699,6 +743,8 @@ def get_db_status(db_path: Path = DB_PATH) -> dict[str, Any]:
         "export_logs",
         "signal_events",
         "source_run_log",
+        "global_securities",
+        "global_security_aliases",
     ]
     counts: dict[str, int] = {}
     try:
@@ -883,6 +929,230 @@ def get_source_run_log(limit: int = 50, db_path: Path = DB_PATH) -> list[dict[st
     return result
 
 
+# ---------------------------------------------------------------------------
+# Global securities master
+# ---------------------------------------------------------------------------
+
+def _sec_row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
+    d = dict(row)
+    d["advisory_status"] = _ADVISORY_STATUS
+    d["ai_execution_count"] = _AI_EXECUTION_COUNT
+    d["broker_api_called"] = False
+    d["broker_order_id"] = "NONE"
+    d["active"] = bool(d.get("active", 1))
+    d["human_review_required"] = bool(d.get("human_review_required", 1))
+    try:
+        d["raw_payload"] = json.loads(d["raw_payload"])
+    except (json.JSONDecodeError, TypeError):
+        d["raw_payload"] = {}
+    return d
+
+
+def upsert_global_security(
+    canonical_symbol: str,
+    name: str = "",
+    exchange_code: str = "",
+    exchange_name: str = "",
+    country: str = "",
+    currency: str | None = None,
+    asset_type: str = "EQUITY",
+    sector: str | None = None,
+    industry: str | None = None,
+    isin: str | None = None,
+    economy_rank: int | None = None,
+    provider_symbol: str = "",
+    yahoo_symbol: str = "",
+    active: bool = True,
+    source: str = "",
+    raw_payload: dict[str, Any] | None = None,
+    db_path: Path = DB_PATH,
+) -> bool:
+    """Upsert a global security record. Returns True if newly inserted, False if updated."""
+    now = utc_timestamp()
+    sym = canonical_symbol.strip().upper()
+    raw_str = json.dumps(raw_payload or {})
+    conn = _get_conn(db_path)
+    try:
+        existing = conn.execute(
+            "SELECT id FROM global_securities WHERE canonical_symbol=?", (sym,)
+        ).fetchone()
+        if existing:
+            conn.execute(
+                "UPDATE global_securities SET name=?, exchange_code=?, exchange_name=?,"
+                " country=?, currency=?, asset_type=?, sector=?, industry=?, isin=?,"
+                " economy_rank=?, provider_symbol=?, yahoo_symbol=?, active=?,"
+                " source=?, raw_payload=?, last_seen_at=?"
+                " WHERE canonical_symbol=?",
+                (
+                    name, exchange_code, exchange_name, country, currency,
+                    asset_type, sector, industry, isin, economy_rank,
+                    provider_symbol, yahoo_symbol, int(active),
+                    source, raw_str, now, sym,
+                ),
+            )
+            conn.commit()
+            return False
+        conn.execute(
+            "INSERT INTO global_securities"
+            " (canonical_symbol, provider_symbol, yahoo_symbol, isin, name,"
+            "  exchange_code, exchange_name, country, economy_rank, currency,"
+            "  asset_type, sector, industry, active, first_seen_at, last_seen_at,"
+            "  source, raw_payload, advisory_status, execution_gate,"
+            "  human_review_required, ai_execution_count, broker_api_called, broker_order_id)"
+            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (
+                sym, provider_symbol, yahoo_symbol, isin, name,
+                exchange_code, exchange_name, country, economy_rank, currency,
+                asset_type, sector, industry, int(active), now, now,
+                source, raw_str,
+                _ADVISORY_STATUS, "LOCKED", 1, _AI_EXECUTION_COUNT, 0, "NONE",
+            ),
+        )
+        conn.commit()
+        return True
+    finally:
+        conn.close()
+
+
+def get_global_security(
+    canonical_symbol: str, db_path: Path = DB_PATH
+) -> dict[str, Any] | None:
+    """Return a single global security by canonical symbol, or None."""
+    conn = _get_conn(db_path)
+    try:
+        row = conn.execute(
+            "SELECT * FROM global_securities WHERE canonical_symbol=?",
+            (canonical_symbol.strip().upper(),),
+        ).fetchone()
+    finally:
+        conn.close()
+    return _sec_row_to_dict(row) if row else None
+
+
+def search_global_securities(
+    q: str,
+    limit: int = 20,
+    db_path: Path = DB_PATH,
+) -> list[dict[str, Any]]:
+    """Search global securities by symbol prefix or name substring."""
+    q_like = f"%{q.strip().upper()}%"
+    conn = _get_conn(db_path)
+    try:
+        rows = conn.execute(
+            "SELECT * FROM global_securities"
+            " WHERE canonical_symbol LIKE ? OR name LIKE ? OR exchange_code LIKE ?"
+            " ORDER BY active DESC,"
+            " CASE WHEN economy_rank IS NULL THEN 1 ELSE 0 END ASC,"
+            " economy_rank ASC, canonical_symbol ASC"
+            " LIMIT ?",
+            (q_like, q_like, q_like, limit),
+        ).fetchall()
+    finally:
+        conn.close()
+    return [_sec_row_to_dict(r) for r in rows]
+
+
+def upsert_security_alias(
+    alias: str,
+    canonical_symbol: str,
+    confidence: float = 1.0,
+    source: str = "",
+    db_path: Path = DB_PATH,
+) -> bool:
+    """Insert or update a symbol alias mapping. Returns True on success."""
+    now = utc_timestamp()
+    alias_upper = alias.strip().upper()
+    canonical_upper = canonical_symbol.strip().upper()
+    conn = _get_conn(db_path)
+    try:
+        existing = conn.execute(
+            "SELECT id FROM global_security_aliases WHERE alias=?", (alias_upper,)
+        ).fetchone()
+        if existing:
+            conn.execute(
+                "UPDATE global_security_aliases SET canonical_symbol=?, confidence=?, source=?"
+                " WHERE alias=?",
+                (canonical_upper, confidence, source, alias_upper),
+            )
+        else:
+            conn.execute(
+                "INSERT INTO global_security_aliases"
+                " (alias, canonical_symbol, confidence, source, created_at)"
+                " VALUES (?,?,?,?,?)",
+                (alias_upper, canonical_upper, confidence, source, now),
+            )
+        conn.commit()
+        return True
+    finally:
+        conn.close()
+
+
+def resolve_alias(alias: str, db_path: Path = DB_PATH) -> str | None:
+    """Resolve an alias to its canonical symbol, or return None if not found."""
+    conn = _get_conn(db_path)
+    try:
+        row = conn.execute(
+            "SELECT canonical_symbol FROM global_security_aliases WHERE alias=?",
+            (alias.strip().upper(),),
+        ).fetchone()
+    finally:
+        conn.close()
+    return str(row["canonical_symbol"]) if row else None
+
+
+def get_security_coverage(
+    canonical_symbol: str, db_path: Path = DB_PATH
+) -> dict[str, Any]:
+    """Return OHLCV candle coverage and metadata for a canonical symbol."""
+    sym = canonical_symbol.strip().upper()
+    conn = _get_conn(db_path)
+    try:
+        sec_row = conn.execute(
+            "SELECT * FROM global_securities WHERE canonical_symbol=?", (sym,)
+        ).fetchone()
+        candle_row = conn.execute(
+            "SELECT COUNT(*) AS n,"
+            " MIN(json_extract(raw_payload,'$.timestamp')) AS first_ts,"
+            " MAX(json_extract(raw_payload,'$.timestamp')) AS last_ts"
+            " FROM signal_events"
+            " WHERE source_name='market_data'"
+            " AND json_extract(raw_payload,'$.symbol')=?",
+            (sym,),
+        ).fetchone()
+        alias_rows = conn.execute(
+            "SELECT alias FROM global_security_aliases WHERE canonical_symbol=?", (sym,)
+        ).fetchall()
+    finally:
+        conn.close()
+
+    candle_count = int(candle_row["n"]) if candle_row else 0
+    first_ts = candle_row["first_ts"] if candle_row and candle_count > 0 else None
+    last_ts = candle_row["last_ts"] if candle_row and candle_count > 0 else None
+    aliases = [r["alias"] for r in alias_rows]
+
+    return {
+        "canonical_symbol": sym,
+        "in_securities_master": sec_row is not None,
+        "security": _sec_row_to_dict(sec_row) if sec_row else None,
+        "candle_count": candle_count,
+        "first_candle_at": first_ts,
+        "last_candle_at": last_ts,
+        "aliases": aliases,
+        "discovery_command": (
+            f"python scripts/global_security_master_discovery.py --symbols {sym} --write"
+        ),
+        "backfill_command": (
+            f"python scripts/backfill_global_ohlcv.py --symbols {sym} --period max --interval 1d --write"
+        ),
+        "advisory_status": _ADVISORY_STATUS,
+        "execution_gate": "LOCKED",
+        "human_review_required": True,
+        "ai_execution_count": _AI_EXECUTION_COUNT,
+        "broker_api_called": False,
+        "broker_order_id": "NONE",
+    }
+
+
 __all__ = [
     "DB_PATH",
     "init_schema",
@@ -914,4 +1184,10 @@ __all__ = [
     "get_signal_events",
     "log_source_run",
     "get_source_run_log",
+    "upsert_global_security",
+    "get_global_security",
+    "search_global_securities",
+    "upsert_security_alias",
+    "resolve_alias",
+    "get_security_coverage",
 ]

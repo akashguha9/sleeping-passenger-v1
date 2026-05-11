@@ -425,6 +425,112 @@ export interface ChartStructureResponse {
   chart_state?: string;
   advisory_summary?: string;
   run_ingestion?: string;
+  discovery_command?: string;
+  backfill_command?: string;
+  input_symbol?: string;
+  security?: GlobalSecurity | null;
   report: ChartStructureReport | null;
+  error?: string;
+}
+
+// ---------------------------------------------------------------------------
+// Global Securities (Phase F) — advisory-only, no execution
+// ---------------------------------------------------------------------------
+
+export interface GlobalSecurity {
+  id?: number;
+  canonical_symbol: string;
+  provider_symbol: string;
+  yahoo_symbol: string;
+  isin: string | null;
+  name: string;
+  exchange_code: string;
+  exchange_name: string;
+  country: string;
+  economy_rank: number | null;
+  currency: string | null;
+  asset_type: string;
+  sector: string | null;
+  industry: string | null;
+  active: boolean;
+  first_seen_at: string;
+  last_seen_at: string;
+  delisted_at: string | null;
+  source: string;
+  advisory_status: string;
+  execution_gate: string;
+  human_review_required: boolean;
+  ai_execution_count: number;
+  broker_api_called: boolean;
+  broker_order_id: string;
+}
+
+export interface SymbolResolution {
+  canonical_symbol: string;
+  input_symbol: string;
+  resolution_path: 'direct' | 'alias' | 'unknown';
+  alias_used: string | null;
+  security: GlobalSecurity | null;
+  unknown: boolean;
+  error?: string;
+  message?: string;
+  discovery_command: string;
+  backfill_command: string;
+  advisory_status: string;
+  execution_gate: string;
+  human_review_required: boolean;
+  ai_execution_count: number;
+  broker_api_called: boolean;
+  broker_order_id: string;
+}
+
+export interface SecuritySearchResponse {
+  query: string;
+  count: number;
+  results: GlobalSecurity[];
+  advisory_status: string;
+  execution_gate: string;
+  human_review_required: boolean;
+  ai_execution_count: number;
+  broker_api_called: boolean;
+  broker_order_id: string;
+  error?: string;
+}
+
+export interface SecurityDetailResponse {
+  symbol: string;
+  canonical_symbol: string;
+  found: boolean;
+  resolution: SymbolResolution;
+  security: GlobalSecurity | null;
+  advisory_status: string;
+  execution_gate: string;
+  human_review_required: boolean;
+  ai_execution_count: number;
+  broker_api_called: boolean;
+  broker_order_id: string;
+  error?: string;
+  discovery_command?: string;
+  backfill_command?: string;
+}
+
+export interface SecurityCoverageResponse {
+  canonical_symbol: string;
+  input_symbol: string;
+  in_securities_master: boolean;
+  security: GlobalSecurity | null;
+  candle_count: number;
+  first_candle_at: string | null;
+  last_candle_at: string | null;
+  aliases: string[];
+  discovery_command: string;
+  backfill_command: string;
+  resolution: SymbolResolution;
+  advisory_status: string;
+  execution_gate: string;
+  human_review_required: boolean;
+  ai_execution_count: number;
+  broker_api_called: boolean;
+  broker_order_id: string;
   error?: string;
 }

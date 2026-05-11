@@ -397,6 +397,112 @@ def get_chart_structure(
 
 
 # ---------------------------------------------------------------------------
+# Global Securities (Phase F) — advisory-only, read-only
+# ---------------------------------------------------------------------------
+
+_SEC_SAFE_BASE = {
+    "advisory_status": _ADVISORY_STATUS,
+    "execution_gate": "LOCKED",
+    "human_review_required": True,
+    "ai_execution_count": _AI_EXECUTION_COUNT,
+    "broker_api_called": False,
+    "broker_order_id": "NONE",
+}
+
+
+def _sec_persistence():
+    try:
+        from scripts.persistence import (
+            search_global_securities,
+            get_global_security,
+            get_security_coverage,
+        )
+        return search_global_securities, get_global_security, get_security_coverage
+    except ModuleNotFoundError:
+        from persistence import (  # type: ignore[no-redef]
+            search_global_securities,
+            get_global_security,
+            get_security_coverage,
+        )
+        return search_global_securities, get_global_security, get_security_coverage
+
+
+@app.get("/securities/search")
+def search_securities(q: str = "", limit: int = 20) -> dict:
+    try:
+        search_fn, _, _ = _sec_persistence()
+        results = search_fn(q, limit=limit) if q.strip() else []
+        return {
+            **_SEC_SAFE_BASE,
+            "query": q,
+            "count": len(results),
+            "results": results,
+        }
+    except Exception as exc:
+        return {**_SEC_SAFE_BASE, "query": q, "count": 0, "results": [], "error": str(exc)}
+
+
+@app.get("/securities/{symbol}")
+def get_security(symbol: str) -> dict:
+    try:
+        try:
+            from scripts.symbol_normalizer import normalize_symbol
+        except ModuleNotFoundError:
+            from symbol_normalizer import normalize_symbol  # type: ignore[no-redef]
+
+        norm = normalize_symbol(symbol)
+        canonical = norm["canonical_symbol"]
+        _, get_fn, _ = _sec_persistence()
+        security = get_fn(canonical)
+
+        if security is None and norm.get("unknown"):
+            return {
+                **_SEC_SAFE_BASE,
+                "symbol": symbol.upper(),
+                "canonical_symbol": canonical,
+                "found": False,
+                "resolution": norm,
+                "error": "UNKNOWN_SYMBOL",
+                "discovery_command": norm.get("discovery_command"),
+                "backfill_command": norm.get("backfill_command"),
+            }
+
+        return {
+            **_SEC_SAFE_BASE,
+            "symbol": symbol.upper(),
+            "canonical_symbol": canonical,
+            "found": security is not None,
+            "resolution": norm,
+            "security": security,
+        }
+    except Exception as exc:
+        return {**_SEC_SAFE_BASE, "symbol": symbol, "found": False, "error": str(exc)}
+
+
+@app.get("/securities/{symbol}/coverage")
+def get_security_coverage_endpoint(symbol: str) -> dict:
+    try:
+        try:
+            from scripts.symbol_normalizer import normalize_symbol
+        except ModuleNotFoundError:
+            from symbol_normalizer import normalize_symbol  # type: ignore[no-redef]
+
+        norm = normalize_symbol(symbol)
+        canonical = norm["canonical_symbol"]
+        _, _, cov_fn = _sec_persistence()
+        coverage = cov_fn(canonical)
+        coverage["input_symbol"] = symbol.upper()
+        coverage["resolution"] = norm
+        return coverage
+    except Exception as exc:
+        return {
+            **_SEC_SAFE_BASE,
+            "canonical_symbol": symbol.upper(),
+            "error": str(exc),
+        }
+
+
+# ---------------------------------------------------------------------------
 # DB status
 # ---------------------------------------------------------------------------
 

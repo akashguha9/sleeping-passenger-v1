@@ -8,6 +8,7 @@ const NAV_ITEMS = [
   { href: '/signal-inbox', label: 'Signal Inbox', icon: '◈' },
   { href: '/live-signals', label: 'Live Signals', icon: '◆' },
   { href: '/chart-structure', label: 'Chart Structure', icon: '◫' },
+  { href: '/securities', label: 'Securities', icon: '◈' },
   { href: '/reflection-desk', label: 'Reflection Desk', icon: '◎' },
   { href: '/moltbook', label: 'Moltbook', icon: '◑' },
   { href: '/manual-trade-log', label: 'Manual Trade Log', icon: '▣' },

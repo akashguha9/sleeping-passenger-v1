@@ -126,17 +126,42 @@ def _get_chart_structure(
         candles = merged[-limit:] if len(merged) > limit else merged
 
         if not candles:
+            # Try symbol normalization to provide canonical info and exact commands
+            canonical_symbol = symbol_upper
+            security_meta: dict | None = None
+            try:
+                try:
+                    from scripts.symbol_normalizer import normalize_symbol
+                except ModuleNotFoundError:
+                    from symbol_normalizer import normalize_symbol  # type: ignore[no-redef]
+                norm = normalize_symbol(symbol_upper, db_path=db_path)
+                canonical_symbol = norm.get("canonical_symbol", symbol_upper)
+                security_meta = norm.get("security")
+            except Exception:
+                norm = {}
+
+            discovery_cmd = (
+                f"python scripts/global_security_master_discovery.py --symbols {canonical_symbol} --write"
+            )
+            backfill_cmd = (
+                f"python scripts/backfill_global_ohlcv.py --symbols {canonical_symbol} --period max --interval 1d --write"
+            )
+
             return {
                 **_safe_base,
-                "symbol": symbol_upper,
+                "symbol": canonical_symbol,
+                "input_symbol": symbol_upper,
                 "source_event_id": linked_event_id,
                 "candle_count": 0,
                 "chart_state": "INSUFFICIENT_DATA",
                 "advisory_summary": (
-                    "No OHLCV candle data available for this symbol. "
-                    "Run real historical backfill: "
-                    "python scripts/backfill_ohlcv_history.py --symbols AAPL,GLD,TLT,BTC-USD,SPY --period max --interval 1d --write"
+                    f"No OHLCV candle data available for {canonical_symbol}. "
+                    f"Run discovery then backfill: "
+                    f"{discovery_cmd}  &&  {backfill_cmd}"
                 ),
+                "discovery_command": discovery_cmd,
+                "backfill_command": backfill_cmd,
+                "security": security_meta,
                 "report": None,
             }
 

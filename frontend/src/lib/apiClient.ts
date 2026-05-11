@@ -13,6 +13,9 @@ import type {
   DbStatusResponse,
   LiveSignalsResponse,
   ChartStructureResponse,
+  SecuritySearchResponse,
+  SecurityDetailResponse,
+  SecurityCoverageResponse,
 } from '@/types';
 
 export interface HealthResponse {
@@ -215,6 +218,40 @@ export async function getChartStructure(
     params.set('limit', String(limit));
     if (sourceEventId) params.set('source_event_id', sourceEventId);
     return await apiFetch<ChartStructureResponse>(`/chart-structure?${params.toString()}`);
+  } catch {
+    return null;
+  }
+}
+
+export async function searchSecurities(
+  q: string,
+  limit = 20,
+): Promise<SecuritySearchResponse | null> {
+  try {
+    const params = new URLSearchParams({ q, limit: String(limit) });
+    return await apiFetch<SecuritySearchResponse>(`/securities/search?${params.toString()}`);
+  } catch {
+    return null;
+  }
+}
+
+export async function getSecurityDetail(symbol: string): Promise<SecurityDetailResponse | null> {
+  try {
+    return await apiFetch<SecurityDetailResponse>(
+      `/securities/${encodeURIComponent(symbol)}`,
+    );
+  } catch {
+    return null;
+  }
+}
+
+export async function getSecurityCoverage(
+  symbol: string,
+): Promise<SecurityCoverageResponse | null> {
+  try {
+    return await apiFetch<SecurityCoverageResponse>(
+      `/securities/${encodeURIComponent(symbol)}/coverage`,
+    );
   } catch {
     return null;
   }

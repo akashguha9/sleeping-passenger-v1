@@ -1,0 +1,599 @@
+# Global Securities Master — top 50 major economies and major exchanges
+# Advisory-only. No execution. No broker API. Human review required.
+#
+# advisory_status: ADVISORY_ONLY
+# execution_gate: LOCKED
+# human_review_required: true
+# ai_execution_count: 0
+# broker_api_called: false
+# broker_order_id: NONE
+#
+# Each entry:
+#   canonical_symbol: The primary symbol stored in global_securities (uppercase).
+#   yahoo_symbol:     The yfinance ticker string (may differ from canonical).
+#   exchange_code:    Short exchange identifier.
+#   exchange_name:    Human-readable exchange name.
+#   country:          ISO 3166-1 alpha-2 country code.
+#   economy_rank:     Approximate GDP rank (1 = largest).
+#   asset_type:       EQUITY | ETF | INDEX | CRYPTO | BOND
+#   name:             Human-readable security name.
+#
+# Symbols are discovered/backfilled via:
+#   python scripts/global_security_master_discovery.py --write
+#   python scripts/backfill_global_ohlcv.py --symbols <SYM> --period max --interval 1d --write
+
+exchanges:
+  - code: NYSE
+    name: New York Stock Exchange
+    country: US
+    economy_rank: 1
+  - code: NASDAQ
+    name: NASDAQ
+    country: US
+    economy_rank: 1
+  - code: LSE
+    name: London Stock Exchange
+    country: GB
+    economy_rank: 6
+  - code: TSE
+    name: Tokyo Stock Exchange
+    country: JP
+    economy_rank: 3
+  - code: SSE
+    name: Shanghai Stock Exchange
+    country: CN
+    economy_rank: 2
+  - code: SZSE
+    name: Shenzhen Stock Exchange
+    country: CN
+    economy_rank: 2
+  - code: HKEX
+    name: Hong Kong Stock Exchange
+    country: HK
+    economy_rank: 25
+  - code: NSE
+    name: National Stock Exchange of India
+    country: IN
+    economy_rank: 5
+  - code: BSE
+    name: Bombay Stock Exchange
+    country: IN
+    economy_rank: 5
+  - code: Euronext
+    name: Euronext (Paris / Amsterdam / Brussels / Lisbon)
+    country: EU
+    economy_rank: 7
+  - code: FSE
+    name: Frankfurt Stock Exchange (XETRA)
+    country: DE
+    economy_rank: 4
+  - code: TSX
+    name: Toronto Stock Exchange
+    country: CA
+    economy_rank: 9
+  - code: ASX
+    name: Australian Securities Exchange
+    country: AU
+    economy_rank: 13
+  - code: TWSE
+    name: Taiwan Stock Exchange
+    country: TW
+    economy_rank: 22
+  - code: KRX
+    name: Korea Exchange
+    country: KR
+    economy_rank: 13
+  - code: SGX
+    name: Singapore Exchange
+    country: SG
+    economy_rank: 37
+  - code: BM
+    name: Bursa Malaysia
+    country: MY
+    economy_rank: 38
+  - code: SET
+    name: Stock Exchange of Thailand
+    country: TH
+    economy_rank: 29
+  - code: IDX
+    name: Indonesia Stock Exchange
+    country: ID
+    economy_rank: 16
+  - code: BVMF
+    name: B3 — Brasil Bolsa Balcão
+    country: BR
+    economy_rank: 12
+  - code: BMV
+    name: Bolsa Mexicana de Valores
+    country: MX
+    economy_rank: 15
+  - code: BCS
+    name: Bolsa de Comercio de Santiago
+    country: CL
+    economy_rank: 42
+  - code: MERVAL
+    name: Bolsa de Comercio de Buenos Aires
+    country: AR
+    economy_rank: 26
+  - code: JSE
+    name: Johannesburg Stock Exchange
+    country: ZA
+    economy_rank: 33
+  - code: TADAWUL
+    name: Saudi Exchange (Tadawul)
+    country: SA
+    economy_rank: 18
+  - code: DFM
+    name: Dubai Financial Market
+    country: AE
+    economy_rank: 32
+  - code: IST
+    name: Borsa Istanbul
+    country: TR
+    economy_rank: 19
+  - code: MOEX
+    name: Moscow Exchange
+    country: RU
+    economy_rank: 11
+  - code: WSE
+    name: Warsaw Stock Exchange
+    country: PL
+    economy_rank: 24
+  - code: SIX
+    name: SIX Swiss Exchange
+    country: CH
+    economy_rank: 20
+
+# Seed securities — top symbols per exchange for initial discovery
+# yahoo_symbol is the ticker used with yfinance
+securities:
+  # --- United States ---
+  - canonical_symbol: SPY
+    yahoo_symbol: SPY
+    exchange_code: NYSE
+    country: US
+    economy_rank: 1
+    asset_type: ETF
+    name: SPDR S&P 500 ETF Trust
+
+  - canonical_symbol: AAPL
+    yahoo_symbol: AAPL
+    exchange_code: NASDAQ
+    country: US
+    economy_rank: 1
+    asset_type: EQUITY
+    name: Apple Inc.
+
+  - canonical_symbol: MSFT
+    yahoo_symbol: MSFT
+    exchange_code: NASDAQ
+    country: US
+    economy_rank: 1
+    asset_type: EQUITY
+    name: Microsoft Corporation
+
+  - canonical_symbol: NVDA
+    yahoo_symbol: NVDA
+    exchange_code: NASDAQ
+    country: US
+    economy_rank: 1
+    asset_type: EQUITY
+    name: NVIDIA Corporation
+
+  - canonical_symbol: GLD
+    yahoo_symbol: GLD
+    exchange_code: NYSE
+    country: US
+    economy_rank: 1
+    asset_type: ETF
+    name: SPDR Gold Shares
+
+  - canonical_symbol: TLT
+    yahoo_symbol: TLT
+    exchange_code: NASDAQ
+    country: US
+    economy_rank: 1
+    asset_type: ETF
+    name: iShares 20+ Year Treasury Bond ETF
+
+  - canonical_symbol: BTC-USD
+    yahoo_symbol: BTC-USD
+    exchange_code: CRYPTO
+    country: US
+    economy_rank: 1
+    asset_type: CRYPTO
+    name: Bitcoin USD
+
+  # --- China ---
+  - canonical_symbol: 600519.SS
+    yahoo_symbol: 600519.SS
+    exchange_code: SSE
+    country: CN
+    economy_rank: 2
+    asset_type: EQUITY
+    name: Kweichow Moutai Co. Ltd.
+
+  - canonical_symbol: 000858.SZ
+    yahoo_symbol: 000858.SZ
+    exchange_code: SZSE
+    country: CN
+    economy_rank: 2
+    asset_type: EQUITY
+    name: Wuliangye Yibin Co. Ltd.
+
+  - canonical_symbol: FXI
+    yahoo_symbol: FXI
+    exchange_code: NYSE
+    country: CN
+    economy_rank: 2
+    asset_type: ETF
+    name: iShares China Large-Cap ETF
+
+  # --- Japan ---
+  - canonical_symbol: 7203.T
+    yahoo_symbol: 7203.T
+    exchange_code: TSE
+    country: JP
+    economy_rank: 3
+    asset_type: EQUITY
+    name: Toyota Motor Corporation
+
+  - canonical_symbol: 6758.T
+    yahoo_symbol: 6758.T
+    exchange_code: TSE
+    country: JP
+    economy_rank: 3
+    asset_type: EQUITY
+    name: Sony Group Corporation
+
+  - canonical_symbol: EWJ
+    yahoo_symbol: EWJ
+    exchange_code: NYSE
+    country: JP
+    economy_rank: 3
+    asset_type: ETF
+    name: iShares MSCI Japan ETF
+
+  # --- Germany ---
+  - canonical_symbol: SAP.DE
+    yahoo_symbol: SAP.DE
+    exchange_code: FSE
+    country: DE
+    economy_rank: 4
+    asset_type: EQUITY
+    name: SAP SE
+
+  - canonical_symbol: VOW3.DE
+    yahoo_symbol: VOW3.DE
+    exchange_code: FSE
+    country: DE
+    economy_rank: 4
+    asset_type: EQUITY
+    name: Volkswagen AG
+
+  # --- India ---
+  - canonical_symbol: RELIANCE.NS
+    yahoo_symbol: RELIANCE.NS
+    exchange_code: NSE
+    country: IN
+    economy_rank: 5
+    asset_type: EQUITY
+    name: Reliance Industries Limited
+
+  - canonical_symbol: SBIN.NS
+    yahoo_symbol: SBIN.NS
+    exchange_code: NSE
+    country: IN
+    economy_rank: 5
+    asset_type: EQUITY
+    name: State Bank of India
+
+  - canonical_symbol: INFY.NS
+    yahoo_symbol: INFY.NS
+    exchange_code: NSE
+    country: IN
+    economy_rank: 5
+    asset_type: EQUITY
+    name: Infosys Limited
+
+  - canonical_symbol: TCS.NS
+    yahoo_symbol: TCS.NS
+    exchange_code: NSE
+    country: IN
+    economy_rank: 5
+    asset_type: EQUITY
+    name: Tata Consultancy Services Limited
+
+  - canonical_symbol: INDA
+    yahoo_symbol: INDA
+    exchange_code: NASDAQ
+    country: IN
+    economy_rank: 5
+    asset_type: ETF
+    name: iShares MSCI India ETF
+
+  # --- United Kingdom ---
+  - canonical_symbol: SHEL.L
+    yahoo_symbol: SHEL.L
+    exchange_code: LSE
+    country: GB
+    economy_rank: 6
+    asset_type: EQUITY
+    name: Shell plc
+
+  - canonical_symbol: HSBA.L
+    yahoo_symbol: HSBA.L
+    exchange_code: LSE
+    country: GB
+    economy_rank: 6
+    asset_type: EQUITY
+    name: HSBC Holdings plc
+
+  # --- France ---
+  - canonical_symbol: LVMH.PA
+    yahoo_symbol: MC.PA
+    exchange_code: Euronext
+    country: FR
+    economy_rank: 7
+    asset_type: EQUITY
+    name: LVMH Moët Hennessy Louis Vuitton SE
+
+  # --- Canada ---
+  - canonical_symbol: RY.TO
+    yahoo_symbol: RY.TO
+    exchange_code: TSX
+    country: CA
+    economy_rank: 9
+    asset_type: EQUITY
+    name: Royal Bank of Canada
+
+  - canonical_symbol: SHOP.TO
+    yahoo_symbol: SHOP.TO
+    exchange_code: TSX
+    country: CA
+    economy_rank: 9
+    asset_type: EQUITY
+    name: Shopify Inc.
+
+  # --- South Korea ---
+  - canonical_symbol: 005930.KS
+    yahoo_symbol: 005930.KS
+    exchange_code: KRX
+    country: KR
+    economy_rank: 13
+    asset_type: EQUITY
+    name: Samsung Electronics Co. Ltd.
+
+  - canonical_symbol: EWY
+    yahoo_symbol: EWY
+    exchange_code: NYSE
+    country: KR
+    economy_rank: 13
+    asset_type: ETF
+    name: iShares MSCI South Korea ETF
+
+  # --- Australia ---
+  - canonical_symbol: BHP.AX
+    yahoo_symbol: BHP.AX
+    exchange_code: ASX
+    country: AU
+    economy_rank: 13
+    asset_type: EQUITY
+    name: BHP Group Limited
+
+  - canonical_symbol: CBA.AX
+    yahoo_symbol: CBA.AX
+    exchange_code: ASX
+    country: AU
+    economy_rank: 13
+    asset_type: EQUITY
+    name: Commonwealth Bank of Australia
+
+  - canonical_symbol: EWA
+    yahoo_symbol: EWA
+    exchange_code: NYSE
+    country: AU
+    economy_rank: 13
+    asset_type: ETF
+    name: iShares MSCI Australia ETF
+
+  # --- Taiwan ---
+  - canonical_symbol: 2330.TW
+    yahoo_symbol: 2330.TW
+    exchange_code: TWSE
+    country: TW
+    economy_rank: 22
+    asset_type: EQUITY
+    name: Taiwan Semiconductor Manufacturing Co. Ltd.
+
+  - canonical_symbol: 2002.TW
+    yahoo_symbol: 2002.TW
+    exchange_code: TWSE
+    country: TW
+    economy_rank: 22
+    asset_type: EQUITY
+    name: China Steel Corporation
+
+  - canonical_symbol: EWT
+    yahoo_symbol: EWT
+    exchange_code: NYSE
+    country: TW
+    economy_rank: 22
+    asset_type: ETF
+    name: iShares MSCI Taiwan ETF
+
+  # --- Brazil ---
+  - canonical_symbol: PETR4.SA
+    yahoo_symbol: PETR4.SA
+    exchange_code: BVMF
+    country: BR
+    economy_rank: 12
+    asset_type: EQUITY
+    name: Petróleo Brasileiro S.A. – Petrobras
+
+  - canonical_symbol: VALE3.SA
+    yahoo_symbol: VALE3.SA
+    exchange_code: BVMF
+    country: BR
+    economy_rank: 12
+    asset_type: EQUITY
+    name: Vale S.A.
+
+  - canonical_symbol: EWZ
+    yahoo_symbol: EWZ
+    exchange_code: NYSE
+    country: BR
+    economy_rank: 12
+    asset_type: ETF
+    name: iShares MSCI Brazil ETF
+
+  # --- Hong Kong ---
+  - canonical_symbol: 0700.HK
+    yahoo_symbol: 0700.HK
+    exchange_code: HKEX
+    country: HK
+    economy_rank: 25
+    asset_type: EQUITY
+    name: Tencent Holdings Limited
+
+  - canonical_symbol: 0005.HK
+    yahoo_symbol: 0005.HK
+    exchange_code: HKEX
+    country: HK
+    economy_rank: 25
+    asset_type: EQUITY
+    name: HSBC Holdings plc (HK)
+
+  # --- Singapore ---
+  - canonical_symbol: D05.SI
+    yahoo_symbol: D05.SI
+    exchange_code: SGX
+    country: SG
+    economy_rank: 37
+    asset_type: EQUITY
+    name: DBS Group Holdings Ltd
+
+  - canonical_symbol: EWS
+    yahoo_symbol: EWS
+    exchange_code: NYSE
+    country: SG
+    economy_rank: 37
+    asset_type: ETF
+    name: iShares MSCI Singapore ETF
+
+  # --- Saudi Arabia ---
+  - canonical_symbol: 2222.SR
+    yahoo_symbol: 2222.SR
+    exchange_code: TADAWUL
+    country: SA
+    economy_rank: 18
+    asset_type: EQUITY
+    name: Saudi Aramco
+
+  # --- Switzerland ---
+  - canonical_symbol: NESN.SW
+    yahoo_symbol: NESN.SW
+    exchange_code: SIX
+    country: CH
+    economy_rank: 20
+    asset_type: EQUITY
+    name: Nestlé S.A.
+
+  - canonical_symbol: ROG.SW
+    yahoo_symbol: ROG.SW
+    exchange_code: SIX
+    country: CH
+    economy_rank: 20
+    asset_type: EQUITY
+    name: Roche Holding AG
+
+  # --- Netherlands ---
+  - canonical_symbol: ASML.AS
+    yahoo_symbol: ASML.AS
+    exchange_code: Euronext
+    country: NL
+    economy_rank: 17
+    asset_type: EQUITY
+    name: ASML Holding N.V.
+
+  # --- Mexico ---
+  - canonical_symbol: AMXL.MX
+    yahoo_symbol: AMXL.MX
+    exchange_code: BMV
+    country: MX
+    economy_rank: 15
+    asset_type: EQUITY
+    name: América Móvil S.A.B. de C.V.
+
+  - canonical_symbol: EWW
+    yahoo_symbol: EWW
+    exchange_code: NYSE
+    country: MX
+    economy_rank: 15
+    asset_type: ETF
+    name: iShares MSCI Mexico ETF
+
+  # --- South Africa ---
+  - canonical_symbol: NPN.JO
+    yahoo_symbol: NPN.JO
+    exchange_code: JSE
+    country: ZA
+    economy_rank: 33
+    asset_type: EQUITY
+    name: Naspers Limited
+
+  # --- Indonesia ---
+  - canonical_symbol: BBCA.JK
+    yahoo_symbol: BBCA.JK
+    exchange_code: IDX
+    country: ID
+    economy_rank: 16
+    asset_type: EQUITY
+    name: PT Bank Central Asia Tbk
+
+  # --- Malaysia ---
+  - canonical_symbol: 1155.KL
+    yahoo_symbol: 1155.KL
+    exchange_code: BM
+    country: MY
+    economy_rank: 38
+    asset_type: EQUITY
+    name: Malayan Banking Berhad (Maybank)
+
+# Known aliases for common alternate forms
+# These allow SBI.NSE -> SBIN.NS resolution etc.
+aliases:
+  - alias: SBI.NSE
+    canonical_symbol: SBIN.NS
+    confidence: 0.95
+    source: manual_seed
+
+  - alias: RELIANCE
+    canonical_symbol: RELIANCE.NS
+    confidence: 0.85
+    source: manual_seed
+
+  - alias: TSMC
+    canonical_symbol: 2330.TW
+    confidence: 0.90
+    source: manual_seed
+
+  - alias: TSMC.US
+    canonical_symbol: TSM
+    confidence: 0.95
+    source: manual_seed
+
+  - alias: SAMSUNG
+    canonical_symbol: 005930.KS
+    confidence: 0.80
+    source: manual_seed
+
+  - alias: ARAMCO
+    canonical_symbol: 2222.SR
+    confidence: 0.90
+    source: manual_seed
+
+  - alias: PETROBRAS
+    canonical_symbol: PETR4.SA
+    confidence: 0.85
+    source: manual_seed
