@@ -261,7 +261,7 @@ class TestNormalizerOutputInvariants:
         from scripts.live_source_runner import _normalize_polymarket_record
         rec = _normalize_polymarket_record({
             "market_id": "test-mkt-1",
-            "question": "Will X happen?",
+            "question": "Will the Fed cut rates in 2026?",
             "volume": 1000,
             "liquidity": 500,
             "end_date": "2026-12-31",

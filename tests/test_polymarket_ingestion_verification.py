@@ -98,32 +98,32 @@ class TestPolymarketNormalization:
     def test_source_name_is_polymarket(self) -> None:
         from scripts.live_source_runner import _normalize_polymarket_record
 
-        out = _normalize_polymarket_record({"market_id": "x", "question": "Q?"})
+        out = _normalize_polymarket_record({"market_id": "x", "question": "S&P 500 end of Q3 2026?"})
         assert out["source_name"] == "polymarket"
 
     def test_signal_type_is_prediction_market(self) -> None:
         from scripts.live_source_runner import _normalize_polymarket_record
 
-        out = _normalize_polymarket_record({"market_id": "x", "question": "Q?"})
+        out = _normalize_polymarket_record({"market_id": "x", "question": "S&P 500 end of Q3 2026?"})
         assert out["signal_type"] == "prediction_market"
 
     def test_title_comes_from_question(self) -> None:
         from scripts.live_source_runner import _normalize_polymarket_record
 
-        out = _normalize_polymarket_record({"market_id": "x", "question": "Will X happen?"})
-        assert out["title"] == "Will X happen?"
+        out = _normalize_polymarket_record({"market_id": "x", "question": "Will the Fed cut rates in 2026?"})
+        assert out["title"] == "Will the Fed cut rates in 2026?"
 
     def test_market_id_preserved(self) -> None:
         from scripts.live_source_runner import _normalize_polymarket_record
 
-        out = _normalize_polymarket_record({"market_id": "mkt-abc", "question": "?"})
+        out = _normalize_polymarket_record({"market_id": "mkt-abc", "question": "Fed rate decision in 2026?"})
         assert out["market_id"] == "mkt-abc"
 
     def test_volume_and_liquidity_preserved(self) -> None:
         from scripts.live_source_runner import _normalize_polymarket_record
 
         out = _normalize_polymarket_record(
-            {"market_id": "x", "question": "?", "volume": 42.5, "liquidity": 10.0}
+            {"market_id": "x", "question": "Will the Fed cut rates in 2026?", "volume": 42.5, "liquidity": 10.0}
         )
         assert out["volume"] == 42.5
         assert out["liquidity"] == 10.0
@@ -132,21 +132,21 @@ class TestPolymarketNormalization:
         from scripts.live_source_runner import _normalize_polymarket_record
 
         out = _normalize_polymarket_record(
-            {"market_id": "x", "question": "?", "end_date": "2026-12-31"}
+            {"market_id": "x", "question": "Will the Fed cut rates in 2026?", "end_date": "2026-12-31"}
         )
         assert out["end_date"] == "2026-12-31"
 
     def test_event_id_is_stable_and_prefixed(self) -> None:
         from scripts.live_source_runner import _normalize_polymarket_record
 
-        out = _normalize_polymarket_record({"market_id": "mkt-abc", "question": "?"})
+        out = _normalize_polymarket_record({"market_id": "mkt-abc", "question": "Fed rate decision in 2026?"})
         assert out["event_id"].startswith("polymarket_")
         assert len(out["event_id"]) == len("polymarket_") + 16
 
     def test_event_id_deterministic(self) -> None:
         from scripts.live_source_runner import _normalize_polymarket_record
 
-        rec = {"market_id": "mkt-xyz", "question": "Test?"}
+        rec = {"market_id": "mkt-xyz", "question": "Fed Decision in June 2026?"}
         out1 = _normalize_polymarket_record(rec)
         out2 = _normalize_polymarket_record(rec)
         assert out1["event_id"] == out2["event_id"]
@@ -154,14 +154,14 @@ class TestPolymarketNormalization:
     def test_event_id_unique_per_market(self) -> None:
         from scripts.live_source_runner import _normalize_polymarket_record
 
-        out1 = _normalize_polymarket_record({"market_id": "mkt-001", "question": "?"})
-        out2 = _normalize_polymarket_record({"market_id": "mkt-002", "question": "?"})
+        out1 = _normalize_polymarket_record({"market_id": "mkt-001", "question": "Will the Fed cut rates?"})
+        out2 = _normalize_polymarket_record({"market_id": "mkt-002", "question": "S&P 500 end of May 2026?"})
         assert out1["event_id"] != out2["event_id"]
 
     def test_missing_market_id_produces_valid_event_id(self) -> None:
         from scripts.live_source_runner import _normalize_polymarket_record
 
-        out = _normalize_polymarket_record({"question": "No ID?"})
+        out = _normalize_polymarket_record({"question": "Will oil prices rise in 2026?"})
         assert out["event_id"].startswith("polymarket_")
 
     def test_all_payload_records_normalized(self, polymarket_payload: list) -> None:
@@ -183,38 +183,38 @@ class TestPolymarketAdvisoryContract:
     def test_advisory_status_is_advisory_only(self) -> None:
         from scripts.live_source_runner import _normalize_polymarket_record
 
-        out = _normalize_polymarket_record({"market_id": "x", "question": "?"})
+        out = _normalize_polymarket_record({"market_id": "x", "question": "Will the Fed cut rates in 2026?"})
         assert out["advisory_status"] == "ADVISORY_ONLY"
 
     def test_human_review_required_is_true(self) -> None:
         from scripts.live_source_runner import _normalize_polymarket_record
 
-        out = _normalize_polymarket_record({"market_id": "x", "question": "?"})
+        out = _normalize_polymarket_record({"market_id": "x", "question": "Will the Fed cut rates in 2026?"})
         assert out["human_review_required"] is True
 
     def test_execution_gate_is_locked(self) -> None:
         from scripts.live_source_runner import _normalize_polymarket_record
 
-        out = _normalize_polymarket_record({"market_id": "x", "question": "?"})
+        out = _normalize_polymarket_record({"market_id": "x", "question": "Will the Fed cut rates in 2026?"})
         assert out["execution_gate"] == "LOCKED"
 
     def test_ai_execution_count_is_zero(self) -> None:
         from scripts.live_source_runner import _normalize_polymarket_record
 
-        out = _normalize_polymarket_record({"market_id": "x", "question": "?"})
+        out = _normalize_polymarket_record({"market_id": "x", "question": "Will the Fed cut rates in 2026?"})
         assert out["ai_execution_count"] == 0
 
     def test_no_broker_api_called_field_or_false(self) -> None:
         from scripts.live_source_runner import _normalize_polymarket_record
 
-        out = _normalize_polymarket_record({"market_id": "x", "question": "?"})
+        out = _normalize_polymarket_record({"market_id": "x", "question": "Will the Fed cut rates in 2026?"})
         # broker_api_called must either not be present or be False
         assert out.get("broker_api_called", False) is False
 
     def test_no_trade_fields_in_normalized_record(self) -> None:
         from scripts.live_source_runner import _normalize_polymarket_record
 
-        out = _normalize_polymarket_record({"market_id": "x", "question": "?"})
+        out = _normalize_polymarket_record({"market_id": "x", "question": "Will the Fed cut rates in 2026?"})
         forbidden = {"order_id", "broker_order_id", "trade_id", "executed", "buy", "sell"}
         assert not forbidden & set(out.keys())
 
@@ -683,7 +683,7 @@ class TestPolymarketNoExecutionSafety:
     def test_normalized_polymarket_event_no_execution_fields(self) -> None:
         from scripts.live_source_runner import _normalize_polymarket_record
 
-        out = _normalize_polymarket_record({"market_id": "x", "question": "?"})
+        out = _normalize_polymarket_record({"market_id": "x", "question": "Will the Fed cut rates in 2026?"})
         forbidden = {"order_id", "broker_order_id", "trade_id", "executed"}
         assert not forbidden & set(out.keys())
 

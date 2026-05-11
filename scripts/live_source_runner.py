@@ -11,6 +11,8 @@ Safety contract
 - Dry-run mode fetches and normalizes but does NOT persist anything.
 - SEC EDGAR skips cleanly when SEC_USER_AGENT env var is unset.
 - Polymarket and GDELT require no secrets.
+- Polymarket markets are domain-gated: only politics/finance/geopolitics/economy
+  markets are accepted; sports/entertainment/meme/gaming markets are rejected.
 
 Rate-limit-safe defaults
 ------------------------
@@ -23,9 +25,16 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import time
 from dataclasses import dataclass, field
 from typing import Any
+
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
 
 try:
     from scripts.runtime_common import utc_timestamp
@@ -64,24 +73,32 @@ class SourceRunResult:
     source_name: str
     status: str  # "ok" | "skipped" | "error"
     fetched_count: int = 0
+    accepted_count: int = 0
+    rejected_count: int = 0
     skipped_reason: str = ""
     error_message: str = ""
     timestamp_utc: str = ""
     duration_ms: int = 0
     events_persisted: int = 0
     advisory_status: str = _ADVISORY_STATUS
+    status_detail: str = ""
+    missing_env_var: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "source_name": self.source_name,
             "status": self.status,
             "fetched_count": self.fetched_count,
+            "accepted_count": self.accepted_count,
+            "rejected_count": self.rejected_count,
             "skipped_reason": self.skipped_reason,
             "error_message": self.error_message,
             "timestamp_utc": self.timestamp_utc,
             "duration_ms": self.duration_ms,
             "events_persisted": self.events_persisted,
             "advisory_status": self.advisory_status,
+            "status_detail": self.status_detail,
+            "missing_env_var": self.missing_env_var,
         }
 
 
@@ -125,18 +142,52 @@ def _stable_event_id(source_name: str, *key_parts: str) -> str:
     return f"{source_name}_{digest}"
 
 
-def _normalize_polymarket_record(rec: dict[str, Any]) -> dict[str, Any]:
+def _normalize_polymarket_record(rec: dict[str, Any]) -> dict[str, Any] | None:
+    """
+    Normalize a raw Polymarket record.
+
+    Returns None when the market is rejected by the domain classifier.
+    Rejected records are never written to SQLite.
+    Accepted records carry domain, matched_terms, and full advisory-lock fields.
+    """
+    try:
+        from scripts.live_signal_filters import classify_market_domain
+    except ModuleNotFoundError:
+        from live_signal_filters import classify_market_domain  # type: ignore[no-redef]
+
+    title = str(rec.get("question", ""))
+    category = str(rec.get("category", "") or "")
+    tags: list[str] = rec.get("tags") or []
     market_id = str(rec.get("market_id", ""))
+
+    classification = classify_market_domain(title, category or None, tags or None)
+
+    if not classification["allowed"]:
+        import logging
+        logging.getLogger(__name__).debug(
+            "REJECTED_POLYMARKET_DOMAIN market_id=%s title=%r category=%r "
+            "tags=%r blocked_terms=%r reason=%s",
+            market_id,
+            title,
+            category,
+            tags,
+            classification["blocked_terms"],
+            classification["reason"],
+        )
+        return None
+
     return {
         "event_id": _stable_event_id("polymarket", market_id),
         "source_name": "polymarket",
         "signal_type": "prediction_market",
-        "title": str(rec.get("question", "")),
+        "title": title,
         "market_id": market_id,
         "volume": rec.get("volume"),
         "liquidity": rec.get("liquidity"),
         "end_date": rec.get("end_date"),
         "active": rec.get("active"),
+        "domain": classification["domain"],
+        "matched_terms": classification["matched_terms"],
         "advisory_status": _ADVISORY_STATUS,
         "human_review_required": True,
         "execution_gate": _EXECUTION_GATE,
@@ -326,26 +377,50 @@ def run_phase1(
         duration_ms = int((time.monotonic() - t0) * 1000)
 
         if loader_result.skipped:
+            reason = loader_result.skip_reason
+            # Classify the skip reason for the diagnostic table
+            missing_var = ""
+            if "SEC_USER_AGENT" in reason:
+                diag_status = "MISSING_CONFIG"
+                missing_var = "SEC_USER_AGENT"
+            elif "unreachable" in reason.lower() or "error" in reason.lower():
+                diag_status = "HTTP_ERROR"
+            else:
+                diag_status = "SKIPPED"
             src_result = SourceRunResult(
                 source_name=source_name,
                 status="skipped",
                 fetched_count=0,
-                skipped_reason=loader_result.skip_reason,
+                skipped_reason=reason,
                 timestamp_utc=ts,
                 duration_ms=duration_ms,
+                status_detail=reason,
+                missing_env_var=missing_var,
             )
         else:
-            events = [normalizer(rec) for rec in loader_result.records]
+            raw_count = len(loader_result.records)
+            normalized = [normalizer(rec) for rec in loader_result.records]
+            # Filter out None (domain-rejected) records — only applies to Polymarket
+            events = [e for e in normalized if e is not None]
+            rejected_count = raw_count - len(events)
             persisted = 0
             if not dry_run:
                 persisted = _persist_events(events, source_name, ts)
+            detail = ""
+            if source_name == "polymarket":
+                detail = (
+                    f"domain gate active — accepted {len(events)}/{raw_count}"
+                )
             src_result = SourceRunResult(
                 source_name=source_name,
-                status="ok",
-                fetched_count=len(events),
+                status="ok" if events else "ok",
+                fetched_count=raw_count,
+                accepted_count=len(events),
+                rejected_count=rejected_count,
                 timestamp_utc=ts,
                 duration_ms=duration_ms,
                 events_persisted=persisted,
+                status_detail=detail,
             )
 
         if not dry_run:
@@ -372,3 +447,185 @@ __all__ = [
     "_log_run",
     "_PHASE1_SOURCES",
 ]
+
+
+# ---------------------------------------------------------------------------
+# Standalone diagnostic CLI  (python scripts/live_source_runner.py)
+# ---------------------------------------------------------------------------
+
+_PHASE2_ENV_REQS: dict[str, str] = {
+    "newsapi": "NEWS_API_KEY or NEWSAPI_KEY",
+    "event_registry": "EVENT_REGISTRY_API_KEY",
+    "etherscan": "ETHERSCAN_API_KEY",
+    "grok_xai": "XAI_API_KEY or GROK_API_KEY",
+    "sec_edgar": "SEC_USER_AGENT",
+    "market_data": "",   # no key — uses yfinance
+    "india": "",         # no key — public NSE endpoints
+    "global_filings": "", # no key (ASX only active provider)
+    "asia_disclosure": "", # all placeholder — no key
+}
+
+_PHASE2_IMPLEMENTED: set[str] = {"newsapi", "event_registry", "etherscan", "grok_xai", "market_data", "india", "global_filings", "asia_disclosure"}
+
+
+def _check_env_key(env_spec: str) -> tuple[bool, str]:
+    """Return (present, label) for an env var spec like 'FOO or BAR'."""
+    if not env_spec:
+        return True, ""
+    for var in [v.strip() for v in env_spec.replace(" or ", "|").split("|")]:
+        if os.environ.get(var):
+            return True, var
+    # None present
+    return False, env_spec
+
+
+def _build_diag_rows(phase1_report: "Phase1RunReport") -> list[dict]:
+    """Build a combined row list for all 11 sources."""
+    rows: list[dict] = []
+
+    # Phase 1 sources from live run
+    p1_map = {s.source_name: s for s in phase1_report.sources}
+
+    for src_name in _PHASE1_SOURCES:
+        if src_name not in p1_map:
+            rows.append({
+                "source": src_name,
+                "raw": 0, "accepted": 0, "rejected": 0,
+                "status": "NOT_RUN", "detail": "",
+            })
+            continue
+        sr = p1_map[src_name]
+        if sr.status == "skipped":
+            reason = sr.skipped_reason or ""
+            if "SEC_USER_AGENT" in reason or "sec_user_agent" in reason.lower():
+                st = "MISSING_CONFIG"
+                detail = "SEC_USER_AGENT missing"
+            elif "unreachable" in reason.lower():
+                st = "HTTP_ERROR"
+                detail = reason[:60]
+            else:
+                st = "SKIPPED"
+                detail = reason[:60]
+        else:
+            accepted = sr.accepted_count if sr.accepted_count or sr.rejected_count else sr.fetched_count
+            rejected = sr.rejected_count
+            st = "OK"
+            detail = sr.status_detail or "wrote live signals"
+            rows.append({
+                "source": src_name,
+                "raw": sr.fetched_count,
+                "accepted": accepted,
+                "rejected": rejected,
+                "status": st, "detail": detail,
+            })
+            continue
+        rows.append({
+            "source": src_name,
+            "raw": 0, "accepted": 0, "rejected": 0,
+            "status": st, "detail": detail,
+        })
+
+    # Phase 2 sources — diagnostic only (no live fetch in this mode)
+    p2_sources = ["newsapi", "event_registry", "etherscan", "grok_xai",
+                  "market_data", "india", "global_filings", "asia_disclosure"]
+    for src_name in p2_sources:
+        env_spec = _PHASE2_ENV_REQS.get(src_name, "")
+        present, _var = _check_env_key(env_spec)
+        if not present:
+            rows.append({
+                "source": src_name,
+                "raw": 0, "accepted": 0, "rejected": 0,
+                "status": "MISSING_API_KEY",
+                "detail": f"{env_spec} missing",
+            })
+        elif src_name not in _PHASE2_IMPLEMENTED:
+            rows.append({
+                "source": src_name,
+                "raw": 0, "accepted": 0, "rejected": 0,
+                "status": "NOT_IMPLEMENTED",
+                "detail": "fetcher not implemented",
+            })
+        else:
+            rows.append({
+                "source": src_name,
+                "raw": 0, "accepted": 0, "rejected": 0,
+                "status": "OK_KEY_PRESENT",
+                "detail": "API key present — run phase2 CLI to ingest",
+            })
+    return rows
+
+
+_DISPLAY_NAMES: dict[str, str] = {
+    "polymarket": "Polymarket",
+    "gdelt": "GDELT",
+    "sec_edgar": "SEC EDGAR",
+    "newsapi": "NewsAPI",
+    "event_registry": "Event Registry",
+    "etherscan": "Etherscan",
+    "grok_xai": "Grok/xAI",
+    "market_data": "Market Data",
+    "india": "India",
+    "global_filings": "Global Filings",
+    "asia_disclosure": "Asia Disclosure",
+}
+
+
+def _print_diag_table(rows: list[dict]) -> None:
+    header = f"{'Source':<18} {'Raw':>5} {'Accepted':>8} {'Rejected':>8}  {'Status':<25} {'Detail'}"
+    sep = "-" * len(header)
+    print(sep)
+    print(header)
+    print(sep)
+    for r in rows:
+        name = _DISPLAY_NAMES.get(r["source"], r["source"])
+        print(
+            f"{name:<18} {r['raw']:>5} {r['accepted']:>8} {r['rejected']:>8}  "
+            f"{r['status']:<25} {r['detail']}"
+        )
+    print(sep)
+
+
+if __name__ == "__main__":
+    import sys
+    from pathlib import Path
+
+    _REPO_ROOT = Path(__file__).resolve().parents[1]
+    if str(_REPO_ROOT) not in sys.path:
+        sys.path.insert(0, str(_REPO_ROOT))
+
+    print("=" * 70)
+    print("Live Source Runner — Diagnostic Mode")
+    print("Advisory policy: ADVISORY_ONLY | HUMAN_REVIEW_REQUIRED |"
+          " execution_gate=LOCKED | ai_executions=0")
+    print("=" * 70)
+    print()
+
+    # Env-var presence summary (no values printed)
+    env_checks = {
+        "NEWS_API_KEY": os.environ.get("NEWS_API_KEY") or os.environ.get("NEWSAPI_KEY"),
+        "EVENT_REGISTRY_API_KEY": os.environ.get("EVENT_REGISTRY_API_KEY"),
+        "ETHERSCAN_API_KEY": os.environ.get("ETHERSCAN_API_KEY"),
+        "XAI_API_KEY": os.environ.get("XAI_API_KEY") or os.environ.get("GROK_API_KEY"),
+        "SEC_USER_AGENT": os.environ.get("SEC_USER_AGENT"),
+    }
+    print("Env-var presence:")
+    for var, val in env_checks.items():
+        print(f"  {var:<28} {'present' if val else 'MISSING'}")
+    print()
+
+    print("Running Phase 1 (Polymarket, GDELT, SEC EDGAR) in dry-run mode…")
+    phase1_report = run_phase1(dry_run=True)
+    print()
+
+    rows = _build_diag_rows(phase1_report)
+    _print_diag_table(rows)
+    print()
+    print(f"Phase 1 total fetched:   {phase1_report.total_fetched}")
+    print(f"Phase 1 advisory_status: {phase1_report.advisory_status}")
+    print(f"Phase 1 execution_gate:  {phase1_report.execution_gate}")
+    print(f"Phase 1 ai_executions:   {phase1_report.ai_execution_count}")
+    print()
+    print("To run Phase 2 sources:")
+    print("  python scripts/run_live_sources_phase2.py --source newsapi --dry-run")
+    print("  python scripts/run_live_sources_phase2.py --source market_data --dry-run")
+    print("  python scripts/run_live_sources_phase2.py --source india --dry-run")

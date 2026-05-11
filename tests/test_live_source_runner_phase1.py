@@ -149,7 +149,7 @@ class TestNormalization:
 
         rec = {
             "market_id": "mkt-abc",
-            "question": "Will X happen?",
+            "question": "Will the Fed cut rates in 2026?",
             "volume": 100.0,
             "active": True,
             "source": "polymarket",
@@ -157,7 +157,7 @@ class TestNormalization:
         out = _normalize_polymarket_record(rec)
         assert out["source_name"] == "polymarket"
         assert out["signal_type"] == "prediction_market"
-        assert out["title"] == "Will X happen?"
+        assert out["title"] == "Will the Fed cut rates in 2026?"
         assert out["advisory_status"] == "ADVISORY_ONLY"
         assert out["human_review_required"] is True
         assert out["execution_gate"] == "LOCKED"

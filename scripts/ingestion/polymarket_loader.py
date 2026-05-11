@@ -53,6 +53,15 @@ class PolymarketLoader(BaseSourceLoader):
         for m in markets:
             if not isinstance(m, dict):
                 continue
+            # Extract tags — API may return list[str] or list[dict]
+            raw_tags = m.get("tags") or []
+            if isinstance(raw_tags, list):
+                tags = [
+                    t.get("label", "") if isinstance(t, dict) else str(t)
+                    for t in raw_tags
+                ]
+            else:
+                tags = []
             rec: dict[str, Any] = {
                 "market_id": str(m.get("id", "")),
                 "question": str(m.get("question", "")),
@@ -60,6 +69,9 @@ class PolymarketLoader(BaseSourceLoader):
                 "liquidity": m.get("liquidity"),
                 "end_date": m.get("endDate"),
                 "active": m.get("active"),
+                "category": m.get("category") or m.get("groupItemTitle") or "",
+                "tags": tags,
+                "description": str(m.get("description", "") or ""),
                 "source": "polymarket",
             }
             self._stamp_record(rec)
