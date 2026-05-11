@@ -1003,3 +1003,64 @@ broker_order_id    = NONE
 ```
 
 No broker API is called. No orders are placed. No private keys are used.
+
+---
+
+## Phase E.5 — Silent local startup
+
+Starts the full MVP stack in the background with no visible PowerShell windows.
+All output is redirected to `runtime\logs\`.
+
+### Scripts
+
+| Script | Purpose |
+|---|---|
+| `scripts\windows\start_mvp_stack_silent.ps1` | Start backend, frontend, poller, proxy silently |
+| `scripts\windows\stop_mvp_stack_silent.ps1` | Stop all MVP stack processes by command-line pattern |
+| `scripts\windows\register_mvp_silent_startup_task.ps1` | Register Windows Scheduled Task at logon |
+| `scripts\windows\unregister_mvp_silent_startup_task.ps1` | Remove the scheduled task |
+
+### One-time setup
+
+```powershell
+# 1. Add sleepingpassenger host alias (run as Administrator, once):
+powershell -ExecutionPolicy Bypass -File scripts\windows\add_sleepingpassenger_host_alias.ps1
+
+# 2. Register silent auto-start task (run as Administrator for port 80):
+powershell -ExecutionPolicy Bypass -File scripts\windows\register_mvp_silent_startup_task.ps1
+```
+
+### Manual start / stop
+
+```powershell
+# Start silently (idempotent — skips components already running):
+powershell -ExecutionPolicy Bypass -WindowStyle Hidden -File scripts\windows\start_mvp_stack_silent.ps1
+
+# Stop all MVP stack processes:
+powershell -ExecutionPolicy Bypass -File scripts\windows\stop_mvp_stack_silent.ps1
+```
+
+### After startup
+
+| URL | Notes |
+|---|---|
+| `http://sleepingpassenger` | Requires host alias + port-80 proxy (Administrator) |
+| `http://localhost:3000` | Frontend direct |
+| `http://localhost:8000/health` | Backend health check |
+
+### Logs
+
+All logs are written to `runtime\logs\`:
+
+| File | Content |
+|---|---|
+| `silent_startup.log` | Startup progress and port-ready timestamps |
+| `silent_stop.log` | Process stop events |
+| `backend_stdout.log` / `backend_stderr.log` | uvicorn output |
+| `frontend_stdout.log` / `frontend_stderr.log` | Next.js dev server output |
+| `poller_stdout.log` / `poller_stderr.log` | poll_live_sources.ps1 output |
+| `proxy_stdout.log` / `proxy_stderr.log` | sleepingpassenger proxy output |
+
+### Safety invariant (unchanged)
+
+Advisory only. No broker API is called. No orders are placed.
