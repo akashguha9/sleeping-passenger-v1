@@ -32,8 +32,8 @@ class NewsAPILoader(BaseSourceLoader):
         self._base_url = base_url
 
     def fetch(self) -> LoaderResult:
-        """Fetch news articles from NewsAPI (read-only). Requires NEWS_API_KEY."""
-        api_key = self._require_env_key("NEWS_API_KEY")
+        """Fetch news articles from NewsAPI (read-only). Requires NEWS_API_KEY or NEWSAPI_KEY."""
+        api_key = self._require_env_any("NEWS_API_KEY", "NEWSAPI_KEY")
 
         try:
             import requests

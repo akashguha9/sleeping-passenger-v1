@@ -98,6 +98,12 @@ def _parse_args() -> argparse.Namespace:
 
 
 def main() -> int:
+    try:
+        from dotenv import load_dotenv
+        load_dotenv()
+    except Exception:
+        pass
+
     args = _parse_args()
     dry_run: bool = args.dry_run
     sources = [args.source] if args.source else None

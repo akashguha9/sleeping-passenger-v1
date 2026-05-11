@@ -110,12 +110,22 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
+
+
+def _env_any(*names: str) -> "str | None":
+    """Return the first non-empty value among the given env var names, or None."""
+    for name in names:
+        value = os.getenv(name)
+        if value:
+            return value
+    return None
 
 from scripts.live_source_runner_phase2 import run_phase2  # noqa: E402
 
@@ -376,6 +386,12 @@ def _parse_args() -> argparse.Namespace:
 
 
 def main() -> int:
+    try:
+        from dotenv import load_dotenv
+        load_dotenv()
+    except Exception:
+        pass
+
     args = _parse_args()
     dry_run: bool = args.dry_run
 

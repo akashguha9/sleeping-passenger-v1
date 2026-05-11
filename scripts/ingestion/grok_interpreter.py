@@ -70,8 +70,8 @@ class GrokInterpreter(BaseSourceLoader):
         self._base_url = base_url
 
     def fetch(self) -> LoaderResult:
-        """Query xAI Grok for advisory interpretation. Requires XAI_API_KEY."""
-        api_key = self._require_env_key("XAI_API_KEY")
+        """Query xAI Grok for advisory interpretation. Requires XAI_API_KEY or GROK_API_KEY."""
+        api_key = self._require_env_any("XAI_API_KEY", "GROK_API_KEY")
 
         try:
             import requests

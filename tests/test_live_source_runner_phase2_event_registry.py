@@ -328,6 +328,7 @@ class TestEventRegistrySkipWithoutKey:
     def test_newsapi_also_skips_independently(self) -> None:
         os.environ.pop("EVENT_REGISTRY_API_KEY", None)
         os.environ.pop("NEWS_API_KEY", None)
+        os.environ.pop("NEWSAPI_KEY", None)
         from scripts.live_source_runner_phase2 import run_phase2
 
         report = run_phase2(dry_run=True, sources=["newsapi", "event_registry"])

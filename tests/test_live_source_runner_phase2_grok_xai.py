@@ -231,6 +231,7 @@ class TestGrokInterpreterMissingKey:
 
         with patch.dict(os.environ, {}, clear=False):
             os.environ.pop("XAI_API_KEY", None)
+            os.environ.pop("GROK_API_KEY", None)
             gi = GrokInterpreter()
             with pytest.raises(SkipLoader):
                 gi.fetch()
@@ -240,6 +241,7 @@ class TestGrokInterpreterMissingKey:
 
         with patch.dict(os.environ, {}, clear=False):
             os.environ.pop("XAI_API_KEY", None)
+            os.environ.pop("GROK_API_KEY", None)
             gi = GrokInterpreter()
             result = gi.safe_fetch()
             assert result.skipped
@@ -251,6 +253,7 @@ class TestGrokInterpreterMissingKey:
 
         with patch.dict(os.environ, {}, clear=False):
             os.environ.pop("XAI_API_KEY", None)
+            os.environ.pop("GROK_API_KEY", None)
             gi = GrokInterpreter()
             result = gi.safe_fetch()
             assert isinstance(result, LoaderResult)
@@ -262,6 +265,7 @@ class TestGrokInterpreterMissingKey:
 
         with patch.dict(os.environ, {}, clear=False):
             os.environ.pop("XAI_API_KEY", None)
+            os.environ.pop("GROK_API_KEY", None)
             gi = GrokInterpreter()
             result = gi.safe_fetch()
             assert result.source_name == "grok_xai"
@@ -498,6 +502,7 @@ class TestPhase2RunnerGrokXai:
 
         with patch.dict(os.environ, {}, clear=False):
             os.environ.pop("XAI_API_KEY", None)
+            os.environ.pop("GROK_API_KEY", None)
             report = run_phase2(dry_run=True, sources=["grok_xai"])
             assert len(report.sources) == 1
             assert report.sources[0].status == "skipped"
@@ -596,6 +601,7 @@ class TestGrokXaiWriteMode:
 
         with patch.dict(os.environ, {}, clear=False):
             os.environ.pop("XAI_API_KEY", None)
+            os.environ.pop("GROK_API_KEY", None)
             with patch("scripts.live_source_runner_phase2._persist_events") as mp:
                 run_phase2(dry_run=False, sources=["grok_xai"])
                 mp.assert_not_called()

@@ -271,7 +271,7 @@ class TestMissingKeySkips:
             EtherscanLoader(address="0xtest").fetch()
 
     def test_newsapi_skips_without_key(self) -> None:
-        self._clear("NEWS_API_KEY")
+        self._clear("NEWS_API_KEY", "NEWSAPI_KEY")
         from scripts.ingestion.newsapi_loader import NewsAPILoader
         from scripts.ingestion.base_loader import SkipLoader
         with pytest.raises(SkipLoader):
@@ -285,7 +285,7 @@ class TestMissingKeySkips:
             EventRegistryLoader().fetch()
 
     def test_grok_skips_without_key(self) -> None:
-        self._clear("XAI_API_KEY")
+        self._clear("XAI_API_KEY", "GROK_API_KEY")
         from scripts.ingestion.grok_interpreter import GrokInterpreter
         from scripts.ingestion.base_loader import SkipLoader
         with pytest.raises(SkipLoader):
@@ -322,8 +322,8 @@ class TestMissingKeySkips:
     def test_safe_fetch_never_raises_for_missing_key_loaders(self) -> None:
         from scripts.ingestion.base_loader import LoaderResult
         self._clear(
-            "SEC_USER_AGENT", "ETHERSCAN_API_KEY", "NEWS_API_KEY",
-            "EVENT_REGISTRY_API_KEY", "XAI_API_KEY",
+            "SEC_USER_AGENT", "ETHERSCAN_API_KEY", "NEWS_API_KEY", "NEWSAPI_KEY",
+            "EVENT_REGISTRY_API_KEY", "XAI_API_KEY", "GROK_API_KEY",
         )
         from scripts.ingestion.sec_edgar_loader import SECEdgarLoader
         from scripts.ingestion.etherscan_loader import EtherscanLoader

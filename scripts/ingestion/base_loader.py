@@ -79,6 +79,18 @@ class BaseSourceLoader(ABC):
         return value
 
     @staticmethod
+    def _require_env_any(*names: str) -> str:
+        """Return the first non-empty value among the given env var names, or raise SkipLoader."""
+        for name in names:
+            value = os.environ.get(name, "").strip()
+            if value:
+                return value
+        checked = ", ".join(repr(n) for n in names)
+        raise SkipLoader(
+            f"None of the required env vars [{checked}] are set — loader skipped"
+        )
+
+    @staticmethod
     def _stamp_record(record: dict[str, Any]) -> dict[str, Any]:
         """Attach advisory stamps to an observation record."""
         record.setdefault("advisory_status", _ADVISORY_STATUS)

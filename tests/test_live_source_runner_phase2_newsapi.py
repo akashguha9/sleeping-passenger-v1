@@ -264,6 +264,7 @@ class TestNewsAPIMocked:
 class TestNewsAPISkipWithoutKey:
     def test_skips_cleanly_without_env_var(self) -> None:
         os.environ.pop("NEWS_API_KEY", None)
+        os.environ.pop("NEWSAPI_KEY", None)
         with patch("requests.get", side_effect=Exception("should not be called")):
             from scripts.live_source_runner_phase2 import run_phase2
 
@@ -276,6 +277,7 @@ class TestNewsAPISkipWithoutKey:
 
     def test_skip_reason_mentions_api_key(self) -> None:
         os.environ.pop("NEWS_API_KEY", None)
+        os.environ.pop("NEWSAPI_KEY", None)
         from scripts.live_source_runner_phase2 import run_phase2
 
         report = run_phase2(dry_run=True)
@@ -284,6 +286,7 @@ class TestNewsAPISkipWithoutKey:
 
     def test_advisory_fields_intact_when_skipped(self) -> None:
         os.environ.pop("NEWS_API_KEY", None)
+        os.environ.pop("NEWSAPI_KEY", None)
         from scripts.live_source_runner_phase2 import run_phase2
 
         report = run_phase2(dry_run=True)
@@ -421,6 +424,7 @@ class TestNoExecutionSafety:
 class TestAllSkipped:
     def test_all_skipped_report_is_valid(self) -> None:
         os.environ.pop("NEWS_API_KEY", None)
+        os.environ.pop("NEWSAPI_KEY", None)
         from scripts.live_source_runner_phase2 import run_phase2
 
         report = run_phase2(dry_run=True)
@@ -432,6 +436,7 @@ class TestAllSkipped:
 
     def test_all_skipped_sources_named(self) -> None:
         os.environ.pop("NEWS_API_KEY", None)
+        os.environ.pop("NEWSAPI_KEY", None)
         from scripts.live_source_runner_phase2 import run_phase2
 
         report = run_phase2(dry_run=True)
@@ -440,6 +445,7 @@ class TestAllSkipped:
 
     def test_report_to_dict_valid_when_all_skipped(self) -> None:
         os.environ.pop("NEWS_API_KEY", None)
+        os.environ.pop("NEWSAPI_KEY", None)
         from scripts.live_source_runner_phase2 import run_phase2
 
         report = run_phase2(dry_run=True)
@@ -470,6 +476,7 @@ class TestDurationTracking:
 
     def test_duration_ms_is_non_negative_on_skip(self) -> None:
         os.environ.pop("NEWS_API_KEY", None)
+        os.environ.pop("NEWSAPI_KEY", None)
         from scripts.live_source_runner_phase2 import run_phase2
 
         report = run_phase2(dry_run=True)
@@ -485,6 +492,7 @@ class TestDurationTracking:
 class TestNewsAPILoader:
     def test_loader_skips_without_api_key(self) -> None:
         os.environ.pop("NEWS_API_KEY", None)
+        os.environ.pop("NEWSAPI_KEY", None)
         from scripts.ingestion.newsapi_loader import NewsAPILoader
 
         loader = NewsAPILoader()
@@ -525,6 +533,7 @@ class TestNewsAPILoader:
 
     def test_loader_result_advisory_status(self) -> None:
         os.environ.pop("NEWS_API_KEY", None)
+        os.environ.pop("NEWSAPI_KEY", None)
         from scripts.ingestion.newsapi_loader import NewsAPILoader
 
         loader = NewsAPILoader()
