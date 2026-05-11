@@ -44,8 +44,18 @@ class GDELTLoader(BaseSourceLoader):
         }
         try:
             resp = requests.get(self._base_url, params=params, timeout=self._timeout)
+            if resp.status_code == 429:
+                raise SkipLoader(
+                    f"[RATE_LIMITED] GDELT API returned 429 Too Many Requests — retry later"
+                )
             resp.raise_for_status()
             data = resp.json()
+        except SkipLoader:
+            raise
+        except requests.exceptions.Timeout:
+            raise SkipLoader(
+                f"[TIMEOUT] GDELT API timed out after {self._timeout}s"
+            )
         except Exception as exc:
             raise SkipLoader(f"GDELT API unreachable: {exc}") from exc
 

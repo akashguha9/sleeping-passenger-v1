@@ -686,9 +686,25 @@ def run_phase2(
         duration_ms = int((time.monotonic() - t0) * 1000)
 
         if loader_result.skipped:
+            reason = loader_result.skip_reason
+            reason_lower = reason.lower()
+            if "[rate_limited]" in reason_lower:
+                run_status = "rate_limited"
+            elif "[timeout]" in reason_lower:
+                run_status = "timeout"
+            elif "[placeholder]" in reason_lower:
+                run_status = "placeholder"
+            elif (
+                "unreachable" in reason_lower
+                or "http error" in reason_lower
+                or "httperror" in reason_lower
+            ):
+                run_status = "http_error"
+            else:
+                run_status = "skipped"
             src_result = SourceRunResult(
                 source_name=source_name,
-                status="skipped",
+                status=run_status,
                 fetched_count=0,
                 skipped_reason=loader_result.skip_reason,
                 timestamp_utc=ts,

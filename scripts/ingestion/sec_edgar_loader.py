@@ -41,48 +41,42 @@ class SECEdgarLoader(BaseSourceLoader):
 
         headers = {"User-Agent": user_agent, "Accept": "application/json"}
 
-        if self._cik:
-            cik_padded = str(self._cik).zfill(10)
-            url = f"{self._base_url}/submissions/CIK{cik_padded}.json"
-            try:
-                resp = requests.get(url, headers=headers, timeout=self._timeout)
-                resp.raise_for_status()
-                data = resp.json()
-            except Exception as exc:
-                raise SkipLoader(f"SEC EDGAR unreachable: {exc}") from exc
-
-            filings = (
-                data.get("filings", {}).get("recent", {})
-                if isinstance(data, dict)
-                else {}
+        if not self._cik:
+            raise SkipLoader(
+                "No CIK provided to SEC EDGAR loader — pass --sec-cik <CIK> to fetch filings"
             )
-            forms = filings.get("form", []) or []
-            dates = filings.get("filingDate", []) or []
-            acc_nos = filings.get("accessionNumber", []) or []
-            records = []
-            for i, form in enumerate(forms):
-                if form != self._form_type:
-                    continue
-                if len(records) >= self._max:
-                    break
-                rec = {
-                    "cik": self._cik,
-                    "form_type": form,
-                    "filing_date": dates[i] if i < len(dates) else "",
-                    "accession_number": acc_nos[i] if i < len(acc_nos) else "",
-                    "source": "sec_edgar",
-                }
-                self._stamp_record(rec)
-                records.append(rec)
-        else:
-            url = f"{self._base_url}/submissions"
-            try:
-                resp = requests.get(url, headers=headers, timeout=self._timeout)
-                resp.raise_for_status()
-            except Exception as exc:
-                raise SkipLoader(f"SEC EDGAR unreachable: {exc}") from exc
-            rec = {"source": "sec_edgar", "note": "no cik provided, index fetched"}
+
+        cik_padded = str(self._cik).zfill(10)
+        url = f"{self._base_url}/submissions/CIK{cik_padded}.json"
+        try:
+            resp = requests.get(url, headers=headers, timeout=self._timeout)
+            resp.raise_for_status()
+            data = resp.json()
+        except Exception as exc:
+            raise SkipLoader(f"SEC EDGAR unreachable: {exc}") from exc
+
+        filings = (
+            data.get("filings", {}).get("recent", {})
+            if isinstance(data, dict)
+            else {}
+        )
+        forms = filings.get("form", []) or []
+        dates = filings.get("filingDate", []) or []
+        acc_nos = filings.get("accessionNumber", []) or []
+        records = []
+        for i, form in enumerate(forms):
+            if form != self._form_type:
+                continue
+            if len(records) >= self._max:
+                break
+            rec = {
+                "cik": self._cik,
+                "form_type": form,
+                "filing_date": dates[i] if i < len(dates) else "",
+                "accession_number": acc_nos[i] if i < len(acc_nos) else "",
+                "source": "sec_edgar",
+            }
             self._stamp_record(rec)
-            records = [rec]
+            records.append(rec)
 
         return LoaderResult(source_name=self.source_name, records=records)

@@ -492,7 +492,7 @@ class TestPhase2RunnerIndia(unittest.TestCase):
         with patch("requests.get", side_effect=Exception("all down")):
             report = run_phase2(dry_run=True, sources=["india"])
         india = next(s for s in report.sources if s.source_name == "india")
-        self.assertEqual(india.status, "skipped")
+        self.assertIn(india.status, ("skipped", "http_error"))
 
     def test_unknown_source_ignored(self):
         with patch("requests.get", side_effect=_all_mocks()):

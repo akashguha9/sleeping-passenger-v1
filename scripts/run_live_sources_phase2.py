@@ -417,6 +417,14 @@ def main() -> int:
         else None
     )
 
+    # Validate Etherscan address early for a cleaner error message.
+    if args.source == "etherscan" and args.address:
+        from scripts.ingestion.etherscan_loader import _validate_eth_address
+        addr_err = _validate_eth_address(args.address)
+        if addr_err:
+            print(f"[ERROR] --address validation failed: {addr_err}", file=sys.stderr)
+            return 1
+
     if not args.output_json:
         print(f"[Phase 2 Source Runner] mode={'dry-run' if dry_run else 'write'}")
         print(f"  Sources: {args.source}")

@@ -3,13 +3,39 @@ Etherscan read-only loader — Phase 2 Global Signal Fabric.
 
 Requires ETHERSCAN_API_KEY env var. Skips cleanly if missing.
 Fetches public blockchain data only (transactions, token transfers, gas).
+No private-key, signing, or transaction-send logic.
 """
 from __future__ import annotations
+
+import re
 
 from scripts.ingestion.base_loader import BaseSourceLoader, LoaderResult, SkipLoader
 
 _ETHERSCAN_BASE = "https://api.etherscan.io/api"
 _TIMEOUT = 15
+
+_ETH_ADDRESS_RE = re.compile(r"^0x[0-9a-fA-F]{40}$")
+_PLACEHOLDER_FRAGMENTS = [
+    "YOUR_PUBLIC_ETH_ADDRESS",
+    "YOUR_ETH_ADDRESS",
+    "INSERT_ADDRESS",
+    "WALLET_ADDRESS",
+    "0xYOUR",
+    "0xINSERT",
+]
+
+
+def _validate_eth_address(address: str) -> str | None:
+    """Return None if address is valid, or an error string if invalid."""
+    upper = address.upper()
+    for frag in _PLACEHOLDER_FRAGMENTS:
+        if frag.upper() in upper:
+            return f"address appears to be a placeholder: {address!r}"
+    if not _ETH_ADDRESS_RE.match(address):
+        return (
+            f"malformed Ethereum address (expected 0x + 40 hex chars): {address!r}"
+        )
+    return None
 
 
 class EtherscanLoader(BaseSourceLoader):
@@ -35,7 +61,13 @@ class EtherscanLoader(BaseSourceLoader):
         api_key = self._require_env_key("ETHERSCAN_API_KEY")
 
         if not self._address:
-            raise SkipLoader("No Ethereum address provided to EtherscanLoader")
+            raise SkipLoader(
+                "No Ethereum address provided to EtherscanLoader — pass --address <0x...>"
+            )
+
+        addr_error = _validate_eth_address(self._address)
+        if addr_error:
+            raise SkipLoader(f"Invalid Ethereum address: {addr_error}")
 
         try:
             import requests

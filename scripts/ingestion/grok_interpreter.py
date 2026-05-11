@@ -29,7 +29,7 @@ from scripts.ingestion.base_loader import BaseSourceLoader, LoaderResult, SkipLo
 
 _XAI_BASE = "https://api.x.ai/v1/chat/completions"
 _TIMEOUT = 30
-_DEFAULT_MODEL = "grok-beta"
+_DEFAULT_MODEL = "grok-3-mini"
 _DEFAULT_MAX_ITEMS = 1
 
 _ADVISORY_SYSTEM_PROMPT = (
@@ -71,6 +71,8 @@ class GrokInterpreter(BaseSourceLoader):
 
     def fetch(self) -> LoaderResult:
         """Query xAI Grok for advisory interpretation. Requires XAI_API_KEY or GROK_API_KEY."""
+        import os
+
         api_key = self._require_env_any("XAI_API_KEY", "GROK_API_KEY")
 
         try:
@@ -78,12 +80,15 @@ class GrokInterpreter(BaseSourceLoader):
         except ImportError:
             raise SkipLoader("requests library not installed")
 
+        # XAI_MODEL env var overrides the constructor-supplied model.
+        model = os.environ.get("XAI_MODEL", "").strip() or self._model
+
         headers = {
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
         }
         payload: dict[str, Any] = {
-            "model": self._model,
+            "model": model,
             "messages": [
                 {"role": "system", "content": _ADVISORY_SYSTEM_PROMPT},
                 {"role": "user", "content": self._prompt},
@@ -94,8 +99,24 @@ class GrokInterpreter(BaseSourceLoader):
             resp = requests.post(
                 self._base_url, json=payload, headers=headers, timeout=self._timeout
             )
+            if resp.status_code == 400:
+                # Sanitize: show response body but never the API key.
+                try:
+                    body_preview = resp.text[:400]
+                except Exception:
+                    body_preview = "<unreadable>"
+                raise SkipLoader(
+                    f"xAI API returned 400 Bad Request — check model name '{model}' and payload. "
+                    f"Response body: {body_preview}"
+                )
             resp.raise_for_status()
             data = resp.json()
+        except SkipLoader:
+            raise
+        except requests.exceptions.Timeout:
+            raise SkipLoader(
+                f"[TIMEOUT] xAI API timed out after {self._timeout}s"
+            )
         except Exception as exc:
             raise SkipLoader(f"xAI Grok API unreachable: {exc}") from exc
 
@@ -105,11 +126,16 @@ class GrokInterpreter(BaseSourceLoader):
             raw_content = (choices[0].get("message") or {}).get("content", "")
 
         created_at = datetime.now(timezone.utc).isoformat()
-        rec = self._parse_grok_response(raw_content, created_at)
+        rec = self._parse_grok_response(raw_content, created_at, effective_model=model)
         self._stamp_record(rec)
         return LoaderResult(source_name=self.source_name, records=[rec])
 
-    def _parse_grok_response(self, raw_content: str, created_at: str) -> dict[str, Any]:
+    def _parse_grok_response(
+        self,
+        raw_content: str,
+        created_at: str,
+        effective_model: str | None = None,
+    ) -> dict[str, Any]:
         """Parse Grok JSON response; fall back gracefully on parse failure."""
         interpreted_topic = ""
         narrative_frame = ""
@@ -134,7 +160,7 @@ class GrokInterpreter(BaseSourceLoader):
 
         return {
             "source": "grok_xai",
-            "model_name": self._model,
+            "model_name": effective_model or self._model,
             "source_prompt": self._prompt,
             "interpreted_topic": interpreted_topic,
             "narrative_frame": narrative_frame,

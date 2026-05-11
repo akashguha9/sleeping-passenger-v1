@@ -727,7 +727,8 @@ class TestPhase2RunnerAsiaDisclosure(unittest.TestCase):
         # Without patching, the loader skips because all providers are placeholder
         report = run_phase2(dry_run=True, sources=["asia_disclosure"])
         asia = next(s for s in report.sources if s.source_name == "asia_disclosure")
-        self.assertEqual(asia.status, "skipped")
+        # Status is "placeholder" because reason contains "[PLACEHOLDER]"
+        self.assertIn(asia.status, ("skipped", "placeholder"))
         self.assertIn("placeholder", asia.skipped_reason.lower())
 
     def test_unknown_source_ignored(self):
@@ -753,7 +754,7 @@ class TestPhase2RunnerAsiaDisclosure(unittest.TestCase):
             asia_disclosure_jurisdiction="HK",
         )
         asia = next(s for s in report.sources if s.source_name == "asia_disclosure")
-        self.assertIn(asia.status, {"ok", "skipped"})
+        self.assertIn(asia.status, {"ok", "skipped", "placeholder"})
 
     def test_asia_max_items_param(self):
         two_records = [_mock_loader_result().records[0]] * 5
@@ -1018,7 +1019,7 @@ class TestAsiaDisclosureCLIStructure(unittest.TestCase):
             )
         self.assertIsInstance(report, Phase2RunReport)
         asia = next(s for s in report.sources if s.source_name == "asia_disclosure")
-        self.assertIn(asia.status, {"ok", "skipped"})
+        self.assertIn(asia.status, {"ok", "skipped", "placeholder"})
 
     def test_report_to_dict_has_required_keys(self):
         report = run_phase2(dry_run=True, sources=["asia_disclosure"])

@@ -264,7 +264,7 @@ class AsiaDisclosureLoader(BaseSourceLoader):
         active_names = [p for p in selected if _PROVIDER_CONFIGS[p].get("active")]
         if not active_names:
             raise SkipLoader(
-                "No active Asia disclosure providers in selection — all are placeholders"
+                "[PLACEHOLDER] No active Asia disclosure providers in selection — all are placeholders"
             )
 
         records: list[dict[str, Any]] = []

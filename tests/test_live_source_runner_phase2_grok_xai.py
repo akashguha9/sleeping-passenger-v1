@@ -354,7 +354,9 @@ class TestGrokInterpreterJsonParsing:
     def test_parse_includes_model_name(self) -> None:
         gi = self._make_interpreter(prompt="test prompt")
         result = gi._parse_grok_response("{}", "ts")
-        assert result["model_name"] == "grok-beta"
+        # model_name defaults to _DEFAULT_MODEL when no effective_model provided
+        from scripts.ingestion.grok_interpreter import _DEFAULT_MODEL
+        assert result["model_name"] == _DEFAULT_MODEL
 
     def test_parse_includes_source_prompt(self) -> None:
         gi = self._make_interpreter(prompt="My custom query")

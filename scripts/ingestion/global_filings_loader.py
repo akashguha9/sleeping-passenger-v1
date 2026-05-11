@@ -36,7 +36,8 @@ _PROVIDER_CONFIGS: dict[str, dict[str, Any]] = {
         "params": {"count": 20},
         "requires_key": False,
         "key_env": None,
-        "active": True,
+        "active": False,
+        "note": "ASX company announcements endpoint returns 404 — marked as placeholder",
     },
     "hkex": {
         "jurisdiction": "HK",
@@ -254,7 +255,7 @@ class GlobalFilingsLoader(BaseSourceLoader):
         active_names = [p for p in selected if _PROVIDER_CONFIGS[p].get("active")]
         if not active_names:
             raise SkipLoader(
-                "No active global filings providers in selection — all are placeholders"
+                "[PLACEHOLDER] No active global filings providers in selection — all are placeholders"
             )
 
         records: list[dict[str, Any]] = []

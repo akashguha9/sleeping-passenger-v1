@@ -129,12 +129,12 @@ def main() -> int:
         return 0
 
     for src in report.sources:
-        label = {"ok": "OK", "skipped": "SKIPPED", "error": "ERROR"}.get(
-            src.status, src.status.upper()
-        )
+        label = src.status.upper()
         print(
             f"  [{label}] {src.source_name}: "
             f"fetched={src.fetched_count}, "
+            f"accepted={src.accepted_count}, "
+            f"rejected={src.rejected_count}, "
             f"persisted={src.events_persisted}, "
             f"duration={src.duration_ms}ms"
         )

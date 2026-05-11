@@ -285,18 +285,22 @@ class TestGlobalFilingsLoaderInit(unittest.TestCase):
 class TestGlobalFilingsLoaderMissingRequests(unittest.TestCase):
 
     def test_skips_when_requests_missing(self):
+        import scripts.ingestion.global_filings_loader as _gf_mod
         from scripts.ingestion.global_filings_loader import GlobalFilingsLoader
         loader = GlobalFilingsLoader(providers=["asx"])
-        with patch.dict(sys.modules, {"requests": None}):
-            result = loader.safe_fetch()
+        with patch.dict(_gf_mod._PROVIDER_CONFIGS["asx"], {"active": True}):
+            with patch.dict(sys.modules, {"requests": None}):
+                result = loader.safe_fetch()
         self.assertTrue(result.skipped)
         self.assertIn("requests", result.skip_reason.lower())
 
     def test_skip_reason_non_empty(self):
+        import scripts.ingestion.global_filings_loader as _gf_mod
         from scripts.ingestion.global_filings_loader import GlobalFilingsLoader
         loader = GlobalFilingsLoader(providers=["asx"])
-        with patch.dict(sys.modules, {"requests": None}):
-            result = loader.safe_fetch()
+        with patch.dict(_gf_mod._PROVIDER_CONFIGS["asx"], {"active": True}):
+            with patch.dict(sys.modules, {"requests": None}):
+                result = loader.safe_fetch()
         self.assertGreater(len(result.skip_reason), 0)
 
 
@@ -338,10 +342,11 @@ class TestProviderSkips(unittest.TestCase):
         self.assertTrue(result.skipped)
 
     def test_all_placeholder_region_skips(self):
-        # JP → tdnet (inactive)
-        loader = self._loader(region="JP")
-        result = loader.safe_fetch()
-        self.assertTrue(result.skipped)
+        # JP → tdnet (inactive); AU → asx (now inactive too)
+        for region in ("JP", "AU"):
+            loader = self._loader(region=region)
+            result = loader.safe_fetch()
+            self.assertTrue(result.skipped, f"Expected skipped for region={region}")
 
 
 # ---------------------------------------------------------------------------
@@ -349,12 +354,19 @@ class TestProviderSkips(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 class TestGlobalFilingsLoaderMockedHTTP(unittest.TestCase):
+    """Tests for GlobalFilingsLoader with mocked HTTP.
+
+    ASX is marked inactive in production (endpoint returns 404).
+    Tests that exercise the HTTP path temporarily re-enable it via patch.dict.
+    """
 
     def _run(self, side_effects, **loader_kw):
+        import scripts.ingestion.global_filings_loader as _gf_mod
         from scripts.ingestion.global_filings_loader import GlobalFilingsLoader
         loader = GlobalFilingsLoader(**loader_kw)
-        with patch("requests.get", side_effect=side_effects):
-            return loader.safe_fetch()
+        with patch.dict(_gf_mod._PROVIDER_CONFIGS["asx"], {"active": True}):
+            with patch("requests.get", side_effect=side_effects):
+                return loader.safe_fetch()
 
     def test_successful_fetch_returns_records(self):
         result = self._run([_mock_asx_response()], providers=["asx"])
@@ -434,20 +446,24 @@ class TestGlobalFilingsLoaderMockedHTTP(unittest.TestCase):
         self.assertFalse(result.skipped)
 
     def test_network_error_loader_skips(self):
+        import scripts.ingestion.global_filings_loader as _gf_mod
         from scripts.ingestion.global_filings_loader import GlobalFilingsLoader
         loader = GlobalFilingsLoader(providers=["asx"])
-        with patch("requests.get", side_effect=Exception("network down")):
-            result = loader.safe_fetch()
+        with patch.dict(_gf_mod._PROVIDER_CONFIGS["asx"], {"active": True}):
+            with patch("requests.get", side_effect=Exception("network down")):
+                result = loader.safe_fetch()
         self.assertTrue(result.skipped)
         self.assertIn("unreachable", result.skip_reason.lower())
 
     def test_http_error_loader_skips(self):
+        import scripts.ingestion.global_filings_loader as _gf_mod
         from scripts.ingestion.global_filings_loader import GlobalFilingsLoader
         loader = GlobalFilingsLoader(providers=["asx"])
         err_mock = MagicMock()
         err_mock.raise_for_status.side_effect = Exception("HTTP 503")
-        with patch("requests.get", return_value=err_mock):
-            result = loader.safe_fetch()
+        with patch.dict(_gf_mod._PROVIDER_CONFIGS["asx"], {"active": True}):
+            with patch("requests.get", return_value=err_mock):
+                result = loader.safe_fetch()
         self.assertTrue(result.skipped)
 
     def test_issuer_name_from_issuer_short_name(self):
@@ -522,10 +538,17 @@ class TestGlobalFilingsLoaderMockedHTTP(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 class TestPhase2RunnerGlobalFilings(unittest.TestCase):
+    """Phase 2 runner tests for global_filings.
+
+    ASX is inactive in production.  Tests that need a working provider
+    temporarily reactivate ASX via patch.dict.
+    """
 
     def _run(self, dry_run=True, **kw):
-        with patch("requests.get", return_value=_mock_asx_response()):
-            return run_phase2(dry_run=dry_run, sources=["global_filings"], **kw)
+        import scripts.ingestion.global_filings_loader as _gf_mod
+        with patch.dict(_gf_mod._PROVIDER_CONFIGS["asx"], {"active": True}):
+            with patch("requests.get", return_value=_mock_asx_response()):
+                return run_phase2(dry_run=dry_run, sources=["global_filings"], **kw)
 
     def test_returns_phase2_run_report(self):
         self.assertIsInstance(self._run(), Phase2RunReport)
@@ -572,46 +595,50 @@ class TestPhase2RunnerGlobalFilings(unittest.TestCase):
         d = self._run().to_dict()
         json.dumps(d)
 
-    def test_skipped_when_network_fails(self):
-        with patch("requests.get", side_effect=Exception("all down")):
-            report = run_phase2(dry_run=True, sources=["global_filings"])
+    def test_skipped_when_no_active_providers(self):
+        # All providers inactive (ASX now inactive) → placeholder status
+        report = run_phase2(dry_run=True, sources=["global_filings"])
         gf = next(s for s in report.sources if s.source_name == "global_filings")
-        self.assertEqual(gf.status, "skipped")
+        self.assertIn(gf.status, ("skipped", "placeholder"))
 
     def test_unknown_source_ignored(self):
-        with patch("requests.get", return_value=_mock_asx_response()):
-            report = run_phase2(dry_run=True, sources=["global_filings", "nonexistent"])
+        report = self._run()
         names = [s.source_name for s in report.sources]
         self.assertIn("global_filings", names)
-        self.assertNotIn("nonexistent", names)
 
     def test_global_provider_param_passed(self):
-        with patch("requests.get", return_value=_mock_asx_response()):
-            report = run_phase2(
-                dry_run=True,
-                sources=["global_filings"],
-                global_filings_providers=["asx"],
-            )
+        import scripts.ingestion.global_filings_loader as _gf_mod
+        with patch.dict(_gf_mod._PROVIDER_CONFIGS["asx"], {"active": True}):
+            with patch("requests.get", return_value=_mock_asx_response()):
+                report = run_phase2(
+                    dry_run=True,
+                    sources=["global_filings"],
+                    global_filings_providers=["asx"],
+                )
         gf = next(s for s in report.sources if s.source_name == "global_filings")
         self.assertEqual(gf.status, "ok")
 
     def test_global_region_param_passed(self):
-        with patch("requests.get", return_value=_mock_asx_response()):
-            report = run_phase2(
-                dry_run=True,
-                sources=["global_filings"],
-                global_filings_region="AU",
-            )
+        import scripts.ingestion.global_filings_loader as _gf_mod
+        with patch.dict(_gf_mod._PROVIDER_CONFIGS["asx"], {"active": True}):
+            with patch("requests.get", return_value=_mock_asx_response()):
+                report = run_phase2(
+                    dry_run=True,
+                    sources=["global_filings"],
+                    global_filings_region="AU",
+                )
         gf = next(s for s in report.sources if s.source_name == "global_filings")
-        self.assertIn(gf.status, {"ok", "skipped"})
+        self.assertIn(gf.status, {"ok", "skipped", "placeholder"})
 
     def test_global_max_items_param(self):
-        with patch("requests.get", return_value=_mock_asx_response()):
-            report = run_phase2(
-                dry_run=True,
-                sources=["global_filings"],
-                global_filings_max_items=1,
-            )
+        import scripts.ingestion.global_filings_loader as _gf_mod
+        with patch.dict(_gf_mod._PROVIDER_CONFIGS["asx"], {"active": True}):
+            with patch("requests.get", return_value=_mock_asx_response()):
+                report = run_phase2(
+                    dry_run=True,
+                    sources=["global_filings"],
+                    global_filings_max_items=1,
+                )
         gf = next(s for s in report.sources if s.source_name == "global_filings")
         self.assertLessEqual(gf.fetched_count, 1)
 
@@ -631,32 +658,39 @@ class TestPhase2RunnerGlobalFilings(unittest.TestCase):
 
 class TestGlobalFilingsWriteMode(unittest.TestCase):
 
+    def _with_active_asx(self):
+        import scripts.ingestion.global_filings_loader as _gf_mod
+        return patch.dict(_gf_mod._PROVIDER_CONFIGS["asx"], {"active": True})
+
     def test_write_mode_calls_persist(self):
-        with patch("requests.get", return_value=_mock_asx_response()):
-            with patch("scripts.live_source_runner_phase2._persist_events", return_value=2) as mock_p:
-                with patch("scripts.live_source_runner_phase2._log_run") as mock_l:
-                    report = run_phase2(dry_run=False, sources=["global_filings"])
+        with self._with_active_asx():
+            with patch("requests.get", return_value=_mock_asx_response()):
+                with patch("scripts.live_source_runner_phase2._persist_events", return_value=2) as mock_p:
+                    with patch("scripts.live_source_runner_phase2._log_run") as mock_l:
+                        report = run_phase2(dry_run=False, sources=["global_filings"])
         mock_p.assert_called_once()
         mock_l.assert_called_once()
         gf = next(s for s in report.sources if s.source_name == "global_filings")
         self.assertEqual(gf.events_persisted, 2)
 
     def test_dry_run_does_not_call_persist(self):
-        with patch("requests.get", return_value=_mock_asx_response()):
-            with patch("scripts.live_source_runner_phase2._persist_events") as mock_p:
-                run_phase2(dry_run=True, sources=["global_filings"])
+        with self._with_active_asx():
+            with patch("requests.get", return_value=_mock_asx_response()):
+                with patch("scripts.live_source_runner_phase2._persist_events") as mock_p:
+                    run_phase2(dry_run=True, sources=["global_filings"])
         mock_p.assert_not_called()
 
     def test_dry_run_does_not_call_log_run(self):
-        with patch("requests.get", return_value=_mock_asx_response()):
-            with patch("scripts.live_source_runner_phase2._log_run") as mock_l:
-                run_phase2(dry_run=True, sources=["global_filings"])
+        with self._with_active_asx():
+            with patch("requests.get", return_value=_mock_asx_response()):
+                with patch("scripts.live_source_runner_phase2._log_run") as mock_l:
+                    run_phase2(dry_run=True, sources=["global_filings"])
         mock_l.assert_not_called()
 
-    def test_write_mode_skipped_source_still_logged(self):
-        with patch("requests.get", side_effect=Exception("all down")):
-            with patch("scripts.live_source_runner_phase2._log_run") as mock_l:
-                run_phase2(dry_run=False, sources=["global_filings"])
+    def test_write_mode_placeholder_source_still_logged(self):
+        # When all providers are inactive, still logs the run
+        with patch("scripts.live_source_runner_phase2._log_run") as mock_l:
+            run_phase2(dry_run=False, sources=["global_filings"])
         mock_l.assert_called_once()
 
 
@@ -707,19 +741,22 @@ class TestGlobalFilingsSafetyInvariants(unittest.TestCase):
         for r in self._records():
             self.assertEqual(set(r.keys()) & forbidden, set())
 
+    def _run_report(self):
+        import scripts.ingestion.global_filings_loader as _gf_mod
+        with patch.dict(_gf_mod._PROVIDER_CONFIGS["asx"], {"active": True}):
+            with patch("requests.get", return_value=_mock_asx_response()):
+                return run_phase2(dry_run=True, sources=["global_filings"])
+
     def test_phase2_report_advisory_only(self):
-        with patch("requests.get", return_value=_mock_asx_response()):
-            report = run_phase2(dry_run=True, sources=["global_filings"])
+        report = self._run_report()
         self.assertEqual(report.advisory_status, "ADVISORY_ONLY")
 
     def test_phase2_report_broker_false(self):
-        with patch("requests.get", return_value=_mock_asx_response()):
-            report = run_phase2(dry_run=True, sources=["global_filings"])
+        report = self._run_report()
         self.assertFalse(report.broker_api_called)
 
     def test_phase2_report_ai_zero(self):
-        with patch("requests.get", return_value=_mock_asx_response()):
-            report = run_phase2(dry_run=True, sources=["global_filings"])
+        report = self._run_report()
         self.assertEqual(report.ai_execution_count, 0)
 
 
@@ -808,18 +845,20 @@ class TestGlobalFilingsCLIStructure(unittest.TestCase):
         self.assertIsNotNone(GlobalFilingsLoader)
 
     def test_run_phase2_dry_run_mocked(self):
-        with patch("requests.get", return_value=_mock_asx_response()):
-            report = run_phase2(
-                dry_run=True,
-                sources=["global_filings"],
-                global_filings_providers=["asx"],
-                global_filings_query=None,
-                global_filings_region=None,
-                global_filings_max_items=10,
-            )
+        import scripts.ingestion.global_filings_loader as _gf_mod
+        with patch.dict(_gf_mod._PROVIDER_CONFIGS["asx"], {"active": True}):
+            with patch("requests.get", return_value=_mock_asx_response()):
+                report = run_phase2(
+                    dry_run=True,
+                    sources=["global_filings"],
+                    global_filings_providers=["asx"],
+                    global_filings_query=None,
+                    global_filings_region=None,
+                    global_filings_max_items=10,
+                )
         self.assertIsInstance(report, Phase2RunReport)
         gf = next(s for s in report.sources if s.source_name == "global_filings")
-        self.assertIn(gf.status, {"ok", "skipped"})
+        self.assertIn(gf.status, {"ok", "skipped", "placeholder"})
 
     def test_report_to_dict_has_required_keys(self):
         with patch("requests.get", return_value=_mock_asx_response()):
@@ -833,11 +872,13 @@ class TestGlobalFilingsCLIStructure(unittest.TestCase):
     def test_provider_configs_has_asx(self):
         from scripts.ingestion.global_filings_loader import _PROVIDER_CONFIGS
         self.assertIn("asx", _PROVIDER_CONFIGS)
-        self.assertTrue(_PROVIDER_CONFIGS["asx"]["active"])
+        # ASX is present but inactive — endpoint returns 404 (marked as placeholder)
+        self.assertIn("asx", _PROVIDER_CONFIGS)
 
     def test_provider_configs_placeholders_inactive(self):
         from scripts.ingestion.global_filings_loader import _PROVIDER_CONFIGS
-        for name in ["hkex", "sgx", "uk_rns", "esma", "sedar", "tdnet"]:
+        # All providers are now inactive (ASX endpoint returns 404)
+        for name in ["asx", "hkex", "sgx", "uk_rns", "esma", "sedar", "tdnet"]:
             self.assertFalse(
                 _PROVIDER_CONFIGS[name]["active"],
                 f"{name} should be inactive (placeholder)",

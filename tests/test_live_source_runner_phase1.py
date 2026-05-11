@@ -271,7 +271,8 @@ class TestPolymarketMocked:
                 report = run_phase1(dry_run=True)
 
         poly = next(s for s in report.sources if s.source_name == "polymarket")
-        assert poly.status == "skipped"
+        # network error on polymarket → "unreachable" → http_error status
+        assert poly.status in ("http_error", "skipped")
         assert poly.fetched_count == 0
 
 
@@ -568,6 +569,8 @@ class TestNoExecutionSafety:
 
 
 class TestAllSkipped:
+    _INACTIVE_STATUSES = {"skipped", "http_error", "rate_limited", "timeout", "placeholder"}
+
     def test_all_skipped_report_is_valid(self) -> None:
         os.environ.pop("SEC_USER_AGENT", None)
         with patch("requests.get", side_effect=Exception("no network")):
@@ -578,7 +581,8 @@ class TestAllSkipped:
         assert report.total_fetched == 0
         assert report.total_persisted == 0
         assert report.advisory_status == "ADVISORY_ONLY"
-        assert all(s.status == "skipped" for s in report.sources)
+        # No source should be "ok" when network is down / keys missing
+        assert all(s.status in self._INACTIVE_STATUSES for s in report.sources)
         assert len(report.sources) == 3
 
     def test_all_skipped_sources_named(self) -> None:

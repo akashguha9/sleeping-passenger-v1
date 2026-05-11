@@ -269,7 +269,7 @@ class TestEtherscanKey:
         env["ETHERSCAN_API_KEY"] = "eth-key-value"
         with patch.dict(os.environ, env, clear=True):
             with patch("requests.get", return_value=_mock_resp(_ETHERSCAN_PAYLOAD)):
-                result = EtherscanLoader(address="0xtest").safe_fetch()
+                result = EtherscanLoader(address="0xde0b295669a9fd93d5f28d9ec85e40f4cb697bae").safe_fetch()
         assert not result.skipped
         assert len(result.records) == 1
 

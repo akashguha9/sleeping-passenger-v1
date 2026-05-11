@@ -231,7 +231,7 @@ class TestEtherscanMocked:
                 )
 
             eth = next(s for s in report.sources if s.source_name == "etherscan")
-            assert eth.status == "skipped"
+            assert eth.status in ("skipped", "http_error")
             assert eth.fetched_count == 0
         finally:
             os.environ.pop("ETHERSCAN_API_KEY", None)

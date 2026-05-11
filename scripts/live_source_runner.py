@@ -378,18 +378,30 @@ def run_phase1(
 
         if loader_result.skipped:
             reason = loader_result.skip_reason
-            # Classify the skip reason for the diagnostic table
+            reason_lower = reason.lower()
+            # Classify the skip reason into a semantic status
             missing_var = ""
-            if "SEC_USER_AGENT" in reason:
-                diag_status = "MISSING_CONFIG"
-                missing_var = "SEC_USER_AGENT"
-            elif "unreachable" in reason.lower() or "error" in reason.lower():
-                diag_status = "HTTP_ERROR"
+            if "[rate_limited]" in reason_lower:
+                run_status = "rate_limited"
+            elif "[timeout]" in reason_lower:
+                run_status = "timeout"
+            elif "[placeholder]" in reason_lower:
+                run_status = "placeholder"
+            elif "SEC_USER_AGENT" in reason or "no cik provided" in reason_lower:
+                run_status = "skipped"
+                if "SEC_USER_AGENT" in reason:
+                    missing_var = "SEC_USER_AGENT"
+            elif (
+                "unreachable" in reason_lower
+                or "http error" in reason_lower
+                or "httperror" in reason_lower
+            ):
+                run_status = "http_error"
             else:
-                diag_status = "SKIPPED"
+                run_status = "skipped"
             src_result = SourceRunResult(
                 source_name=source_name,
-                status="skipped",
+                status=run_status,
                 fetched_count=0,
                 skipped_reason=reason,
                 timestamp_utc=ts,
@@ -406,6 +418,11 @@ def run_phase1(
             persisted = 0
             if not dry_run:
                 persisted = _persist_events(events, source_name, ts)
+            # Set OK_FILTERED when source responded but all records were domain-rejected
+            if source_name == "polymarket" and raw_count > 0 and len(events) == 0:
+                run_status = "ok_filtered"
+            else:
+                run_status = "ok"
             detail = ""
             if source_name == "polymarket":
                 detail = (
@@ -413,7 +430,7 @@ def run_phase1(
                 )
             src_result = SourceRunResult(
                 source_name=source_name,
-                status="ok" if events else "ok",
+                status=run_status,
                 fetched_count=raw_count,
                 accepted_count=len(events),
                 rejected_count=rejected_count,
