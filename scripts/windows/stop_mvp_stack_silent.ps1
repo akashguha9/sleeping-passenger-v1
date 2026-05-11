@@ -40,16 +40,16 @@ function Stop-MatchingProcesses {
         Where-Object { $_.CommandLine -like $CommandPattern }
     if ($procs) {
         foreach ($p in $procs) {
-            Write-Log "$Label: stopping PID $($p.ProcessId) ..."
+            Write-Log "${Label}: stopping PID $($p.ProcessId) ..."
             try {
                 Stop-Process -Id $p.ProcessId -Force -ErrorAction Stop
-                Write-Log "$Label: PID $($p.ProcessId) stopped."
+                Write-Log "${Label}: PID $($p.ProcessId) stopped."
             } catch {
-                Write-Log "$Label: WARNING - could not stop PID $($p.ProcessId): $_"
+                Write-Log "${Label}: WARNING - could not stop PID $($p.ProcessId): $_"
             }
         }
     } else {
-        Write-Log "$Label: not running."
+        Write-Log "${Label}: not running."
     }
 }
 
