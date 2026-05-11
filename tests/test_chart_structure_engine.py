@@ -875,12 +875,19 @@ class TestNoLiveInternet:
 
 class TestNoBackendFrontendChanges:
     def test_api_server_has_chart_structure_wired(self):
-        # Phase D.3 has landed: api_server.py MUST import chart_structure_engine
+        # Phase D.3 has landed: api_server.py must import from chart_structure_api_context,
+        # which in turn imports chart_structure_engine (dep-free refactor: E.6).
         api_path = _REPO / "scripts" / "api_server.py"
+        ctx_path = _REPO / "scripts" / "chart_structure_api_context.py"
         if api_path.exists():
-            source = api_path.read_text(encoding="utf-8")
-            assert "chart_structure_engine" in source, (
-                "api_server.py must import chart_structure_engine (Phase D.3 complete)"
+            api_src = api_path.read_text(encoding="utf-8")
+            assert "chart_structure_api_context" in api_src, (
+                "api_server.py must import from chart_structure_api_context (Phase D.3 + E.6)"
+            )
+        if ctx_path.exists():
+            ctx_src = ctx_path.read_text(encoding="utf-8")
+            assert "chart_structure_engine" in ctx_src, (
+                "chart_structure_api_context.py must import chart_structure_engine (Phase D.3)"
             )
 
     def test_frontend_unchanged(self):

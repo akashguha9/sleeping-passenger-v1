@@ -472,20 +472,13 @@ def test_chart_structure_prefers_real_over_seed(tmp_path):
 
 def test_chart_structure_result_advisory_status(tmp_path):
     """_get_chart_structure always returns advisory_status=ADVISORY_ONLY."""
-    import scripts.persistence as p
-    import scripts.api_server as api
+    from scripts.chart_structure_api_context import _get_chart_structure
 
     db = tmp_path / "cs_advisory.db"
-    # Patch DB_PATH in persistence to use tmp db
-    original_db = p.DB_PATH
-    p.DB_PATH = db
-    try:
-        # No candles — should return INSUFFICIENT_DATA with advisory stamp
-        result = api._get_chart_structure(symbol="ZZZZTEST", limit=10)
-        assert result["advisory_status"] == "ADVISORY_ONLY"
-        assert result["execution_gate"] == "LOCKED"
-    finally:
-        p.DB_PATH = original_db
+    # No candles — should return INSUFFICIENT_DATA with advisory stamp
+    result = _get_chart_structure(symbol="ZZZZTEST", limit=10, db_path=db)
+    assert result["advisory_status"] == "ADVISORY_ONLY"
+    assert result["execution_gate"] == "LOCKED"
 
 
 # ---------------------------------------------------------------------------

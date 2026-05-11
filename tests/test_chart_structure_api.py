@@ -513,3 +513,47 @@ def test_no_live_internet_required(client):
     # that no real network calls are needed for any test.
     r = client.get("/chart-structure?symbol=AAPL")
     assert r.status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# 27–29. Regression: chart_structure_api_context is fastapi-free
+# ---------------------------------------------------------------------------
+
+def test_chart_structure_api_context_importable_without_fastapi():
+    """scripts.chart_structure_api_context must be importable even when fastapi is absent."""
+    import importlib
+    import sys
+    # Temporarily hide fastapi from the module view without uninstalling it
+    original = sys.modules.get("fastapi")
+    sys.modules["fastapi"] = None  # type: ignore[assignment]
+    try:
+        mod_name = "scripts.chart_structure_api_context"
+        if mod_name in sys.modules:
+            del sys.modules[mod_name]
+        import scripts.chart_structure_api_context as ctx  # noqa: F401
+        assert callable(ctx._candles_from_market_events)
+        assert callable(ctx._get_chart_structure)
+    finally:
+        if original is None:
+            sys.modules.pop("fastapi", None)
+        else:
+            sys.modules["fastapi"] = original
+        # Reload with real fastapi for subsequent tests
+        if "scripts.chart_structure_api_context" in sys.modules:
+            del sys.modules["scripts.chart_structure_api_context"]
+
+
+def test_get_chart_structure_importable_from_dep_free_module():
+    """_get_chart_structure must be present in chart_structure_api_context (not only api_server)."""
+    from scripts.chart_structure_api_context import _get_chart_structure
+    assert callable(_get_chart_structure)
+
+
+def test_phase_e3_test_file_does_not_import_api_server_for_pure_helpers():
+    """Regression: test_phase_e3_ohlcv.py must not use 'import scripts.api_server as api'."""
+    e3_path = _REPO / "tests" / "test_phase_e3_ohlcv.py"
+    src = e3_path.read_text(encoding="utf-8")
+    assert "import scripts.api_server as api" not in src, (
+        "test_phase_e3_ohlcv.py must not import scripts.api_server for pure helper tests; "
+        "use scripts.chart_structure_api_context instead."
+    )

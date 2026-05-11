@@ -16,6 +16,9 @@ from __future__ import annotations
 
 import json
 
+_ADVISORY_STATUS = "ADVISORY_ONLY"
+_AI_EXECUTION_COUNT = 0
+
 
 def _candles_from_market_events(events: list[dict]) -> list[dict]:
     """Extract OHLCV candle dicts from market_data signal_events raw_payload.
@@ -50,3 +53,111 @@ def _candles_from_market_events(events: list[dict]) -> list[dict]:
             "volume": v,
         })
     return candles
+
+
+def _get_chart_structure(
+    symbol: str,
+    source_event_id: str | None = None,
+    limit: int = 100,
+    db_path=None,
+) -> dict:
+    """Fetch market_data signal events for *symbol*, adapt to candles, run engine.
+
+    Returns an advisory-only chart structure report. Never places orders.
+    Safety invariants are always present in the returned dict.
+    Importable without FastAPI — no web framework dependency.
+    """
+    _safe_base = {
+        "advisory_status": _ADVISORY_STATUS,
+        "execution_gate": "LOCKED",
+        "human_review_required": True,
+        "ai_execution_count": _AI_EXECUTION_COUNT,
+        "broker_api_called": False,
+        "broker_order_id": "NONE",
+    }
+    try:
+        try:
+            from scripts.persistence import get_signal_events, get_signal_events_for_symbol
+        except ModuleNotFoundError:
+            from persistence import get_signal_events, get_signal_events_for_symbol  # type: ignore
+
+        try:
+            from scripts.chart_structure_engine import analyze_chart_structure
+        except ModuleNotFoundError:
+            from chart_structure_engine import analyze_chart_structure  # type: ignore
+
+        symbol_upper = symbol.strip().upper()
+
+        kwargs: dict = {"symbol": symbol_upper, "source_name": "market_data", "limit": max(limit * 6, 600)}
+        if db_path is not None:
+            kwargs["db_path"] = db_path
+
+        events = get_signal_events_for_symbol(**kwargs)
+
+        linked_event_id: str | None = None
+        if source_event_id:
+            matched = [ev for ev in events if ev.get("event_id") == source_event_id]
+            if not matched:
+                ge_kwargs: dict = {"limit": limit * 5}
+                if db_path is not None:
+                    ge_kwargs["db_path"] = db_path
+                broader = get_signal_events(**ge_kwargs)
+                matched = [ev for ev in broader if ev.get("event_id") == source_event_id]
+            if matched:
+                linked_event_id = matched[0].get("event_id")
+
+        real_evts = [ev for ev in events if str(ev.get("event_id", "")).startswith("ohlcv_")]
+        seed_evts = [ev for ev in events if not str(ev.get("event_id", "")).startswith("ohlcv_")]
+
+        if real_evts:
+            real_candles = _candles_from_market_events(real_evts)
+            real_dates = {c["timestamp"][:10] for c in real_candles}
+            extra_seed = [
+                c for c in _candles_from_market_events(seed_evts)
+                if c["timestamp"][:10] not in real_dates
+            ]
+            merged = sorted(real_candles + extra_seed, key=lambda c: c["timestamp"])
+        else:
+            merged = sorted(
+                _candles_from_market_events(seed_evts or events),
+                key=lambda c: c["timestamp"],
+            )
+
+        candles = merged[-limit:] if len(merged) > limit else merged
+
+        if not candles:
+            return {
+                **_safe_base,
+                "symbol": symbol_upper,
+                "source_event_id": linked_event_id,
+                "candle_count": 0,
+                "chart_state": "INSUFFICIENT_DATA",
+                "advisory_summary": (
+                    "No OHLCV candle data available for this symbol. "
+                    "Run real historical backfill: "
+                    "python scripts/backfill_ohlcv_history.py --symbols AAPL,GLD,TLT,BTC-USD,SPY --period max --interval 1d --write"
+                ),
+                "report": None,
+            }
+
+        report = analyze_chart_structure(candles, symbol=symbol_upper, source="market_data")
+        report_dict = report.to_dict()
+
+        return {
+            **_safe_base,
+            "symbol": symbol_upper,
+            "source_event_id": linked_event_id,
+            "candle_count": len(candles),
+            "report": report_dict,
+        }
+
+    except Exception as exc:
+        return {
+            **_safe_base,
+            "symbol": symbol,
+            "source_event_id": source_event_id,
+            "candle_count": 0,
+            "chart_state": "ERROR",
+            "error": str(exc),
+            "report": None,
+        }
