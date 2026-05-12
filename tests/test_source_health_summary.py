@@ -1,23 +1,41 @@
 """
-Tests for the /source-health/summary endpoint and its classifier.
+Tests for the source-health classifier, sanitizer, and summary builder.
 
 Covers:
-  1. _classify_source_status maps known statuses to severities/categories.
+  1. classify_source_status maps known statuses to severities/categories.
   2. CREDITS_EXHAUSTED detection on HTTP 402 / "credit" error messages.
   3. RATE_LIMITED detection on HTTP 429.
   4. AUTH_ERROR detection on HTTP 401/403.
   5. PLACEHOLDER is info-level, not warning.
   6. Sanitizer redacts api_key/token/secret patterns and trims long text.
-  7. _get_source_health_summary returns advisory invariants.
+  7. Source-health summary preserves advisory invariants.
   8. Persistence helpers: get_latest_source_run_per_source, count_signal_events_by_source.
+
+The pure classifier/sanitizer/summary logic lives in
+``scripts.source_health_summary`` so these tests do not require FastAPI to
+run.  An additional ``_api()`` helper exists for the API wrapper checks at
+the bottom of the file; it skips cleanly when FastAPI is unavailable.
 """
 from __future__ import annotations
 
 import json
 import sqlite3
 
+import pytest
+
+
+def _srv():
+    """Pure source-health module (no FastAPI dependency)."""
+    import scripts.source_health_summary as srv
+    return srv
+
 
 def _api():
+    """FastAPI wrapper; skip caller if FastAPI is not installed."""
+    try:
+        import fastapi  # noqa: F401
+    except ImportError:
+        pytest.skip("fastapi not installed")
     import scripts.api_server as srv
     return srv
 
@@ -33,45 +51,45 @@ def _p():
 
 
 def test_classifier_known_statuses():
-    srv = _api()
-    assert srv._classify_source_status("OK", "", "")["severity"] == "ok"
-    assert srv._classify_source_status("OK_FILTERED", "", "")["severity"] == "ok"
-    assert srv._classify_source_status("PLACEHOLDER", "", "")["severity"] == "info"
-    assert srv._classify_source_status("PLACEHOLDER", "", "")["category"] == "PLACEHOLDER"
-    assert srv._classify_source_status("RATE_LIMITED", "", "")["severity"] == "warning"
-    assert srv._classify_source_status("TIMEOUT", "", "")["severity"] == "warning"
-    assert srv._classify_source_status("ERROR", "", "")["severity"] == "error"
+    srv = _srv()
+    assert srv.classify_source_status("OK", "", "")["severity"] == "ok"
+    assert srv.classify_source_status("OK_FILTERED", "", "")["severity"] == "ok"
+    assert srv.classify_source_status("PLACEHOLDER", "", "")["severity"] == "info"
+    assert srv.classify_source_status("PLACEHOLDER", "", "")["category"] == "PLACEHOLDER"
+    assert srv.classify_source_status("RATE_LIMITED", "", "")["severity"] == "warning"
+    assert srv.classify_source_status("TIMEOUT", "", "")["severity"] == "warning"
+    assert srv.classify_source_status("ERROR", "", "")["severity"] == "error"
 
 
 def test_classifier_credits_exhausted_402():
-    srv = _api()
-    c = srv._classify_source_status("HTTP_ERROR", "", "HTTP 402 credits depleted")
+    srv = _srv()
+    c = srv.classify_source_status("HTTP_ERROR", "", "HTTP 402 credits depleted")
     assert c["category"] == "CREDITS_EXHAUSTED"
     assert c["severity"] == "warning"
 
 
 def test_classifier_credits_exhausted_error_keyword():
-    srv = _api()
-    c = srv._classify_source_status("ERROR", "", "xAI credits exhausted for account")
+    srv = _srv()
+    c = srv.classify_source_status("ERROR", "", "xAI credits exhausted for account")
     assert c["category"] == "CREDITS_EXHAUSTED"
 
 
 def test_classifier_rate_limit_http_429():
-    srv = _api()
-    c = srv._classify_source_status("HTTP_ERROR", "", "HTTP 429 too many requests")
+    srv = _srv()
+    c = srv.classify_source_status("HTTP_ERROR", "", "HTTP 429 too many requests")
     assert c["category"] == "RATE_LIMITED"
     assert c["severity"] == "warning"
 
 
 def test_classifier_auth_error_http_401():
-    srv = _api()
-    c = srv._classify_source_status("HTTP_ERROR", "", "HTTP 401 unauthorized")
+    srv = _srv()
+    c = srv.classify_source_status("HTTP_ERROR", "", "HTTP 401 unauthorized")
     assert c["category"] == "AUTH_ERROR"
 
 
 def test_classifier_skipped_missing_api_key():
-    srv = _api()
-    c = srv._classify_source_status("SKIPPED", "missing api_key in env", "")
+    srv = _srv()
+    c = srv.classify_source_status("SKIPPED", "missing api_key in env", "")
     assert c["category"] == "MISSING_API_KEY"
 
 
@@ -81,22 +99,22 @@ def test_classifier_skipped_missing_api_key():
 
 
 def test_sanitizer_redacts_api_key():
-    srv = _api()
-    cleaned = srv._sanitize_error_text("Failed: api_key=sk-secret-12345 bad token")
+    srv = _srv()
+    cleaned = srv.sanitize_error_text("Failed: api_key=sk-secret-12345 bad token")
     assert "sk-secret-12345" not in cleaned
     assert "<redacted>" in cleaned
 
 
 def test_sanitizer_redacts_bearer_and_secret():
-    srv = _api()
-    cleaned = srv._sanitize_error_text("Authorization: Bearer ABC.DEF.HIJ secret=xyz")
+    srv = _srv()
+    cleaned = srv.sanitize_error_text("Authorization: Bearer ABC.DEF.HIJ secret=xyz")
     assert "ABC.DEF.HIJ" not in cleaned
     assert "xyz" not in cleaned
 
 
 def test_sanitizer_truncates_long_text():
-    srv = _api()
-    cleaned = srv._sanitize_error_text("x" * 1000)
+    srv = _srv()
+    cleaned = srv.sanitize_error_text("x" * 1000)
     assert len(cleaned) <= 241
 
 
@@ -149,19 +167,23 @@ def test_count_signal_events_by_source(tmp_path):
 
 
 def test_source_health_summary_advisory_invariants():
-    srv = _api()
-    result = srv._get_source_health_summary()
-    # Even if the DB is empty / missing, the response must keep these constants
+    srv = _srv()
+    # Pure builder with empty inputs — confirms invariants survive empty state.
+    result = srv.build_source_health_summary([], {})
     assert result["advisory_status"] == "ADVISORY_ONLY"
     assert result["execution_mode"] == "HUMAN_ONLY"
     assert result["ai_execution_count"] == 0
     assert result["human_review_required"] is True
     assert "sources" in result
     assert isinstance(result["sources"], list)
+    # All configured sources should be reported as NO_RUNS when no rows exist.
+    by_source = {s["source_name"]: s for s in result["sources"]}
+    assert "asia_disclosure" in by_source
+    assert by_source["asia_disclosure"]["category"] == "NO_RUNS"
 
 
-def test_source_health_summary_includes_known_source_labels(tmp_path, monkeypatch):
-    srv = _api()
+def test_source_health_summary_includes_known_source_labels(tmp_path):
+    srv = _srv()
     p = _p()
     db = tmp_path / "sh.db"
     p.init_schema(db)
@@ -180,20 +202,9 @@ def test_source_health_summary_includes_known_source_labels(tmp_path, monkeypatc
         "2026-05-12T00:00:00Z", 500, db_path=db,
     )
 
-    # Route the persistence helpers used by _get_source_health_summary at the
-    # temp DB so we don't depend on whatever sits in the real runtime DB.
-    original_latest = p.get_latest_source_run_per_source
-    original_count = p.count_signal_events_by_source
-    monkeypatch.setattr(
-        p, "get_latest_source_run_per_source",
-        lambda *a, **kw: original_latest(db_path=db),
-    )
-    monkeypatch.setattr(
-        p, "count_signal_events_by_source",
-        lambda *a, **kw: original_count(db_path=db),
-    )
-
-    result = srv._get_source_health_summary()
+    latest_rows = p.get_latest_source_run_per_source(db_path=db)
+    event_counts = p.count_signal_events_by_source(db_path=db)
+    result = srv.build_source_health_summary(latest_rows, event_counts)
     by_source = {s["source_name"]: s for s in result["sources"]}
 
     assert by_source["gdelt"]["category"] == "RATE_LIMITED"
@@ -201,6 +212,9 @@ def test_source_health_summary_includes_known_source_labels(tmp_path, monkeypatc
 
     assert by_source["asia_disclosure"]["category"] == "PLACEHOLDER"
     assert by_source["asia_disclosure"]["severity"] == "info"
+    # Placeholder copy should be source-specific, not generic.
+    assert "Asia Disclosure" in by_source["asia_disclosure"]["human_message"]
+    assert "PLACEHOLDER" in by_source["asia_disclosure"]["human_message"]
 
     assert by_source["grok_xai"]["category"] == "CREDITS_EXHAUSTED"
     assert by_source["grok_xai"]["severity"] == "warning"
@@ -212,9 +226,48 @@ def test_source_health_summary_includes_known_source_labels(tmp_path, monkeypatc
 
 
 def test_source_health_summary_counts_warnings():
-    srv = _api()
-    out = srv._get_source_health_summary()
+    srv = _srv()
+    out = srv.build_source_health_summary([], {})
     # Even when empty, count fields exist with correct types
     assert isinstance(out.get("warning_count"), int)
     assert isinstance(out.get("error_count"), int)
     assert isinstance(out.get("ok_count"), int)
+
+
+def test_no_runs_message_uses_phase2_command_for_asia_disclosure():
+    """Asia Disclosure runs through run_live_sources_phase2.py — make sure
+    the NO_RUNS hint never points at the legacy live_source_runner script.
+    """
+    srv = _srv()
+    result = srv.build_source_health_summary([], {})
+    by_source = {s["source_name"]: s for s in result["sources"]}
+    asia = by_source["asia_disclosure"]
+    assert asia["category"] == "NO_RUNS"
+    assert "run_live_sources_phase2.py" in asia["human_message"]
+    assert "--source asia_disclosure" in asia["human_message"]
+    assert "live_source_runner.py" not in asia["human_message"]
+
+
+def test_no_runs_message_uses_phase1_command_for_gdelt():
+    """GDELT is a Phase 1 source — the CLI hint must use phase1."""
+    srv = _srv()
+    result = srv.build_source_health_summary([], {})
+    by_source = {s["source_name"]: s for s in result["sources"]}
+    gdelt = by_source["gdelt"]
+    assert gdelt["category"] == "NO_RUNS"
+    assert "run_live_sources_phase1.py" in gdelt["human_message"]
+    assert "--source gdelt" in gdelt["human_message"]
+
+
+def test_api_wrapper_returns_same_invariants():
+    """The FastAPI wrapper layer should re-export the same advisory shape.
+
+    Skipped when FastAPI is unavailable (e.g. minimal CI without dev deps).
+    """
+    srv = _api()
+    result = srv._get_source_health_summary()
+    assert result["advisory_status"] == "ADVISORY_ONLY"
+    assert result["execution_mode"] == "HUMAN_ONLY"
+    assert result["ai_execution_count"] == 0
+    assert result["human_review_required"] is True
+    assert isinstance(result.get("sources"), list)

@@ -1,0 +1,14 @@
+# Dev / CI test dependencies.
+#
+# Installed on GitHub Actions on top of requirements.txt so the pytest
+# session can import scripts.api_server (FastAPI), instantiate Pydantic
+# request bodies, and run TestClient round-trips.
+#
+# Keep this file lean: only test-time deps belong here.
+
+-r requirements.txt
+
+fastapi>=0.110,<1
+uvicorn>=0.27,<1
+pydantic>=2.6,<3
+httpx>=0.27,<1

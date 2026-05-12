@@ -316,6 +316,13 @@ function PerSourceEmptyState({
     ? health.sources.find((s) => s.source_name === sourceFilter)
     : undefined;
 
+  // Sources that route through run_live_sources_phase1.py.
+  const phase1 = new Set(['polymarket', 'gdelt', 'sec_edgar']);
+  const phaseCmd = (src: string) =>
+    phase1.has(src)
+      ? `python scripts/run_live_sources_phase1.py --source ${src} --dry-run`
+      : `python scripts/run_live_sources_phase2.py --source ${src} --dry-run`;
+
   // 1. Specific source filter chosen → use source-health to give an honest reason.
   if (sourceFilter) {
     if (entry) {
@@ -328,6 +335,10 @@ function PerSourceEmptyState({
           ? 'var(--sp-cyan)'
           : 'var(--sp-mist)';
       const headline = `No ${label} signals available right now.`;
+      // Show the runnable command for NO_RUNS rows so the user has an
+      // actionable next step instead of a generic "no runs yet" line.
+      const showCommand =
+        entry.category === 'NO_RUNS' && (entry.suggested_command ?? phaseCmd(sourceFilter));
       return (
         <div className="sp-card-soft p-8 space-y-3 text-center">
           <div className="sp-eyebrow">Source Status</div>
@@ -340,6 +351,19 @@ function PerSourceEmptyState({
           <p className="text-xs" style={{ color: 'var(--sp-mist)' }}>
             {entry.human_message}
           </p>
+          {showCommand && (
+            <pre
+              className="text-[11px] font-mono inline-block px-3 py-2 rounded mx-auto"
+              style={{
+                color: 'var(--sp-bone)',
+                background: 'rgba(13, 16, 21, 0.7)',
+                border: '1px solid var(--sp-line)',
+                whiteSpace: 'pre-wrap',
+              }}
+            >
+              {entry.suggested_command ?? phaseCmd(sourceFilter)}
+            </pre>
+          )}
           {entry.last_run_at && (
             <p className="text-[10px] font-mono" style={{ color: 'var(--sp-mist)' }}>
               last run · {formatTs(entry.last_run_at)} · {entry.fetched_count} fetched
@@ -363,6 +387,17 @@ function PerSourceEmptyState({
         <p className="text-xs" style={{ color: 'var(--sp-mist)' }}>
           No source-health record yet for {label}. Try another source or run ingestion later.
         </p>
+        <pre
+          className="text-[11px] font-mono inline-block px-3 py-2 rounded"
+          style={{
+            color: 'var(--sp-bone)',
+            background: 'rgba(13, 16, 21, 0.7)',
+            border: '1px solid var(--sp-line)',
+            whiteSpace: 'pre-wrap',
+          }}
+        >
+          {phaseCmd(sourceFilter)}
+        </pre>
       </div>
     );
   }
@@ -376,7 +411,8 @@ function PerSourceEmptyState({
     );
   }
 
-  // 3. Truly empty across all sources → the generic ingestion CTA is appropriate.
+  // 3. Truly empty across all sources → suggest the Phase 1 ingestion runner
+  // (Phase 1 is what most users seed first).  No legacy live_source_runner.py.
   return (
     <div className="sp-card-soft p-8 text-center space-y-2">
       <p className="text-sm" style={{ color: 'var(--sp-bone)' }}>No live signals ingested yet.</p>
@@ -389,9 +425,10 @@ function PerSourceEmptyState({
           color: 'var(--sp-bone)',
           background: 'rgba(13, 16, 21, 0.7)',
           border: '1px solid var(--sp-line)',
+          whiteSpace: 'pre-wrap',
         }}
       >
-        python scripts/live_source_runner.py
+        python scripts/run_live_sources_phase1.py --dry-run
       </pre>
     </div>
   );

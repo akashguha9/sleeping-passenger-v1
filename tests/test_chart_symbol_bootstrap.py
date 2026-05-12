@@ -15,6 +15,8 @@ Covers:
 """
 from __future__ import annotations
 
+import pytest
+
 
 def _bs():
     import scripts.chart_symbol_bootstrap as bs
@@ -251,6 +253,12 @@ def test_bootstrap_symbol_safety_invariants_present_on_failure():
 
 
 def test_api_server_post_bootstrap_returns_advisory(monkeypatch):
+    # The endpoint test exercises FastAPI's Pydantic request body machinery.
+    # Skip cleanly when FastAPI isn't installed (e.g. trimmed CI without
+    # requirements-dev.txt) — the underlying bootstrap logic is already
+    # covered by the dependency-free tests above.
+    pytest.importorskip("fastapi")
+    pytest.importorskip("pydantic")
     from scripts import api_server as srv
 
     def fake(symbol, period, interval):

@@ -23,19 +23,33 @@ from __future__ import annotations
 
 import json
 
+# FastAPI is an OPTIONAL dependency at import time.
+#
+# Why: the source-health classifier, sanitizer, and other pure helpers in
+# this module are imported by tests that should not require a web framework
+# to be installed.  GitHub Actions runners did not have fastapi installed,
+# so an unconditional sys.exit(1) at import time was killing the entire
+# pytest session.  Instead, we set a sentinel and let `if __name__ ==
+# "__main__"` handle the user-facing install hint.
 try:
     from fastapi import FastAPI, Response
     from fastapi.middleware.cors import CORSMiddleware
     from pydantic import BaseModel
-except ImportError as _exc:  # pragma: no cover
-    import sys
+    _FASTAPI_AVAILABLE = True
+    _FASTAPI_IMPORT_ERROR: str | None = None
+except ImportError as _exc:  # pragma: no cover — depends on env
+    _FASTAPI_AVAILABLE = False
+    _FASTAPI_IMPORT_ERROR = str(_exc)
+    FastAPI = None  # type: ignore[assignment]
+    Response = None  # type: ignore[assignment]
+    CORSMiddleware = None  # type: ignore[assignment]
 
-    print(
-        f"FastAPI is not installed ({_exc}).\n"
-        "Install it with:  pip install fastapi uvicorn\n"
-        "Then re-run:      python scripts/api_server.py"
-    )
-    sys.exit(1)
+    class BaseModel:  # type: ignore[no-redef]
+        """Lightweight stand-in so module-level subclasses still parse."""
+
+        def __init__(self, **kwargs: object) -> None:
+            for key, value in kwargs.items():
+                setattr(self, key, value)
 
 try:
     from scripts.signal_inbox_api import (
@@ -129,143 +143,26 @@ def _get_source_run_log(limit: int = 50) -> list:
         return []
 
 
-# Source health summary helpers — classify ingestion run statuses for UI banners
-_SOURCE_LABELS: dict[str, str] = {
-    "polymarket": "Polymarket",
-    "gdelt": "GDELT",
-    "sec_edgar": "SEC EDGAR",
-    "newsapi": "NewsAPI",
-    "event_registry": "Event Registry",
-    "etherscan": "Etherscan",
-    "grok_xai": "Grok/xAI",
-    "market_data": "Market Data",
-    "india": "India (NSE/RBI/SEBI)",
-    "global_filings": "Global Filings",
-    "asia_disclosure": "Asia Disclosure",
-}
-
-
-def _classify_source_status(status: str, skipped_reason: str, error_message: str) -> dict:
-    """Return a {severity, category, human_message} classification.
-
-    Severity is one of: ok | info | warning | error.
-    Category is a short machine code (CREDITS_EXHAUSTED, RATE_LIMITED, ...).
-    human_message is a short, secret-free, user-friendly description.
-    """
-    s = (status or "").upper().strip()
-    reason = (skipped_reason or "").lower()
-    err = (error_message or "").lower()
-
-    if s == "OK":
-        return {"severity": "ok", "category": "OK", "human_message": "Source healthy."}
-    if s == "OK_FILTERED":
-        return {
-            "severity": "ok",
-            "category": "OK_FILTERED",
-            "human_message": "Source healthy (filtered out off-domain rows).",
-        }
-    if s == "PLACEHOLDER":
-        return {
-            "severity": "info",
-            "category": "PLACEHOLDER",
-            "human_message": "Not implemented yet — placeholder source.",
-        }
-    if s == "SKIPPED":
-        # Try to surface the why behind the skip
-        if "api_key" in reason or "api key" in reason or "missing key" in reason:
-            return {
-                "severity": "warning",
-                "category": "MISSING_API_KEY",
-                "human_message": "Source skipped: API key not configured.",
-            }
-        if "license" in reason or "credits" in reason or "quota" in reason:
-            return {
-                "severity": "warning",
-                "category": "CREDITS_EXHAUSTED",
-                "human_message": "Source skipped: credits/license appear exhausted.",
-            }
-        return {
-            "severity": "info",
-            "category": "SKIPPED",
-            "human_message": "Source skipped this run.",
-        }
-    if s == "RATE_LIMITED":
-        return {
-            "severity": "warning",
-            "category": "RATE_LIMITED",
-            "human_message": "Source rate-limited — try again later.",
-        }
-    if s == "TIMEOUT":
-        return {
-            "severity": "warning",
-            "category": "TIMEOUT",
-            "human_message": "Source timed out — likely transient.",
-        }
-    if s == "HTTP_ERROR":
-        # Specific quota / credits hints
-        if "402" in err or "credit" in err or "credits" in err:
-            return {
-                "severity": "warning",
-                "category": "CREDITS_EXHAUSTED",
-                "human_message": "Source unavailable: credits/license exhausted.",
-            }
-        if "401" in err or "403" in err or "unauthorized" in err:
-            return {
-                "severity": "warning",
-                "category": "AUTH_ERROR",
-                "human_message": "Source unavailable: authentication/authorization issue.",
-            }
-        if "429" in err:
-            return {
-                "severity": "warning",
-                "category": "RATE_LIMITED",
-                "human_message": "Source rate-limited (HTTP 429).",
-            }
-        return {
-            "severity": "warning",
-            "category": "HTTP_ERROR",
-            "human_message": "Source returned an HTTP error.",
-        }
-    if s == "ERROR":
-        if "credit" in err or "credits" in err:
-            return {
-                "severity": "warning",
-                "category": "CREDITS_EXHAUSTED",
-                "human_message": "Source unavailable: credits/license exhausted.",
-            }
-        return {
-            "severity": "error",
-            "category": "ERROR",
-            "human_message": "Source error during last run.",
-        }
-    return {
-        "severity": "info",
-        "category": s or "UNKNOWN",
-        "human_message": "Source status unknown.",
-    }
-
-
-def _sanitize_error_text(text: str) -> str:
-    """Trim and redact obvious secret-like tokens from error strings.
-
-    The persistence layer already stores short messages, but we belt-and-
-    braces this so the API never leaks tokens that might land in stack
-    traces from third-party SDKs.
-    """
-    if not text:
-        return ""
-    out = str(text).strip()
-    if len(out) > 240:
-        out = out[:240] + "…"
-    # crude redaction of obvious key-looking substrings
-    import re
-
-    out = re.sub(
-        r"(?i)(api[_-]?key|token|secret|bearer)\s*[=:\s]\s*\S+",
-        r"\1=<redacted>",
-        out,
+# Source health summary helpers — classify ingestion run statuses for UI banners.
+# Pure logic lives in scripts.source_health_summary so tests can exercise it
+# without dragging in FastAPI.  We re-export the canonical helpers under the
+# legacy `_`-prefixed names for backwards compatibility with existing tests.
+try:
+    from scripts.source_health_summary import (
+        SOURCE_LABELS as _SOURCE_LABELS,
+        build_source_health_summary as _build_source_health_summary,
+        classify_source_status as _classify_source_status,
+        empty_summary as _empty_source_health_summary,
+        sanitize_error_text as _sanitize_error_text,
     )
-    return out
+except ModuleNotFoundError:
+    from source_health_summary import (  # type: ignore[no-redef]
+        SOURCE_LABELS as _SOURCE_LABELS,
+        build_source_health_summary as _build_source_health_summary,
+        classify_source_status as _classify_source_status,
+        empty_summary as _empty_source_health_summary,
+        sanitize_error_text as _sanitize_error_text,
+    )
 
 
 def _get_source_health_summary() -> dict:
@@ -283,85 +180,9 @@ def _get_source_health_summary() -> dict:
         latest_rows = get_latest_source_run_per_source()
         event_counts = count_signal_events_by_source()
     except Exception as exc:
-        return {
-            "sources": [],
-            "warning_count": 0,
-            "error_count": 0,
-            "ok_count": 0,
-            "error": str(exc),
-            "advisory_status": _ADVISORY_STATUS,
-            "execution_mode": _EXECUTION_MODE,
-            "ai_execution_count": _AI_EXECUTION_COUNT,
-            "human_review_required": True,
-        }
+        return _empty_source_health_summary(error=str(exc))
 
-    sources: list[dict] = []
-    warning_count = 0
-    error_count = 0
-    ok_count = 0
-
-    seen: set[str] = set()
-    for row in latest_rows:
-        source_name = str(row.get("source_name", ""))
-        if not source_name or source_name in seen:
-            continue
-        seen.add(source_name)
-        status = str(row.get("status", ""))
-        skipped_reason = str(row.get("skipped_reason", ""))
-        error_message = _sanitize_error_text(str(row.get("error_message", "")))
-        classification = _classify_source_status(status, skipped_reason, error_message)
-        if classification["severity"] == "warning":
-            warning_count += 1
-        elif classification["severity"] == "error":
-            error_count += 1
-        elif classification["severity"] == "ok":
-            ok_count += 1
-        sources.append({
-            "source_name": source_name,
-            "label": _SOURCE_LABELS.get(source_name, source_name),
-            "status": status,
-            "severity": classification["severity"],
-            "category": classification["category"],
-            "human_message": classification["human_message"],
-            "skipped_reason": skipped_reason,
-            "error_message": error_message,
-            "fetched_count": int(row.get("fetched_count", 0) or 0),
-            "duration_ms": int(row.get("duration_ms", 0) or 0),
-            "last_run_at": str(row.get("timestamp_utc", "")),
-            "event_row_count": int(event_counts.get(source_name, 0)),
-        })
-
-    # If a configured source has zero runs yet, surface that as an unknown
-    for source_name, label in _SOURCE_LABELS.items():
-        if source_name in seen:
-            continue
-        sources.append({
-            "source_name": source_name,
-            "label": label,
-            "status": "NO_RUNS",
-            "severity": "info",
-            "category": "NO_RUNS",
-            "human_message": "No ingestion runs recorded yet.",
-            "skipped_reason": "",
-            "error_message": "",
-            "fetched_count": 0,
-            "duration_ms": 0,
-            "last_run_at": "",
-            "event_row_count": int(event_counts.get(source_name, 0)),
-        })
-
-    return {
-        "sources": sources,
-        "warning_count": warning_count,
-        "error_count": error_count,
-        "ok_count": ok_count,
-        "total_count": len(sources),
-        "advisory_status": _ADVISORY_STATUS,
-        "execution_mode": _EXECUTION_MODE,
-        "ai_execution_count": _AI_EXECUTION_COUNT,
-        "human_review_required": True,
-        "broker_api_called": False,
-    }
+    return _build_source_health_summary(latest_rows, event_counts)
 
 
 # DB status helper — imported lazily so server starts even if persistence unavailable
@@ -404,33 +225,63 @@ _EXECUTION_MODE = "HUMAN_ONLY"
 _AI_EXECUTION_COUNT = 0
 _VERSION = "1.0.0"
 
-app = FastAPI(
-    title="Signal Advisory API",
-    description=(
-        "Local advisory signal surface. "
-        "ALL outputs are ADVISORY_ONLY. "
-        "Execution is HUMAN_ONLY. "
-        "AI execution count is always 0. "
-        "No broker API connections. "
-        "No order placement."
-    ),
-    version=_VERSION,
-)
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-        "http://sleepingpassenger",
-        "http://sleepingpassenger.local",
-        "http://sleepingpassenger:80",
-        "http://sleepingpassenger.local:80",
-    ],
-    allow_credentials=False,
-    allow_methods=["GET", "POST", "OPTIONS"],
-    allow_headers=["Content-Type", "Accept", "Origin"],
-)
+class _NoopApp:
+    """No-op stand-in for FastAPI() when the framework is unavailable.
+
+    Lets module-level ``@app.get(...)`` / ``@app.post(...)`` decorators stay
+    in place during import without actually registering any routes.  The
+    ``__main__`` block below refuses to start the server in this mode.
+    """
+
+    routes: list = []
+
+    def add_middleware(self, *_args, **_kwargs) -> None:
+        return None
+
+    def _decorator(self, *_args, **_kwargs):
+        def wrap(fn):
+            return fn
+
+        return wrap
+
+    get = _decorator
+    post = _decorator
+    put = _decorator
+    delete = _decorator
+    patch = _decorator
+
+
+if _FASTAPI_AVAILABLE:
+    app = FastAPI(
+        title="Signal Advisory API",
+        description=(
+            "Local advisory signal surface. "
+            "ALL outputs are ADVISORY_ONLY. "
+            "Execution is HUMAN_ONLY. "
+            "AI execution count is always 0. "
+            "No broker API connections. "
+            "No order placement."
+        ),
+        version=_VERSION,
+    )
+
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=[
+            "http://localhost:3000",
+            "http://127.0.0.1:3000",
+            "http://sleepingpassenger",
+            "http://sleepingpassenger.local",
+            "http://sleepingpassenger:80",
+            "http://sleepingpassenger.local:80",
+        ],
+        allow_credentials=False,
+        allow_methods=["GET", "POST", "OPTIONS"],
+        allow_headers=["Content-Type", "Accept", "Origin"],
+    )
+else:
+    app = _NoopApp()  # type: ignore[assignment]
 
 
 # ---------------------------------------------------------------------------
@@ -887,9 +738,19 @@ def export_source_health() -> Response:
 
 
 if __name__ == "__main__":  # pragma: no cover
+    import sys
+
+    if not _FASTAPI_AVAILABLE:
+        print(
+            f"FastAPI is not installed ({_FASTAPI_IMPORT_ERROR}).\n"
+            "Install it with:  pip install fastapi uvicorn\n"
+            "Then re-run:      python scripts/api_server.py"
+        )
+        sys.exit(1)
     try:
         import uvicorn
 
         uvicorn.run(app, host="127.0.0.1", port=8000)
     except ImportError:
         print("uvicorn not installed.  Run: pip install uvicorn")
+        sys.exit(1)

@@ -237,6 +237,7 @@ export interface SourceHealthSummaryEntry {
   duration_ms: number;
   last_run_at: string;
   event_row_count: number;
+  suggested_command?: string;
 }
 
 export interface SourceHealthSummaryResponse {
