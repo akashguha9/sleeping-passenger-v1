@@ -33,9 +33,21 @@ from typing import Any
 try:
     from scripts.runtime_common import LOG_DIR, append_jsonl, utc_timestamp
     from scripts.global_signal_fabric import build_global_signal_fabric_report
+    from scripts.signal_inbox_bridge import (
+        DEFAULT_HOURS as _BRIDGE_DEFAULT_HOURS,
+        DEFAULT_LIMIT as _BRIDGE_DEFAULT_LIMIT,
+        build_inbox_diagnostics,
+        promote_signal_events_to_inbox,
+    )
 except ModuleNotFoundError:
     from runtime_common import LOG_DIR, append_jsonl, utc_timestamp  # type: ignore[no-redef]
     from global_signal_fabric import build_global_signal_fabric_report  # type: ignore[no-redef]
+    from signal_inbox_bridge import (  # type: ignore[no-redef]
+        DEFAULT_HOURS as _BRIDGE_DEFAULT_HOURS,
+        DEFAULT_LIMIT as _BRIDGE_DEFAULT_LIMIT,
+        build_inbox_diagnostics,
+        promote_signal_events_to_inbox,
+    )
 
 # Optional SQLite persistence — falls back gracefully to JSONL if unavailable
 _DB_AVAILABLE = False
@@ -283,33 +295,92 @@ def _ticker_summary_to_event_dict(ts: dict[str, Any]) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-def list_inbox_items(*, write_runtime: bool = False) -> dict[str, Any]:
+def list_inbox_items(
+    *,
+    write_runtime: bool = False,
+    hours: int = _BRIDGE_DEFAULT_HOURS,
+    limit: int = _BRIDGE_DEFAULT_LIMIT,
+) -> dict[str, Any]:
     """1. List all signal inbox items with advisory metadata.
 
-    Reads from the global signal fabric (read-only) and overlays persisted
-    user state. Returns a JSON-serializable dict for a Next.js frontend.
+    Behaviour:
+      1. First, promote fresh `signal_events` rows from SQLite (the table the
+         Live Signals page reads) into InboxItem candidates via the bridge.
+      2. If the bridge returns at least one candidate, those are the inbox.
+         `signal_source = "live_events"`.
+      3. Otherwise fall back to the legacy `global_signal_fabric` report so the
+         inbox doesn't go blank in older environments.
+         `signal_source = "legacy_fabric"`.
+
     advisory_status="ADVISORY_ONLY" and ai_execution_count=0 on every item.
     """
-    report = build_global_signal_fabric_report(write_runtime=write_runtime)
     overlay = _build_inbox_overlay()
-    items = [
-        _build_item_from_event(_ticker_summary_to_event_dict(ts), overlay).to_dict()
-        for ts in report.get("ticker_summaries", [])
-    ]
+    items: list[dict[str, Any]] = []
+    signal_source = "legacy_fabric"
+
+    if _DB_AVAILABLE and _persistence is not None:
+        try:
+            bridge_items = promote_signal_events_to_inbox(
+                hours=hours,
+                limit=limit,
+                overlay=overlay,
+                has_reflection_fn=_has_reflection,
+                has_ai_summary_fn=_has_ai_summary,
+            )
+            if bridge_items:
+                items = bridge_items
+                signal_source = "live_events"
+        except Exception:
+            items = []
+
+    fabric_bull_state = "UNKNOWN"
+    fabric_stats: dict[str, Any] = {}
+    if not items:
+        report = build_global_signal_fabric_report(write_runtime=write_runtime)
+        items = [
+            _build_item_from_event(_ticker_summary_to_event_dict(ts), overlay).to_dict()
+            for ts in report.get("ticker_summaries", [])
+        ]
+        fabric_bull_state = (
+            report.get("fabric_bull_state_context", {}).get("fabric_bull_state", "UNKNOWN")
+        )
+        fabric_stats = dict(report.get("fabric_stats", {}))
+    else:
+        fabric_stats = {
+            "promoted_candidate_count": len(items),
+            "freshness_window_hours": int(hours),
+            "limit": int(limit),
+        }
+
     return {
         "operation": "list_inbox_items",
         "item_count": len(items),
         "items": items,
-        "fabric_bull_state": (
-            report.get("fabric_bull_state_context", {}).get("fabric_bull_state", "UNKNOWN")
-        ),
-        "fabric_stats": report.get("fabric_stats", {}),
+        "fabric_bull_state": fabric_bull_state,
+        "fabric_stats": fabric_stats,
+        "signal_source": signal_source,
+        "freshness_window_hours": int(hours),
+        "mock_fallback": False,
         "advisory_status": _ADVISORY_STATUS,
         "human_review_required": True,
         "execution_mode": _EXECUTION_MODE,
         "ai_execution_count": _AI_EXECUTION_COUNT,
         "generated_at": utc_timestamp(),
     }
+
+
+def get_inbox_diagnostics(
+    *,
+    hours: int = _BRIDGE_DEFAULT_HOURS,
+) -> dict[str, Any]:
+    """Return a freshness + source-count diagnostic for the Signal Inbox.
+
+    Exposed as GET /signals/diagnostics so operators can see at a glance
+    whether the inbox has fresh data, what sources are contributing, and
+    whether mock fallback is active (always False on the backend; the
+    frontend may flip this when it can't reach the API).
+    """
+    return build_inbox_diagnostics(hours=hours)
 
 
 def get_signal_detail(event_id: str) -> dict[str, Any]:
@@ -743,6 +814,7 @@ __all__ = [
     "ManualTradeLog",
     "TradeReconciliation",
     "list_inbox_items",
+    "get_inbox_diagnostics",
     "get_signal_detail",
     "run_validation",
     "add_user_reflection",

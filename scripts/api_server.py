@@ -41,6 +41,7 @@ try:
     from scripts.signal_inbox_api import (
         add_ai_discussion_summary,
         add_user_reflection,
+        get_inbox_diagnostics,
         get_signal_detail,
         list_inbox_items,
         list_manual_trades,
@@ -62,6 +63,7 @@ except ModuleNotFoundError:
     from signal_inbox_api import (  # type: ignore[no-redef]
         add_ai_discussion_summary,
         add_user_reflection,
+        get_inbox_diagnostics,
         get_signal_detail,
         list_inbox_items,
         list_manual_trades,
@@ -269,8 +271,23 @@ def health() -> dict:
 
 
 @app.get("/signals")
-def get_signals() -> dict:
-    return list_inbox_items()
+def get_signals(limit: int = 100, hours: int = 72) -> dict:
+    """Return Signal Inbox candidates derived from fresh signal_events.
+
+    Query params:
+      - limit: max items returned (clamped server-side)
+      - hours: freshness window (defaults to 72)
+    """
+    return list_inbox_items(limit=limit, hours=hours)
+
+
+@app.get("/signals/diagnostics")
+def get_signals_diagnostics(hours: int = 72) -> dict:
+    """Freshness + source-count diagnostic for the Signal Inbox bridge.
+
+    Advisory-only — does not authorize any execution.
+    """
+    return get_inbox_diagnostics(hours=hours)
 
 
 @app.get("/signals/{event_id}")

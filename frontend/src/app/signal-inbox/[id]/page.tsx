@@ -13,6 +13,9 @@ import { SignalScorePanel } from '@/components/SignalScorePanel';
 import { EvidenceTimeline } from '@/components/EvidenceTimeline';
 import { ReflectionChatPanel } from '@/components/ReflectionChatPanel';
 import { ManualTradeLogForm } from '@/components/ManualTradeLogForm';
+import { NextHumanActionBadge } from '@/components/NextHumanActionBadge';
+import { GateDetailsPanel } from '@/components/GateDetailsPanel';
+import { deriveNextHumanAction } from '@/lib/nextHumanAction';
 
 const STATUS_COLORS: Record<string, string> = {
   pending: 'text-slate-400',
@@ -114,6 +117,42 @@ export default function SignalDetailPage() {
             <span className="text-amber-400 font-semibold">ADVISORY_ONLY</span>. Viewing this signal does not constitute a recommendation, trigger, or authorization to execute any trade. AI execution count:{' '}
             <span className="text-emerald-400 font-mono font-bold">0</span>.
           </div>
+
+          {/* Next human action panel */}
+          {(() => {
+            const action = deriveNextHumanAction(signal);
+            return (
+              <div className="bg-slate-800/60 border border-slate-700/60 rounded-lg p-5 space-y-4">
+                <div className="flex items-start justify-between gap-3 flex-wrap">
+                  <div className="flex items-center gap-3 flex-wrap">
+                    <h3 className="text-sm font-semibold text-slate-300 uppercase tracking-wide">
+                      Next human action
+                    </h3>
+                    <NextHumanActionBadge
+                      action={action.action}
+                      label={action.label}
+                      size="md"
+                    />
+                  </div>
+                  <span className="text-[10px] text-slate-500 font-mono">
+                    severity {action.severity_rank}/4
+                  </span>
+                </div>
+                <p className="text-sm text-slate-300 leading-snug">
+                  <span className="text-slate-500">Reason:</span> {action.reason}
+                </p>
+                <GateDetailsPanel
+                  details={action.gate_details}
+                  advisoryStatus={signal.advisory_status}
+                  variant="table"
+                />
+                <p className="text-[11px] text-slate-500 leading-snug">
+                  This is not execution permission. Manual human decision required. No
+                  broker, wallet, or auto-trading path exists in this view.
+                </p>
+              </div>
+            );
+          })()}
 
           {/* Main grid */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">

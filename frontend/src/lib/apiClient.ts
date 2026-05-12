@@ -6,6 +6,7 @@ import {
 } from './mockData';
 import type {
   InboxListResponse,
+  InboxDiagnosticsResponse,
   SignalDetailResponse,
   MoltbookEntry,
   ManualTradeListResponse,
@@ -54,12 +55,35 @@ export async function checkHealth(): Promise<HealthResponse | null> {
   }
 }
 
-export async function getSignals(): Promise<ApiResult<InboxListResponse>> {
+export async function getSignals(
+  limit = 50,
+  hours = 72,
+): Promise<ApiResult<InboxListResponse>> {
   try {
-    const data = await apiFetch<InboxListResponse>('/signals');
+    const params = new URLSearchParams();
+    params.set('limit', String(limit));
+    params.set('hours', String(hours));
+    const data = await apiFetch<InboxListResponse>(`/signals?${params.toString()}`);
     return { data, isMock: false };
   } catch {
-    return { data: MOCK_INBOX_RESPONSE, isMock: true };
+    return {
+      data: { ...MOCK_INBOX_RESPONSE, mock_fallback: true, signal_source: 'mock' },
+      isMock: true,
+    };
+  }
+}
+
+export async function getSignalsDiagnostics(
+  hours = 72,
+): Promise<InboxDiagnosticsResponse | null> {
+  try {
+    const params = new URLSearchParams();
+    params.set('hours', String(hours));
+    return await apiFetch<InboxDiagnosticsResponse>(
+      `/signals/diagnostics?${params.toString()}`,
+    );
+  } catch {
+    return null;
   }
 }
 

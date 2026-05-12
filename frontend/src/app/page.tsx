@@ -110,9 +110,9 @@ export default function DashboardPage() {
               <div className="text-xs text-slate-500 mb-2">Fabric Bull State</div>
               <BullStateBadge state={fabric_bull_state} size="lg" />
             </div>
-            <StatCard label="Total Signals" value={fabric_stats.total_signals} />
-            <StatCard label="Source Files" value={fabric_stats.source_files} />
-            <StatCard label="Tickers" value={fabric_stats.total_tickers} />
+            <StatCard label="Total Signals" value={fabric_stats.total_signals ?? items.length} />
+            <StatCard label="Source Files" value={fabric_stats.source_files ?? 0} />
+            <StatCard label="Tickers" value={fabric_stats.total_tickers ?? 0} />
             <StatCard label="Human Review" value={humanReview} highlight />
           </div>
 

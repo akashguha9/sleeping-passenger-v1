@@ -47,6 +47,10 @@ export interface InboxItem {
   human_review_required: boolean;
   execution_mode: string;
   ai_execution_count: number;
+  // Bridge metadata — present when the item came from the live-events bridge.
+  signal_origin?: 'live_event' | 'legacy_fabric' | string;
+  source_name?: string;
+  age_hours?: number;
 }
 
 export interface ManualTradeLog {
@@ -129,9 +133,14 @@ export interface UserReflection {
 }
 
 export interface FabricStats {
-  total_tickers: number;
-  total_signals: number;
-  source_files: number;
+  total_tickers?: number;
+  total_signals?: number;
+  source_files?: number;
+  // Bridge-mode fields (present when /signals derived items from signal_events)
+  promoted_candidate_count?: number;
+  freshness_window_hours?: number;
+  limit?: number;
+  [key: string]: number | undefined;
 }
 
 export interface InboxListResponse {
@@ -140,11 +149,31 @@ export interface InboxListResponse {
   items: InboxItem[];
   fabric_bull_state: string;
   fabric_stats: FabricStats;
+  signal_source?: 'live_events' | 'legacy_fabric' | string;
+  freshness_window_hours?: number;
+  mock_fallback?: boolean;
   advisory_status: string;
   human_review_required: boolean;
   execution_mode: string;
   ai_execution_count: number;
   generated_at: string;
+}
+
+export interface InboxDiagnosticsResponse {
+  signal_events_total: number;
+  fresh_window_hours: number;
+  latest_signal_event_at: string | null;
+  newest_fresh_event_at: string | null;
+  source_counts: Record<string, number>;
+  fresh_source_counts: Record<string, number>;
+  promoted_candidate_count: number;
+  mock_fallback: boolean;
+  advisory_status: string;
+  execution_mode: string;
+  ai_execution_count: number;
+  human_review_required: boolean;
+  generated_at: string;
+  error?: string;
 }
 
 export interface SignalDetailResponse {

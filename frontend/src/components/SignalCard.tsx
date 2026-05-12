@@ -1,9 +1,13 @@
 'use client';
 
+import { useState } from 'react';
 import Link from 'next/link';
 import type { InboxItem } from '@/types';
 import { BullStateBadge } from './BullStateBadge';
 import { AdvisoryOnlyBadge } from './AdvisoryOnlyBadge';
+import { NextHumanActionBadge } from './NextHumanActionBadge';
+import { GateDetailsPanel } from './GateDetailsPanel';
+import { deriveNextHumanAction } from '@/lib/nextHumanAction';
 
 const STATUS_STYLE: Record<string, string> = {
   pending:      'text-slate-400 bg-slate-800',
@@ -18,15 +22,18 @@ interface Props {
 }
 
 export function SignalCard({ item }: Props) {
+  const [gatesOpen, setGatesOpen] = useState(false);
   const statusCls = STATUS_STYLE[item.user_status] ?? STATUS_STYLE['pending'];
+  const action = deriveNextHumanAction(item);
 
   return (
-    <Link href={`/signal-inbox/${item.event_id}`} className="block">
-      <div className="bg-slate-800/60 border border-slate-700/60 rounded-lg p-4 hover:border-slate-600 hover:bg-slate-800 transition-colors cursor-pointer">
+    <div className="bg-slate-800/60 border border-slate-700/60 rounded-lg p-4 hover:border-slate-600 hover:bg-slate-800 transition-colors">
+      <Link href={`/signal-inbox/${item.event_id}`} className="block">
         <div className="flex items-start justify-between gap-3 mb-3">
-          <div className="flex items-center gap-2.5">
+          <div className="flex items-center gap-2.5 flex-wrap">
             <span className="text-lg font-bold text-white font-mono">{item.ticker}</span>
             <BullStateBadge state={item.signal_state} />
+            <NextHumanActionBadge action={action.action} label={action.label} size="md" />
           </div>
           <div className="flex items-center gap-2 shrink-0">
             <span className={`text-xs px-2 py-0.5 rounded font-medium ${statusCls}`}>
@@ -35,6 +42,11 @@ export function SignalCard({ item }: Props) {
             <AdvisoryOnlyBadge />
           </div>
         </div>
+
+        <p className="text-xs text-slate-400 mb-3 leading-snug">
+          <span className="text-slate-500">Decision reason:</span>{' '}
+          <span className="text-slate-300">{action.reason}</span>
+        </p>
 
         <div className="grid grid-cols-3 gap-3 mb-3">
           <ScoreCell label="Priority" value={item.priority_score} />
@@ -52,16 +64,48 @@ export function SignalCard({ item }: Props) {
           </div>
         )}
 
-        <div className="flex items-center justify-between text-xs text-slate-500">
-          <span>{item.entry_type}</span>
+        <div className="flex items-center justify-between text-xs text-slate-500 flex-wrap gap-2">
+          <div className="flex items-center gap-2">
+            <span>{item.entry_type}</span>
+            {(item.source_name || item.source_file) && (
+              <span className="font-mono text-slate-600">
+                · src={item.source_name || item.source_file}
+              </span>
+            )}
+          </div>
           <div className="flex items-center gap-2">
             {item.has_reflection && <span className="text-purple-400">◎ reflection</span>}
             {item.has_ai_summary && <span className="text-sky-400">AI context</span>}
+            {typeof item.age_hours === 'number' && (
+              <span className="text-slate-600">{Math.round(item.age_hours)}h old</span>
+            )}
             <span>{formatTs(item.observed_at)}</span>
           </div>
         </div>
+      </Link>
+
+      <div className="mt-3 pt-3 border-t border-slate-700/40">
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            setGatesOpen((v) => !v);
+          }}
+          className="text-[11px] text-slate-500 hover:text-slate-300 transition-colors"
+        >
+          {gatesOpen ? '▲ hide gate details' : '▼ show gate details'}
+        </button>
+        {gatesOpen && (
+          <div className="mt-2">
+            <GateDetailsPanel
+              details={action.gate_details}
+              advisoryStatus={item.advisory_status}
+              variant="inline"
+            />
+          </div>
+        )}
       </div>
-    </Link>
+    </div>
   );
 }
 
