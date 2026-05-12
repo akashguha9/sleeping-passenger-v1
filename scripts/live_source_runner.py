@@ -375,6 +375,8 @@ def run_phase1(
     dry_run: bool = True,
     polymarket_limit: int = _POLYMARKET_LIMIT,
     gdelt_max_records: int = _GDELT_MAX_RECORDS,
+    gdelt_query: str | None = None,
+    gdelt_timeout: int | None = None,
     sec_cik: str | None = None,
     sec_form_type: str = "10-K",
     sec_max_filings: int = _SEC_MAX_FILINGS,
@@ -401,9 +403,17 @@ def run_phase1(
 
     report = Phase1RunReport(dry_run=dry_run, run_at=utc_timestamp())
 
+    # GDELT loader: respect explicit overrides; otherwise loader's defaults
+    # (primary=6s, fallback=4s) are already shorter than the legacy 15s.
+    _gdelt_kwargs: dict[str, Any] = {"max_records": gdelt_max_records}
+    if gdelt_query:
+        _gdelt_kwargs["query"] = gdelt_query
+    if gdelt_timeout is not None:
+        _gdelt_kwargs["timeout"] = gdelt_timeout
+
     all_loaders: dict[str, Any] = {
         "polymarket": PolymarketLoader(limit=polymarket_limit, timeout=_DEFAULT_TIMEOUT),
-        "gdelt": GDELTLoader(max_records=gdelt_max_records, timeout=_DEFAULT_TIMEOUT),
+        "gdelt": GDELTLoader(**_gdelt_kwargs),
         "sec_edgar": SECEdgarLoader(
             cik=sec_cik,
             form_type=sec_form_type,

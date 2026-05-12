@@ -53,13 +53,26 @@ class TestGDELTLoaderInit:
     def test_defaults(self) -> None:
         loader = GDELTLoader()
         assert loader._max == 25
-        assert loader._timeout == 8  # was 15, now 8
+        # Primary timeout shortened to keep total budget under ~10s
+        assert loader._timeout == 6
+        assert loader._fallback_timeout == 4
 
     def test_custom_params(self) -> None:
         loader = GDELTLoader(query="bitcoin", max_records=10, timeout=5)
         assert loader._query == "bitcoin"
         assert loader._max == 10
         assert loader._timeout == 5
+
+    def test_custom_fallback_params(self) -> None:
+        loader = GDELTLoader(
+            query="bitcoin",
+            fallback_query="btc",
+            fallback_timeout=3,
+            fallback_max_records=5,
+        )
+        assert loader._fallback_query == "btc"
+        assert loader._fallback_timeout == 3
+        assert loader._fallback_max == 5
 
     def test_source_name(self) -> None:
         assert GDELTLoader.source_name == "gdelt"

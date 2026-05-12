@@ -89,6 +89,32 @@ def _parse_args() -> argparse.Namespace:
         help="Max GDELT articles per request (default: 25).",
     )
     parser.add_argument(
+        "--gdelt-max-records",
+        type=int,
+        default=None,
+        dest="gdelt_max_records_alias",
+        metavar="N",
+        help="Alias for --gdelt-max (kept for symmetry with loader API).",
+    )
+    parser.add_argument(
+        "--gdelt-query",
+        default=None,
+        dest="gdelt_query",
+        metavar="QUERY",
+        help=(
+            "Override the default GDELT search query. "
+            "Default targets macro/financial topics."
+        ),
+    )
+    parser.add_argument(
+        "--gdelt-timeout",
+        type=int,
+        default=None,
+        dest="gdelt_timeout",
+        metavar="SECONDS",
+        help="Primary GDELT HTTP timeout in seconds (default: 6).",
+    )
+    parser.add_argument(
         "--sec-default-watchlist",
         action="store_true",
         dest="sec_default_watchlist",
@@ -124,10 +150,14 @@ def main() -> int:
         print("  Advisory policy: ADVISORY_ONLY | HUMAN_ONLY | AI_EXECUTION=0")
         print()
 
+    gdelt_max = args.gdelt_max_records_alias if args.gdelt_max_records_alias else args.gdelt_max
+
     report = run_phase1(
         dry_run=dry_run,
         polymarket_limit=args.polymarket_limit,
-        gdelt_max_records=args.gdelt_max,
+        gdelt_max_records=gdelt_max,
+        gdelt_query=args.gdelt_query,
+        gdelt_timeout=args.gdelt_timeout,
         sec_cik=args.sec_cik,
         sec_form_type=args.sec_form,
         sec_default_watchlist=args.sec_default_watchlist,

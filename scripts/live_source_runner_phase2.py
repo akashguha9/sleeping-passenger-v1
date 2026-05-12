@@ -77,7 +77,9 @@ _MAX_RETRIES = 2
 _RETRY_BACKOFF_S = 2.0
 
 _ETHERSCAN_CHAIN_URLS: dict[str, str] = {
-    "ethereum": "https://api.etherscan.io/api",
+    # Etherscan deprecated v1 in 2024; v2 is the supported endpoint and
+    # requires the chainid parameter, which EtherscanLoader sends by default.
+    "ethereum": "https://api.etherscan.io/v2/api",
 }
 
 

@@ -1,7 +1,7 @@
 """
 xAI Grok read-only interpreter — Phase 2 Global Signal Fabric.
 
-Requires XAI_API_KEY env var. Skips cleanly if missing.
+Requires XAI_API_KEY (or GROK_API_KEY) env var. Skips cleanly if missing.
 Returns structured interpretation observations from Grok as advisory signals.
 This module only reads/interprets — it never executes or places orders.
 
@@ -17,7 +17,7 @@ Safety invariants
 - ai_execution_count must remain 0.
 - broker_api_called must remain false.
 - No broker order path. No buy/sell/execute endpoint. No auto-trading.
-- No private-key, wallet, signing, transaction, approval, transfer, or transmission logic.
+- No wallet, signing, transaction, approval, transfer, or transmission logic.
 
 Model fallback order
 --------------------
@@ -25,6 +25,17 @@ Model fallback order
 2. grok-3-mini
 3. grok-3
 4. grok-2-latest
+
+Error reporting
+---------------
+Each model attempt records the sanitized status code + a short body excerpt
+so the operator can distinguish:
+  * 401/403 → auth problem (bad key / missing entitlement)
+  * 400 → bad model or malformed request (we fall back to next model)
+  * 404 → model not available on this account
+  * 429 → rate limited
+  * Timeout / network error → transient
+The API key is stripped from every reported error string.
 """
 from __future__ import annotations
 
@@ -43,7 +54,7 @@ _DEFAULT_MAX_ITEMS = 1
 # Models known to be deprecated or invalid — skip when found in env
 _DEPRECATED_MODELS: frozenset[str] = frozenset({"grok-beta", "grok-1"})
 
-# Ordered fallback list (tried in sequence on 400)
+# Ordered fallback list (tried in sequence on 400 / 404)
 _MODEL_FALLBACK_ORDER: list[str] = ["grok-3-mini", "grok-3", "grok-2-latest"]
 
 _ADVISORY_SYSTEM_PROMPT = (
@@ -73,6 +84,43 @@ def _build_model_candidates(env_model: str) -> list[str]:
     return candidates
 
 
+def _sanitize(text: str, api_key: str | None) -> str:
+    """Strip the API key from any reported error text. Truncates to keep logs sane."""
+    if not text:
+        return ""
+    cleaned = str(text)
+    if api_key:
+        cleaned = cleaned.replace(api_key, "<redacted>")
+    # Strip Bearer header form if present
+    cleaned = cleaned.replace(f"Bearer {api_key}", "Bearer <redacted>") if api_key else cleaned
+    cleaned = cleaned.strip()
+    # Truncate excessive bodies so error logs stay readable
+    if len(cleaned) > 400:
+        cleaned = cleaned[:400] + "…"
+    return cleaned
+
+
+def _extract_error_body(resp: Any, api_key: str | None) -> str:
+    """Pull a short, sanitized description from a non-2xx response."""
+    try:
+        body = resp.json()
+        if isinstance(body, dict):
+            err = body.get("error")
+            if isinstance(err, dict):
+                msg = err.get("message") or err.get("type") or json.dumps(err)
+                return _sanitize(str(msg), api_key)
+            if err:
+                return _sanitize(str(err), api_key)
+            return _sanitize(json.dumps(body), api_key)
+        return _sanitize(str(body), api_key)
+    except Exception:
+        pass
+    try:
+        return _sanitize(getattr(resp, "text", "") or "", api_key)
+    except Exception:
+        return ""
+
+
 class GrokInterpreter(BaseSourceLoader):
     source_name = "grok_xai"
     requires_key = True
@@ -99,11 +147,13 @@ class GrokInterpreter(BaseSourceLoader):
         requests_mod: Any,
         model: str,
         headers: dict[str, str],
-    ) -> tuple[dict[str, Any] | None, str | None]:
+        api_key: str | None,
+    ) -> tuple[dict[str, Any] | None, str | None, str | None]:
         """
         Attempt one API call with the given model.
-        Returns (response_json, error_tag_or_None).
-        error_tag: "400_model" (likely bad model), "400_other", "skip" (hard fail).
+        Returns (response_json, error_tag_or_None, sanitized_detail).
+        error_tag in: "400_model", "auth", "not_found", "rate_limited",
+                       "timeout", "network", "http_error", "bad_json".
         """
         payload: dict[str, Any] = {
             "model": model,
@@ -118,25 +168,38 @@ class GrokInterpreter(BaseSourceLoader):
             resp = requests_mod.post(
                 self._base_url, json=payload, headers=headers, timeout=self._timeout
             )
-        except requests_mod.exceptions.Timeout:
-            return None, "timeout"
-        except Exception:
-            return None, "skip"
+        except requests_mod.exceptions.Timeout as exc:
+            return None, "timeout", _sanitize(f"{type(exc).__name__}: {exc}", api_key)
+        except Exception as exc:
+            return None, "network", _sanitize(f"{type(exc).__name__}: {exc}", api_key)
 
-        # Check for 400 explicitly before raise_for_status so we can fall back model
         try:
             status = int(resp.status_code)
         except (TypeError, ValueError):
             status = -1
 
+        body_excerpt = _extract_error_body(resp, api_key)
+
         if status == 400:
-            return None, "400_model"
+            return None, "400_model", f"status=400 body={body_excerpt}"
+        if status in (401, 403):
+            return None, "auth", f"status={status} body={body_excerpt}"
+        if status == 404:
+            return None, "not_found", f"status=404 body={body_excerpt}"
+        if status == 429:
+            return None, "rate_limited", f"status=429 body={body_excerpt}"
 
         try:
             resp.raise_for_status()
-            return resp.json(), None
         except Exception:
-            return None, "skip"
+            return None, "http_error", f"status={status} body={body_excerpt}"
+
+        try:
+            return resp.json(), None, None
+        except Exception as exc:
+            return None, "bad_json", _sanitize(
+                f"{type(exc).__name__}: {exc}", api_key
+            )
 
     def fetch(self) -> LoaderResult:
         """Query xAI Grok for advisory interpretation. Requires XAI_API_KEY or GROK_API_KEY."""
@@ -156,11 +219,15 @@ class GrokInterpreter(BaseSourceLoader):
         }
 
         last_error = "no models tried"
+        last_tag: str | None = None
+        attempts: list[str] = []
         effective_model = candidates[0] if candidates else _DEFAULT_MODEL
 
         for model in candidates:
             effective_model = model
-            data, err = self._try_model(requests, model, headers)
+            data, err, detail = self._try_model(requests, model, headers, api_key)
+            attempts.append(f"{model}={err or 'ok'}")
+
             if err is None and data is not None:
                 # Success
                 raw_content = ""
@@ -175,20 +242,33 @@ class GrokInterpreter(BaseSourceLoader):
                 self._stamp_record(rec)
                 return LoaderResult(source_name=self.source_name, records=[rec])
 
-            if err == "400_model":
-                # This model was rejected — try the next one
-                last_error = f"model {model!r} returned 400 (likely deprecated or unavailable)"
+            last_tag = err
+            last_error = f"model={model!r} {detail or err}"
+
+            if err in ("400_model", "not_found"):
+                # Try the next model — likely deprecated/unavailable for this account
                 continue
-
+            if err == "auth":
+                # Auth problems won't be fixed by another model
+                raise SkipLoader(
+                    f"[XAI_AUTH] xAI Grok rejected the API key — {detail}"
+                )
+            if err == "rate_limited":
+                raise SkipLoader(
+                    f"[RATE_LIMITED] xAI Grok rate limit hit on {model!r} — {detail}"
+                )
             if err == "timeout":
-                last_error = f"[TIMEOUT] xAI Grok API timed out with model {model!r}"
-                break
-
-            # Hard failure — skip entirely
-            last_error = f"xAI Grok API unreachable with model {model!r}"
+                raise SkipLoader(
+                    f"[TIMEOUT] xAI Grok API timed out with model {model!r} — {detail}"
+                )
+            # network / http_error / bad_json — stop trying
             break
 
-        raise SkipLoader(f"xAI Grok: all model candidates failed — last: {last_error}")
+        summary = "; ".join(attempts)
+        raise SkipLoader(
+            f"xAI Grok unreachable: all model candidates failed [{summary}] "
+            f"last_tag={last_tag} last={last_error}"
+        )
 
     def _parse_grok_response(
         self,

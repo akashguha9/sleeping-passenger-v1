@@ -263,8 +263,17 @@ class AsiaDisclosureLoader(BaseSourceLoader):
 
         active_names = [p for p in selected if _PROVIDER_CONFIGS[p].get("active")]
         if not active_names:
+            placeholder_notes = "; ".join(
+                f"{p.upper()}: {_PROVIDER_CONFIGS[p].get('note', 'placeholder')}"
+                for p in selected
+                if p in _PROVIDER_CONFIGS
+            )
             raise SkipLoader(
-                "[PLACEHOLDER] No active Asia disclosure providers in selection — all are placeholders"
+                "[PLACEHOLDER] Asia Disclosure not implemented yet — "
+                "all configured providers (SSE, SZSE, HKEX, TDnet, SGX, DART) "
+                "require auth/registration or scraping and are intentionally "
+                "left as placeholders. No records are ever persisted in this "
+                f"state. Details: {placeholder_notes}"
             )
 
         records: list[dict[str, Any]] = []
