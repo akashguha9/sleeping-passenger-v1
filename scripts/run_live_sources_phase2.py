@@ -51,7 +51,7 @@ Optional flags (Grok/xAI)
 --------------------------
   --grok-query <query>      Custom prompt for Grok/xAI interpretation. Uses built-in default if omitted.
   --grok-max-items <N>      Max interpretation items per call (default: 1).
-  --grok-model <model>      xAI model name (default: grok-beta).
+  --grok-model <model>      xAI model name (default: grok-3-mini). Falls back on 400.
 
 Optional flags (Market Data — Phase C.5)
 -----------------------------------------
@@ -234,10 +234,10 @@ def _parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--grok-model",
-        default="grok-beta",
+        default="grok-3-mini",
         dest="grok_model",
         metavar="MODEL",
-        help="xAI model name (default: grok-beta).",
+        help="xAI model name (default: grok-3-mini). Falls back through grok-3, grok-2-latest on 400.",
     )
     parser.add_argument(
         "--symbols",

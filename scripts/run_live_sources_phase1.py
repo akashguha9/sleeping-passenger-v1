@@ -89,6 +89,15 @@ def _parse_args() -> argparse.Namespace:
         help="Max GDELT articles per request (default: 25).",
     )
     parser.add_argument(
+        "--sec-default-watchlist",
+        action="store_true",
+        dest="sec_default_watchlist",
+        help=(
+            "Use the built-in SEC EDGAR watchlist when no --sec-cik is supplied. "
+            "Watchlist: Apple, Microsoft, Nvidia, Tesla, Amazon, Meta, Alphabet."
+        ),
+    )
+    parser.add_argument(
         "--json",
         action="store_true",
         dest="output_json",
@@ -121,6 +130,7 @@ def main() -> int:
         gdelt_max_records=args.gdelt_max,
         sec_cik=args.sec_cik,
         sec_form_type=args.sec_form,
+        sec_default_watchlist=args.sec_default_watchlist,
         sources=sources,
     )
 

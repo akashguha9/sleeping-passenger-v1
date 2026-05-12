@@ -4,9 +4,18 @@ Etherscan read-only loader — Phase 2 Global Signal Fabric.
 Requires ETHERSCAN_API_KEY env var. Skips cleanly if missing.
 Fetches public blockchain data only (transactions, token transfers, gas).
 No private-key, signing, or transaction-send logic.
+
+Address resolution order
+------------------------
+1. CLI/constructor `address` argument (explicit override)
+2. ETHERSCAN_ADDRESS env var
+3. ETHEREUM_ADDRESS env var
+4. PUBLIC_ETH_ADDRESS env var
+5. SkipLoader if none found or all are placeholder/malformed
 """
 from __future__ import annotations
 
+import os
 import re
 
 from scripts.ingestion.base_loader import BaseSourceLoader, LoaderResult, SkipLoader
@@ -14,7 +23,7 @@ from scripts.ingestion.base_loader import BaseSourceLoader, LoaderResult, SkipLo
 _ETHERSCAN_BASE = "https://api.etherscan.io/api"
 _TIMEOUT = 15
 
-_ETH_ADDRESS_RE = re.compile(r"^0x[0-9a-fA-F]{40}$")
+_ETH_ADDRESS_RE = re.compile(r"^0[xX][0-9a-fA-F]{40}$")
 _PLACEHOLDER_FRAGMENTS = [
     "YOUR_PUBLIC_ETH_ADDRESS",
     "YOUR_ETH_ADDRESS",
@@ -22,6 +31,14 @@ _PLACEHOLDER_FRAGMENTS = [
     "WALLET_ADDRESS",
     "0xYOUR",
     "0xINSERT",
+    "EXAMPLE",
+    "PLACEHOLDER",
+]
+
+_ENV_ADDRESS_VARS = [
+    "ETHERSCAN_ADDRESS",
+    "ETHEREUM_ADDRESS",
+    "PUBLIC_ETH_ADDRESS",
 ]
 
 
@@ -35,6 +52,20 @@ def _validate_eth_address(address: str) -> str | None:
         return (
             f"malformed Ethereum address (expected 0x + 40 hex chars): {address!r}"
         )
+    return None
+
+
+def _resolve_address(explicit: str | None) -> str | None:
+    """
+    Return a candidate address from CLI arg or env vars.
+    Returns None if nothing is configured. Does NOT validate — caller validates.
+    """
+    if explicit:
+        return explicit
+    for var in _ENV_ADDRESS_VARS:
+        val = os.environ.get(var, "").strip()
+        if val:
+            return val
     return None
 
 
@@ -60,12 +91,15 @@ class EtherscanLoader(BaseSourceLoader):
         """Fetch Ethereum transaction data (read-only). Requires ETHERSCAN_API_KEY."""
         api_key = self._require_env_key("ETHERSCAN_API_KEY")
 
-        if not self._address:
+        # Resolve address: CLI arg → env var fallback
+        address = _resolve_address(self._address)
+        if not address:
             raise SkipLoader(
-                "No Ethereum address provided to EtherscanLoader — pass --address <0x...>"
+                "No Ethereum address provided — pass --address <0x...> "
+                f"or set one of: {', '.join(_ENV_ADDRESS_VARS)}"
             )
 
-        addr_error = _validate_eth_address(self._address)
+        addr_error = _validate_eth_address(address)
         if addr_error:
             raise SkipLoader(f"Invalid Ethereum address: {addr_error}")
 
@@ -77,7 +111,7 @@ class EtherscanLoader(BaseSourceLoader):
         params = {
             "module": "account",
             "action": self._action,
-            "address": self._address,
+            "address": address,
             "startblock": 0,
             "endblock": 99999999,
             "sort": "desc",
@@ -91,7 +125,12 @@ class EtherscanLoader(BaseSourceLoader):
             raise SkipLoader(f"Etherscan API unreachable: {exc}") from exc
 
         if data.get("status") != "1":
-            raise SkipLoader(f"Etherscan API error: {data.get('message', 'unknown')}")
+            msg = data.get("message", "unknown")
+            result = data.get("result", "")
+            # "No transactions found" is a valid empty result, not an error
+            if "no transactions" in str(msg).lower() or "no transactions" in str(result).lower():
+                return LoaderResult(source_name=self.source_name, records=[])
+            raise SkipLoader(f"Etherscan API error: {msg}")
 
         txs = data.get("result", []) or []
         records = []

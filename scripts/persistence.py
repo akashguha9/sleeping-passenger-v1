@@ -839,6 +839,26 @@ def get_signal_events(
     return result
 
 
+def delete_signal_events_by_ids(
+    row_ids: list[int],
+    db_path: Path = DB_PATH,
+) -> int:
+    """Delete signal_events rows by primary-key id. Returns count deleted."""
+    if not row_ids:
+        return 0
+    conn = _get_conn(db_path)
+    try:
+        placeholders = ",".join("?" * len(row_ids))
+        cursor = conn.execute(
+            f"DELETE FROM signal_events WHERE id IN ({placeholders})",
+            row_ids,
+        )
+        conn.commit()
+        return cursor.rowcount
+    finally:
+        conn.close()
+
+
 def get_signal_events_for_symbol(
     symbol: str,
     source_name: str = "market_data",

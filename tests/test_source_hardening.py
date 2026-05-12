@@ -303,9 +303,12 @@ class TestStatusSemantics:
         assert src.status == "rate_limited"
 
     def test_global_filings_placeholder_status(self):
-        """All providers inactive → placeholder status."""
+        """All placeholder providers → placeholder status."""
+        from scripts.ingestion.base_loader import SkipLoader
+        from scripts.ingestion.global_filings_loader import GlobalFilingsLoader
         from scripts.live_source_runner_phase2 import run_phase2
-        report = run_phase2(dry_run=True, sources=["global_filings"])
+        with patch.object(GlobalFilingsLoader, "fetch", side_effect=SkipLoader("[PLACEHOLDER] all providers inactive")):
+            report = run_phase2(dry_run=True, sources=["global_filings"])
         gf = next(s for s in report.sources if s.source_name == "global_filings")
         assert gf.status == "placeholder"
 
@@ -641,12 +644,16 @@ class TestGDELTRobustness:
 class TestGlobalFilingsPlaceholder:
     def test_all_providers_inactive(self):
         from scripts.ingestion.global_filings_loader import GlobalFilingsLoader, _PROVIDER_CONFIGS
+        # sec_efts is the only active provider; all others should be inactive placeholders
         for name, conf in _PROVIDER_CONFIGS.items():
-            assert conf["active"] is False, f"Provider {name!r} should be inactive"
+            if name == "sec_efts":
+                assert conf["active"] is True, f"Provider 'sec_efts' should be active"
+            else:
+                assert conf["active"] is False, f"Provider {name!r} should be inactive (placeholder)"
 
     def test_loader_skips_with_placeholder_reason(self):
         from scripts.ingestion.global_filings_loader import GlobalFilingsLoader
-        loader = GlobalFilingsLoader()
+        loader = GlobalFilingsLoader(providers=["hkex"])
         result = loader.safe_fetch()
         assert result.skipped is True
         assert "placeholder" in result.skip_reason.lower()
@@ -656,8 +663,11 @@ class TestGlobalFilingsPlaceholder:
         assert _PROVIDER_CONFIGS["asx"]["active"] is False
 
     def test_runner_reports_placeholder_status(self):
+        from scripts.ingestion.base_loader import SkipLoader
+        from scripts.ingestion.global_filings_loader import GlobalFilingsLoader
         from scripts.live_source_runner_phase2 import run_phase2
-        report = run_phase2(dry_run=True, sources=["global_filings"])
+        with patch.object(GlobalFilingsLoader, "fetch", side_effect=SkipLoader("[PLACEHOLDER] all providers inactive")):
+            report = run_phase2(dry_run=True, sources=["global_filings"])
         gf = next(s for s in report.sources if s.source_name == "global_filings")
         assert gf.status == "placeholder"
 

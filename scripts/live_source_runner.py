@@ -321,6 +321,51 @@ def _log_run(result: SourceRunResult) -> None:
         pass
 
 
+def _cleanup_rejected_polymarket_events() -> int:
+    """
+    Delete persisted Polymarket signal_events that fail the current domain classifier.
+    Returns the number of rows deleted.  Fail-safe — never raises.
+    """
+    try:
+        try:
+            from scripts.persistence import get_signal_events, delete_signal_events_by_ids
+            from scripts.live_signal_filters import classify_market_domain
+        except ModuleNotFoundError:
+            from persistence import get_signal_events, delete_signal_events_by_ids  # type: ignore[no-redef]
+            from live_signal_filters import classify_market_domain  # type: ignore[no-redef]
+    except Exception:
+        return 0
+
+    try:
+        rows = get_signal_events(source_name="polymarket", limit=5000)
+    except Exception:
+        return 0
+
+    bad_ids: list[int] = []
+    for row in rows:
+        try:
+            payload = row.get("raw_payload") or {}
+            if isinstance(payload, str):
+                import json as _json
+                payload = _json.loads(payload)
+            title = str(payload.get("title", "") or payload.get("question", ""))
+            category = str(payload.get("category", "") or "")
+            tags = payload.get("matched_terms") or []
+            result = classify_market_domain(title, category or None, tags or None)
+            if not result["allowed"]:
+                bad_ids.append(row["id"])
+        except Exception:
+            pass
+
+    if not bad_ids:
+        return 0
+
+    try:
+        return delete_signal_events_by_ids(bad_ids)
+    except Exception:
+        return 0
+
+
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
@@ -333,6 +378,7 @@ def run_phase1(
     sec_cik: str | None = None,
     sec_form_type: str = "10-K",
     sec_max_filings: int = _SEC_MAX_FILINGS,
+    sec_default_watchlist: bool = False,
     sources: list[str] | None = None,
 ) -> Phase1RunReport:
     """
@@ -343,6 +389,9 @@ def run_phase1(
     dry_run:
         When True, fetch and normalize signals but do NOT persist to SQLite
         and do NOT write source_run_log entries.
+    sec_default_watchlist:
+        When True and no sec_cik supplied, iterate over the built-in default
+        watchlist (Apple, Microsoft, Nvidia, Tesla, Amazon, Meta, Alphabet).
     sources:
         Subset of Phase 1 sources to run. Defaults to all
         (["polymarket", "gdelt", "sec_edgar"]).
@@ -360,6 +409,7 @@ def run_phase1(
             form_type=sec_form_type,
             max_filings=sec_max_filings,
             timeout=_DEFAULT_TIMEOUT,
+            use_default_watchlist=sec_default_watchlist,
         ),
     }
 
@@ -417,6 +467,9 @@ def run_phase1(
             rejected_count = raw_count - len(events)
             persisted = 0
             if not dry_run:
+                # Purge existing bad Polymarket rows before inserting new ones
+                if source_name == "polymarket":
+                    _cleanup_rejected_polymarket_events()
                 persisted = _persist_events(events, source_name, ts)
             # Set OK_FILTERED when source responded but all records were domain-rejected
             if source_name == "polymarket" and raw_count > 0 and len(events) == 0:

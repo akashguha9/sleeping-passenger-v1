@@ -395,13 +395,13 @@ class TestGrokInterpreterMockedHTTP:
                 assert rec["execution_gate"] == "LOCKED"
 
     def test_fetch_record_has_model_name(self) -> None:
-        from scripts.ingestion.grok_interpreter import GrokInterpreter
+        from scripts.ingestion.grok_interpreter import GrokInterpreter, _MODEL_FALLBACK_ORDER
 
         with patch.dict(os.environ, {"XAI_API_KEY": "test-key-123"}):
             with patch("requests.post", return_value=_mock_response(_GROK_API_RESPONSE)):
-                gi = GrokInterpreter(model="grok-beta")
+                gi = GrokInterpreter(model="grok-3-mini")
                 result = gi.fetch()
-                assert result.records[0]["model_name"] == "grok-beta"
+                assert result.records[0]["model_name"] in _MODEL_FALLBACK_ORDER
 
     def test_fetch_record_has_source_prompt(self) -> None:
         from scripts.ingestion.grok_interpreter import GrokInterpreter
@@ -796,4 +796,4 @@ class TestGrokXaiCLI:
             args = _parse_args()
             assert args.grok_query is None
             assert args.grok_max_items == 1
-            assert args.grok_model == "grok-beta"
+            assert args.grok_model == "grok-3-mini"

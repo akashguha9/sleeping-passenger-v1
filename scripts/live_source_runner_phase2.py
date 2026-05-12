@@ -541,7 +541,7 @@ def run_phase2(
     etherscan_chain: str = "ethereum",
     grok_query: str | None = None,
     grok_max_items: int = _GROK_MAX_ITEMS,
-    grok_model: str = "grok-beta",
+    grok_model: str = "grok-3-mini",
     market_data_tickers: list[str] | None = None,
     market_data_period: str = "5d",
     market_data_interval: str = "1d",

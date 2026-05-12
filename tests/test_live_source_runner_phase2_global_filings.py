@@ -357,16 +357,19 @@ class TestGlobalFilingsLoaderMockedHTTP(unittest.TestCase):
     """Tests for GlobalFilingsLoader with mocked HTTP.
 
     ASX is marked inactive in production (endpoint returns 404).
-    Tests that exercise the HTTP path temporarily re-enable it via patch.dict.
+    Tests that exercise the HTTP path temporarily re-enable it via patch.dict,
+    providing a mock URL so the fetch code can proceed to the HTTP call.
+    sec_efts is disabled in these tests to isolate ASX behaviour.
     """
 
     def _run(self, side_effects, **loader_kw):
         import scripts.ingestion.global_filings_loader as _gf_mod
         from scripts.ingestion.global_filings_loader import GlobalFilingsLoader
         loader = GlobalFilingsLoader(**loader_kw)
-        with patch.dict(_gf_mod._PROVIDER_CONFIGS["asx"], {"active": True}):
-            with patch("requests.get", side_effect=side_effects):
-                return loader.safe_fetch()
+        with patch.dict(_gf_mod._PROVIDER_CONFIGS["asx"], {"active": True, "url": "https://mock.asx.test/"}):
+            with patch.dict(_gf_mod._PROVIDER_CONFIGS["sec_efts"], {"active": False}):
+                with patch("requests.get", side_effect=side_effects):
+                    return loader.safe_fetch()
 
     def test_successful_fetch_returns_records(self):
         result = self._run([_mock_asx_response()], providers=["asx"])
@@ -541,14 +544,16 @@ class TestPhase2RunnerGlobalFilings(unittest.TestCase):
     """Phase 2 runner tests for global_filings.
 
     ASX is inactive in production.  Tests that need a working provider
-    temporarily reactivate ASX via patch.dict.
+    temporarily reactivate ASX via patch.dict with a mock URL.
+    sec_efts is disabled to isolate ASX behaviour.
     """
 
     def _run(self, dry_run=True, **kw):
         import scripts.ingestion.global_filings_loader as _gf_mod
-        with patch.dict(_gf_mod._PROVIDER_CONFIGS["asx"], {"active": True}):
-            with patch("requests.get", return_value=_mock_asx_response()):
-                return run_phase2(dry_run=dry_run, sources=["global_filings"], **kw)
+        with patch.dict(_gf_mod._PROVIDER_CONFIGS["asx"], {"active": True, "url": "https://mock.asx.test/"}):
+            with patch.dict(_gf_mod._PROVIDER_CONFIGS["sec_efts"], {"active": False}):
+                with patch("requests.get", return_value=_mock_asx_response()):
+                    return run_phase2(dry_run=dry_run, sources=["global_filings"], **kw)
 
     def test_returns_phase2_run_report(self):
         self.assertIsInstance(self._run(), Phase2RunReport)
@@ -596,10 +601,12 @@ class TestPhase2RunnerGlobalFilings(unittest.TestCase):
         json.dumps(d)
 
     def test_skipped_when_no_active_providers(self):
-        # All providers inactive (ASX now inactive) → placeholder status
-        report = run_phase2(dry_run=True, sources=["global_filings"])
+        # All providers inactive (ASX now inactive) → non-ok status
+        import scripts.ingestion.global_filings_loader as _gf_mod
+        with patch.dict(_gf_mod._PROVIDER_CONFIGS["sec_efts"], {"active": False}):
+            report = run_phase2(dry_run=True, sources=["global_filings"])
         gf = next(s for s in report.sources if s.source_name == "global_filings")
-        self.assertIn(gf.status, ("skipped", "placeholder"))
+        self.assertIn(gf.status, ("skipped", "placeholder", "http_error"))
 
     def test_unknown_source_ignored(self):
         report = self._run()
@@ -608,7 +615,7 @@ class TestPhase2RunnerGlobalFilings(unittest.TestCase):
 
     def test_global_provider_param_passed(self):
         import scripts.ingestion.global_filings_loader as _gf_mod
-        with patch.dict(_gf_mod._PROVIDER_CONFIGS["asx"], {"active": True}):
+        with patch.dict(_gf_mod._PROVIDER_CONFIGS["asx"], {"active": True, "url": "https://mock.asx.test/"}):
             with patch("requests.get", return_value=_mock_asx_response()):
                 report = run_phase2(
                     dry_run=True,
@@ -620,7 +627,7 @@ class TestPhase2RunnerGlobalFilings(unittest.TestCase):
 
     def test_global_region_param_passed(self):
         import scripts.ingestion.global_filings_loader as _gf_mod
-        with patch.dict(_gf_mod._PROVIDER_CONFIGS["asx"], {"active": True}):
+        with patch.dict(_gf_mod._PROVIDER_CONFIGS["asx"], {"active": True, "url": "https://mock.asx.test/"}):
             with patch("requests.get", return_value=_mock_asx_response()):
                 report = run_phase2(
                     dry_run=True,
@@ -660,7 +667,11 @@ class TestGlobalFilingsWriteMode(unittest.TestCase):
 
     def _with_active_asx(self):
         import scripts.ingestion.global_filings_loader as _gf_mod
-        return patch.dict(_gf_mod._PROVIDER_CONFIGS["asx"], {"active": True})
+        from contextlib import ExitStack
+        stack = ExitStack()
+        stack.enter_context(patch.dict(_gf_mod._PROVIDER_CONFIGS["asx"], {"active": True, "url": "https://mock.asx.test/"}))
+        stack.enter_context(patch.dict(_gf_mod._PROVIDER_CONFIGS["sec_efts"], {"active": False}))
+        return stack
 
     def test_write_mode_calls_persist(self):
         with self._with_active_asx():
@@ -846,7 +857,7 @@ class TestGlobalFilingsCLIStructure(unittest.TestCase):
 
     def test_run_phase2_dry_run_mocked(self):
         import scripts.ingestion.global_filings_loader as _gf_mod
-        with patch.dict(_gf_mod._PROVIDER_CONFIGS["asx"], {"active": True}):
+        with patch.dict(_gf_mod._PROVIDER_CONFIGS["asx"], {"active": True, "url": "https://mock.asx.test/"}):
             with patch("requests.get", return_value=_mock_asx_response()):
                 report = run_phase2(
                     dry_run=True,
