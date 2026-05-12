@@ -11,6 +11,7 @@ import { MOCK_INBOX_RESPONSE } from '@/lib/mockData';
 import { SignalCard } from '@/components/SignalCard';
 import { BullStateBadge } from '@/components/BullStateBadge';
 import { AdvisoryOnlyBadge } from '@/components/AdvisoryOnlyBadge';
+import { SourceHealthWarnings } from '@/components/SourceHealthWarnings';
 import {
   ALL_ACTIONS,
   ACTION_LABELS,
@@ -152,6 +153,8 @@ export default function SignalInboxPage() {
         </div>
         <AdvisoryOnlyBadge size="md" />
       </div>
+
+      <SourceHealthWarnings compact />
 
       {/* HUMAN_REVIEW_REQUIRED notice */}
       <div className="bg-amber-950/20 border border-amber-900/40 rounded-lg px-4 py-2.5 text-xs text-amber-400">

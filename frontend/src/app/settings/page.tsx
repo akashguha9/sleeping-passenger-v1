@@ -7,6 +7,7 @@ import type { DbStatusResponse } from '@/types';
 import { API_BASE } from '@/lib/config';
 import { AdvisoryOnlyBadge } from '@/components/AdvisoryOnlyBadge';
 import { HumanOnlyBadge } from '@/components/HumanOnlyBadge';
+import { SourceHealthWarnings } from '@/components/SourceHealthWarnings';
 
 const SYSTEM_CONSTANTS = [
   { key: 'advisory_status', value: 'ADVISORY_ONLY', color: 'text-amber-400' },
@@ -44,6 +45,8 @@ export default function SettingsPage() {
           <HumanOnlyBadge size="md" />
         </div>
       </div>
+
+      <SourceHealthWarnings />
 
       {/* Backend status */}
       <div className="bg-slate-800/60 border border-slate-700/60 rounded-lg p-5">
@@ -147,7 +150,7 @@ export default function SettingsPage() {
       <div className="bg-slate-800/60 border border-slate-700/60 rounded-lg p-5">
         <h2 className="text-sm font-semibold text-slate-300 mb-4">System Information</h2>
         <div className="space-y-3 text-sm">
-          <InfoRow label="System" value="Signal Intelligence Cockpit v5.7" />
+          <InfoRow label="System" value="//SleepingPassenger v1" />
           <InfoRow label="Backend" value="FastAPI — pipeline-v5.7-core" />
           <InfoRow label="API base URL" value={API_BASE} />
           <InfoRow

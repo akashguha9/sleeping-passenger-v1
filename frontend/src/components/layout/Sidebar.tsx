@@ -21,14 +21,29 @@ export function Sidebar() {
   const pathname = usePathname();
 
   return (
-    <aside className="fixed left-0 top-0 bottom-0 w-60 bg-slate-900 border-r border-slate-800 flex flex-col z-10">
-      {/* Header */}
-      <div className="p-4 border-b border-slate-800">
-        <div className="text-xs font-semibold text-slate-500 uppercase tracking-widest mb-1">
-          Signal Intelligence
+    <aside
+      className="fixed left-0 top-0 bottom-0 w-60 flex flex-col z-10"
+      style={{
+        background: 'linear-gradient(180deg, rgba(13,16,21,0.96), rgba(6,8,11,0.98))',
+        borderRight: '1px solid var(--sp-line)',
+        backdropFilter: 'blur(8px)',
+      }}
+    >
+      {/* Brand header */}
+      <div className="px-5 pt-6 pb-5" style={{ borderBottom: '1px solid var(--sp-line)' }}>
+        <div className="sp-eyebrow mb-2">Signal Intelligence</div>
+        <div className="flex items-baseline gap-1.5 leading-none">
+          <span className="text-[11px] font-mono" style={{ color: 'var(--sp-gold)' }}>//</span>
+          <span
+            className="text-[15px] font-semibold tracking-tight"
+            style={{ color: 'var(--sp-bone)', letterSpacing: '-0.005em' }}
+          >
+            SleepingPassenger
+          </span>
+          <span className="text-[10px] font-mono" style={{ color: 'var(--sp-mist)' }}>v1</span>
         </div>
-        <div className="text-sm font-bold text-slate-100 leading-tight">
-          Cockpit v5.7
+        <div className="mt-2 text-[10px] font-mono uppercase tracking-widest" style={{ color: 'var(--sp-mist)' }}>
+          dark · meditative · advisory
         </div>
       </div>
 
@@ -40,31 +55,52 @@ export function Sidebar() {
             <Link
               key={item.href}
               href={item.href}
-              className={`flex items-center gap-2.5 px-3 py-2 rounded text-sm transition-colors ${
+              className="flex items-center gap-3 px-3 py-2 rounded text-sm transition-colors"
+              style={
                 active
-                  ? 'bg-slate-700 text-white font-medium'
-                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
-              }`}
+                  ? {
+                      color: 'var(--sp-bone)',
+                      background: 'rgba(200, 154, 74, 0.08)',
+                      borderLeft: '1px solid rgba(200, 154, 74, 0.55)',
+                      paddingLeft: 'calc(0.75rem - 1px)',
+                    }
+                  : {
+                      color: 'var(--sp-mist)',
+                    }
+              }
             >
-              <span className="text-base leading-none">{item.icon}</span>
-              <span>{item.label}</span>
+              <span className="text-base leading-none" style={{ color: active ? 'var(--sp-gold)' : 'var(--sp-mist)' }}>
+                {item.icon}
+              </span>
+              <span className="tracking-tight">{item.label}</span>
             </Link>
           );
         })}
       </nav>
 
       {/* System status footer */}
-      <div className="p-3 border-t border-slate-800 space-y-2">
-        <div className="flex items-center justify-between px-2">
-          <span className="text-xs text-slate-500">AI Executions</span>
-          <span className="text-xs font-mono font-bold text-emerald-400">0</span>
+      <div className="p-4 space-y-2" style={{ borderTop: '1px solid var(--sp-line)' }}>
+        <div className="flex items-center justify-between px-1">
+          <span className="text-[10px] uppercase tracking-widest" style={{ color: 'var(--sp-mist)' }}>
+            AI Executions
+          </span>
+          <span className="text-xs font-mono font-bold" style={{ color: 'var(--sp-cyan)' }}>0</span>
         </div>
-        <div className="flex items-center justify-between px-2">
-          <span className="text-xs text-slate-500">Mode</span>
-          <span className="text-xs font-mono text-amber-400">HUMAN_ONLY</span>
+        <div className="flex items-center justify-between px-1">
+          <span className="text-[10px] uppercase tracking-widest" style={{ color: 'var(--sp-mist)' }}>
+            Mode
+          </span>
+          <span className="text-xs font-mono" style={{ color: 'var(--sp-gold)' }}>HUMAN_ONLY</span>
         </div>
-        <div className="px-2 py-1.5 rounded bg-slate-800 text-center">
-          <span className="text-xs text-slate-400 font-medium">ADVISORY_ONLY</span>
+        <div
+          className="mt-2 px-2.5 py-1.5 rounded text-center text-[10px] font-mono uppercase tracking-widest"
+          style={{
+            color: 'var(--sp-bone)',
+            background: 'rgba(200, 154, 74, 0.06)',
+            border: '1px solid rgba(200, 154, 74, 0.22)',
+          }}
+        >
+          ADVISORY_ONLY
         </div>
       </div>
     </aside>

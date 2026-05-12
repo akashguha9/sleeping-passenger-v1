@@ -11,9 +11,11 @@ import type {
   MoltbookEntry,
   ManualTradeListResponse,
   SourceHealthResponse,
+  SourceHealthSummaryResponse,
   DbStatusResponse,
   LiveSignalsResponse,
   ChartStructureResponse,
+  ChartBootstrapResponse,
   SecuritySearchResponse,
   SecurityDetailResponse,
   SecurityCoverageResponse,
@@ -139,10 +141,11 @@ export async function postManualTrade(body: {
   thesis: string;
   notes?: string;
   logged_by?: string;
+  leverage?: number;
 }): Promise<unknown> {
   return apiFetch('/manual-trades', {
     method: 'POST',
-    body: JSON.stringify({ logged_by: 'human', ...body }),
+    body: JSON.stringify({ logged_by: 'human', leverage: 1.0, ...body }),
   });
 }
 
@@ -209,6 +212,14 @@ export async function getSourceHealth(): Promise<SourceHealthResponse | null> {
   }
 }
 
+export async function getSourceHealthSummary(): Promise<SourceHealthSummaryResponse | null> {
+  try {
+    return await apiFetch<SourceHealthSummaryResponse>('/source-health/summary');
+  } catch {
+    return null;
+  }
+}
+
 export async function getDbStatus(): Promise<DbStatusResponse | null> {
   try {
     return await apiFetch<DbStatusResponse>('/db/status');
@@ -242,6 +253,21 @@ export async function getChartStructure(
     params.set('limit', String(limit));
     if (sourceEventId) params.set('source_event_id', sourceEventId);
     return await apiFetch<ChartStructureResponse>(`/chart-structure?${params.toString()}`);
+  } catch {
+    return null;
+  }
+}
+
+export async function bootstrapChartSymbol(
+  symbol: string,
+  period: string = 'max',
+  interval: string = '1d',
+): Promise<ChartBootstrapResponse | null> {
+  try {
+    return await apiFetch<ChartBootstrapResponse>('/chart-structure/bootstrap-symbol', {
+      method: 'POST',
+      body: JSON.stringify({ symbol, period, interval }),
+    });
   } catch {
     return null;
   }

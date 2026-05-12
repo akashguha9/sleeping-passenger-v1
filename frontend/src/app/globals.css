@@ -4,32 +4,165 @@
 
 :root {
   --sidebar-width: 240px;
+
+  /* SleepingPassenger theme tokens — Rick Rubin x Diplo inspired */
+  --sp-obsidian: #06080b;
+  --sp-ink: #0d1015;
+  --sp-slate: #181b21;
+  --sp-line: rgba(232, 231, 227, 0.06);
+  --sp-line-strong: rgba(232, 231, 227, 0.1);
+  --sp-bone: #e8e7e3;
+  --sp-mist: #9a9b97;
+  --sp-gold: #c89a4a;
+  --sp-gold-deep: #8a6824;
+  --sp-cyan: #5fbdc8;
+  --sp-cyan-deep: #28707a;
+  --sp-rust: #a04a3a;
+}
+
+html, body {
+  background-color: var(--sp-obsidian);
 }
 
 body {
-  @apply bg-slate-950 text-slate-100 antialiased;
+  @apply text-slate-100 antialiased;
   font-family: 'Inter', 'Segoe UI', system-ui, sans-serif;
+  background:
+    radial-gradient(1200px 600px at 80% -10%, rgba(200, 154, 74, 0.04), transparent 60%),
+    radial-gradient(900px 500px at -10% 110%, rgba(95, 189, 200, 0.035), transparent 60%),
+    var(--sp-obsidian);
+  letter-spacing: 0.005em;
 }
 
-/* Scrollbar styling */
+::selection {
+  background: rgba(200, 154, 74, 0.25);
+  color: var(--sp-bone);
+}
+
+/* Scrollbar — quieter, more editorial */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
 }
 ::-webkit-scrollbar-track {
-  @apply bg-slate-900;
+  background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  @apply bg-slate-600 rounded;
+  background: rgba(232, 231, 227, 0.06);
+  border-radius: 2px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  @apply bg-slate-500;
+  background: rgba(232, 231, 227, 0.14);
 }
 
-/* Score bar animation */
+/* Score bar animation — kept */
 @keyframes fill-bar {
   from { width: 0%; }
 }
 .score-bar {
   animation: fill-bar 0.6s ease-out;
+}
+
+/* ---------------------------------------------------------------------- */
+/*  Reusable SleepingPassenger component classes                          */
+/*  Centralized so cards/badges/buttons share one premium look.           */
+/* ---------------------------------------------------------------------- */
+
+@layer components {
+  /* A muted, editorial surface card */
+  .sp-card {
+    @apply rounded-lg;
+    background: linear-gradient(180deg, rgba(255,255,255,0.012), rgba(255,255,255,0)) , var(--sp-ink);
+    border: 1px solid var(--sp-line);
+    box-shadow: 0 1px 0 0 rgba(255,255,255,0.02) inset,
+                0 12px 32px -24px rgba(0,0,0,0.7);
+  }
+
+  .sp-card-soft {
+    @apply rounded-lg;
+    background: rgba(24, 27, 33, 0.55);
+    border: 1px solid var(--sp-line);
+  }
+
+  /* Page section heading — small caps, wide tracking */
+  .sp-eyebrow {
+    @apply text-[10px] font-semibold uppercase tracking-widest text-slate-500;
+  }
+
+  /* Premium chip / pill */
+  .sp-chip {
+    @apply inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-mono uppercase tracking-widest;
+    border: 1px solid var(--sp-line-strong);
+    background: rgba(232, 231, 227, 0.03);
+    color: var(--sp-mist);
+  }
+  .sp-chip-gold {
+    color: var(--sp-gold);
+    border-color: rgba(200, 154, 74, 0.32);
+    background: rgba(200, 154, 74, 0.06);
+  }
+  .sp-chip-cyan {
+    color: var(--sp-cyan);
+    border-color: rgba(95, 189, 200, 0.28);
+    background: rgba(95, 189, 200, 0.05);
+  }
+  .sp-chip-rust {
+    color: #d57b6a;
+    border-color: rgba(160, 74, 58, 0.4);
+    background: rgba(160, 74, 58, 0.08);
+  }
+  .sp-chip-warn {
+    color: #d6a85a;
+    border-color: rgba(214, 168, 90, 0.32);
+    background: rgba(214, 168, 90, 0.06);
+  }
+
+  /* Tight divider used between sections inside cards */
+  .sp-divider {
+    height: 1px;
+    background: var(--sp-line);
+  }
+
+  /* Input — clean, restrained, with focus accent in gold */
+  .sp-input {
+    @apply w-full rounded px-3 py-2 text-sm text-slate-100 placeholder-slate-600 transition-colors focus:outline-none;
+    background: rgba(13, 16, 21, 0.85);
+    border: 1px solid var(--sp-line-strong);
+  }
+  .sp-input:focus {
+    border-color: rgba(200, 154, 74, 0.5);
+    box-shadow: 0 0 0 3px rgba(200, 154, 74, 0.08);
+  }
+
+  /* Primary button — gold edge, dark fill */
+  .sp-btn-primary {
+    @apply inline-flex items-center justify-center w-full py-2.5 rounded text-sm font-semibold transition-all uppercase tracking-widest text-[12px];
+    color: var(--sp-bone);
+    background: linear-gradient(180deg, rgba(200,154,74,0.16), rgba(200,154,74,0.06));
+    border: 1px solid rgba(200, 154, 74, 0.45);
+    letter-spacing: 0.16em;
+  }
+  .sp-btn-primary:hover {
+    border-color: rgba(200, 154, 74, 0.7);
+    background: linear-gradient(180deg, rgba(200,154,74,0.22), rgba(200,154,74,0.08));
+  }
+  .sp-btn-primary:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+  }
+
+  /* Filter tab button — minimal */
+  .sp-tab {
+    @apply inline-flex items-center gap-1.5 px-3 py-1.5 text-xs rounded transition-colors;
+    color: var(--sp-mist);
+  }
+  .sp-tab:hover {
+    color: var(--sp-bone);
+    background: rgba(232, 231, 227, 0.04);
+  }
+  .sp-tab-active {
+    color: var(--sp-bone);
+    background: rgba(200, 154, 74, 0.10);
+    border: 1px solid rgba(200, 154, 74, 0.3);
+  }
 }

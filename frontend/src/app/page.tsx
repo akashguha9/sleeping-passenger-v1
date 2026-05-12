@@ -8,6 +8,7 @@ import { MOCK_INBOX_RESPONSE } from '@/lib/mockData';
 import { BullStateBadge } from '@/components/BullStateBadge';
 import { AdvisoryOnlyBadge } from '@/components/AdvisoryOnlyBadge';
 import { HumanOnlyBadge } from '@/components/HumanOnlyBadge';
+import { SourceHealthWarnings } from '@/components/SourceHealthWarnings';
 import Link from 'next/link';
 
 export default function DashboardPage() {
@@ -60,8 +61,14 @@ export default function DashboardPage() {
       {/* Page header */}
       <div className="flex items-start justify-between">
         <div>
-          <h1 className="text-xl font-bold text-white">Dashboard</h1>
-          <p className="text-sm text-slate-500 mt-0.5">
+          <div className="sp-eyebrow mb-1">Overview</div>
+          <h1
+            className="text-2xl font-semibold tracking-tight"
+            style={{ color: 'var(--sp-bone)', letterSpacing: '-0.01em' }}
+          >
+            Dashboard
+          </h1>
+          <p className="text-sm mt-1" style={{ color: 'var(--sp-mist)' }}>
             Signal intelligence overview — {loading ? '…' : formatTs(generated_at)}
           </p>
         </div>
@@ -70,6 +77,8 @@ export default function DashboardPage() {
           <HumanOnlyBadge size="md" />
         </div>
       </div>
+
+      <SourceHealthWarnings />
 
       {/* Safety statement + backend status */}
       <div className="bg-slate-900 border border-slate-700 rounded-lg p-4 flex items-center justify-between gap-4">

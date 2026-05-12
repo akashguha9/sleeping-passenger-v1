@@ -128,6 +128,7 @@ MANUAL_TRADE_HEADERS: list[str] = [
     "side",
     "quantity",
     "price",
+    "leverage",
     "executed_at",
     "thesis",
     "notes",
@@ -225,6 +226,15 @@ def _enforce_advisory(row: dict[str, Any], headers: list[str]) -> dict[str, Any]
         projected["execution_mode"] = _EXECUTION_MODE
     if "ai_execution_count" in headers:
         projected["ai_execution_count"] = _AI_EXECUTION_COUNT
+    if "leverage" in headers:
+        raw = projected.get("leverage", "")
+        if raw == "" or raw is None:
+            projected["leverage"] = 1.0
+        else:
+            try:
+                projected["leverage"] = float(raw)
+            except (TypeError, ValueError):
+                projected["leverage"] = 1.0
     return projected
 
 

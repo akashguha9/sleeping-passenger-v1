@@ -75,6 +75,7 @@ CREATE TABLE IF NOT EXISTS manual_trades (
     thesis TEXT NOT NULL DEFAULT '',
     notes TEXT NOT NULL DEFAULT '',
     logged_by TEXT NOT NULL DEFAULT 'human',
+    leverage REAL NOT NULL DEFAULT 1.0,
     execution_mode TEXT NOT NULL DEFAULT 'HUMAN_ONLY',
     ai_execution_count INTEGER NOT NULL DEFAULT 0,
     advisory_status TEXT NOT NULL DEFAULT 'ADVISORY_ONLY',
@@ -216,12 +217,35 @@ CREATE INDEX IF NOT EXISTS idx_gsa_canonical ON global_security_aliases(canonica
 _initialized: set[str] = set()
 
 
+def _additive_migrations(conn: sqlite3.Connection) -> None:
+    """Apply additive column migrations for forward-compatibility.
+
+    Safe to run on every connect; each ALTER is wrapped to be a no-op when
+    the column already exists.  Never drops or renames columns.
+    """
+    migrations = (
+        ("manual_trades", "leverage", "REAL NOT NULL DEFAULT 1.0"),
+    )
+    for table, column, ddl in migrations:
+        try:
+            existing = {
+                row[1]
+                for row in conn.execute(f"PRAGMA table_info({table})").fetchall()
+            }
+            if column not in existing:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")
+        except sqlite3.OperationalError:
+            pass
+
+
 def init_schema(db_path: Path = DB_PATH) -> None:
     """Create runtime dir and initialize all tables. Idempotent."""
     db_path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(db_path))
     try:
         conn.executescript(_SCHEMA_SQL)
+        _additive_migrations(conn)
+        conn.commit()
     finally:
         conn.close()
     _initialized.add(str(db_path.resolve()))
@@ -251,6 +275,12 @@ def _to_dict(row: sqlite3.Row) -> dict[str, Any]:
         d["broker_order_id"] = d.get("broker_order_id") or "NONE"
     if "human_review_required" in d and isinstance(d["human_review_required"], int):
         d["human_review_required"] = bool(d["human_review_required"])
+    if "leverage" in d:
+        try:
+            lev = float(d["leverage"]) if d["leverage"] is not None else 1.0
+        except (TypeError, ValueError):
+            lev = 1.0
+        d["leverage"] = lev if lev >= 1.0 else 1.0
     return d
 
 
@@ -459,18 +489,28 @@ def insert_manual_trade(
     notes: str,
     logged_by: str,
     db_path: Path = DB_PATH,
+    *,
+    leverage: float = 1.0,
 ) -> None:
+    """Insert a manual trade record. ``leverage`` is record-only (record-keeping
+    of human leverage choice — no broker margin/execution implications)."""
+    try:
+        lev = float(leverage) if leverage is not None else 1.0
+    except (TypeError, ValueError):
+        lev = 1.0
+    if lev < 1.0:
+        lev = 1.0
     conn = _get_conn(db_path)
     try:
         conn.execute(
             "INSERT OR IGNORE INTO manual_trades"
             " (trade_id, event_id, ticker, side, quantity, price, executed_at,"
-            "  thesis, notes, logged_by, execution_mode, ai_execution_count,"
+            "  thesis, notes, logged_by, leverage, execution_mode, ai_execution_count,"
             "  advisory_status, human_review_required, broker_order_id, broker_api_called)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 trade_id, event_id, ticker, side, quantity, price, executed_at,
-                thesis, notes, logged_by,
+                thesis, notes, logged_by, lev,
                 _EXECUTION_MODE, _AI_EXECUTION_COUNT,
                 _ADVISORY_STATUS, 1, "NONE", 0,
             ),
@@ -949,6 +989,52 @@ def get_source_run_log(limit: int = 50, db_path: Path = DB_PATH) -> list[dict[st
     return result
 
 
+def get_latest_source_run_per_source(
+    db_path: Path = DB_PATH,
+) -> list[dict[str, Any]]:
+    """Return the most recent source_run_log entry for each distinct source.
+
+    One row per source_name, ordered newest-first.  Used by the
+    /source-health/summary endpoint to drive the frontend warnings banner
+    and per-source empty-state messages.
+    """
+    conn = _get_conn(db_path)
+    try:
+        rows = conn.execute(
+            "SELECT srl.*"
+            " FROM source_run_log srl"
+            " INNER JOIN ("
+            "   SELECT source_name, MAX(id) AS max_id"
+            "   FROM source_run_log GROUP BY source_name"
+            " ) latest ON latest.source_name = srl.source_name"
+            " AND latest.max_id = srl.id"
+            " ORDER BY srl.timestamp_utc DESC"
+        ).fetchall()
+    finally:
+        conn.close()
+    result = []
+    for row in rows:
+        d = dict(row)
+        d["advisory_status"] = _ADVISORY_STATUS
+        result.append(d)
+    return result
+
+
+def count_signal_events_by_source(
+    db_path: Path = DB_PATH,
+) -> dict[str, int]:
+    """Return {source_name: row_count} across the signal_events table."""
+    conn = _get_conn(db_path)
+    try:
+        rows = conn.execute(
+            "SELECT source_name, COUNT(*) AS n FROM signal_events"
+            " GROUP BY source_name"
+        ).fetchall()
+    finally:
+        conn.close()
+    return {str(r["source_name"]): int(r["n"]) for r in rows}
+
+
 # ---------------------------------------------------------------------------
 # Global securities master
 # ---------------------------------------------------------------------------
@@ -1204,6 +1290,8 @@ __all__ = [
     "get_signal_events",
     "log_source_run",
     "get_source_run_log",
+    "get_latest_source_run_per_source",
+    "count_signal_events_by_source",
     "upsert_global_security",
     "get_global_security",
     "search_global_securities",

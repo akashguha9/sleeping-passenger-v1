@@ -149,6 +149,13 @@ def _get_chart_structure(
 
             return {
                 **_safe_base,
+                "ok": False,
+                "reason": "NO_LOCAL_OHLCV",
+                "can_bootstrap": True,
+                "message": (
+                    f"No local OHLCV candles found for {canonical_symbol}."
+                ),
+                "execution_mode": "HUMAN_ONLY",
                 "symbol": canonical_symbol,
                 "input_symbol": symbol_upper,
                 "source_event_id": linked_event_id,
@@ -156,8 +163,8 @@ def _get_chart_structure(
                 "chart_state": "INSUFFICIENT_DATA",
                 "advisory_summary": (
                     f"No OHLCV candle data available for {canonical_symbol}. "
-                    f"Run discovery then backfill: "
-                    f"{discovery_cmd}  &&  {backfill_cmd}"
+                    f"Click 'Yes, download data' to discover + backfill from the UI, "
+                    f"or run manually: {discovery_cmd}  &&  {backfill_cmd}"
                 ),
                 "discovery_command": discovery_cmd,
                 "backfill_command": backfill_cmd,

@@ -147,6 +147,7 @@ class ManualTradeLog:
     thesis: str
     notes: str
     logged_by: str
+    leverage: float = 1.0
     execution_mode: str = _EXECUTION_MODE
     ai_execution_count: int = _AI_EXECUTION_COUNT
     advisory_status: str = _ADVISORY_STATUS
@@ -640,6 +641,10 @@ def mark_signal(event_id: str, status: str) -> dict[str, Any]:
     }
 
 
+_LEVERAGE_MIN = 1.0
+_LEVERAGE_MAX = 25.0
+
+
 def log_manual_trade(
     *,
     event_id: str,
@@ -650,12 +655,18 @@ def log_manual_trade(
     thesis: str,
     notes: str = "",
     logged_by: str = "human",
+    leverage: float = 1.0,
 ) -> dict[str, Any]:
     """7. Log a manual trade execution (HUMAN_ONLY; no broker API called).
 
     This is a record-keeping function only.  It does NOT place, route, or
     submit any order to any broker or exchange.  broker_api_called is always
     False.  ai_execution_count is always 0.
+
+    leverage is a numeric record-only field (e.g. 1.0x, 2.5x).  It must be
+    >= 1.0 and <= 25.0.  Missing / null defaults to 1.0.  Storing leverage
+    here does NOT enable any broker margin behaviour — this remains pure
+    record-keeping.
     """
     if not event_id or not isinstance(event_id, str):
         return _error_response("log_manual_trade", "event_id must be a non-empty string")
@@ -668,6 +679,20 @@ def log_manual_trade(
     if isinstance(price, bool) or not isinstance(price, (int, float)) or price <= 0:
         return _error_response("log_manual_trade", "price must be a positive number")
 
+    if leverage is None:
+        leverage_val = 1.0
+    elif isinstance(leverage, bool) or not isinstance(leverage, (int, float)):
+        return _error_response(
+            "log_manual_trade", "leverage must be a number (e.g. 1.0, 2.5)"
+        )
+    else:
+        leverage_val = float(leverage)
+    if leverage_val < _LEVERAGE_MIN or leverage_val > _LEVERAGE_MAX:
+        return _error_response(
+            "log_manual_trade",
+            f"leverage must be between {_LEVERAGE_MIN} and {_LEVERAGE_MAX}",
+        )
+
     trade = ManualTradeLog(
         trade_id=f"MT_{uuid.uuid4().hex[:12]}",
         event_id=str(event_id),
@@ -679,6 +704,7 @@ def log_manual_trade(
         thesis=str(thesis),
         notes=str(notes),
         logged_by=str(logged_by),
+        leverage=leverage_val,
     )
     append_jsonl(MANUAL_TRADE_LOG, trade.to_dict(), stamp=False)
     if _DB_AVAILABLE and _persistence is not None:
@@ -687,6 +713,7 @@ def log_manual_trade(
                 trade.trade_id, trade.event_id, trade.ticker, trade.side,
                 trade.quantity, trade.price, trade.executed_at,
                 trade.thesis, trade.notes, trade.logged_by,
+                leverage=trade.leverage,
             )
         except Exception:
             pass
@@ -699,6 +726,7 @@ def log_manual_trade(
         "side": trade.side,
         "quantity": trade.quantity,
         "price": trade.price,
+        "leverage": trade.leverage,
         "status": "logged",
         "execution_mode": _EXECUTION_MODE,
         "ai_execution_count": _AI_EXECUTION_COUNT,

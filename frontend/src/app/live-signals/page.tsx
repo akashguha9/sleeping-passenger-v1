@@ -1,10 +1,17 @@
 'use client';
 
 import { useState, useEffect, useMemo } from 'react';
-import { getLiveSignals } from '@/lib/apiClient';
-import type { LiveSignalEvent, LiveSignalSource, LiveSignalsResponse } from '@/types';
+import { getLiveSignals, getSourceHealthSummary } from '@/lib/apiClient';
+import type {
+  LiveSignalEvent,
+  LiveSignalSource,
+  LiveSignalsResponse,
+  SourceHealthSummaryEntry,
+  SourceHealthSummaryResponse,
+} from '@/types';
 import { AdvisoryOnlyBadge } from '@/components/AdvisoryOnlyBadge';
 import { HumanOnlyBadge } from '@/components/HumanOnlyBadge';
+import { SourceHealthWarnings } from '@/components/SourceHealthWarnings';
 
 const SOURCE_OPTIONS: { value: '' | LiveSignalSource; label: string }[] = [
   { value: '', label: 'All Sources' },
@@ -21,18 +28,18 @@ const SOURCE_OPTIONS: { value: '' | LiveSignalSource; label: string }[] = [
   { value: 'asia_disclosure', label: 'Asia Disclosure' },
 ];
 
-const SOURCE_COLORS: Record<string, string> = {
-  polymarket: 'text-violet-400 bg-violet-900/30 border-violet-700/40',
-  gdelt: 'text-sky-400 bg-sky-900/30 border-sky-700/40',
-  sec_edgar: 'text-amber-400 bg-amber-900/30 border-amber-700/40',
-  newsapi: 'text-emerald-400 bg-emerald-900/30 border-emerald-700/40',
-  event_registry: 'text-teal-400 bg-teal-900/30 border-teal-700/40',
-  etherscan: 'text-orange-400 bg-orange-900/30 border-orange-700/40',
-  grok_xai: 'text-indigo-400 bg-indigo-900/30 border-indigo-700/40',
-  market_data: 'text-blue-400 bg-blue-900/30 border-blue-700/40',
-  india: 'text-yellow-500 bg-yellow-900/30 border-yellow-700/40',
-  global_filings: 'text-rose-400 bg-rose-900/30 border-rose-700/40',
-  asia_disclosure: 'text-red-400 bg-red-900/30 border-red-700/40',
+const SOURCE_ACCENT: Record<string, string> = {
+  polymarket: 'rgba(167, 139, 250, 0.9)',
+  gdelt: 'rgba(125, 211, 252, 0.9)',
+  sec_edgar: 'rgba(200, 154, 74, 0.9)',
+  newsapi: 'rgba(95, 189, 200, 0.9)',
+  event_registry: 'rgba(110, 200, 196, 0.9)',
+  etherscan: 'rgba(217, 119, 87, 0.9)',
+  grok_xai: 'rgba(165, 158, 230, 0.9)',
+  market_data: 'rgba(122, 175, 232, 0.9)',
+  india: 'rgba(216, 168, 96, 0.9)',
+  global_filings: 'rgba(214, 142, 158, 0.9)',
+  asia_disclosure: 'rgba(213, 123, 106, 0.9)',
 };
 
 const SOURCE_LABELS: Record<string, string> = {
@@ -221,60 +228,65 @@ function formatTs(ts: string): string {
 
 function SignalEventCard({ ev }: { ev: LiveSignalEvent }) {
   const [expanded, setExpanded] = useState(false);
-  const sourceColor = SOURCE_COLORS[ev.source_name] ?? 'text-slate-400 bg-slate-800/40 border-slate-700/40';
+  const accent = SOURCE_ACCENT[ev.source_name] ?? 'rgba(154, 155, 151, 0.7)';
   const sourceLabel = SOURCE_LABELS[ev.source_name] ?? ev.source_name;
 
   return (
-    <div className="bg-slate-800/60 border border-slate-700/60 rounded-lg px-4 py-3 space-y-2">
+    <div className="sp-card p-4 space-y-2.5">
       {/* Header row */}
       <div className="flex items-start justify-between gap-3">
         <div className="flex items-center gap-2 flex-wrap">
-          <span className={`text-xs font-semibold px-2 py-0.5 rounded border ${sourceColor}`}>
+          <span
+            className="text-[10px] font-mono font-semibold px-2 py-0.5 rounded-full uppercase tracking-widest"
+            style={{
+              color: accent,
+              border: `1px solid ${accent.replace('0.9', '0.32')}`,
+              background: accent.replace('0.9', '0.05'),
+            }}
+          >
             {sourceLabel}
           </span>
-          <span className="text-xs text-slate-500 font-mono">{ev.event_id}</span>
+          <span className="text-[10px] font-mono" style={{ color: 'var(--sp-mist)' }}>{ev.event_id}</span>
         </div>
         <div className="flex items-center gap-2 shrink-0">
-          <span className="text-xs font-mono px-1.5 py-0.5 rounded bg-red-900/30 border border-red-800/40 text-red-400">
-            EXECUTION LOCKED
-          </span>
-          <span className="text-xs text-slate-500">{formatTs(ev.fetched_at)}</span>
+          <span className="sp-chip sp-chip-rust">Execution · Locked</span>
+          <span className="text-[10px] font-mono" style={{ color: 'var(--sp-mist)' }}>{formatTs(ev.fetched_at)}</span>
         </div>
       </div>
 
-      {/* Title */}
-      <p className="text-sm text-slate-200 leading-snug">{getTitle(ev)}</p>
+      <p className="text-sm leading-snug" style={{ color: 'var(--sp-bone)' }}>{getTitle(ev)}</p>
 
-      {/* Subtitle */}
       {getSubtitle(ev) && (
-        <p className="text-xs text-slate-500">{getSubtitle(ev)}</p>
+        <p className="text-xs" style={{ color: 'var(--sp-mist)' }}>{getSubtitle(ev)}</p>
       )}
 
-      {/* Safety badges */}
       <div className="flex items-center gap-2 flex-wrap pt-0.5">
-        <span className="text-xs px-1.5 py-0.5 rounded bg-slate-700/50 text-slate-400 font-mono">
-          {ev.advisory_status}
-        </span>
+        <span className="sp-chip">{ev.advisory_status}</span>
         {ev.human_review_required && (
-          <span className="text-xs px-1.5 py-0.5 rounded bg-amber-900/30 border border-amber-800/40 text-amber-400 font-mono">
-            HUMAN_REVIEW_REQUIRED
-          </span>
+          <span className="sp-chip sp-chip-warn">Human_Review_Required</span>
         )}
-        <span className="text-xs text-slate-600 font-mono">
-          AI executions: {ev.ai_execution_count}
+        <span className="text-[10px] font-mono" style={{ color: 'var(--sp-mist)' }}>
+          AI executions: <span style={{ color: 'var(--sp-cyan)' }}>{ev.ai_execution_count}</span>
         </span>
       </div>
 
-      {/* Raw payload toggle */}
       <div>
         <button
           onClick={() => setExpanded((v) => !v)}
-          className="text-xs text-slate-600 hover:text-slate-400 transition-colors"
+          className="text-[10px] font-mono uppercase tracking-widest transition-colors"
+          style={{ color: 'var(--sp-mist)' }}
         >
           {expanded ? '▲ hide payload' : '▼ show raw payload'}
         </button>
         {expanded && (
-          <pre className="mt-2 text-xs text-slate-400 bg-slate-900/60 rounded p-3 overflow-x-auto max-h-48 leading-relaxed">
+          <pre
+            className="mt-2 text-xs rounded p-3 overflow-x-auto max-h-48 leading-relaxed font-mono"
+            style={{
+              color: 'var(--sp-mist)',
+              background: 'rgba(13, 16, 21, 0.7)',
+              border: '1px solid var(--sp-line)',
+            }}
+          >
             {JSON.stringify(ev.raw_payload, null, 2)}
           </pre>
         )}
@@ -283,22 +295,129 @@ function SignalEventCard({ ev }: { ev: LiveSignalEvent }) {
   );
 }
 
+/**
+ * Renders an honest, per-source empty state.  Uses /source-health/summary
+ * data when the user has filtered to a specific source so we don't tell
+ * them to "run ingestion" when the source is rate-limited, timed out, or
+ * a placeholder.
+ */
+function PerSourceEmptyState({
+  sourceFilter,
+  data,
+  health,
+}: {
+  sourceFilter: '' | LiveSignalSource;
+  data: LiveSignalsResponse | null;
+  health: SourceHealthSummaryResponse | null;
+}) {
+  const overallEmpty = (data?.count ?? 0) === 0;
+  const label = sourceFilter ? (SOURCE_LABELS[sourceFilter] ?? sourceFilter) : 'live';
+  const entry: SourceHealthSummaryEntry | undefined = sourceFilter && health
+    ? health.sources.find((s) => s.source_name === sourceFilter)
+    : undefined;
+
+  // 1. Specific source filter chosen → use source-health to give an honest reason.
+  if (sourceFilter) {
+    if (entry) {
+      const accent =
+        entry.severity === 'error'
+          ? 'var(--sp-rust)'
+          : entry.severity === 'warning'
+          ? 'var(--sp-gold)'
+          : entry.severity === 'ok'
+          ? 'var(--sp-cyan)'
+          : 'var(--sp-mist)';
+      const headline = `No ${label} signals available right now.`;
+      return (
+        <div className="sp-card-soft p-8 space-y-3 text-center">
+          <div className="sp-eyebrow">Source Status</div>
+          <div className="text-sm" style={{ color: 'var(--sp-bone)' }}>{headline}</div>
+          <div className="flex items-center justify-center gap-2 text-[10px] font-mono uppercase tracking-widest">
+            <span style={{ color: accent }}>{entry.status || 'UNKNOWN'}</span>
+            <span style={{ color: 'var(--sp-mist)' }}>·</span>
+            <span style={{ color: 'var(--sp-mist)' }}>{entry.category}</span>
+          </div>
+          <p className="text-xs" style={{ color: 'var(--sp-mist)' }}>
+            {entry.human_message}
+          </p>
+          {entry.last_run_at && (
+            <p className="text-[10px] font-mono" style={{ color: 'var(--sp-mist)' }}>
+              last run · {formatTs(entry.last_run_at)} · {entry.fetched_count} fetched
+            </p>
+          )}
+          {entry.category !== 'PLACEHOLDER' && (
+            <p className="text-[10px] font-mono uppercase tracking-widest pt-1" style={{ color: 'var(--sp-mist)' }}>
+              Advisory · No execution
+            </p>
+          )}
+        </div>
+      );
+    }
+
+    // Source filter but no source-health entry → still honest, no misleading CTA.
+    return (
+      <div className="sp-card-soft p-8 space-y-2 text-center">
+        <div className="text-sm" style={{ color: 'var(--sp-bone)' }}>
+          No {label} signals available right now.
+        </div>
+        <p className="text-xs" style={{ color: 'var(--sp-mist)' }}>
+          No source-health record yet for {label}. Try another source or run ingestion later.
+        </p>
+      </div>
+    );
+  }
+
+  // 2. No source filter, but DB still has signals → just say "no match for filters".
+  if (!overallEmpty) {
+    return (
+      <div className="sp-card-soft p-8 text-center text-sm" style={{ color: 'var(--sp-mist)' }}>
+        No signals match your filter or search.
+      </div>
+    );
+  }
+
+  // 3. Truly empty across all sources → the generic ingestion CTA is appropriate.
+  return (
+    <div className="sp-card-soft p-8 text-center space-y-2">
+      <p className="text-sm" style={{ color: 'var(--sp-bone)' }}>No live signals ingested yet.</p>
+      <p className="text-[10px] font-mono uppercase tracking-widest" style={{ color: 'var(--sp-mist)' }}>
+        Run Phase 1 ingestion to populate <span className="lowercase">signal_events</span>:
+      </p>
+      <pre
+        className="text-[11px] font-mono inline-block px-3 py-2 rounded"
+        style={{
+          color: 'var(--sp-bone)',
+          background: 'rgba(13, 16, 21, 0.7)',
+          border: '1px solid var(--sp-line)',
+        }}
+      >
+        python scripts/live_source_runner.py
+      </pre>
+    </div>
+  );
+}
+
 export default function LiveSignalsPage() {
   const [sourceFilter, setSourceFilter] = useState<'' | LiveSignalSource>('');
   const [searchQuery, setSearchQuery] = useState('');
   const [data, setData] = useState<LiveSignalsResponse | null>(null);
+  const [health, setHealth] = useState<SourceHealthSummaryResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [backendOffline, setBackendOffline] = useState(false);
 
   useEffect(() => {
     setLoading(true);
-    getLiveSignals(sourceFilter || undefined, 200).then((result) => {
+    Promise.all([
+      getLiveSignals(sourceFilter || undefined, 200),
+      getSourceHealthSummary(),
+    ]).then(([result, h]) => {
       if (!result) {
         setBackendOffline(true);
       } else {
         setBackendOffline(false);
         setData(result);
       }
+      setHealth(h);
       setLoading(false);
     });
   }, [sourceFilter]);
@@ -322,13 +441,18 @@ export default function LiveSignalsPage() {
   }, [data]);
 
   return (
-    <div className="max-w-5xl mx-auto space-y-5">
-      {/* Page header */}
+    <div className="max-w-6xl mx-auto space-y-6">
       <div className="flex items-start justify-between">
         <div>
-          <h1 className="text-xl font-bold text-white">Live Signals</h1>
-          <p className="text-sm text-slate-500 mt-0.5">
-            Real-time ingestion from Polymarket, GDELT, SEC EDGAR, NewsAPI, Event Registry, Etherscan, Grok/xAI, Market Data, India (NSE/RBI/SEBI), Global Filings, and Asia Disclosure — advisory only
+          <div className="sp-eyebrow mb-1">Real-Time Ingestion</div>
+          <h1
+            className="text-2xl font-semibold tracking-tight"
+            style={{ color: 'var(--sp-bone)', letterSpacing: '-0.01em' }}
+          >
+            Live Signals
+          </h1>
+          <p className="text-sm mt-1 max-w-2xl" style={{ color: 'var(--sp-mist)' }}>
+            Polymarket · GDELT · SEC EDGAR · NewsAPI · Event Registry · Etherscan · Grok/xAI · Market Data · India · Global Filings · Asia Disclosure — advisory only.
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -337,63 +461,59 @@ export default function LiveSignalsPage() {
         </div>
       </div>
 
-      {/* Advisory safety banner */}
-      <div className="bg-slate-900 border border-red-900/40 rounded-lg px-4 py-3">
-        <p className="text-sm text-slate-400">
-          <span className="text-white font-semibold">No execution.</span>{' '}
+      <SourceHealthWarnings initial={health} />
+
+      <div
+        className="rounded-lg px-4 py-3"
+        style={{
+          background: 'rgba(160, 74, 58, 0.04)',
+          border: '1px solid rgba(160, 74, 58, 0.22)',
+        }}
+      >
+        <p className="text-sm" style={{ color: 'var(--sp-mist)' }}>
+          <span className="font-semibold" style={{ color: 'var(--sp-bone)' }}>No execution.</span>{' '}
           All live signals are{' '}
-          <span className="font-mono text-amber-400">ADVISORY_ONLY</span> with{' '}
-          <span className="font-mono text-amber-400">HUMAN_REVIEW_REQUIRED</span> and{' '}
-          <span className="font-mono text-red-400">execution_gate=LOCKED</span>. This system does not
+          <span className="font-mono" style={{ color: 'var(--sp-gold)' }}>ADVISORY_ONLY</span> with{' '}
+          <span className="font-mono" style={{ color: 'var(--sp-gold)' }}>HUMAN_REVIEW_REQUIRED</span> and{' '}
+          <span className="font-mono" style={{ color: '#d57b6a' }}>execution_gate=LOCKED</span>. This system does not
           place trades, connect to brokers, or execute orders of any kind.
         </p>
       </div>
 
-      {/* Backend offline */}
       {backendOffline && !loading && (
-        <div className="bg-slate-900 border border-amber-800/60 rounded-lg px-4 py-2.5 flex items-center gap-3 text-xs">
-          <span className="text-amber-400 font-semibold shrink-0">BACKEND OFFLINE</span>
-          <span className="text-slate-400">
-            Could not reach the FastAPI server. Start it with:{' '}
-            <span className="font-mono text-slate-300">python scripts/api_server.py</span>
+        <div
+          className="rounded-lg px-4 py-2.5 flex items-center gap-3 text-xs"
+          style={{
+            background: 'rgba(214, 168, 90, 0.04)',
+            border: '1px solid rgba(214, 168, 90, 0.22)',
+          }}
+        >
+          <span className="sp-chip sp-chip-warn shrink-0">Backend Offline</span>
+          <span style={{ color: 'var(--sp-mist)' }}>
+            Could not reach the FastAPI server. Start it:{' '}
+            <span className="font-mono" style={{ color: 'var(--sp-bone)' }}>python scripts/api_server.py</span>
           </span>
         </div>
       )}
 
-      {/* Summary stats */}
       {!loading && data && (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          <div className="bg-slate-800/60 border border-slate-700/60 rounded-lg p-4">
-            <div className="text-xs text-slate-500 mb-1">Total Signals</div>
-            <div className="text-2xl font-bold font-mono text-white">{data.count}</div>
-          </div>
+          <StatTile label="Total Signals" value={String(data.count)} />
           {Object.entries(sourceCounts).map(([src, cnt]) => (
-            <div key={src} className="bg-slate-800/60 border border-slate-700/60 rounded-lg p-4">
-              <div className="text-xs text-slate-500 mb-1">{SOURCE_LABELS[src] ?? src}</div>
-              <div className="text-2xl font-bold font-mono text-white">{cnt}</div>
-            </div>
+            <StatTile key={src} label={SOURCE_LABELS[src] ?? src} value={String(cnt)} />
           ))}
-          {latestTs && (
-            <div className="bg-slate-800/60 border border-slate-700/60 rounded-lg p-4">
-              <div className="text-xs text-slate-500 mb-1">Latest Fetched</div>
-              <div className="text-xs font-mono text-slate-300 mt-1">{formatTs(latestTs)}</div>
-            </div>
-          )}
+          {latestTs && <StatTile label="Latest Fetched" value={formatTs(latestTs)} small />}
         </div>
       )}
 
       {/* Filters */}
       <div className="flex flex-wrap gap-3 items-center">
-        <div className="flex gap-1">
+        <div className="flex gap-1 flex-wrap">
           {SOURCE_OPTIONS.map((opt) => (
             <button
               key={opt.value}
               onClick={() => setSourceFilter(opt.value)}
-              className={`px-3 py-1.5 text-xs rounded font-medium transition-colors ${
-                sourceFilter === opt.value
-                  ? 'bg-slate-600 text-white'
-                  : 'bg-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-700'
-              }`}
+              className={`sp-tab ${sourceFilter === opt.value ? 'sp-tab-active' : ''}`}
             >
               {opt.label}
             </button>
@@ -404,12 +524,13 @@ export default function LiveSignalsPage() {
           placeholder="Search title, ticker, domain, CIK…"
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
-          className="flex-1 min-w-48 bg-slate-800 border border-slate-700 rounded px-3 py-1.5 text-xs text-slate-200 placeholder-slate-600 focus:outline-none focus:border-slate-500"
+          className="sp-input flex-1 min-w-48 max-w-md"
         />
         {searchQuery && (
           <button
             onClick={() => setSearchQuery('')}
-            className="text-xs text-slate-500 hover:text-slate-300"
+            className="text-xs"
+            style={{ color: 'var(--sp-mist)' }}
           >
             clear
           </button>
@@ -418,32 +539,18 @@ export default function LiveSignalsPage() {
 
       {/* Content */}
       {loading ? (
-        <div className="text-center py-20 text-slate-500 text-sm">Loading live signals…</div>
+        <div className="text-center py-20 text-sm" style={{ color: 'var(--sp-mist)' }}>
+          Loading live signals…
+        </div>
       ) : backendOffline ? (
-        <div className="text-center py-20 space-y-2">
-          <p className="text-slate-500 text-sm">Backend offline — no live signal data available.</p>
-          <p className="text-xs text-slate-600">
-            Run the Phase 1 ingestion first:{' '}
-            <span className="font-mono">python scripts/live_source_runner.py</span>
-          </p>
+        <div className="sp-card-soft p-8 text-center space-y-2">
+          <p className="text-sm" style={{ color: 'var(--sp-mist)' }}>Backend offline — no live signal data available.</p>
         </div>
       ) : filtered.length === 0 ? (
-        <div className="text-center py-20 space-y-2">
-          <p className="text-slate-500 text-sm">
-            {data && data.count > 0
-              ? 'No signals match your filter or search.'
-              : 'No live signals ingested yet.'}
-          </p>
-          {(!data || data.count === 0) && (
-            <p className="text-xs text-slate-600">
-              Run the Phase 1 ingestion:{' '}
-              <span className="font-mono">python scripts/live_source_runner.py</span>
-            </p>
-          )}
-        </div>
+        <PerSourceEmptyState sourceFilter={sourceFilter} data={data} health={health} />
       ) : (
         <>
-          <div className="text-xs text-slate-600 font-mono">
+          <div className="text-[10px] font-mono uppercase tracking-widest" style={{ color: 'var(--sp-mist)' }}>
             {filtered.length} of {data?.count ?? 0} signal{filtered.length !== 1 ? 's' : ''}
           </div>
           <div className="space-y-3">
@@ -453,6 +560,20 @@ export default function LiveSignalsPage() {
           </div>
         </>
       )}
+    </div>
+  );
+}
+
+function StatTile({ label, value, small }: { label: string; value: string; small?: boolean }) {
+  return (
+    <div className="sp-card px-4 py-3">
+      <div className="sp-eyebrow mb-1">{label}</div>
+      <div
+        className={small ? 'text-xs font-mono' : 'text-2xl font-semibold font-mono'}
+        style={{ color: small ? 'var(--sp-mist)' : 'var(--sp-bone)' }}
+      >
+        {value}
+      </div>
     </div>
   );
 }

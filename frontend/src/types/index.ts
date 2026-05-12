@@ -60,6 +60,7 @@ export interface ManualTradeLog {
   side: 'BUY' | 'SELL';
   quantity: number;
   price: number;
+  leverage?: number;
   executed_at: string;
   thesis: string;
   notes: string;
@@ -219,6 +220,37 @@ export interface ManualTradeListResponse {
   human_review_required: boolean;
   broker_api_called: boolean;
   generated_at: string;
+}
+
+export type SourceHealthSeverity = 'ok' | 'info' | 'warning' | 'error';
+
+export interface SourceHealthSummaryEntry {
+  source_name: string;
+  label: string;
+  status: string;
+  severity: SourceHealthSeverity;
+  category: string;
+  human_message: string;
+  skipped_reason: string;
+  error_message: string;
+  fetched_count: number;
+  duration_ms: number;
+  last_run_at: string;
+  event_row_count: number;
+}
+
+export interface SourceHealthSummaryResponse {
+  sources: SourceHealthSummaryEntry[];
+  warning_count: number;
+  error_count: number;
+  ok_count: number;
+  total_count?: number;
+  advisory_status: string;
+  execution_mode: string;
+  ai_execution_count: number;
+  human_review_required: boolean;
+  broker_api_called?: boolean;
+  error?: string;
 }
 
 export interface SourceHealthResponse {
@@ -460,6 +492,32 @@ export interface ChartStructureResponse {
   security?: GlobalSecurity | null;
   report: ChartStructureReport | null;
   error?: string;
+  // Missing-data signal — emitted by backend when there are no local candles.
+  ok?: boolean;
+  reason?: 'NO_LOCAL_OHLCV' | string;
+  can_bootstrap?: boolean;
+  message?: string;
+}
+
+export type ChartBootstrapStepStatus = 'OK' | 'SKIPPED' | 'ERROR';
+
+export interface ChartBootstrapResponse {
+  ok: boolean;
+  symbol: string;
+  period: string;
+  interval: string;
+  discovery_status: ChartBootstrapStepStatus;
+  backfill_status: ChartBootstrapStepStatus;
+  candles_written: number | null;
+  candles_fetched?: number;
+  message: string;
+  advisory_status: string;
+  execution_mode: string;
+  execution_gate: string;
+  broker_api_called: boolean;
+  broker_order_id: string;
+  ai_execution_count: number;
+  human_review_required: boolean;
 }
 
 // ---------------------------------------------------------------------------

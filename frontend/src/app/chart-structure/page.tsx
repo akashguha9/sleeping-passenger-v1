@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { getChartStructure } from '@/lib/apiClient';
+import { getChartStructure, bootstrapChartSymbol } from '@/lib/apiClient';
 import type {
   ChartStructureResponse,
   ChartStructureReport,
@@ -9,47 +9,51 @@ import type {
   ChartTrend,
   ChartVolatility,
   ChartSupportResistance,
+  ChartBootstrapResponse,
 } from '@/types';
 import { AdvisoryOnlyBadge } from '@/components/AdvisoryOnlyBadge';
 import { HumanOnlyBadge } from '@/components/HumanOnlyBadge';
+import { SourceHealthWarnings } from '@/components/SourceHealthWarnings';
 
-const CHART_STATE_COLORS: Record<string, string> = {
-  TRENDING_UP: 'text-emerald-400 bg-emerald-900/30 border-emerald-700/40',
-  TRENDING_DOWN: 'text-red-400 bg-red-900/30 border-red-700/40',
-  BREAKOUT_ATTEMPT: 'text-amber-400 bg-amber-900/30 border-amber-700/40',
-  REVERSAL_RISK: 'text-orange-400 bg-orange-900/30 border-orange-700/40',
-  VOLATILE_UNCLEAR: 'text-rose-400 bg-rose-900/30 border-rose-700/40',
-  RANGE_BOUND: 'text-sky-400 bg-sky-900/30 border-sky-700/40',
-  COMPRESSED: 'text-indigo-400 bg-indigo-900/30 border-indigo-700/40',
-  INSUFFICIENT_DATA: 'text-slate-400 bg-slate-800/60 border-slate-700/40',
-  ERROR: 'text-red-400 bg-red-900/30 border-red-700/40',
+const CHART_STATE_ACCENT: Record<string, string> = {
+  TRENDING_UP: 'var(--sp-cyan)',
+  TRENDING_DOWN: 'var(--sp-rust)',
+  BREAKOUT_ATTEMPT: 'var(--sp-gold)',
+  REVERSAL_RISK: '#d97757',
+  VOLATILE_UNCLEAR: '#d57b6a',
+  RANGE_BOUND: 'var(--sp-cyan)',
+  COMPRESSED: '#a59ee6',
+  INSUFFICIENT_DATA: 'var(--sp-mist)',
+  ERROR: 'var(--sp-rust)',
 };
 
 const TREND_DIR_COLORS: Record<string, string> = {
-  uptrend: 'text-emerald-400',
-  downtrend: 'text-red-400',
-  sideways: 'text-sky-400',
-  insufficient_data: 'text-slate-500',
+  uptrend: 'var(--sp-cyan)',
+  downtrend: 'var(--sp-rust)',
+  sideways: 'var(--sp-mist)',
+  insufficient_data: 'var(--sp-mist)',
 };
 
 const VOL_REGIME_COLORS: Record<string, string> = {
-  compressed: 'text-indigo-400',
-  normal: 'text-emerald-400',
-  expanded: 'text-rose-400',
-  insufficient_data: 'text-slate-500',
+  compressed: '#a59ee6',
+  normal: 'var(--sp-cyan)',
+  expanded: '#d57b6a',
+  insufficient_data: 'var(--sp-mist)',
 };
 
 const NEXT_STEP_COLORS: Record<string, string> = {
-  WATCH_ONLY: 'text-sky-400',
-  REQUEST_MORE_EVIDENCE: 'text-amber-400',
-  HUMAN_REVIEW: 'text-orange-400',
-  NO_ACTION: 'text-slate-400',
+  WATCH_ONLY: 'var(--sp-cyan)',
+  REQUEST_MORE_EVIDENCE: 'var(--sp-gold)',
+  HUMAN_REVIEW: '#d97757',
+  NO_ACTION: 'var(--sp-mist)',
 };
 
-function scoreBar(score: number): string {
-  if (score >= 0.7) return 'bg-emerald-500';
-  if (score >= 0.4) return 'bg-amber-500';
-  return 'bg-red-500';
+type BootstrapPhase = 'idle' | 'discovering' | 'backfilling' | 'refreshing' | 'done' | 'failed';
+
+function scoreColor(score: number): string {
+  if (score >= 0.7) return 'var(--sp-cyan)';
+  if (score >= 0.4) return 'var(--sp-gold)';
+  return 'var(--sp-rust)';
 }
 
 function fmt(v: number | null | undefined, decimals = 2): string {
@@ -63,38 +67,28 @@ function fmtPct(v: number | null | undefined): string {
   return `${n >= 0 ? '+' : ''}${n.toFixed(2)}%`;
 }
 
-function InvariantRow({ label, value, mono = true }: { label: string; value: string; mono?: boolean }) {
-  return (
-    <div className="flex items-center justify-between px-3 py-1.5 rounded bg-slate-900/60">
-      <span className="text-xs text-slate-500">{label}</span>
-      <span className={`text-xs font-semibold ${mono ? 'font-mono' : ''} text-emerald-400`}>{value}</span>
-    </div>
-  );
-}
-
 function ContextPanel({ context }: { context: ChartMarketContext }) {
   const score = context.chart_confirmation_score;
+  const color = scoreColor(score);
   return (
     <div className="space-y-3">
       <div className="flex items-center gap-3">
-        <div className="text-sm font-semibold text-slate-300">Confirmation Score</div>
-        <div className="flex-1 h-2 rounded bg-slate-700 overflow-hidden">
+        <div className="text-sm font-semibold" style={{ color: 'var(--sp-bone)' }}>Confirmation Score</div>
+        <div className="flex-1 h-1.5 rounded overflow-hidden" style={{ background: 'rgba(232,231,227,0.06)' }}>
           <div
-            className={`h-full rounded transition-all ${scoreBar(score)}`}
-            style={{ width: `${Math.round(score * 100)}%` }}
+            className="h-full rounded transition-all"
+            style={{ width: `${Math.round(score * 100)}%`, background: color }}
           />
         </div>
-        <div className={`text-sm font-mono font-bold ${scoreBar(score).replace('bg-', 'text-')}`}>
-          {fmt(score)}
-        </div>
+        <div className="text-sm font-mono font-bold" style={{ color }}>{fmt(score)}</div>
       </div>
       {context.confirmation_reasons.length > 0 && (
         <div>
-          <div className="text-xs text-slate-500 mb-1">Confirmations</div>
+          <div className="sp-eyebrow mb-1">Confirmations</div>
           <ul className="space-y-0.5">
             {context.confirmation_reasons.map((r, i) => (
-              <li key={i} className="text-xs text-emerald-300 flex gap-1.5">
-                <span className="text-emerald-600">+</span>{r}
+              <li key={i} className="text-xs flex gap-1.5" style={{ color: 'var(--sp-bone)' }}>
+                <span style={{ color: 'var(--sp-cyan)' }}>+</span>{r}
               </li>
             ))}
           </ul>
@@ -102,11 +96,11 @@ function ContextPanel({ context }: { context: ChartMarketContext }) {
       )}
       {context.contradiction_reasons.length > 0 && (
         <div>
-          <div className="text-xs text-slate-500 mb-1">Contradictions</div>
+          <div className="sp-eyebrow mb-1">Contradictions</div>
           <ul className="space-y-0.5">
             {context.contradiction_reasons.map((r, i) => (
-              <li key={i} className="text-xs text-red-300 flex gap-1.5">
-                <span className="text-red-600">−</span>{r}
+              <li key={i} className="text-xs flex gap-1.5" style={{ color: 'var(--sp-bone)' }}>
+                <span style={{ color: 'var(--sp-rust)' }}>−</span>{r}
               </li>
             ))}
           </ul>
@@ -117,83 +111,44 @@ function ContextPanel({ context }: { context: ChartMarketContext }) {
 }
 
 function TrendPanel({ trend }: { trend: ChartTrend }) {
-  const dirColor = TREND_DIR_COLORS[trend.trend_direction] ?? 'text-slate-300';
+  const dirColor = TREND_DIR_COLORS[trend.trend_direction] ?? 'var(--sp-bone)';
   return (
     <div className="grid grid-cols-2 gap-x-6 gap-y-2 text-xs">
-      <div>
-        <div className="text-slate-500 mb-0.5">Direction</div>
-        <div className={`font-mono font-semibold uppercase ${dirColor}`}>{trend.trend_direction}</div>
-      </div>
-      <div>
-        <div className="text-slate-500 mb-0.5">Strength</div>
-        <div className="font-mono text-slate-200">{fmt(trend.trend_strength_score)}</div>
-      </div>
-      <div>
-        <div className="text-slate-500 mb-0.5">Short SMA</div>
-        <div className="font-mono text-slate-300">{fmt(trend.short_sma, 4)}</div>
-      </div>
-      <div>
-        <div className="text-slate-500 mb-0.5">Medium SMA</div>
-        <div className="font-mono text-slate-300">{fmt(trend.medium_sma, 4)}</div>
-      </div>
-      <div>
-        <div className="text-slate-500 mb-0.5">Long SMA</div>
-        <div className="font-mono text-slate-300">{fmt(trend.long_sma, 4)}</div>
-      </div>
-      <div>
-        <div className="text-slate-500 mb-0.5">Dist from Short SMA</div>
-        <div className="font-mono text-slate-300">{fmtPct(trend.distance_from_short_sma_pct)}</div>
-      </div>
-      <div>
-        <div className="text-slate-500 mb-0.5">Consec Up Closes</div>
-        <div className="font-mono text-slate-200">{trend.consecutive_up_closes}</div>
-      </div>
-      <div>
-        <div className="text-slate-500 mb-0.5">Consec Down Closes</div>
-        <div className="font-mono text-slate-200">{trend.consecutive_down_closes}</div>
-      </div>
+      <Pair label="Direction" value={trend.trend_direction} valueStyle={{ color: dirColor, textTransform: 'uppercase' }} />
+      <Pair label="Strength" value={fmt(trend.trend_strength_score)} />
+      <Pair label="Short SMA" value={fmt(trend.short_sma, 4)} />
+      <Pair label="Medium SMA" value={fmt(trend.medium_sma, 4)} />
+      <Pair label="Long SMA" value={fmt(trend.long_sma, 4)} />
+      <Pair label="Dist from Short SMA" value={fmtPct(trend.distance_from_short_sma_pct)} />
+      <Pair label="Consec Up Closes" value={String(trend.consecutive_up_closes)} />
+      <Pair label="Consec Down Closes" value={String(trend.consecutive_down_closes)} />
     </div>
   );
 }
 
 function VolatilityPanel({ vol }: { vol: ChartVolatility }) {
-  const regColor = VOL_REGIME_COLORS[vol.volatility_regime] ?? 'text-slate-300';
+  const regColor = VOL_REGIME_COLORS[vol.volatility_regime] ?? 'var(--sp-bone)';
   return (
     <div className="grid grid-cols-2 gap-x-6 gap-y-2 text-xs">
-      <div>
-        <div className="text-slate-500 mb-0.5">Regime</div>
-        <div className={`font-mono font-semibold uppercase ${regColor}`}>{vol.volatility_regime}</div>
-      </div>
-      <div>
-        <div className="text-slate-500 mb-0.5">ATR</div>
-        <div className="font-mono text-slate-300">{fmt(vol.average_true_range, 4)}</div>
-      </div>
-      <div>
-        <div className="text-slate-500 mb-0.5">ATR %</div>
-        <div className="font-mono text-slate-300">{fmtPct(vol.atr_pct)}</div>
-      </div>
-      <div>
-        <div className="text-slate-500 mb-0.5">Realized Vol Proxy</div>
-        <div className="font-mono text-slate-300">{fmt(vol.realized_volatility_proxy, 4)}</div>
-      </div>
-      <div>
-        <div className="text-slate-500 mb-0.5">Range Expansion</div>
-        <div className={`font-mono font-semibold ${vol.range_expansion_flag ? 'text-amber-400' : 'text-slate-500'}`}>
-          {vol.range_expansion_flag ? 'YES' : 'no'}
-        </div>
-      </div>
-      <div>
-        <div className="text-slate-500 mb-0.5">Gap Flag</div>
-        <div className={`font-mono font-semibold ${vol.gap_flag ? 'text-amber-400' : 'text-slate-500'}`}>
-          {vol.gap_flag ? 'YES' : 'no'}
-        </div>
-      </div>
-      <div>
-        <div className="text-slate-500 mb-0.5">Large Move</div>
-        <div className={`font-mono font-semibold ${vol.large_move_flag ? 'text-rose-400' : 'text-slate-500'}`}>
-          {vol.large_move_flag ? 'YES' : 'no'}
-        </div>
-      </div>
+      <Pair label="Regime" value={vol.volatility_regime} valueStyle={{ color: regColor, textTransform: 'uppercase' }} />
+      <Pair label="ATR" value={fmt(vol.average_true_range, 4)} />
+      <Pair label="ATR %" value={fmtPct(vol.atr_pct)} />
+      <Pair label="Realized Vol" value={fmt(vol.realized_volatility_proxy, 4)} />
+      <Pair
+        label="Range Expansion"
+        value={vol.range_expansion_flag ? 'YES' : 'no'}
+        valueStyle={{ color: vol.range_expansion_flag ? 'var(--sp-gold)' : 'var(--sp-mist)' }}
+      />
+      <Pair
+        label="Gap Flag"
+        value={vol.gap_flag ? 'YES' : 'no'}
+        valueStyle={{ color: vol.gap_flag ? 'var(--sp-gold)' : 'var(--sp-mist)' }}
+      />
+      <Pair
+        label="Large Move"
+        value={vol.large_move_flag ? 'YES' : 'no'}
+        valueStyle={{ color: vol.large_move_flag ? '#d57b6a' : 'var(--sp-mist)' }}
+      />
     </div>
   );
 }
@@ -201,147 +156,256 @@ function VolatilityPanel({ vol }: { vol: ChartVolatility }) {
 function SupportResistancePanel({ sr }: { sr: ChartSupportResistance }) {
   return (
     <div className="grid grid-cols-2 gap-x-6 gap-y-2 text-xs">
-      <div>
-        <div className="text-slate-500 mb-0.5">Breakout Proximity</div>
-        <div className="font-mono font-semibold text-slate-200 uppercase">{sr.breakout_proximity.replace(/_/g, ' ')}</div>
-      </div>
-      <div>
-        <div className="text-slate-500 mb-0.5">Rolling High</div>
-        <div className="font-mono text-slate-300">{fmt(sr.rolling_high, 4)}</div>
-      </div>
-      <div>
-        <div className="text-slate-500 mb-0.5">Rolling Low</div>
-        <div className="font-mono text-slate-300">{fmt(sr.rolling_low, 4)}</div>
-      </div>
-      <div>
-        <div className="text-slate-500 mb-0.5">Dist to High</div>
-        <div className="font-mono text-slate-300">{fmtPct(sr.distance_to_rolling_high_pct)}</div>
-      </div>
-      <div>
-        <div className="text-slate-500 mb-0.5">Dist to Low</div>
-        <div className="font-mono text-slate-300">{fmtPct(sr.distance_to_rolling_low_pct)}</div>
-      </div>
+      <Pair label="Breakout Proximity" value={sr.breakout_proximity.replace(/_/g, ' ')} valueStyle={{ textTransform: 'uppercase' }} />
+      <Pair label="Rolling High" value={fmt(sr.rolling_high, 4)} />
+      <Pair label="Rolling Low" value={fmt(sr.rolling_low, 4)} />
+      <Pair label="Dist to High" value={fmtPct(sr.distance_to_rolling_high_pct)} />
+      <Pair label="Dist to Low" value={fmtPct(sr.distance_to_rolling_low_pct)} />
+    </div>
+  );
+}
+
+function Pair({ label, value, valueStyle }: { label: string; value: string; valueStyle?: React.CSSProperties }) {
+  return (
+    <div>
+      <div className="text-[10px] font-mono uppercase tracking-widest mb-0.5" style={{ color: 'var(--sp-mist)' }}>{label}</div>
+      <div className="font-mono" style={{ color: 'var(--sp-bone)', ...valueStyle }}>{value}</div>
     </div>
   );
 }
 
 function ReportView({ report }: { report: ChartStructureReport }) {
   const nextStepColor = report.advisory?.suggested_next_step
-    ? (NEXT_STEP_COLORS[report.advisory.suggested_next_step] ?? 'text-slate-300')
-    : 'text-slate-300';
+    ? (NEXT_STEP_COLORS[report.advisory.suggested_next_step] ?? 'var(--sp-bone)')
+    : 'var(--sp-bone)';
 
   return (
     <div className="space-y-4">
-      {/* Advisory summary */}
       {report.advisory && (
-        <div className="bg-slate-800/60 border border-slate-700/60 rounded-lg px-4 py-3 space-y-2">
-          <div className="text-xs font-semibold text-slate-400 uppercase tracking-wide">Advisory Summary</div>
-          <p className="text-sm text-slate-200 leading-relaxed">{report.advisory.advisory_summary}</p>
+        <div className="sp-card p-4 space-y-2">
+          <div className="sp-eyebrow">Advisory Summary</div>
+          <p className="text-sm leading-relaxed" style={{ color: 'var(--sp-bone)' }}>
+            {report.advisory.advisory_summary}
+          </p>
           <div className="flex items-center gap-2 pt-0.5">
-            <span className="text-xs text-slate-500">Suggested next step:</span>
-            <span className={`text-xs font-mono font-semibold ${nextStepColor}`}>
+            <span className="text-xs" style={{ color: 'var(--sp-mist)' }}>Suggested next step:</span>
+            <span className="text-xs font-mono font-semibold" style={{ color: nextStepColor }}>
               {report.advisory.suggested_next_step}
             </span>
           </div>
         </div>
       )}
 
-      {/* Summary stats */}
       {report.summary && (
-        <div className="bg-slate-800/60 border border-slate-700/60 rounded-lg px-4 py-3 space-y-2">
-          <div className="text-xs font-semibold text-slate-400 uppercase tracking-wide">OHLCV Summary</div>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <div className="sp-card p-4 space-y-3">
+          <div className="sp-eyebrow">OHLCV Summary</div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <div>
-              <div className="text-xs text-slate-500">Latest Close</div>
-              <div className="text-lg font-bold font-mono text-white">
+              <div className="text-[10px] font-mono uppercase tracking-widest mb-1" style={{ color: 'var(--sp-mist)' }}>Latest Close</div>
+              <div className="text-lg font-bold font-mono" style={{ color: 'var(--sp-bone)' }}>
                 {report.summary.latest_close != null ? `$${fmt(report.summary.latest_close, 4)}` : '—'}
               </div>
             </div>
             <div>
-              <div className="text-xs text-slate-500">Price Change</div>
-              <div className={`text-sm font-mono font-semibold ${
-                (report.summary.price_change_pct ?? 0) >= 0 ? 'text-emerald-400' : 'text-red-400'
-              }`}>
+              <div className="text-[10px] font-mono uppercase tracking-widest mb-1" style={{ color: 'var(--sp-mist)' }}>Price Change</div>
+              <div
+                className="text-sm font-mono font-semibold"
+                style={{ color: (report.summary.price_change_pct ?? 0) >= 0 ? 'var(--sp-cyan)' : 'var(--sp-rust)' }}
+              >
                 {fmtPct(report.summary.price_change_pct)}
               </div>
-              <div className="text-xs text-slate-600 font-mono">
-                {report.summary.price_change_abs != null
-                  ? `${(report.summary.price_change_abs ?? 0) >= 0 ? '+' : ''}${fmt(report.summary.price_change_abs, 4)}`
-                  : ''}
+            </div>
+            <div>
+              <div className="text-[10px] font-mono uppercase tracking-widest mb-1" style={{ color: 'var(--sp-mist)' }}>Candle Count</div>
+              <div className="text-lg font-bold font-mono" style={{ color: 'var(--sp-bone)' }}>{report.summary.candle_count}</div>
+            </div>
+            <div>
+              <div className="text-[10px] font-mono uppercase tracking-widest mb-1" style={{ color: 'var(--sp-mist)' }}>H/L Range</div>
+              <div className="text-sm font-mono" style={{ color: 'var(--sp-bone)' }}>{fmtPct(report.summary.high_low_range_pct)}</div>
+            </div>
+            <div>
+              <div className="text-[10px] font-mono uppercase tracking-widest mb-1" style={{ color: 'var(--sp-mist)' }}>Avg Volume</div>
+              <div className="text-xs font-mono" style={{ color: 'var(--sp-bone)' }}>
+                {report.summary.average_volume != null ? Number(report.summary.average_volume).toLocaleString() : '—'}
               </div>
             </div>
             <div>
-              <div className="text-xs text-slate-500">Candle Count</div>
-              <div className="text-lg font-bold font-mono text-white">{report.summary.candle_count}</div>
-            </div>
-            <div>
-              <div className="text-xs text-slate-500">H/L Range</div>
-              <div className="text-sm font-mono text-slate-300">{fmtPct(report.summary.high_low_range_pct)}</div>
-            </div>
-            <div>
-              <div className="text-xs text-slate-500">Avg Volume</div>
-              <div className="text-xs font-mono text-slate-300">
-                {report.summary.average_volume != null
-                  ? Number(report.summary.average_volume).toLocaleString()
-                  : '—'}
+              <div className="text-[10px] font-mono uppercase tracking-widest mb-1" style={{ color: 'var(--sp-mist)' }}>Latest Volume</div>
+              <div className="text-xs font-mono" style={{ color: 'var(--sp-bone)' }}>
+                {report.summary.latest_volume != null ? Number(report.summary.latest_volume).toLocaleString() : '—'}
               </div>
             </div>
             <div>
-              <div className="text-xs text-slate-500">Latest Volume</div>
-              <div className="text-xs font-mono text-slate-300">
-                {report.summary.latest_volume != null
-                  ? Number(report.summary.latest_volume).toLocaleString()
-                  : '—'}
-              </div>
+              <div className="text-[10px] font-mono uppercase tracking-widest mb-1" style={{ color: 'var(--sp-mist)' }}>First Candle</div>
+              <div className="text-xs font-mono" style={{ color: 'var(--sp-mist)' }}>{report.summary.first_timestamp ?? '—'}</div>
             </div>
             <div>
-              <div className="text-xs text-slate-500">First Candle</div>
-              <div className="text-xs font-mono text-slate-400">{report.summary.first_timestamp ?? '—'}</div>
-            </div>
-            <div>
-              <div className="text-xs text-slate-500">Latest Candle</div>
-              <div className="text-xs font-mono text-slate-400">{report.summary.latest_timestamp ?? '—'}</div>
+              <div className="text-[10px] font-mono uppercase tracking-widest mb-1" style={{ color: 'var(--sp-mist)' }}>Latest Candle</div>
+              <div className="text-xs font-mono" style={{ color: 'var(--sp-mist)' }}>{report.summary.latest_timestamp ?? '—'}</div>
             </div>
           </div>
         </div>
       )}
 
-      {/* Three-column detail panels */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        {/* Trend */}
         {report.trend && (
-          <div className="bg-slate-800/60 border border-slate-700/60 rounded-lg px-4 py-3 space-y-3">
-            <div className="text-xs font-semibold text-slate-400 uppercase tracking-wide">Trend</div>
+          <div className="sp-card p-4 space-y-3">
+            <div className="sp-eyebrow">Trend</div>
             <TrendPanel trend={report.trend} />
           </div>
         )}
-
-        {/* Volatility */}
         {report.volatility && (
-          <div className="bg-slate-800/60 border border-slate-700/60 rounded-lg px-4 py-3 space-y-3">
-            <div className="text-xs font-semibold text-slate-400 uppercase tracking-wide">Volatility</div>
+          <div className="sp-card p-4 space-y-3">
+            <div className="sp-eyebrow">Volatility</div>
             <VolatilityPanel vol={report.volatility} />
           </div>
         )}
-
-        {/* Support / Resistance */}
         {report.support_resistance && (
-          <div className="bg-slate-800/60 border border-slate-700/60 rounded-lg px-4 py-3 space-y-3">
-            <div className="text-xs font-semibold text-slate-400 uppercase tracking-wide">Support / Resistance</div>
+          <div className="sp-card p-4 space-y-3">
+            <div className="sp-eyebrow">Support / Resistance</div>
             <SupportResistancePanel sr={report.support_resistance} />
           </div>
         )}
       </div>
 
-      {/* Confirmation / Context */}
       {report.context && (
-        <div className="bg-slate-800/60 border border-slate-700/60 rounded-lg px-4 py-3 space-y-3">
-          <div className="text-xs font-semibold text-slate-400 uppercase tracking-wide">Market Context</div>
+        <div className="sp-card p-4 space-y-3">
+          <div className="sp-eyebrow">Market Context</div>
           <ContextPanel context={report.context} />
         </div>
       )}
     </div>
   );
+}
+
+function BootstrapPrompt({
+  symbol,
+  onConfirm,
+  onCancel,
+}: {
+  symbol: string;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  return (
+    <div
+      className="sp-card p-6 space-y-4"
+      style={{ borderColor: 'rgba(200, 154, 74, 0.32)' }}
+    >
+      <div className="sp-eyebrow" style={{ color: 'var(--sp-gold)' }}>Symbol Bootstrap</div>
+      <div className="text-sm leading-relaxed" style={{ color: 'var(--sp-bone)' }}>
+        Symbol data not found locally for{' '}
+        <span className="font-mono font-bold">{symbol}</span>.
+        Do you want to discover/register this symbol and download full historical OHLCV data?
+      </div>
+      <div className="flex items-center gap-3 flex-wrap">
+        <span className="sp-chip sp-chip-gold">period · max</span>
+        <span className="sp-chip sp-chip-cyan">interval · 1d</span>
+        <span className="sp-chip">market-data only</span>
+      </div>
+      <p className="text-xs" style={{ color: 'var(--sp-mist)' }}>
+        This only downloads local market data into SQLite. It does not place trades or connect to any broker.
+        Advisory-only · broker_api_called = <span className="font-mono">false</span> · ai_execution_count = <span className="font-mono">0</span>.
+      </p>
+      <div className="flex items-center gap-3">
+        <button type="button" onClick={onConfirm} className="sp-btn-primary" style={{ width: 'auto', minWidth: '180px' }}>
+          Yes, download data
+        </button>
+        <button
+          type="button"
+          onClick={onCancel}
+          className="px-4 py-2.5 rounded text-sm uppercase tracking-widest text-[12px]"
+          style={{
+            color: 'var(--sp-mist)',
+            border: '1px solid var(--sp-line-strong)',
+            background: 'transparent',
+            letterSpacing: '0.16em',
+          }}
+        >
+          No, cancel
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function BootstrapProgress({
+  phase,
+  symbol,
+  result,
+}: {
+  phase: BootstrapPhase;
+  symbol: string;
+  result: ChartBootstrapResponse | null;
+}) {
+  const phaseLabel: Record<BootstrapPhase, string> = {
+    idle: '',
+    discovering: 'Discovering/registering symbol…',
+    backfilling: 'Downloading OHLCV candles…',
+    refreshing: 'Completed, refreshing chart…',
+    done: 'Bootstrap complete.',
+    failed: 'Bootstrap failed.',
+  };
+  const accent =
+    phase === 'failed'
+      ? 'var(--sp-rust)'
+      : phase === 'done' || phase === 'refreshing'
+      ? 'var(--sp-cyan)'
+      : 'var(--sp-gold)';
+  return (
+    <div className="sp-card p-5 space-y-3">
+      <div className="flex items-center gap-3">
+        <span
+          className="w-1.5 h-1.5 rounded-full"
+          style={{
+            background: accent,
+            boxShadow: `0 0 10px ${accent}`,
+            animation: phase === 'failed' || phase === 'done' ? 'none' : 'pulse 1.6s ease-in-out infinite',
+          }}
+        />
+        <div className="sp-eyebrow" style={{ color: accent }}>{phaseLabel[phase]}</div>
+      </div>
+      <div className="text-xs font-mono" style={{ color: 'var(--sp-mist)' }}>
+        symbol: <span style={{ color: 'var(--sp-bone)' }}>{symbol}</span> · period: max · interval: 1d
+      </div>
+      {result && (
+        <div className="space-y-1 text-xs" style={{ color: 'var(--sp-mist)' }}>
+          <div>
+            discovery_status:{' '}
+            <span className="font-mono" style={{ color: statusColor(result.discovery_status) }}>
+              {result.discovery_status}
+            </span>
+          </div>
+          <div>
+            backfill_status:{' '}
+            <span className="font-mono" style={{ color: statusColor(result.backfill_status) }}>
+              {result.backfill_status}
+            </span>
+          </div>
+          {result.candles_written != null && (
+            <div>
+              candles_written: <span className="font-mono" style={{ color: 'var(--sp-bone)' }}>{result.candles_written}</span>
+            </div>
+          )}
+          {result.message && (
+            <div className="pt-1" style={{ color: 'var(--sp-bone)' }}>{result.message}</div>
+          )}
+        </div>
+      )}
+      <style jsx>{`
+        @keyframes pulse {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0.35; }
+        }
+      `}</style>
+    </div>
+  );
+}
+
+function statusColor(status: string): string {
+  if (status === 'OK') return 'var(--sp-cyan)';
+  if (status === 'ERROR') return 'var(--sp-rust)';
+  return 'var(--sp-mist)';
 }
 
 export default function ChartStructurePage() {
@@ -352,12 +416,13 @@ export default function ChartStructurePage() {
   const [backendOffline, setBackendOffline] = useState(false);
   const [queried, setQueried] = useState(false);
 
-  async function handleLookup() {
-    const sym = symbolInput.trim().toUpperCase();
-    if (!sym) return;
-    const lim = Math.max(1, Math.min(500, parseInt(limitInput, 10) || 100));
+  // Bootstrap state
+  const [bootstrapPhase, setBootstrapPhase] = useState<BootstrapPhase>('idle');
+  const [bootstrapResult, setBootstrapResult] = useState<ChartBootstrapResponse | null>(null);
+  const [bootstrappingSymbol, setBootstrappingSymbol] = useState<string | null>(null);
+
+  async function fetchChartFor(sym: string, lim: number) {
     setLoading(true);
-    setQueried(true);
     setBackendOffline(false);
     const data = await getChartStructure(sym, lim);
     if (!data) {
@@ -369,24 +434,109 @@ export default function ChartStructurePage() {
     setLoading(false);
   }
 
+  async function handleLookup() {
+    const sym = symbolInput.trim().toUpperCase();
+    if (!sym) return;
+    const lim = Math.max(1, Math.min(500, parseInt(limitInput, 10) || 100));
+    setBootstrapPhase('idle');
+    setBootstrapResult(null);
+    setQueried(true);
+    await fetchChartFor(sym, lim);
+  }
+
+  async function handleBootstrapConfirm() {
+    if (!result) return;
+    const sym = result.symbol;
+    if (bootstrappingSymbol === sym) return; // prevent duplicate
+    const lim = Math.max(1, Math.min(500, parseInt(limitInput, 10) || 100));
+
+    setBootstrappingSymbol(sym);
+    setBootstrapPhase('discovering');
+    setBootstrapResult(null);
+
+    // Single backend call performs discovery + backfill. We flip the phase
+    // to "backfilling" optimistically so the UI conveys progress while the
+    // request is in-flight (the request itself can take 20–60s on a real
+    // backfill, but we don't block the user from clicking Cancel).
+    const backfillTimer = setTimeout(() => {
+      setBootstrapPhase((p) => (p === 'discovering' ? 'backfilling' : p));
+    }, 1200);
+
+    const data = await bootstrapChartSymbol(sym, 'max', '1d');
+    clearTimeout(backfillTimer);
+
+    if (!data) {
+      setBootstrapPhase('failed');
+      setBootstrapResult({
+        ok: false,
+        symbol: sym,
+        period: 'max',
+        interval: '1d',
+        discovery_status: 'ERROR',
+        backfill_status: 'SKIPPED',
+        candles_written: null,
+        message: 'Backend unreachable. Start the API server and try again.',
+        advisory_status: 'ADVISORY_ONLY',
+        execution_mode: 'HUMAN_ONLY',
+        execution_gate: 'LOCKED',
+        broker_api_called: false,
+        broker_order_id: 'NONE',
+        ai_execution_count: 0,
+        human_review_required: true,
+      });
+      setBootstrappingSymbol(null);
+      return;
+    }
+
+    setBootstrapResult(data);
+    if (!data.ok) {
+      setBootstrapPhase('failed');
+      setBootstrappingSymbol(null);
+      return;
+    }
+
+    setBootstrapPhase('refreshing');
+    await fetchChartFor(sym, lim);
+    setBootstrapPhase('done');
+    setBootstrappingSymbol(null);
+  }
+
+  function handleBootstrapCancel() {
+    setBootstrapPhase('idle');
+    setBootstrapResult(null);
+  }
+
   function handleKeyDown(e: React.KeyboardEvent) {
     if (e.key === 'Enter') handleLookup();
   }
 
   const chartState = result?.report?.context?.chart_state ?? result?.chart_state;
-  const stateColor = chartState ? (CHART_STATE_COLORS[chartState] ?? CHART_STATE_COLORS.INSUFFICIENT_DATA) : '';
+  const stateAccent = chartState ? (CHART_STATE_ACCENT[chartState] ?? 'var(--sp-mist)') : '';
   const hasReport = !!(result && result.report);
-  const isInsufficient = !!(result && !result.report && result.candle_count === 0);
+  const isMissingData = !!(
+    result && !result.report && result.candle_count === 0 && result.can_bootstrap !== false
+  );
   const isError = !!(result && result.error);
+  const showBootstrapPrompt =
+    isMissingData && !isError && bootstrapPhase === 'idle' && !bootstrappingSymbol;
+  const isBootstrapping =
+    bootstrapPhase === 'discovering' ||
+    bootstrapPhase === 'backfilling' ||
+    bootstrapPhase === 'refreshing';
 
   return (
-    <div className="max-w-5xl mx-auto space-y-5">
-      {/* Page header */}
+    <div className="max-w-6xl mx-auto space-y-6">
       <div className="flex items-start justify-between">
         <div>
-          <h1 className="text-xl font-bold text-white">Chart Structure</h1>
-          <p className="text-sm text-slate-500 mt-0.5">
-            Advisory-only OHLCV feature engine — reads local market data, no broker connection
+          <div className="sp-eyebrow mb-1">Technical Engine</div>
+          <h1
+            className="text-2xl font-semibold tracking-tight"
+            style={{ color: 'var(--sp-bone)', letterSpacing: '-0.01em' }}
+          >
+            Chart Structure
+          </h1>
+          <p className="text-sm mt-1" style={{ color: 'var(--sp-mist)' }}>
+            Advisory-only OHLCV feature engine — reads local market data. No broker connection.
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -395,162 +545,163 @@ export default function ChartStructurePage() {
         </div>
       </div>
 
-      {/* Safety banner */}
-      <div className="bg-slate-900 border border-red-900/40 rounded-lg px-4 py-3">
-        <p className="text-sm text-slate-400">
-          <span className="text-white font-semibold">Chart structure is advisory-only. No execution. Human review required.</span>{' '}
+      <SourceHealthWarnings compact />
+
+      <div
+        className="rounded-lg px-4 py-3"
+        style={{
+          background: 'rgba(160, 74, 58, 0.04)',
+          border: '1px solid rgba(160, 74, 58, 0.22)',
+        }}
+      >
+        <p className="text-sm" style={{ color: 'var(--sp-mist)' }}>
+          <span className="font-semibold" style={{ color: 'var(--sp-bone)' }}>
+            Chart structure is advisory-only. No execution. Human review required.
+          </span>{' '}
           This panel reads historical OHLCV candles from local SQLite and computes technical features.
-          It does{' '}
-          <span className="text-red-400 font-semibold">not</span>{' '}
-          place orders, connect to any broker, or produce buy/sell instructions.
-          All results carry{' '}
-          <span className="font-mono text-amber-400">ADVISORY_ONLY</span>,{' '}
-          <span className="font-mono text-red-400">execution_gate=LOCKED</span>, and{' '}
-          <span className="font-mono text-amber-400">HUMAN_REVIEW_REQUIRED</span>.
+          It does <span className="font-semibold" style={{ color: '#d57b6a' }}>not</span> place orders,
+          connect to any broker, or produce buy/sell instructions.
         </p>
       </div>
 
-      {/* Execution invariants */}
-      <div className="bg-slate-800/60 border border-slate-700/60 rounded-lg px-4 py-3 space-y-2">
-        <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Execution Invariants</div>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-          <InvariantRow label="Advisory" value="ADVISORY_ONLY" />
-          <InvariantRow label="Execution gate" value="LOCKED" />
-          <InvariantRow label="Human review" value="REQUIRED" />
-          <InvariantRow label="AI execution count" value="0" />
-          <InvariantRow label="Broker API called" value="false" />
-          <InvariantRow label="Broker order ID" value="NONE" />
-          <InvariantRow label="Mode" value="HUMAN_REVIEW_REQUIRED" />
-          <InvariantRow label="AI executions" value="AI_EXECUTION_COUNT=0" />
-        </div>
-      </div>
-
-      {/* Symbol lookup */}
-      <div className="bg-slate-800/60 border border-slate-700/60 rounded-lg px-4 py-3">
-        <div className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-3">Symbol Lookup</div>
+      <div className="sp-card p-5">
+        <div className="sp-eyebrow mb-3">Symbol Lookup</div>
         <div className="flex flex-wrap gap-3 items-end">
           <div className="flex flex-col gap-1">
-            <label className="text-xs text-slate-500">Symbol</label>
+            <label className="text-[10px] font-mono uppercase tracking-widest" style={{ color: 'var(--sp-mist)' }}>Symbol</label>
             <input
               type="text"
               placeholder="AAPL · BTC-USD · RELIANCE.NS"
               value={symbolInput}
               onChange={(e) => setSymbolInput(e.target.value)}
               onKeyDown={handleKeyDown}
-              className="w-56 bg-slate-900 border border-slate-700 rounded px-3 py-1.5 text-sm text-slate-200 placeholder-slate-600 focus:outline-none focus:border-slate-500 font-mono"
+              className="sp-input font-mono w-56"
+              disabled={isBootstrapping}
             />
           </div>
           <div className="flex flex-col gap-1">
-            <label className="text-xs text-slate-500">Candle limit</label>
+            <label className="text-[10px] font-mono uppercase tracking-widest" style={{ color: 'var(--sp-mist)' }}>Candle Limit</label>
             <input
               type="number"
               min={1}
               max={500}
               value={limitInput}
               onChange={(e) => setLimitInput(e.target.value)}
-              className="w-24 bg-slate-900 border border-slate-700 rounded px-3 py-1.5 text-sm text-slate-200 focus:outline-none focus:border-slate-500 font-mono"
+              className="sp-input font-mono w-24"
+              disabled={isBootstrapping}
             />
           </div>
           <button
             onClick={handleLookup}
-            disabled={loading || !symbolInput.trim()}
-            className="px-4 py-1.5 rounded bg-slate-700 text-sm text-white font-medium hover:bg-slate-600 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            disabled={loading || isBootstrapping || !symbolInput.trim()}
+            className="sp-btn-primary"
+            style={{ width: 'auto', minWidth: '120px' }}
           >
             {loading ? 'Loading…' : 'Fetch'}
           </button>
           {result && (
             <button
-              onClick={() => { setResult(null); setQueried(false); }}
-              className="text-xs text-slate-500 hover:text-slate-300 transition-colors"
+              onClick={() => { setResult(null); setQueried(false); setBootstrapPhase('idle'); setBootstrapResult(null); }}
+              className="text-xs"
+              style={{ color: 'var(--sp-mist)' }}
             >
               clear
             </button>
           )}
         </div>
-        <p className="text-xs text-slate-600 mt-2">
+        <p className="text-xs mt-3" style={{ color: 'var(--sp-mist)' }}>
           Examples: <span className="font-mono">AAPL</span> · <span className="font-mono">BTC-USD</span> · <span className="font-mono">RELIANCE.NS</span> · <span className="font-mono">SPY</span>
         </p>
       </div>
 
-      {/* Backend offline */}
       {backendOffline && !loading && (
-        <div className="bg-slate-900 border border-amber-800/60 rounded-lg px-4 py-2.5 flex items-center gap-3 text-xs">
-          <span className="text-amber-400 font-semibold shrink-0">BACKEND OFFLINE</span>
-          <span className="text-slate-400">
-            Could not reach the FastAPI server. Start it with:{' '}
-            <span className="font-mono text-slate-300">python scripts/api_server.py</span>
+        <div
+          className="rounded-lg px-4 py-2.5 flex items-center gap-3 text-xs"
+          style={{ background: 'rgba(214, 168, 90, 0.04)', border: '1px solid rgba(214, 168, 90, 0.22)' }}
+        >
+          <span className="sp-chip sp-chip-warn shrink-0">Backend Offline</span>
+          <span style={{ color: 'var(--sp-mist)' }}>
+            Could not reach the FastAPI server. Start it:{' '}
+            <span className="font-mono" style={{ color: 'var(--sp-bone)' }}>python scripts/api_server.py</span>
           </span>
         </div>
       )}
 
-      {/* Loading */}
       {loading && (
-        <div className="text-center py-16 text-slate-500 text-sm">Fetching chart structure…</div>
+        <div className="text-center py-16 text-sm" style={{ color: 'var(--sp-mist)' }}>
+          Fetching chart structure…
+        </div>
       )}
 
-      {/* Results */}
+      {/* Bootstrap progress card sits above results */}
+      {bootstrapPhase !== 'idle' && result && (
+        <BootstrapProgress phase={bootstrapPhase} symbol={result.symbol} result={bootstrapResult} />
+      )}
+
       {!loading && result && (
         <div className="space-y-4">
-          {/* Header row */}
           <div className="flex items-center gap-3 flex-wrap">
-            <div className="text-lg font-bold font-mono text-white">{result.symbol}</div>
+            <div className="text-lg font-bold font-mono" style={{ color: 'var(--sp-bone)' }}>{result.symbol}</div>
             {chartState && (
-              <span className={`text-xs font-semibold px-2 py-0.5 rounded border font-mono ${stateColor}`}>
+              <span
+                className="text-[10px] font-mono font-semibold px-2 py-0.5 rounded-full uppercase tracking-widest"
+                style={{
+                  color: stateAccent,
+                  border: `1px solid ${stateAccent.startsWith('var') ? 'rgba(232,231,227,0.18)' : `${stateAccent}55`}`,
+                  background: 'rgba(232,231,227,0.03)',
+                }}
+              >
                 {chartState}
               </span>
             )}
-            <span className="text-xs font-mono text-slate-500">
+            <span className="text-[10px] font-mono" style={{ color: 'var(--sp-mist)' }}>
               {result.candle_count} candle{result.candle_count !== 1 ? 's' : ''}
             </span>
-            <span className="text-xs px-1.5 py-0.5 rounded bg-red-900/30 border border-red-800/40 text-red-400 font-mono">
-              EXECUTION LOCKED
-            </span>
-            <span className="text-xs px-1.5 py-0.5 rounded bg-amber-900/30 border border-amber-800/40 text-amber-400 font-mono">
-              ADVISORY_ONLY
-            </span>
-            <span className="text-xs px-1.5 py-0.5 rounded bg-amber-900/30 border border-amber-800/40 text-amber-400 font-mono">
-              HUMAN_REVIEW_REQUIRED
-            </span>
+            <span className="sp-chip sp-chip-rust">Execution · Locked</span>
+            <span className="sp-chip sp-chip-gold">Advisory_Only</span>
+            <span className="sp-chip sp-chip-warn">Human_Review_Required</span>
           </div>
 
-          {/* Error state */}
           {isError && (
-            <div className="bg-slate-900 border border-red-800/40 rounded-lg px-4 py-3 text-sm text-red-400">
+            <div
+              className="rounded-lg px-4 py-3 text-sm"
+              style={{ color: '#d57b6a', background: 'rgba(160, 74, 58, 0.06)', border: '1px solid rgba(160, 74, 58, 0.32)' }}
+            >
               Error: {result.error}
             </div>
           )}
 
-          {/* Insufficient data */}
-          {isInsufficient && !isError && (
-            <div className="bg-slate-900 border border-slate-700/60 rounded-lg px-4 py-5 space-y-2 text-center">
-              <p className="text-slate-400 text-sm">
-                {result.advisory_summary ?? 'No OHLCV data found for this symbol.'}
+          {showBootstrapPrompt && (
+            <BootstrapPrompt
+              symbol={result.symbol}
+              onConfirm={handleBootstrapConfirm}
+              onCancel={handleBootstrapCancel}
+            />
+          )}
+
+          {/* Show the no-data block only when the user declined / closed the prompt */}
+          {isMissingData && !isError && !showBootstrapPrompt && bootstrapPhase === 'idle' && (
+            <div className="sp-card-soft p-6 text-center space-y-2">
+              <p className="text-sm" style={{ color: 'var(--sp-bone)' }}>
+                {result.message ?? result.advisory_summary ?? 'No OHLCV data found for this symbol.'}
               </p>
-              {result.run_ingestion && (
-                <p className="text-xs text-slate-600">
-                  Ingest market data first:{' '}
-                  <span className="font-mono text-slate-400">{result.run_ingestion}</span>
-                </p>
-              )}
-              <p className="text-xs text-slate-600 mt-1">
-                Run:{' '}
-                <span className="font-mono">python scripts/run_live_sources_phase2.py --source market_data --write</span>
+              <p className="text-[10px] font-mono uppercase tracking-widest" style={{ color: 'var(--sp-mist)' }}>
+                Re-open the bootstrap prompt by fetching this symbol again.
               </p>
             </div>
           )}
 
-          {/* Report */}
           {hasReport && <ReportView report={result.report!} />}
         </div>
       )}
 
-      {/* Not yet queried */}
       {!loading && !queried && (
         <div className="text-center py-16 space-y-2">
-          <p className="text-slate-500 text-sm">Enter a symbol above and press Fetch to view chart structure.</p>
-          <p className="text-xs text-slate-600">
-            Requires market data ingestion:{' '}
-            <span className="font-mono">python scripts/run_live_sources_phase2.py --source market_data --write</span>
+          <p className="text-sm" style={{ color: 'var(--sp-mist)' }}>
+            Enter a symbol above and press Fetch to view chart structure.
+          </p>
+          <p className="text-[10px] font-mono uppercase tracking-widest" style={{ color: 'var(--sp-mist)' }}>
+            Missing symbols can be downloaded from the UI — no terminal needed.
           </p>
         </div>
       )}

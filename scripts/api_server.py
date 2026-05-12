@@ -87,6 +87,11 @@ try:
 except ModuleNotFoundError:
     from chart_structure_api_context import _candles_from_market_events, _get_chart_structure  # type: ignore[no-redef]
 
+try:
+    from scripts.chart_symbol_bootstrap import bootstrap_symbol as _bootstrap_symbol
+except ModuleNotFoundError:
+    from chart_symbol_bootstrap import bootstrap_symbol as _bootstrap_symbol  # type: ignore[no-redef]
+
 
 def _get_live_signals(source_name: str | None = None, limit: int = 100) -> dict:
     try:
@@ -122,6 +127,241 @@ def _get_source_run_log(limit: int = 50) -> list:
         return get_source_run_log(limit=limit)
     except Exception:
         return []
+
+
+# Source health summary helpers — classify ingestion run statuses for UI banners
+_SOURCE_LABELS: dict[str, str] = {
+    "polymarket": "Polymarket",
+    "gdelt": "GDELT",
+    "sec_edgar": "SEC EDGAR",
+    "newsapi": "NewsAPI",
+    "event_registry": "Event Registry",
+    "etherscan": "Etherscan",
+    "grok_xai": "Grok/xAI",
+    "market_data": "Market Data",
+    "india": "India (NSE/RBI/SEBI)",
+    "global_filings": "Global Filings",
+    "asia_disclosure": "Asia Disclosure",
+}
+
+
+def _classify_source_status(status: str, skipped_reason: str, error_message: str) -> dict:
+    """Return a {severity, category, human_message} classification.
+
+    Severity is one of: ok | info | warning | error.
+    Category is a short machine code (CREDITS_EXHAUSTED, RATE_LIMITED, ...).
+    human_message is a short, secret-free, user-friendly description.
+    """
+    s = (status or "").upper().strip()
+    reason = (skipped_reason or "").lower()
+    err = (error_message or "").lower()
+
+    if s == "OK":
+        return {"severity": "ok", "category": "OK", "human_message": "Source healthy."}
+    if s == "OK_FILTERED":
+        return {
+            "severity": "ok",
+            "category": "OK_FILTERED",
+            "human_message": "Source healthy (filtered out off-domain rows).",
+        }
+    if s == "PLACEHOLDER":
+        return {
+            "severity": "info",
+            "category": "PLACEHOLDER",
+            "human_message": "Not implemented yet — placeholder source.",
+        }
+    if s == "SKIPPED":
+        # Try to surface the why behind the skip
+        if "api_key" in reason or "api key" in reason or "missing key" in reason:
+            return {
+                "severity": "warning",
+                "category": "MISSING_API_KEY",
+                "human_message": "Source skipped: API key not configured.",
+            }
+        if "license" in reason or "credits" in reason or "quota" in reason:
+            return {
+                "severity": "warning",
+                "category": "CREDITS_EXHAUSTED",
+                "human_message": "Source skipped: credits/license appear exhausted.",
+            }
+        return {
+            "severity": "info",
+            "category": "SKIPPED",
+            "human_message": "Source skipped this run.",
+        }
+    if s == "RATE_LIMITED":
+        return {
+            "severity": "warning",
+            "category": "RATE_LIMITED",
+            "human_message": "Source rate-limited — try again later.",
+        }
+    if s == "TIMEOUT":
+        return {
+            "severity": "warning",
+            "category": "TIMEOUT",
+            "human_message": "Source timed out — likely transient.",
+        }
+    if s == "HTTP_ERROR":
+        # Specific quota / credits hints
+        if "402" in err or "credit" in err or "credits" in err:
+            return {
+                "severity": "warning",
+                "category": "CREDITS_EXHAUSTED",
+                "human_message": "Source unavailable: credits/license exhausted.",
+            }
+        if "401" in err or "403" in err or "unauthorized" in err:
+            return {
+                "severity": "warning",
+                "category": "AUTH_ERROR",
+                "human_message": "Source unavailable: authentication/authorization issue.",
+            }
+        if "429" in err:
+            return {
+                "severity": "warning",
+                "category": "RATE_LIMITED",
+                "human_message": "Source rate-limited (HTTP 429).",
+            }
+        return {
+            "severity": "warning",
+            "category": "HTTP_ERROR",
+            "human_message": "Source returned an HTTP error.",
+        }
+    if s == "ERROR":
+        if "credit" in err or "credits" in err:
+            return {
+                "severity": "warning",
+                "category": "CREDITS_EXHAUSTED",
+                "human_message": "Source unavailable: credits/license exhausted.",
+            }
+        return {
+            "severity": "error",
+            "category": "ERROR",
+            "human_message": "Source error during last run.",
+        }
+    return {
+        "severity": "info",
+        "category": s or "UNKNOWN",
+        "human_message": "Source status unknown.",
+    }
+
+
+def _sanitize_error_text(text: str) -> str:
+    """Trim and redact obvious secret-like tokens from error strings.
+
+    The persistence layer already stores short messages, but we belt-and-
+    braces this so the API never leaks tokens that might land in stack
+    traces from third-party SDKs.
+    """
+    if not text:
+        return ""
+    out = str(text).strip()
+    if len(out) > 240:
+        out = out[:240] + "…"
+    # crude redaction of obvious key-looking substrings
+    import re
+
+    out = re.sub(
+        r"(?i)(api[_-]?key|token|secret|bearer)\s*[=:\s]\s*\S+",
+        r"\1=<redacted>",
+        out,
+    )
+    return out
+
+
+def _get_source_health_summary() -> dict:
+    try:
+        try:
+            from scripts.persistence import (
+                get_latest_source_run_per_source,
+                count_signal_events_by_source,
+            )
+        except ModuleNotFoundError:
+            from persistence import (  # type: ignore[no-redef]
+                get_latest_source_run_per_source,
+                count_signal_events_by_source,
+            )
+        latest_rows = get_latest_source_run_per_source()
+        event_counts = count_signal_events_by_source()
+    except Exception as exc:
+        return {
+            "sources": [],
+            "warning_count": 0,
+            "error_count": 0,
+            "ok_count": 0,
+            "error": str(exc),
+            "advisory_status": _ADVISORY_STATUS,
+            "execution_mode": _EXECUTION_MODE,
+            "ai_execution_count": _AI_EXECUTION_COUNT,
+            "human_review_required": True,
+        }
+
+    sources: list[dict] = []
+    warning_count = 0
+    error_count = 0
+    ok_count = 0
+
+    seen: set[str] = set()
+    for row in latest_rows:
+        source_name = str(row.get("source_name", ""))
+        if not source_name or source_name in seen:
+            continue
+        seen.add(source_name)
+        status = str(row.get("status", ""))
+        skipped_reason = str(row.get("skipped_reason", ""))
+        error_message = _sanitize_error_text(str(row.get("error_message", "")))
+        classification = _classify_source_status(status, skipped_reason, error_message)
+        if classification["severity"] == "warning":
+            warning_count += 1
+        elif classification["severity"] == "error":
+            error_count += 1
+        elif classification["severity"] == "ok":
+            ok_count += 1
+        sources.append({
+            "source_name": source_name,
+            "label": _SOURCE_LABELS.get(source_name, source_name),
+            "status": status,
+            "severity": classification["severity"],
+            "category": classification["category"],
+            "human_message": classification["human_message"],
+            "skipped_reason": skipped_reason,
+            "error_message": error_message,
+            "fetched_count": int(row.get("fetched_count", 0) or 0),
+            "duration_ms": int(row.get("duration_ms", 0) or 0),
+            "last_run_at": str(row.get("timestamp_utc", "")),
+            "event_row_count": int(event_counts.get(source_name, 0)),
+        })
+
+    # If a configured source has zero runs yet, surface that as an unknown
+    for source_name, label in _SOURCE_LABELS.items():
+        if source_name in seen:
+            continue
+        sources.append({
+            "source_name": source_name,
+            "label": label,
+            "status": "NO_RUNS",
+            "severity": "info",
+            "category": "NO_RUNS",
+            "human_message": "No ingestion runs recorded yet.",
+            "skipped_reason": "",
+            "error_message": "",
+            "fetched_count": 0,
+            "duration_ms": 0,
+            "last_run_at": "",
+            "event_row_count": int(event_counts.get(source_name, 0)),
+        })
+
+    return {
+        "sources": sources,
+        "warning_count": warning_count,
+        "error_count": error_count,
+        "ok_count": ok_count,
+        "total_count": len(sources),
+        "advisory_status": _ADVISORY_STATUS,
+        "execution_mode": _EXECUTION_MODE,
+        "ai_execution_count": _AI_EXECUTION_COUNT,
+        "human_review_required": True,
+        "broker_api_called": False,
+    }
 
 
 # DB status helper — imported lazily so server starts even if persistence unavailable
@@ -222,6 +462,7 @@ class ManualTradeBody(BaseModel):
     thesis: str
     notes: str = ""
     logged_by: str = "human"
+    leverage: float = 1.0
 
 
 class ReconcileBody(BaseModel):
@@ -230,6 +471,12 @@ class ReconcileBody(BaseModel):
     outcome_notes: str = ""
     pnl_estimate: float = 0.0
     outcome_status: str = "UNKNOWN"
+
+
+class ChartBootstrapBody(BaseModel):
+    symbol: str
+    period: str = "max"
+    interval: str = "1d"
 
 
 class MoltbookEntryBody(BaseModel):
@@ -340,6 +587,7 @@ def post_manual_trade(body: ManualTradeBody) -> dict:
         thesis=body.thesis,
         notes=body.notes,
         logged_by=body.logged_by,
+        leverage=body.leverage,
     )
 
 
@@ -389,6 +637,18 @@ def get_source_health() -> dict:
     }
 
 
+@app.get("/source-health/summary")
+def get_source_health_summary() -> dict:
+    """Per-source classified health summary.
+
+    Each entry exposes a sanitized human_message and a category code
+    (e.g. CREDITS_EXHAUSTED, RATE_LIMITED, TIMEOUT, PLACEHOLDER) so the
+    frontend can render a clear warning banner without leaking secrets.
+    Advisory-only — no execution implications.
+    """
+    return _get_source_health_summary()
+
+
 # ---------------------------------------------------------------------------
 # Live signals (Phase 1 live source ingestion results)
 # ---------------------------------------------------------------------------
@@ -411,6 +671,39 @@ def get_chart_structure(
     limit: int = 100,
 ) -> dict:
     return _get_chart_structure(symbol=symbol, source_event_id=source_event_id, limit=limit)
+
+
+@app.post("/chart-structure/bootstrap-symbol")
+def post_chart_structure_bootstrap(body: ChartBootstrapBody) -> dict:
+    """Discover + backfill OHLCV for a missing symbol on demand.
+
+    Read-only market-data ingestion. Never places orders, never connects to
+    a broker, never increments ai_execution_count. Returns sanitized status.
+    """
+    try:
+        return _bootstrap_symbol(
+            symbol=body.symbol,
+            period=body.period,
+            interval=body.interval,
+        )
+    except Exception as exc:  # pragma: no cover — belt-and-braces; bootstrap never raises
+        return {
+            "ok": False,
+            "symbol": str(getattr(body, "symbol", "")).strip().upper(),
+            "period": body.period,
+            "interval": body.interval,
+            "discovery_status": "ERROR",
+            "backfill_status": "SKIPPED",
+            "candles_written": None,
+            "message": f"Unexpected error: {str(exc)[:200]}",
+            "advisory_status": _ADVISORY_STATUS,
+            "execution_mode": _EXECUTION_MODE,
+            "execution_gate": "LOCKED",
+            "broker_api_called": False,
+            "broker_order_id": "NONE",
+            "ai_execution_count": _AI_EXECUTION_COUNT,
+            "human_review_required": True,
+        }
 
 
 # ---------------------------------------------------------------------------
