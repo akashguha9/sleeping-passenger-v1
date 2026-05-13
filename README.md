@@ -90,6 +90,18 @@ Open http://localhost:3000.
 | [docs/FINAL_SCORECARD.md](docs/FINAL_SCORECARD.md) | Honest before/after readiness scorecard |
 | [docs/SCRIPT_INVENTORY.md](docs/SCRIPT_INVENTORY.md) | Active vs. research scripts |
 
+### Framework and diagnostic roadmap
+
+These are internal framework documents. They are documentation and metadata
+only — no live calls, no DB writes, no execution permission. The MVP
+remains advisory-only.
+
+| Doc | Purpose |
+|---|---|
+| [docs/REFLECTION_FRAMEWORKS.md](docs/REFLECTION_FRAMEWORKS.md) | Sober engineering translation of biological / physical / probabilistic metaphors into diagnostic principles |
+| [docs/FRAMEWORK_COMPONENT_MAP.md](docs/FRAMEWORK_COMPONENT_MAP.md) | Maps each reflection concept to a professional name, repo layer, priority, and test strategy |
+| [docs/DIAGNOSTIC_FRAMEWORK_ROADMAP.md](docs/DIAGNOSTIC_FRAMEWORK_ROADMAP.md) | Sequenced roadmap for future diagnostics (sensitivity, distribution shift, toxic quarantine, continuity mode) — none implemented yet |
+
 The historical reference content (operator-control layer, perception-control
 layer, phase 1/2 ingestion runbooks, chart-structure API, etc.) is preserved
 below for context. Treat it as internal reference, not as the canonical

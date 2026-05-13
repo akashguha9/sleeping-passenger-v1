@@ -88,6 +88,12 @@ Tests in `tests/` either exercise the active runtime above or exercise
 research engines below. The `conftest.py` and `tests/fixtures/` set up a
 deterministic snapshot seed.
 
+## Framework metadata helper (documentation companion, not runtime)
+
+| Script | Role |
+|---|---|
+| `scripts/reflection_frameworks.py` | Metadata-only companion to `docs/REFLECTION_FRAMEWORKS.md`. No live calls. No DB writes. No filesystem writes. Not imported by `api_server.py` or `persistence.py`. Exposes the framework component inventory, banned theatrical terms, priority/status enums, a deterministic validator, and a metadata scorecard. Every component blob carries the canonical advisory-only safety stamps (`advisory_status=ADVISORY_ONLY`, `execution_gate=LOCKED`, `broker_api_called=false`, `ai_execution_count=0`, `execution_permission=false`, `can_execute=false`). Covered by `tests/test_reflection_frameworks.py`. |
+
 ## Research / not-verified
 
 These scripts exist, have tests, and compile — but they are **not reached
