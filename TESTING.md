@@ -25,14 +25,34 @@ surface. **Do not delete or weaken these without a written reason.**
 | API: token gate | `tests/test_api_token_gate.py` | `MVP_API_TOKEN` unset → mutating POSTs allowed; set → require Bearer token; GETs always open |
 | API: error honesty | `tests/test_api_error_honesty.py` | global handler returns sanitized JSON with explicit HTTP status |
 | Persistence | `tests/test_persistence.py` | schema init, advisory stamp enforcement on writes |
+| Persistence truth model | `tests/test_persistence_truth_model.py` | doctrine doc exists, inbox/list responses expose `truth_source`, fallback is never claimed canonical |
 | Inbox bridge | `tests/test_signal_inbox_bridge.py` | dedup, freshness window, candidate promotion |
+| DB backup/restore | `tests/test_db_backup_restore.py` | backup is non-mutating, restore is dry-run by default, pre-restore backup is mandatory, invalid backup files are rejected, same-path restore is refused |
+| Smoke check | `tests/test_smoke_check.py` | offline backend = FAIL, missing safety stamps = FAIL, `broker_api_called=true` or `ai_execution_count>0` = FAIL |
+
+### Persistence truth (canonical vs fallback vs mock)
+
+The doctrine lives in `docs/PERSISTENCE_MODEL.md`. In short:
+SQLite is the canonical store; JSONL is an audit trace and a fallback for
+reads; mock data is UI-only and must always be visibly labelled.
+
+`GET /signals` and `list_manual_trades` now expose three flags
+(`truth_source`, `fallback_used`, `canonical`) so callers can never confuse
+a fallback slice with canonical state. Verified by
+`tests/test_persistence_truth_model.py`.
 
 ### What is not tested
 
-- **The frontend.** No Vitest/Jest/Playwright. The canonical click-through in
-  `DEMO.md` is a manual smoke test.
-- **End-to-end.** No Playwright/Cypress. See "Frontend smoke test" below for
-  the manual flow.
+- **The frontend.** No Vitest/Jest/Playwright installed -- `frontend/package.json`
+  ships only Next.js + React + TypeScript + Tailwind. `next lint` is the only
+  automated frontend check today.
+- **End-to-end.** No Playwright/Cypress. The canonical click-through in
+  `DEMO.md` is the manual smoke test today.
+- **The frontend test stack is planned, not run.** See
+  `docs/E2E_TEST_PLAN.md` for the exact Vitest + Playwright spec, the
+  install commands, the canonical 10-step e2e journey, and the
+  definition-of-done. No packages were installed during the Day 1-10
+  sprint -- doing so requires explicit user approval.
 - **Live source adapters against real APIs.** Tests mock the network. Real
   Polymarket / NewsAPI / SEC behavior is verified only by running ingestion
   manually (`python scripts\run_live_sources_phase1.py --dry-run --json`).

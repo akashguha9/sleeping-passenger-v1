@@ -19,15 +19,23 @@ Wait for:
 - backend logs `Uvicorn running on http://127.0.0.1:8000`
 - frontend logs `Local: http://localhost:3000`
 
-Verify:
+Verify with the smoke check (exits non-zero if anything is wrong):
+
+```powershell
+python scripts\smoke_check.py --api http://127.0.0.1:8000
+```
+
+Expected output ends with `RESULT: PASS`. If you see `RESULT: FAIL`, fix
+the backend before continuing — the dashboard will fall back to mock data
+and the demo will not exercise the real path.
+
+For a manual sanity check:
 
 ```powershell
 curl http://127.0.0.1:8000/health
 ```
 
-Look for `"status":"ok"` and `"ai_execution_count":0`. If the call fails, fix
-the backend before continuing — the dashboard will fall back to mock data and
-the demo will not exercise the real path.
+Look for `"status":"ok"` and `"ai_execution_count":0`.
 
 ## 1. Open the Dashboard (45s)
 

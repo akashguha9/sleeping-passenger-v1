@@ -110,6 +110,19 @@ Expected: `{"status":"ok","advisory_status":"ADVISORY_ONLY","execution_mode":"HU
 
 The dashboard's top bar also shows backend status as a green dot.
 
+## Pre-demo smoke check
+
+One command that fails loudly if the backend is offline or any advisory
+safety stamp is wrong. Run it after starting the backend and again right
+before a demo.
+
+```powershell
+python scripts\smoke_check.py
+python scripts\smoke_check.py --api http://127.0.0.1:8000 --json
+```
+
+Exits non-zero if anything is wrong, so it's safe to chain in a script.
+
 ## Run tests
 
 ```powershell
@@ -121,6 +134,53 @@ python -m pytest tests -q
 - Backend: `Ctrl+C` in its terminal.
 - Frontend: `Ctrl+C` in its terminal.
 - No background daemons or system services are installed.
+
+## Back up and restore the local DB
+
+`runtime/mvp_local.db` is the canonical store for everything you've journaled —
+trades, reflections, decisions, moltbook entries. It is gitignored. If
+`runtime/` is deleted, that history is gone unless you have a backup.
+
+### Back up
+
+```powershell
+# default: writes runtime/backups/mvp_local-YYYYMMDD-HHMMSS.db
+python scripts\backup_db.py
+
+# add a label
+python scripts\backup_db.py --label predemo
+
+# custom paths
+python scripts\backup_db.py --db-path runtime\mvp_local.db --backup-dir D:\backups
+```
+
+Backups use the SQLite online backup API, so they are safe to take while the
+backend is running. The source DB is never mutated.
+
+### Restore
+
+Default mode is **dry-run** — nothing is overwritten unless you pass `--yes`
+(or `--force`).
+
+```powershell
+# safe preview
+python scripts\restore_db.py --backup-file runtime\backups\mvp_local-20260101-120000.db
+
+# actually restore (creates a pre-restore backup of the current DB first)
+python scripts\restore_db.py --backup-file runtime\backups\mvp_local-20260101-120000.db --yes
+```
+
+A pre-restore backup is always written before an existing DB is overwritten,
+so you can roll back. The restore script refuses if:
+
+- the backup file is missing or not a valid SQLite database
+- backup and target resolve to the same path
+- neither `--yes` nor `--dry-run` was passed
+
+### Do not delete `runtime/`
+
+`runtime/` holds your only copy of the local DB. Don't `rm -rf` it. If you
+need to reset the project, take a backup first.
 
 ## "BACKEND OFFLINE" and "MOCK_FALLBACK" — what they mean
 

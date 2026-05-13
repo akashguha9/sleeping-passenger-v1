@@ -359,6 +359,13 @@ def list_inbox_items(
 
     action_counts = compute_action_counts(items)
 
+    # Persistence truth model (see docs/PERSISTENCE_MODEL.md):
+    #   sqlite     -> canonical
+    #   anything else -> not canonical; UI should surface a cue
+    truth_source = "sqlite" if signal_source == "live_events" else "legacy_fabric"
+    fallback_used = truth_source != "sqlite"
+    canonical = truth_source == "sqlite"
+
     return {
         "operation": "list_inbox_items",
         "item_count": len(items),
@@ -369,6 +376,9 @@ def list_inbox_items(
         "signal_source": signal_source,
         "freshness_window_hours": int(hours),
         "mock_fallback": False,
+        "truth_source": truth_source,
+        "fallback_used": fallback_used,
+        "canonical": canonical,
         "advisory_status": _ADVISORY_STATUS,
         "human_review_required": True,
         "execution_mode": _EXECUTION_MODE,
@@ -814,19 +824,36 @@ def reconcile_trade(
 
 
 def list_manual_trades() -> dict[str, Any]:
-    """List all logged manual trades (SQLite-first, JSONL fallback)."""
+    """List all logged manual trades.
+
+    SQLite is canonical (truth_source="sqlite").  Falls back to JSONL only
+    when SQLite is unavailable; that response is marked
+    truth_source="jsonl_fallback", fallback_used=True, canonical=False.
+    See docs/PERSISTENCE_MODEL.md.
+    """
     trades: list[dict[str, Any]] = []
+    truth_source = "jsonl_fallback"
     if _DB_AVAILABLE and _persistence is not None:
         try:
             trades = _persistence.get_all_manual_trades()
+            truth_source = "sqlite"  # even an empty SQLite result is canonical
         except Exception:
-            pass
-    if not trades:
+            trades = []
+            truth_source = "jsonl_fallback"
+    if truth_source != "sqlite":
         trades = _load_jsonl(MANUAL_TRADE_LOG)
+        truth_source = "jsonl_fallback"
+
+    canonical = truth_source == "sqlite"
+    fallback_used = not canonical
+
     return {
         "operation": "list_manual_trades",
         "trade_count": len(trades),
         "trades": trades,
+        "truth_source": truth_source,
+        "fallback_used": fallback_used,
+        "canonical": canonical,
         "advisory_status": _ADVISORY_STATUS,
         "execution_mode": _EXECUTION_MODE,
         "ai_execution_count": _AI_EXECUTION_COUNT,

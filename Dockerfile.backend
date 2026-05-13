@@ -1,0 +1,59 @@
+# syntax=docker/dockerfile:1.7
+#
+# Backend container for the local advisory MVP.
+#
+# This image is LOCAL/DEMO-GRADE, not production:
+#   * SQLite under /app/runtime (must be mounted as a volume)
+#   * single uvicorn worker, sync routes
+#   * no auth unless MVP_API_TOKEN is set at runtime
+#   * no secrets are baked in -- pass them via `docker run -e` or compose env
+#
+# Build:
+#     docker build -f Dockerfile.backend -t sleeping-passenger-backend:dev .
+#
+# Run (mount the host runtime/ so journaled data survives container removal):
+#     docker run --rm -p 8000:8000 \
+#         -e API_HOST=0.0.0.0 -e API_PORT=8000 -e MVP_ENVIRONMENT=docker \
+#         -v "$PWD/runtime":/app/runtime \
+#         sleeping-passenger-backend:dev
+
+FROM python:3.13-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+WORKDIR /app
+
+# Install Python deps first for layer caching.
+COPY requirements.txt requirements-dev.txt ./
+RUN pip install --no-cache-dir -r requirements-dev.txt
+
+# Application code -- explicit copies only.  Avoid copying runtime/ or .env.
+COPY scripts ./scripts
+COPY config ./config
+COPY configs ./configs
+COPY adapters ./adapters
+COPY src ./src
+COPY conftest.py ./conftest.py
+COPY pytest.ini ./pytest.ini
+
+# Runtime DB lives here.  Compose mounts the host runtime/ over this path.
+RUN mkdir -p /app/runtime /app/logs
+
+ENV API_HOST=0.0.0.0 \
+    API_PORT=8000 \
+    MVP_ENVIRONMENT=docker \
+    MVP_DB_PATH=/app/runtime/mvp_local.db
+
+EXPOSE 8000
+
+# /health on the public port -- exits non-zero if the API is unreachable.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD python -c "import urllib.request,sys; \
+import json; \
+r=urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3); \
+sys.exit(0 if json.load(r).get('status')=='ok' else 1)" || exit 1
+
+CMD ["python", "scripts/api_server.py"]

@@ -1,0 +1,68 @@
+# Local/demo Docker Compose for sleeping-passenger-v1.
+#
+# This is NOT a production manifest:
+#   * single replica per service
+#   * SQLite under runtime/ (volume-mounted)
+#   * no reverse proxy, no TLS, no rate limiting, no monitoring
+#   * MVP_API_TOKEN is optional and read from the shell env or a local
+#     .env file -- never commit a real token.
+#
+# Bring up:
+#     docker compose up --build
+#
+# Bring down (volumes preserved):
+#     docker compose down
+#
+# Inspect the rendered config without building:
+#     docker compose config
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    image: sleeping-passenger-backend:dev
+    container_name: sleeping-passenger-backend
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      API_HOST: 0.0.0.0
+      API_PORT: "8000"
+      MVP_ENVIRONMENT: docker
+      MVP_DB_PATH: /app/runtime/mvp_local.db
+      ALLOWED_ORIGINS: "http://localhost:3000,http://127.0.0.1:3000"
+      # Optional: set MVP_API_TOKEN in your shell or a local .env file
+      # to require Bearer auth on mutating routes.  Left unset for parity
+      # with the local PowerShell flow.
+      MVP_API_TOKEN: "${MVP_API_TOKEN:-}"
+    volumes:
+      # Journaled data (SQLite, JSONL audit logs) persists across rebuilds.
+      - ./runtime:/app/runtime
+      - ./logs:/app/logs
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys,json; r=urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3); sys.exit(0 if json.load(r).get('status')=='ok' else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+      args:
+        # Browsers talk to the host-mapped port, not the compose hostname.
+        NEXT_PUBLIC_API_BASE_URL: "http://localhost:8000"
+    image: sleeping-passenger-frontend:dev
+    container_name: sleeping-passenger-frontend
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      HOSTNAME: 0.0.0.0
+    depends_on:
+      backend:
+        condition: service_started

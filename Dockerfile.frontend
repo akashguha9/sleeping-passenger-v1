@@ -1,0 +1,57 @@
+# syntax=docker/dockerfile:1.7
+#
+# Frontend container (Next.js 14) for the local advisory MVP.
+#
+# This image is LOCAL/DEMO-GRADE.  It runs `next start` against a
+# production build done at image-build time.  No secret server keys
+# are baked in.  Only NEXT_PUBLIC_* env vars matter at build time --
+# pass them via build-args if you need to point at a non-default
+# backend URL.
+#
+# Build:
+#     docker build -f Dockerfile.frontend \
+#         --build-arg NEXT_PUBLIC_API_BASE_URL=http://localhost:8000 \
+#         -t sleeping-passenger-frontend:dev .
+#
+# Run:
+#     docker run --rm -p 3000:3000 sleeping-passenger-frontend:dev
+
+# ---- Stage 1: build ----
+FROM node:20-alpine AS build
+
+WORKDIR /app/frontend
+
+# Install dependencies first for layer caching.
+COPY frontend/package.json frontend/package-lock.json* ./
+RUN npm ci
+
+# Copy source and build.
+COPY frontend/ ./
+
+# NEXT_PUBLIC_* must be present at build time to be inlined into the bundle.
+ARG NEXT_PUBLIC_API_BASE_URL=http://localhost:8000
+ENV NEXT_PUBLIC_API_BASE_URL=${NEXT_PUBLIC_API_BASE_URL}
+
+RUN npm run build
+
+# ---- Stage 2: runtime ----
+FROM node:20-alpine AS runtime
+
+WORKDIR /app/frontend
+
+ENV NODE_ENV=production \
+    PORT=3000 \
+    HOSTNAME=0.0.0.0
+
+# Bring over the built app + production deps only.
+COPY --from=build /app/frontend/package.json ./package.json
+COPY --from=build /app/frontend/package-lock.json ./package-lock.json
+COPY --from=build /app/frontend/.next ./.next
+COPY --from=build /app/frontend/public ./public
+COPY --from=build /app/frontend/next.config.js ./next.config.js
+RUN npm ci --omit=dev
+
+EXPOSE 3000
+
+# `next start` honours $PORT / $HOSTNAME.
+CMD ["npm", "start"]
