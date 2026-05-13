@@ -1064,3 +1064,70 @@ All logs are written to `runtime\logs\`:
 ### Safety invariant (unchanged)
 
 Advisory only. No broker API is called. No orders are placed.
+
+---
+
+## Run local frontend as http://sleepingpassenger/
+
+Simpler alternative to the reverse-proxy path above: bind Next.js dev server directly
+to port 80 so `http://sleepingpassenger/` works without a separate proxy process.
+
+Backend is unchanged — FastAPI continues to serve on `http://127.0.0.1:8000`. The
+frontend reads it from `NEXT_PUBLIC_API_BASE_URL` in `frontend/.env.local`.
+
+### One-time hosts entry (Administrator PowerShell)
+
+```powershell
+Add-Content -Path "C:\Windows\System32\drivers\etc\hosts" -Value "`n127.0.0.1 sleepingpassenger"
+ipconfig /flushdns
+ping sleepingpassenger
+```
+
+### Start the backend (regular PowerShell)
+
+```powershell
+cd C:\Users\akash\sleeping-passenger-v1
+python -m uvicorn scripts.api_server:app --host 127.0.0.1 --port 8000 --reload
+```
+
+### Start the frontend on port 80 (Administrator PowerShell)
+
+Port 80 binding on Windows requires Administrator. Use either:
+
+```powershell
+cd C:\Users\akash\sleeping-passenger-v1\frontend
+npm run dev:sleepingpassenger
+```
+
+Or the preflight helper (checks hosts entry and port 80 availability first):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\windows\start_sleepingpassenger_local.ps1
+```
+
+Then open:
+
+```
+http://sleepingpassenger/
+```
+
+### Verify
+
+```powershell
+ping sleepingpassenger
+netstat -ano | findstr ":80"
+```
+
+### Fallback if port 80 is blocked
+
+If Administrator is unavailable, port 80 is held by IIS/Skype/another service, or
+the bind otherwise fails, use the standard dev script:
+
+```powershell
+cd C:\Users\akash\sleeping-passenger-v1\frontend
+npm run dev
+# open http://localhost:3000
+```
+
+The existing reverse-proxy path (`scripts\windows\start_sleepingpassenger_proxy.ps1`)
+is also still available — it runs Next.js on 3000 and proxies 80 → 3000.
