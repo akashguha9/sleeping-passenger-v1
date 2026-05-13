@@ -43,7 +43,7 @@ export function Sidebar() {
           <span className="text-[10px] font-mono" style={{ color: 'var(--sp-mist)' }}>v1</span>
         </div>
         <div className="mt-2 text-[10px] font-mono uppercase tracking-widest" style={{ color: 'var(--sp-mist)' }}>
-          dark · meditative · advisory
+          meditative · advisory
         </div>
       </div>
 
