@@ -70,10 +70,24 @@ Open http://localhost:3000.
 
 | Doc | Purpose |
 |---|---|
+| [SHOWCASE.md](SHOWCASE.md) | One-stop product showcase (problem, workflow, safety, demo) |
 | [SETUP.md](SETUP.md) | Install, env vars, start/stop, troubleshooting |
 | [DEMO.md](DEMO.md) | 5-minute scripted walkthrough |
 | [TESTING.md](TESTING.md) | What is and isn't tested, how to run |
 | [DEPLOYMENT.md](DEPLOYMENT.md) | Current status and the path to production |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | System / workflow / safety / persistence / refresh diagrams |
+| [docs/AI_OUTPUT_VALIDATION.md](docs/AI_OUTPUT_VALIDATION.md) | AI payload schema, malformed handling, safety overrides |
+| [docs/LIVE_SIGNALS_REFRESH_MODEL.md](docs/LIVE_SIGNALS_REFRESH_MODEL.md) | 6-hour refresh model and source-health contract |
+| [docs/LIVE_SIGNALS_SCHEDULING.md](docs/LIVE_SIGNALS_SCHEDULING.md) | Windows Task Scheduler / cron recipes |
+| [docs/LEGAL_PRIVACY_NOTES.md](docs/LEGAL_PRIVACY_NOTES.md) | Advisory-only, no-financial-advice, source ToS posture |
+| [docs/SOURCE_TOS_CHECKLIST.md](docs/SOURCE_TOS_CHECKLIST.md) | Per-source ToS verification checklist |
+| [docs/PRODUCT_DIRECTION_DECISION.md](docs/PRODUCT_DIRECTION_DECISION.md) | Local-showcase vs private-beta vs public-prod decision |
+| [docs/PRIVATE_BETA_AUTH_DESIGN.md](docs/PRIVATE_BETA_AUTH_DESIGN.md) | Multi-user auth and isolation design (not yet implemented) |
+| [docs/POSTGRES_MIGRATION_PLAN.md](docs/POSTGRES_MIGRATION_PLAN.md) | SQLite → Postgres migration plan |
+| [docs/HOSTED_DEPLOYMENT_PLAN.md](docs/HOSTED_DEPLOYMENT_PLAN.md) | Hosting options comparison and rollout checklist |
+| [docs/MONITORING_AND_INCIDENTS.md](docs/MONITORING_AND_INCIDENTS.md) | Alerts, incident response, P0/P1 triage |
+| [docs/FINAL_ACCEPTANCE_CHECKLIST.md](docs/FINAL_ACCEPTANCE_CHECKLIST.md) | Local setup, safety, data, frontend, tests, deployment acceptance |
+| [docs/FINAL_SCORECARD.md](docs/FINAL_SCORECARD.md) | Honest before/after readiness scorecard |
 | [docs/SCRIPT_INVENTORY.md](docs/SCRIPT_INVENTORY.md) | Active vs. research scripts |
 
 The historical reference content (operator-control layer, perception-control

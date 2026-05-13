@@ -194,3 +194,117 @@ The first commit on the migration branch should add only:
 
 That commit changes zero behaviour. Everything that follows is a
 deliberate, reviewable, reversible step on top of that scaffold.
+
+---
+
+## 10. Day 33 enrichment — user-isolation–aware migration map
+
+> Added during the Day 26–35 finalization sprint. Pairs with
+> `docs/PRIVATE_BETA_AUTH_DESIGN.md`. Still **plan, not implementation**.
+
+### 10.1 Required env vars
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `DB_BACKEND` | `sqlite` | `sqlite` or `postgres` |
+| `DATABASE_URL` | unset | Full Postgres DSN. Required when `DB_BACKEND=postgres`. |
+| `MVP_DB_PATH` | `runtime/mvp_local.db` | SQLite file path (sqlite mode only). |
+| `POSTGRES_SSL_MODE` | `require` | TLS posture for hosted PG. |
+
+### 10.2 Recommended approach — staged adapter pattern
+
+1. Define a thin persistence interface (or accept the existing
+   `scripts/persistence.py` shape as the canonical signature surface).
+2. Keep SQLite as one implementation.
+3. Add Postgres as a second implementation behind `DB_BACKEND=postgres`.
+4. Run the **same contract tests** against both adapters in CI.
+5. Introduce Alembic or hand-rolled SQL migrations as soon as the
+   Postgres path is real.
+
+A heavy ORM rewrite is not required. The schema is small enough that
+hand-managed SQL with parameter binding is fine.
+
+### 10.3 Table-by-table migration map
+
+| Table | Owner | Needs `user_id`? | Migration risk | Required indexes |
+|---|---|---|---|---|
+| `signal_events` | shared | no | low | `(source_name, created_at)`, `event_id UNIQUE` |
+| `signal_decisions` | user | **yes** | medium | `(user_id, event_id)`, `(user_id, created_at)` |
+| `user_reflections` | user | **yes** | medium | `(user_id, event_id)`, `(user_id, created_at)` |
+| `ai_discussion_summaries` | user | **yes** | medium | `(user_id, event_id)`, `(user_id, prompt_version)` |
+| `manual_trades` | user | **yes** | medium | `(user_id, symbol)`, `(user_id, executed_at)` |
+| `reconciliation_results` | user | **yes** | medium | `(user_id, trade_id)` |
+| `moltbook_entries` | user | **yes** | low | `(user_id, created_at)` |
+| `live_source_runs` | system | no | low | `(source_name, timestamp_utc)` |
+| `live_refresh_runs` (if introduced) | system | no | low | `(timestamp_utc)`, `(run_id UNIQUE)` |
+| `global_securities` | shared | no | low | `symbol UNIQUE` |
+| `global_security_aliases` | shared | no | low | `(symbol, alias)` |
+| Source-registry persistence (if introduced) | shared | no | low | `source_key UNIQUE` |
+
+### 10.4 Index plan (cross-cutting)
+
+| Index | Reason |
+|---|---|
+| `user_id` (every user-owned table) | hot path for `WHERE user_id = ?` |
+| `created_at` / `timestamp_utc` | recent-first listings |
+| `symbol` | symbol-scoped queries |
+| `source_name` | source-scoped queries |
+| `event_id` UNIQUE | dedupe on idempotent ingestion |
+| `trade_id` UNIQUE | idempotent reconciliation |
+| `decision_id` UNIQUE | idempotent decision capture |
+| `last_success_at` | source-health "freshness" queries |
+| `refresh_run_id` (if introduced) | per-run trace |
+
+### 10.5 Rollback plan
+
+1. Trigger a final SQLite backup with `scripts/backup_db.py`.
+2. Export every table to CSV (or JSONL) before cutover.
+3. Import into Postgres via `\copy` or `pg_dump` of the export.
+4. Verify row counts table-by-table.
+5. Keep the SQLite file as a **read-only archive** for ≥ 30 days.
+6. If a row-count mismatch or behavior drift appears, flip `DB_BACKEND`
+   back to `sqlite` (the SQLite path was never decommissioned in the
+   staged-adapter approach).
+
+### 10.6 Acceptance criteria
+
+Postgres migration is complete only when:
+
+- [ ] Contract tests pass for SQLite and Postgres adapters.
+- [ ] `scripts/backup_db.py` (or its PG equivalent) is wired and
+      restored once in staging.
+- [ ] User isolation is enforced at the DB layer (per
+      `docs/PRIVATE_BETA_AUTH_DESIGN.md`).
+- [ ] Hosted deployment uses Postgres.
+- [ ] Live refresh writes `source_health` rows reliably in PG.
+- [ ] Local dev still works with `DB_BACKEND=sqlite`.
+- [ ] No secret (DATABASE_URL with credentials) appears in `/health`,
+      `/db/status`, or any logging surface.
+
+### 10.7 Migration risk model
+
+```
+Migration_Risk =
+    Schema_Drift
+  + Data_Loss_Risk
+  + User_Isolation_Bugs
+  + Query_Behavior_Difference
+  + Deployment_Config_Error
+  + Refresh_Duplicate_Risk
+```
+
+Mitigations:
+
+| Term | Mitigation |
+|---|---|
+| Schema_Drift | Single source-of-truth migration files committed in repo. |
+| Data_Loss_Risk | Pre-cutover backup + CSV export; SQLite kept read-only post-cutover. |
+| User_Isolation_Bugs | Required `user_id` argument on every persistence helper; isolation tests in CI. |
+| Query_Behavior_Difference | Same contract tests on both adapters; explicit `RETURNING` shaping. |
+| Deployment_Config_Error | Hosted deploy template stores DSN in provider secret store, never in repo. |
+| Refresh_Duplicate_Risk | `event_id UNIQUE` constraint; idempotent INSERTs. |
+
+This appendix is the design floor. Promote it to implementation only when
+`docs/ROADMAP_DECISION_DAY_30.md` says private-beta scaffolding is the
+active milestone.
+
