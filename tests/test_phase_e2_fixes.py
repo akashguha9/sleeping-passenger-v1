@@ -72,6 +72,10 @@ _FORBIDDEN_SEED_STRINGS = [
 # ---------------------------------------------------------------------------
 
 def _cors_origins_from_ast() -> list[str]:
+    """Legacy AST helper — still used by other tests to assert the literal list
+    when one is present.  CORS is now env-driven via scripts.runtime_config,
+    so we also offer a runtime-mode lookup below.
+    """
     src = _API_SERVER.read_text(encoding="utf-8")
     tree = ast.parse(src)
     for node in ast.walk(tree):
@@ -92,9 +96,33 @@ def _cors_origins_from_ast() -> list[str]:
     return []
 
 
+def _cors_origins_default() -> list[str]:
+    """Resolve the default CORS allowlist from scripts.runtime_config.
+
+    The api_server now reads ``ALLOWED_ORIGINS`` from the environment; with no
+    override, it falls back to the project's default localhost +
+    sleepingpassenger origins.  This helper mirrors that resolution path so
+    the original Phase E.2 origin-allowlist intent is still pinned.
+    """
+    import os
+    saved = os.environ.pop("ALLOWED_ORIGINS", None)
+    try:
+        from scripts.runtime_config import get_allowed_origins
+        return list(get_allowed_origins())
+    finally:
+        if saved is not None:
+            os.environ["ALLOWED_ORIGINS"] = saved
+
+
 @pytest.fixture(scope="module")
 def cors_origins() -> list[str]:
-    return _cors_origins_from_ast()
+    """Effective CORS allowlist.
+
+    Prefers the inline AST list when present (legacy behaviour); falls back to
+    the env-driven default when api_server now resolves origins at startup.
+    """
+    ast_list = _cors_origins_from_ast()
+    return ast_list if ast_list else _cors_origins_default()
 
 
 @pytest.fixture(scope="module")

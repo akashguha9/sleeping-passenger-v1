@@ -14,6 +14,15 @@ Rules
 - No buy/sell/execute endpoint exists.
 - Manual trade log is record-keeping only — not order routing.
 
+Configuration (all optional, defaults preserve historical behaviour)
+--------------------------------------------------------------------
+- API_HOST                 (default 127.0.0.1)
+- API_PORT                 (default 8000)
+- ALLOWED_ORIGINS          (comma-separated; default localhost:3000 etc.)
+- MVP_API_TOKEN            (if set, mutating POST routes require Bearer auth)
+- MVP_DB_PATH              (default runtime/mvp_local.db)
+- MVP_ENVIRONMENT          (default "local")
+
 Start server
 ------------
   python scripts/api_server.py
@@ -22,6 +31,7 @@ Start server
 from __future__ import annotations
 
 import json
+import logging
 
 # FastAPI is an OPTIONAL dependency at import time.
 #
@@ -32,8 +42,9 @@ import json
 # pytest session.  Instead, we set a sentinel and let `if __name__ ==
 # "__main__"` handle the user-facing install hint.
 try:
-    from fastapi import FastAPI, Response
+    from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response
     from fastapi.middleware.cors import CORSMiddleware
+    from fastapi.responses import JSONResponse
     from pydantic import BaseModel
     _FASTAPI_AVAILABLE = True
     _FASTAPI_IMPORT_ERROR: str | None = None
@@ -41,7 +52,12 @@ except ImportError as _exc:  # pragma: no cover — depends on env
     _FASTAPI_AVAILABLE = False
     _FASTAPI_IMPORT_ERROR = str(_exc)
     FastAPI = None  # type: ignore[assignment]
+    Depends = lambda f=None: f  # type: ignore[assignment,misc]
+    Header = None  # type: ignore[assignment]
+    HTTPException = Exception  # type: ignore[assignment,misc]
+    Request = None  # type: ignore[assignment]
     Response = None  # type: ignore[assignment]
+    JSONResponse = None  # type: ignore[assignment]
     CORSMiddleware = None  # type: ignore[assignment]
 
     class BaseModel:  # type: ignore[no-redef]
@@ -105,6 +121,43 @@ try:
     from scripts.chart_symbol_bootstrap import bootstrap_symbol as _bootstrap_symbol
 except ModuleNotFoundError:
     from chart_symbol_bootstrap import bootstrap_symbol as _bootstrap_symbol  # type: ignore[no-redef]
+
+try:
+    from scripts.runtime_config import (
+        api_token_required,
+        db_available,
+        get_allowed_origins,
+        get_api_host,
+        get_api_port,
+        get_api_token,
+        get_environment_tag,
+        safe_db_display_path,
+    )
+except ModuleNotFoundError:  # pragma: no cover
+    from runtime_config import (  # type: ignore[no-redef]
+        api_token_required,
+        db_available,
+        get_allowed_origins,
+        get_api_host,
+        get_api_port,
+        get_api_token,
+        get_environment_tag,
+        safe_db_display_path,
+    )
+
+
+_logger = logging.getLogger("sleeping_passenger.api")
+if not _logger.handlers:
+    # Lightweight default handler — does not duplicate uvicorn's own stream
+    # but ensures startup/health messages reach stdout when running via
+    # `python scripts/api_server.py`.
+    _handler = logging.StreamHandler()
+    _handler.setFormatter(
+        logging.Formatter("[%(asctime)s] %(levelname)s %(name)s: %(message)s")
+    )
+    _logger.addHandler(_handler)
+    _logger.setLevel(logging.INFO)
+    _logger.propagate = False
 
 
 def _get_live_signals(source_name: str | None = None, limit: int = 100) -> dict:
@@ -266,22 +319,101 @@ if _FASTAPI_AVAILABLE:
         version=_VERSION,
     )
 
+    _ALLOWED_ORIGINS = get_allowed_origins()
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=[
-            "http://localhost:3000",
-            "http://127.0.0.1:3000",
-            "http://sleepingpassenger",
-            "http://sleepingpassenger.local",
-            "http://sleepingpassenger:80",
-            "http://sleepingpassenger.local:80",
-        ],
+        allow_origins=_ALLOWED_ORIGINS,
         allow_credentials=False,
         allow_methods=["GET", "POST", "OPTIONS"],
-        allow_headers=["Content-Type", "Accept", "Origin"],
+        allow_headers=["Content-Type", "Accept", "Origin", "Authorization"],
     )
+
+    @app.on_event("startup")
+    def _startup_safety_log() -> None:  # pragma: no cover — side effect only
+        if not api_token_required():
+            _logger.warning(
+                "MVP_API_TOKEN not set; mutating routes are unprotected. "
+                "Local-only use recommended."
+            )
+        else:
+            _logger.info("MVP_API_TOKEN set; mutating routes require Bearer auth.")
+        _logger.info(
+            "advisory contract enforced: %s / %s / execution_gate=%s / ai_execution_count=%d",
+            _ADVISORY_STATUS,
+            _EXECUTION_MODE,
+            "LOCKED",
+            _AI_EXECUTION_COUNT,
+        )
+
+    @app.exception_handler(HTTPException)
+    async def _http_exception_handler(  # pragma: no cover — exercised by tests
+        request: "Request", exc: HTTPException
+    ) -> "JSONResponse":
+        """Stamp HTTPException responses with the advisory safety block.
+
+        We never weaken safety on error paths.  HTTP status is preserved.
+        """
+        payload: dict = {
+            "error": str(exc.detail) if exc.detail else "request failed",
+            "status_code": exc.status_code,
+            "advisory_status": _ADVISORY_STATUS,
+            "execution_mode": _EXECUTION_MODE,
+            "execution_gate": "LOCKED",
+            "ai_execution_count": _AI_EXECUTION_COUNT,
+            "broker_api_called": False,
+            "broker_order_id": "NONE",
+            "human_review_required": True,
+        }
+        return JSONResponse(status_code=exc.status_code, content=payload)
+
+    @app.exception_handler(Exception)
+    async def _unhandled_exception_handler(  # pragma: no cover
+        request: "Request", exc: Exception
+    ) -> "JSONResponse":
+        """Sanitise unhandled exceptions: log full detail, return generic JSON.
+
+        Never leaks file paths or stack traces to clients.
+        """
+        _logger.exception("unhandled error on %s %s", request.method, request.url.path)
+        payload = {
+            "error": "internal_error",
+            "status_code": 500,
+            "advisory_status": _ADVISORY_STATUS,
+            "execution_mode": _EXECUTION_MODE,
+            "execution_gate": "LOCKED",
+            "ai_execution_count": _AI_EXECUTION_COUNT,
+            "broker_api_called": False,
+            "broker_order_id": "NONE",
+            "human_review_required": True,
+        }
+        return JSONResponse(status_code=500, content=payload)
+
+
+    def require_api_token(authorization: str | None = Header(default=None)) -> None:
+        """FastAPI dependency that enforces a Bearer token when ``MVP_API_TOKEN`` is set.
+
+        Behaviour:
+          * If ``MVP_API_TOKEN`` is unset or empty: no-op (local-dev permissive).
+          * If set: request must include ``Authorization: Bearer <token>`` and
+            the token must match exactly.  Otherwise 401.
+
+        GET routes do not depend on this; only mutating routes do.
+        """
+        expected = get_api_token()
+        if not expected:
+            return None
+        if not authorization or not authorization.lower().startswith("bearer "):
+            raise HTTPException(status_code=401, detail="missing bearer token")
+        provided = authorization.split(" ", 1)[1].strip()
+        if provided != expected:
+            raise HTTPException(status_code=401, detail="invalid bearer token")
+        return None
 else:
     app = _NoopApp()  # type: ignore[assignment]
+
+    def require_api_token(authorization: str | None = None) -> None:  # type: ignore[no-redef]
+        """No-op fallback when FastAPI is unavailable (test-only path)."""
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -353,13 +485,30 @@ class MoltbookEntryBody(BaseModel):
 
 @app.get("/health")
 def health() -> dict:
+    from datetime import datetime, timezone
+
+    try:
+        _allowed = get_allowed_origins()
+    except Exception:
+        _allowed = []
     return {
         "status": "ok",
         "advisory_status": _ADVISORY_STATUS,
         "execution_mode": _EXECUTION_MODE,
+        "execution_gate": "LOCKED",
         "ai_execution_count": _AI_EXECUTION_COUNT,
+        "broker_api_called": False,
+        "broker_order_id": "NONE",
         "human_review_required": True,
         "version": _VERSION,
+        "environment": get_environment_tag(),
+        "db_available": db_available(),
+        "db_path": safe_db_display_path(),
+        "api_token_required": api_token_required(),
+        "allowed_origins_count": len(_allowed),
+        "generated_at": datetime.now(timezone.utc)
+        .replace(microsecond=0)
+        .isoformat(),
     }
 
 
@@ -394,12 +543,16 @@ def get_signal(event_id: str) -> dict:
 
 
 @app.post("/signals/{event_id}/validate")
-def validate_signal(event_id: str) -> dict:
+def validate_signal(event_id: str, _auth: None = Depends(require_api_token)) -> dict:
     return run_validation(event_id)
 
 
 @app.post("/signals/{event_id}/reflection")
-def post_reflection(event_id: str, body: ReflectionBody) -> dict:
+def post_reflection(
+    event_id: str,
+    body: ReflectionBody,
+    _auth: None = Depends(require_api_token),
+) -> dict:
     return add_user_reflection(
         event_id,
         body.reflection_text,
@@ -409,7 +562,11 @@ def post_reflection(event_id: str, body: ReflectionBody) -> dict:
 
 
 @app.post("/signals/{event_id}/ai-summary")
-def post_ai_summary(event_id: str, body: AISummaryBody) -> dict:
+def post_ai_summary(
+    event_id: str,
+    body: AISummaryBody,
+    _auth: None = Depends(require_api_token),
+) -> dict:
     return add_ai_discussion_summary(
         event_id,
         body.summary_text,
@@ -418,7 +575,11 @@ def post_ai_summary(event_id: str, body: AISummaryBody) -> dict:
 
 
 @app.post("/signals/{event_id}/decision")
-def post_decision(event_id: str, body: DecisionBody) -> dict:
+def post_decision(
+    event_id: str,
+    body: DecisionBody,
+    _auth: None = Depends(require_api_token),
+) -> dict:
     return mark_signal(event_id, body.status)
 
 
@@ -428,7 +589,10 @@ def post_decision(event_id: str, body: DecisionBody) -> dict:
 
 
 @app.post("/manual-trades")
-def post_manual_trade(body: ManualTradeBody) -> dict:
+def post_manual_trade(
+    body: ManualTradeBody,
+    _auth: None = Depends(require_api_token),
+) -> dict:
     return log_manual_trade(
         event_id=body.event_id,
         ticker=body.ticker,
@@ -443,7 +607,11 @@ def post_manual_trade(body: ManualTradeBody) -> dict:
 
 
 @app.post("/manual-trades/{trade_id}/reconcile")
-def post_reconcile(trade_id: str, body: ReconcileBody) -> dict:
+def post_reconcile(
+    trade_id: str,
+    body: ReconcileBody,
+    _auth: None = Depends(require_api_token),
+) -> dict:
     return reconcile_trade(
         trade_id,
         actual_fill_price=body.actual_fill_price,
@@ -525,7 +693,10 @@ def get_chart_structure(
 
 
 @app.post("/chart-structure/bootstrap-symbol")
-def post_chart_structure_bootstrap(body: ChartBootstrapBody) -> dict:
+def post_chart_structure_bootstrap(
+    body: ChartBootstrapBody,
+    _auth: None = Depends(require_api_token),
+) -> dict:
     """Discover + backfill OHLCV for a missing symbol on demand.
 
     Read-only market-data ingestion. Never places orders, never connects to
@@ -684,7 +855,10 @@ def get_moltbook() -> dict:
 
 
 @app.post("/moltbook")
-def post_moltbook(body: MoltbookEntryBody) -> dict:
+def post_moltbook(
+    body: MoltbookEntryBody,
+    _auth: None = Depends(require_api_token),
+) -> dict:
     return log_moltbook_entry(
         event_id=body.event_id,
         ticker=body.ticker,
@@ -750,7 +924,16 @@ if __name__ == "__main__":  # pragma: no cover
     try:
         import uvicorn
 
-        uvicorn.run(app, host="127.0.0.1", port=8000)
+        host = get_api_host()
+        port = get_api_port()
+        if not api_token_required():
+            print(
+                "[warning] MVP_API_TOKEN not set; mutating routes are unprotected. "
+                "Local-only use recommended.",
+                file=sys.stderr,
+            )
+        print(f"[info] Starting Signal Advisory API at http://{host}:{port}")
+        uvicorn.run(app, host=host, port=port)
     except ImportError:
         print("uvicorn not installed.  Run: pip install uvicorn")
         sys.exit(1)

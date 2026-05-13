@@ -1,4 +1,89 @@
-# Pipeline V5.7 Core
+# sleeping-passenger-v1
+
+> A **local, single-user advisory signal journal**. It pulls public-data
+> signals into a SQLite store, surfaces them in a Next.js dashboard, and lets
+> a human reflect, log a manual trade, and reconcile the outcome.
+
+## Who this is for
+
+One person — you — running this on your own laptop to enforce trade-journal
+discipline. It is not a hosted product, not multi-user, and not a broker.
+
+## What this MVP does
+
+- Ingests public signals (Polymarket, GDELT, SEC EDGAR, NewsAPI, Etherscan,
+  Yahoo OHLCV, Grok/xAI) into a local SQLite database — all read-only.
+- Surfaces them in a Next.js dashboard with derived next-human-action hints.
+- Lets you reflect on a signal, log a manual trade you placed yourself, and
+  reconcile the outcome later.
+- Maintains a Moltbook — a self-correction journal of mistakes / biases /
+  rule updates.
+- Exports every journal stream as CSV for offline analysis.
+
+## What this MVP does NOT do
+
+- Does **not** place buy/sell orders on any exchange or broker.
+- Does **not** connect to any broker API.
+- Does **not** execute trades automatically or semi-automatically.
+- Does **not** ever set `ai_execution_count > 0`. That value is immutable.
+- Does **not** store broker credentials.
+
+The advisory contract is stamped on every record:
+`advisory_status=ADVISORY_ONLY`, `execution_mode=HUMAN_ONLY`,
+`execution_gate=LOCKED`, `broker_api_called=false`, `ai_execution_count=0`.
+
+## Canonical workflow
+
+1. **Ingest** live signals (or use seeded data).
+2. **Review** the Signal Inbox — filter, sort, drill into details.
+3. **Reflect** — write a thesis or note on a signal.
+4. **Decide** — mark `watchlist`, `human_review`, or `rejected`.
+5. **Log** a manual trade you placed yourself (record-keeping only).
+6. **Reconcile** the trade with the actual outcome.
+7. **Learn** — log a Moltbook entry capturing the mistake/bias/rule update.
+
+## Safety posture
+
+This system is designed to be **incapable** of placing trades. The refusal
+is enforced at four layers (UI badges, FastAPI route absence, persistence
+stamps, AST-level test that no `/execute|/buy|/sell|/order|/broker` route
+exists). See `scripts/api_server.py` and `tests/test_api_server.py` for the
+exact enforcement.
+
+## Quick start
+
+See **[SETUP.md](SETUP.md)** for the full setup. Short version:
+
+```powershell
+# backend
+python -m venv .venv; .\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt; pip install -r requirements-dev.txt
+python scripts\api_server.py
+
+# frontend (new terminal)
+cd frontend; npm install; npm run dev
+```
+
+Open http://localhost:3000.
+
+## Documentation map
+
+| Doc | Purpose |
+|---|---|
+| [SETUP.md](SETUP.md) | Install, env vars, start/stop, troubleshooting |
+| [DEMO.md](DEMO.md) | 5-minute scripted walkthrough |
+| [TESTING.md](TESTING.md) | What is and isn't tested, how to run |
+| [DEPLOYMENT.md](DEPLOYMENT.md) | Current status and the path to production |
+| [docs/SCRIPT_INVENTORY.md](docs/SCRIPT_INVENTORY.md) | Active vs. research scripts |
+
+The historical reference content (operator-control layer, perception-control
+layer, phase 1/2 ingestion runbooks, chart-structure API, etc.) is preserved
+below for context. Treat it as internal reference, not as the canonical
+description of what the MVP does today.
+
+---
+
+# Pipeline V5.7 Core — historical reference
 
 This repo is a local decision shell for inspecting seeded signal state, blocker state, action posture, and transition readiness. It is not a live trading system.
 

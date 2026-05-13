@@ -9,7 +9,22 @@ const STATE_CONFIG: Record<string, { bg: string; border: string; text: string; d
   'UNKNOWN':    { bg: 'bg-slate-800/50',   border: 'border-slate-600/60',   text: 'text-slate-500',   dot: 'bg-slate-500' },
 };
 
+// Plain-English explanations surfaced as the native browser tooltip on hover.
+// These are intentionally short — the long-form taxonomy stays in docs.
+// Keep these aligned with anything user-facing in DEMO.md.
+const STATE_HINT: Record<string, string> = {
+  'HURACÁN':    'High-velocity fast-track candidate — strong persistence, low blocker pressure',
+  'AVENTADOR':  'Actionable human-review candidate — review before any manual decision',
+  'MURCIÉLAGO': 'Durable signal candidate — has survived multiple checks',
+  'GALLARDO':   'Execution-discipline / checklist layer — confirm before logging a trade',
+  'ISLERO':     'Shock / reclassification — recent regime change, treat with caution',
+  'DIABLO':     'Chaos veto / high risk — likely rejected; require extraordinary evidence',
+  'MIURA':      'Raw / noisy novelty — early-stage candidate, low confidence',
+  'UNKNOWN':    'State not yet classified',
+};
+
 const DEFAULT_CONFIG = STATE_CONFIG['UNKNOWN'];
+const DEFAULT_HINT = STATE_HINT['UNKNOWN'];
 
 interface Props {
   state: string;
@@ -18,6 +33,7 @@ interface Props {
 
 export function BullStateBadge({ state, size = 'sm' }: Props) {
   const cfg = STATE_CONFIG[state] ?? DEFAULT_CONFIG;
+  const hint = STATE_HINT[state] ?? DEFAULT_HINT;
   const cls = size === 'lg'
     ? 'px-3 py-1.5 text-sm gap-2'
     : size === 'md'
@@ -25,7 +41,11 @@ export function BullStateBadge({ state, size = 'sm' }: Props) {
     : 'px-1.5 py-0.5 text-xs gap-1';
 
   return (
-    <span className={`inline-flex items-center ${cls} rounded border ${cfg.bg} ${cfg.border} ${cfg.text} font-mono font-semibold`}>
+    <span
+      title={`${state} — ${hint}`}
+      aria-label={`${state} signal state: ${hint}`}
+      className={`inline-flex items-center ${cls} rounded border ${cfg.bg} ${cfg.border} ${cfg.text} font-mono font-semibold cursor-help`}
+    >
       <span className={`${size === 'lg' ? 'w-2 h-2' : 'w-1.5 h-1.5'} rounded-full ${cfg.dot} shrink-0`} />
       {state}
     </span>
