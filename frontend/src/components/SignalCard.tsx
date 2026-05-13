@@ -43,10 +43,16 @@ export function SignalCard({ item }: Props) {
           </div>
         </div>
 
-        <p className="text-xs text-slate-400 mb-3 leading-snug">
+        <p className="text-xs text-slate-400 mb-1 leading-snug">
           <span className="text-slate-500">Decision reason:</span>{' '}
           <span className="text-slate-300">{action.reason}</span>
         </p>
+        {item.promotion_reason && (
+          <p className="text-xs text-slate-500 mb-3 leading-snug">
+            <span className="text-slate-600">Promotion:</span>{' '}
+            <span className="text-slate-400">{item.promotion_reason}</span>
+          </p>
+        )}
 
         <div className="grid grid-cols-3 gap-3 mb-3">
           <ScoreCell label="Priority" value={item.priority_score} />
@@ -65,11 +71,30 @@ export function SignalCard({ item }: Props) {
         )}
 
         <div className="flex items-center justify-between text-xs text-slate-500 flex-wrap gap-2">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <span>{item.entry_type}</span>
-            {(item.source_name || item.source_file) && (
+            {(item.source_names && item.source_names.length > 1) ? (
+              <span className="font-mono text-slate-600">
+                · src={item.source_names.join(',')}
+              </span>
+            ) : (item.source_name || item.source_file) ? (
               <span className="font-mono text-slate-600">
                 · src={item.source_name || item.source_file}
+              </span>
+            ) : null}
+            {typeof item.event_count === 'number' && item.event_count > 1 && (
+              <span className="font-mono text-emerald-400/80 bg-emerald-950/30 border border-emerald-900/40 rounded px-1.5 py-0.5">
+                ×{item.event_count} events
+              </span>
+            )}
+            {typeof item.duplicate_suppressed_count === 'number' && item.duplicate_suppressed_count > 0 && (
+              <span className="font-mono text-slate-500" title={`${item.duplicate_suppressed_count} duplicate raw events collapsed into this card`}>
+                · {item.duplicate_suppressed_count} dups suppressed
+              </span>
+            )}
+            {typeof item.cross_source_support_count === 'number' && item.cross_source_support_count > 1 && (
+              <span className="font-mono text-indigo-400/80 bg-indigo-950/30 border border-indigo-900/40 rounded px-1.5 py-0.5">
+                ×{item.cross_source_support_count} sources
               </span>
             )}
           </div>

@@ -85,6 +85,8 @@ export default function ReflectionDeskPage() {
                 const hasActivity =
                   reflections.some((r) => r.event_id === item.event_id) ||
                   aiSummaries.some((s) => s.event_id === item.event_id);
+                const ec = item.event_count ?? 1;
+                const srcLabel = item.source_name || item.source_file || '';
                 return (
                   <button
                     key={item.event_id}
@@ -96,10 +98,22 @@ export default function ReflectionDeskPage() {
                     }`}
                   >
                     <div className="flex items-center gap-2 mb-1">
-                      <span className="font-bold font-mono text-sm text-white">{item.ticker}</span>
+                      <span className="font-bold font-mono text-sm text-white truncate">{item.ticker}</span>
                       {hasActivity && <span className="w-1.5 h-1.5 rounded-full bg-purple-400" />}
                     </div>
-                    <BullStateBadge state={item.signal_state} />
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <BullStateBadge state={item.signal_state} />
+                      {ec > 1 && (
+                        <span className="text-[10px] font-mono text-slate-400 bg-slate-800/80 border border-slate-700/60 rounded px-1.5 py-0.5">
+                          {ec} supporting events
+                        </span>
+                      )}
+                    </div>
+                    {srcLabel && (
+                      <div className="text-[10px] text-slate-500 font-mono mt-1 truncate">
+                        src={srcLabel}
+                      </div>
+                    )}
                   </button>
                 );
               })}

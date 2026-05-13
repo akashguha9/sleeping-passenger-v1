@@ -1,6 +1,6 @@
 """
 Signal Inbox bridge — promote fresh persisted signal_events into Signal Inbox
-candidates.
+candidates with **deterministic deduplication / aggregation**.
 
 Why this exists
 ---------------
@@ -10,9 +10,15 @@ Signals page reads `signal_events` (populated by live ingestion) and stays
 fresh, but the Signal Inbox kept showing the same legacy tickers for days.
 
 This module bridges that gap. It reads the most recent `signal_events` rows
-from SQLite and projects them into the InboxItem-shaped dicts the frontend
-already understands. Source-specific normalizers map each event's raw_payload
-to a meaningful display ticker/topic.
+from SQLite, **groups** them by a stable candidate key, and projects each
+group into a single InboxItem-shaped dict. Source-specific normalizers map
+each event's raw_payload to a meaningful display ticker / topic.
+
+Grouping prevents the inbox from being spammed by:
+  - per-candle OHLCV rows (one symbol = one card, not one card per candle)
+  - repeated news rows that share the same title / topic
+  - repeated regulatory filings for the same issuer + form
+  - repeated wallet activity for the same address
 
 Advisory contract
 -----------------
@@ -23,12 +29,14 @@ Advisory contract
     execution_mode       = "HUMAN_ONLY"
     execution_gate       = "LOCKED"
     ai_execution_count   = 0
+    broker_api_called    = False
 - No buy/sell/trade language. No price targets. Candidates are observational
   context, never recommendations. The human decides whether they're worth
   reviewing.
 """
 from __future__ import annotations
 
+import hashlib
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -40,6 +48,7 @@ except ModuleNotFoundError:  # pragma: no cover
 
 _ADVISORY_STATUS = "ADVISORY_ONLY"
 _EXECUTION_MODE = "HUMAN_ONLY"
+_EXECUTION_GATE = "LOCKED"
 _AI_EXECUTION_COUNT = 0
 
 # Default freshness window — bridge will reach this far back when promoting.
@@ -57,11 +66,15 @@ _REGULATORY_SOURCES = {
 }
 
 
+# ---------------------------------------------------------------------------
+# Time / helpers
+# ---------------------------------------------------------------------------
+
+
 def _parse_iso(ts: str) -> datetime | None:
     if not ts:
         return None
     try:
-        # Accept both "...Z" and "...+00:00"
         cleaned = ts.replace("Z", "+00:00")
         dt = datetime.fromisoformat(cleaned)
         if dt.tzinfo is None:
@@ -79,6 +92,31 @@ def _clamp(value: float, lo: float = 0.0, hi: float = 1.0) -> float:
     return value
 
 
+def _clamp_int(value: int, lo: int, hi: int) -> int:
+    if value < lo:
+        return lo
+    if value > hi:
+        return hi
+    return value
+
+
+def _truncate(s: str, n: int) -> str:
+    s = (s or "").strip()
+    if len(s) <= n:
+        return s
+    return s[: n - 1].rstrip() + "…"
+
+
+def _hash_short(text: str, n: int = 10) -> str:
+    h = hashlib.sha1((text or "").encode("utf-8", errors="replace")).hexdigest()
+    return h[:n]
+
+
+# ---------------------------------------------------------------------------
+# Display ticker / topic per source
+# ---------------------------------------------------------------------------
+
+
 def _ticker_for_event(source_name: str, payload: dict[str, Any]) -> str:
     """Map source-specific payload fields to a single display label.
 
@@ -93,7 +131,6 @@ def _ticker_for_event(source_name: str, payload: dict[str, Any]) -> str:
             return sym
 
     if src == "polymarket":
-        # Topic-shaped — title or market_id, NOT a fake stock ticker.
         title = str(p.get("title") or p.get("question") or "").strip()
         if title:
             return _truncate(title, 48)
@@ -102,7 +139,6 @@ def _ticker_for_event(source_name: str, payload: dict[str, Any]) -> str:
             return f"PM_{mid[:20]}"
 
     if src == "sec_edgar":
-        # Prefer issuer ticker if available; fall back to CIK or form
         cik = str(p.get("cik") or "").strip()
         form = str(p.get("form_type") or "").strip()
         if cik and form:
@@ -170,18 +206,10 @@ def _ticker_for_event(source_name: str, payload: dict[str, Any]) -> str:
         if regsrc:
             return f"IN/{regsrc.upper()}"
 
-    # Fallback: try generic title, then source name
     title = str(p.get("title") or "").strip()
     if title:
         return _truncate(title, 48)
     return src.upper()
-
-
-def _truncate(s: str, n: int) -> str:
-    s = s.strip()
-    if len(s) <= n:
-        return s
-    return s[: n - 1].rstrip() + "…"
 
 
 def _entry_type_for_source(source_name: str) -> str:
@@ -201,145 +229,414 @@ def _entry_type_for_source(source_name: str) -> str:
     }.get(source_name, "LIVE_SIGNAL")
 
 
-def _signal_state_for_event(age_hours: float, source_name: str) -> str:
-    """Deterministic placeholder fabric state derived from freshness.
-
-    The legacy fabric assigns Lamborghini-flavored states. New live events
-    don't have a kill/blocker history yet, so we keep classification minimal
-    and honest: fresh = AVENTADOR (steady), aging = GALLARDO, stale = MIURA.
-    DIABLO is reserved for the legacy chaos path.
-    """
+def _signal_state_for_age(age_hours: float) -> str:
+    """Deterministic placeholder fabric state derived from freshness."""
     if age_hours <= 6:
         return "AVENTADOR"
     if age_hours <= 24:
         return "GALLARDO"
-    if age_hours <= 72:
-        return "MIURA"
     return "MIURA"
 
 
-def _scores_for_event(
+# ---------------------------------------------------------------------------
+# Grouping key — what makes two events "the same candidate"
+# ---------------------------------------------------------------------------
+
+
+def _group_key_for_event(
     source_name: str,
     payload: dict[str, Any],
-    age_hours: float,
-    same_ticker_count: int,
-) -> dict[str, float]:
-    """Compute deterministic advisory scores from event metadata.
+    display_ticker: str,
+) -> str:
+    """Build a stable per-candidate grouping key.
 
-    These are not predictions. They reflect:
-      - priority: source confidence + recency
-      - persistence: how many fresh events share the same display ticker
-      - kill_rate: 0 (no rejection history attached to a raw live event)
-      - blocker_pressure: 0 (no blocker engine output on live events)
-
-    The downstream `deriveNextHumanAction()` then classifies these scores into
-    IGNORE / HAVE_A_LOOK / WATCHLIST / HUMAN_REVIEW / MANUAL_CANDIDATE.
+    Two raw events sharing this key collapse into one inbox candidate. The key
+    incorporates entry_type so a future cross-type accidental collision (e.g.
+    a market_data symbol that happens to equal a polymarket title) still stays
+    in its own group.
     """
+    src = (source_name or "unknown").lower().strip()
     p = payload if isinstance(payload, dict) else {}
+    entry_type = _entry_type_for_source(src)
 
+    # Source-specific normalization — DOES NOT use individual event_id.
+    if src == "market_data":
+        sym = str(p.get("symbol") or p.get("ticker") or "").strip().upper()
+        anchor = sym or display_ticker.upper()
+    elif src == "polymarket":
+        mid = str(p.get("market_id") or "").strip()
+        if mid:
+            anchor = f"MID:{mid}"
+        else:
+            anchor = "TITLE:" + _hash_short(display_ticker.lower(), 12)
+    elif src == "sec_edgar":
+        cik = str(p.get("cik") or "").strip()
+        form = str(p.get("form_type") or "").strip()
+        anchor = f"CIK:{cik}|FORM:{form}" if (cik or form) else display_ticker.upper()
+    elif src in {"global_filings", "asia_disclosure"}:
+        ticker = str(p.get("ticker_or_identifier") or "").strip().upper()
+        issuer = str(p.get("issuer_name") or "").strip().lower()
+        dtype = str(p.get("disclosure_type") or p.get("form_type") or "").strip().lower()
+        anchor = f"T:{ticker}|I:{_hash_short(issuer, 8)}|D:{dtype}"
+    elif src == "etherscan":
+        addr = (
+            str(p.get("to_address") or p.get("from_address") or "")
+            .strip()
+            .lower()
+        )
+        chain = str(p.get("chain") or "ethereum").strip().lower()
+        category = str(p.get("category") or p.get("tx_category") or "tx").strip().lower()
+        anchor = f"{chain}|{addr or 'unknown'}|{category}"
+    elif src == "grok_xai":
+        topic = str(p.get("interpreted_topic") or "").strip().lower()
+        frame = str(p.get("narrative_frame") or "").strip().lower()
+        if topic or frame:
+            anchor = f"T:{_hash_short(topic, 8)}|F:{_hash_short(frame, 6)}"
+        else:
+            anchor = "FALLBACK:" + _hash_short(display_ticker.lower(), 10)
+    elif src in {"newsapi", "event_registry", "gdelt", "gdelt_fallback"}:
+        # Group by detected asset/ticker if present, else by normalized title.
+        detected = str(
+            p.get("detected_asset")
+            or p.get("ticker")
+            or p.get("symbol")
+            or ""
+        ).strip().upper()
+        if detected:
+            anchor = f"ASSET:{detected}"
+        else:
+            title = str(p.get("title") or "").strip().lower()
+            anchor = "TITLE:" + _hash_short(title or display_ticker.lower(), 12)
+    elif src == "india":
+        idx = str(p.get("index_name") or p.get("symbol") or "").strip().upper()
+        reg = str(p.get("regulatory_source") or "").strip().lower()
+        anchor = f"S:{idx}|R:{reg}" if (idx or reg) else display_ticker.upper()
+    else:
+        anchor = display_ticker.upper() or "UNKNOWN"
+
+    return f"{src}|{entry_type}|{anchor}"
+
+
+def _normalized_ticker_for_cross_source(ticker: str) -> str:
+    """Case-insensitive ticker form used to detect cross-source support."""
+    return (ticker or "").strip().lower()
+
+
+# ---------------------------------------------------------------------------
+# Per-group aggregation + scoring
+# ---------------------------------------------------------------------------
+
+
+def _base_priority_for_source(source_name: str, payload: dict[str, Any]) -> float:
+    p = payload if isinstance(payload, dict) else {}
     if source_name == "market_data":
-        base = float(p.get("market_confirmation_score", 0.55) or 0.55)
-    elif source_name == "grok_xai":
+        return _clamp(float(p.get("market_confirmation_score", 0.55) or 0.55), 0.05, 0.95)
+    if source_name == "grok_xai":
         cs = p.get("confidence_score")
-        base = float(cs) if isinstance(cs, (int, float)) else 0.5
-    elif source_name in _REGULATORY_SOURCES:
-        base = 0.6
-    elif source_name == "polymarket":
-        # Bigger market = more attention; clamp to 0.4–0.7 band
+        return _clamp(float(cs) if isinstance(cs, (int, float)) else 0.5, 0.05, 0.95)
+    if source_name in _REGULATORY_SOURCES:
+        return 0.6
+    if source_name == "polymarket":
         vol = float(p.get("volume", 0) or 0)
-        base = 0.4 + min(0.3, vol / 1_000_000.0)
-    elif source_name == "gdelt_fallback":
-        base = 0.45
-    else:
-        base = 0.5
+        return _clamp(0.4 + min(0.3, vol / 1_000_000.0), 0.05, 0.95)
+    if source_name == "gdelt_fallback":
+        return 0.45
+    return 0.5
 
-    base = _clamp(base, 0.05, 0.95)
 
-    # Freshness factor — fresher = higher priority within the bridge window.
+def _freshness_factor(age_hours: float) -> float:
     if age_hours <= 6:
-        freshness_factor = 1.0
+        return 1.0
+    if age_hours <= 24:
+        return 0.85
+    if age_hours <= 72:
+        return 0.7
+    return 0.4
+
+
+def _persistence_score_for_group(event_count: int, freshness_factor: float) -> float:
+    """Persistence rises with repeated observations but caps at 1.0.
+
+    Single event -> mild persistence proportional to freshness. Multiple
+    events stack but the curve flattens fast so a 50-candle backfill doesn't
+    instantly look like 50x conviction.
+    """
+    if event_count <= 1:
+        return round(_clamp(0.35 * freshness_factor + 0.05, 0.0, 1.0), 4)
+    bonus = min(0.6, 0.12 * (event_count - 1))  # caps at +0.60
+    base = 0.4 + bonus
+    return round(_clamp(base, 0.0, 1.0), 4)
+
+
+def _priority_score_for_group(
+    base_priority: float,
+    age_hours: float,
+    event_count: int,
+    cross_source_support: int,
+) -> float:
+    freshness = _freshness_factor(age_hours)
+    raw = base_priority * freshness + 0.05
+    if event_count >= 3:
+        raw += 0.05
+    if cross_source_support >= 2:
+        raw += 0.10
+    return round(_clamp(raw, 0.0, 1.0), 4)
+
+
+def _promotion_reason(
+    source_name: str,
+    event_count: int,
+    cross_source_support: int,
+    age_hours: float,
+) -> str:
+    bits: list[str] = []
+    if event_count > 1:
+        bits.append(f"{event_count} fresh events aggregated into one candidate")
+    else:
+        bits.append("single fresh event from this source")
+    if cross_source_support >= 2:
+        bits.append(f"cross-source support from {cross_source_support} sources")
+    if age_hours <= 6:
+        bits.append("fresh (≤6h)")
     elif age_hours <= 24:
-        freshness_factor = 0.85
+        bits.append("recent (≤24h)")
     elif age_hours <= 72:
-        freshness_factor = 0.7
+        bits.append("aging (≤72h)")
     else:
-        freshness_factor = 0.4
-    priority = _clamp(base * freshness_factor + 0.05, 0.0, 1.0)
-
-    # Persistence — multiple fresh events for the same ticker boost confidence.
-    if same_ticker_count >= 3:
-        persistence = _clamp(0.7 + 0.05 * min(6, same_ticker_count - 3), 0.0, 1.0)
-    elif same_ticker_count == 2:
-        persistence = 0.55
-    else:
-        persistence = _clamp(base * freshness_factor, 0.0, 1.0)
-
-    return {
-        "priority_score": round(priority, 4),
-        "persistence_score": round(persistence, 4),
-        "kill_rate_score": 0.0,
-        "blocker_pressure_score": 0.0,
-    }
+        bits.append("stale (>72h)")
+    return "; ".join(bits) + f"; source={source_name}"
 
 
-def _signal_event_to_inbox_item(
-    row: dict[str, Any],
+def _aggregate_group(
+    rows: list[dict[str, Any]],
     *,
+    cross_source_support: int,
     overlay: dict[str, dict[str, Any]],
-    same_ticker_count: int,
     has_reflection_fn,
     has_ai_summary_fn,
     now: datetime,
 ) -> dict[str, Any]:
-    event_id = str(row.get("event_id", "") or "")
-    source_name = str(row.get("source_name", "") or "")
-    fetched_at = str(row.get("fetched_at", "") or "")
-    payload = row.get("raw_payload") or {}
+    """Collapse one group of raw signal_events into a single inbox item."""
+    # Sort newest-first so the representative is the most recent observation.
+    sorted_rows = sorted(
+        rows,
+        key=lambda r: str(r.get("fetched_at", "")),
+        reverse=True,
+    )
+    rep = sorted_rows[0]
+    oldest = sorted_rows[-1]
+
+    source_name = str(rep.get("source_name", "") or "")
+    payload = rep.get("raw_payload") or {}
     if not isinstance(payload, dict):
         payload = {}
 
-    ts = _parse_iso(fetched_at) or now
-    age_hours = max(0.0, (now - ts).total_seconds() / 3600.0)
+    ts_latest = _parse_iso(str(rep.get("fetched_at", ""))) or now
+    ts_first = _parse_iso(str(oldest.get("fetched_at", ""))) or ts_latest
+    age_hours = max(0.0, (now - ts_latest).total_seconds() / 3600.0)
+    display_ticker = _ticker_for_event(source_name, payload)
 
-    ticker = _ticker_for_event(source_name, payload)
-    scores = _scores_for_event(source_name, payload, age_hours, same_ticker_count)
-    state = _signal_state_for_event(age_hours, source_name)
+    base_priority = _base_priority_for_source(source_name, payload)
+    event_count = len(rows)
+    priority = _priority_score_for_group(
+        base_priority, age_hours, event_count, cross_source_support
+    )
+    freshness = _freshness_factor(age_hours)
+    persistence = _persistence_score_for_group(event_count, freshness)
 
-    user_status = str((overlay.get(event_id) or {}).get("user_status", "pending"))
+    # Track every event_id covered by the group (capped to keep payload sane).
+    aggregated_event_ids = [str(r.get("event_id", "") or "") for r in sorted_rows]
+    aggregated_event_ids = [e for e in aggregated_event_ids if e]
+    capped_event_ids = aggregated_event_ids[:50]
+
+    source_names = sorted({str(r.get("source_name", "") or "") for r in rows if r.get("source_name")})
+
+    representative_event_id = str(rep.get("event_id", "") or "")
+    user_status = str((overlay.get(representative_event_id) or {}).get("user_status", "pending"))
+
+    has_reflection = False
+    has_ai_summary = False
+    if has_reflection_fn:
+        for eid in capped_event_ids:
+            try:
+                if has_reflection_fn(eid):
+                    has_reflection = True
+                    break
+            except Exception:
+                continue
+    if has_ai_summary_fn:
+        for eid in capped_event_ids:
+            try:
+                if has_ai_summary_fn(eid):
+                    has_ai_summary = True
+                    break
+            except Exception:
+                continue
+
+    state = _signal_state_for_age(age_hours)
 
     return {
-        "event_id": event_id,
-        "ticker": ticker,
+        "event_id": representative_event_id,
+        "representative_event_id": representative_event_id,
+        "ticker": display_ticker,
         "signal_state": state,
         "entry_type": _entry_type_for_source(source_name),
-        "priority_score": scores["priority_score"],
-        "observed_at": fetched_at,
+        "priority_score": priority,
+        "observed_at": str(rep.get("fetched_at", "") or ""),
+        "first_observed_at": str(oldest.get("fetched_at", "") or ""),
+        "last_observed_at": str(rep.get("fetched_at", "") or ""),
         "source_file": source_name,
+        "source_name": source_name,
+        "source_names": source_names,
         "rejection_dimensions": [],
         "rejection_reason": "",
-        "persistence_score": scores["persistence_score"],
-        "blocker_pressure_score": scores["blocker_pressure_score"],
-        "kill_rate_score": scores["kill_rate_score"],
+        "persistence_score": persistence,
+        "blocker_pressure_score": 0.0,
+        "kill_rate_score": 0.0,
         "blocker_attribution": "NONE",
         "user_status": user_status,
-        "has_reflection": bool(has_reflection_fn(event_id)) if has_reflection_fn else False,
-        "has_ai_summary": bool(has_ai_summary_fn(event_id)) if has_ai_summary_fn else False,
+        "has_reflection": has_reflection,
+        "has_ai_summary": has_ai_summary,
         "advisory_status": _ADVISORY_STATUS,
         "human_review_required": True,
         "execution_mode": _EXECUTION_MODE,
+        "execution_gate": _EXECUTION_GATE,
         "ai_execution_count": _AI_EXECUTION_COUNT,
+        "broker_api_called": False,
         "signal_origin": "live_event",
-        "source_name": source_name,
         "age_hours": round(age_hours, 2),
+        "event_count": event_count,
+        "duplicate_suppressed_count": max(0, event_count - 1),
+        "cross_source_support_count": int(cross_source_support),
+        "aggregated_event_ids": capped_event_ids,
+        "promotion_reason": _promotion_reason(
+            source_name, event_count, cross_source_support, age_hours
+        ),
     }
 
 
-def _clamp_int(value: int, lo: int, hi: int) -> int:
-    if value < lo:
-        return lo
-    if value > hi:
-        return hi
-    return value
+# ---------------------------------------------------------------------------
+# Next-human-action classifier (backend mirror of frontend deriveNextHumanAction)
+# ---------------------------------------------------------------------------
+
+
+_ACTION_KEYS = (
+    "ignore",
+    "have_a_look",
+    "watchlist",
+    "human_review",
+    "manual_review_candidate",
+)
+
+_PLACEHOLDER_SOURCE_HINTS = ("unknown", "placeholder", "mock", "todo", "fake", "stub")
+
+
+def _is_known_source(item: dict[str, Any]) -> bool:
+    raw = (str(item.get("source_name") or item.get("source_file") or "")).lower().strip()
+    if not raw:
+        return False
+    for hint in _PLACEHOLDER_SOURCE_HINTS:
+        if hint in raw:
+            return False
+    return True
+
+
+def classify_next_human_action(item: dict[str, Any]) -> str:
+    """Return one of IGNORE / HAVE_A_LOOK / WATCHLIST / HUMAN_REVIEW /
+    MANUAL_REVIEW_CANDIDATE — kept in lockstep with the frontend rules.
+
+    Advisory-only. No trade language, no execution implications.
+    """
+    user_status = str(item.get("user_status", "pending"))
+    state = str(item.get("signal_state", "") or "").upper()
+    priority = float(item.get("priority_score", 0.0) or 0.0)
+    persistence = float(item.get("persistence_score", 0.0) or 0.0)
+    kill_rate = float(item.get("kill_rate_score", 0.0) or 0.0)
+    blocker = float(item.get("blocker_pressure_score", 0.0) or 0.0)
+    age_hours = float(item.get("age_hours", 0.0) or 0.0)
+    rejection_dims = list(item.get("rejection_dimensions", []) or [])
+    event_count = int(item.get("event_count", 1) or 1)
+    cross_source = int(item.get("cross_source_support_count", 1) or 1)
+    ticker = str(item.get("ticker", "") or "").strip()
+    known_source = _is_known_source(item)
+
+    # ----- IGNORE -----
+    if user_status == "rejected":
+        return "IGNORE"
+    if state == "DIABLO":
+        return "IGNORE"
+    if kill_rate >= 0.85:
+        return "IGNORE"
+    if blocker >= 0.85:
+        return "IGNORE"
+    if age_hours > 72:
+        return "IGNORE"
+    if not known_source:
+        return "IGNORE"
+    if not ticker:
+        return "IGNORE"
+
+    has_context = bool(item.get("has_reflection") or item.get("has_ai_summary"))
+    serious_rejection = len(rejection_dims) >= 2
+
+    # ----- MANUAL_REVIEW_CANDIDATE -----
+    if (
+        priority >= 0.85
+        and persistence >= 0.75
+        and kill_rate <= 0.20
+        and blocker <= 0.20
+        and known_source
+        and not serious_rejection
+        and (cross_source >= 2 or event_count >= 3 or has_context)
+    ):
+        return "MANUAL_REVIEW_CANDIDATE"
+
+    # ----- HUMAN_REVIEW -----
+    if (
+        priority >= 0.75
+        and persistence >= 0.55
+        and kill_rate <= 0.30
+        and blocker <= 0.30
+        and known_source
+        and not serious_rejection
+        and age_hours <= 48
+    ):
+        return "HUMAN_REVIEW"
+
+    # ----- WATCHLIST -----
+    if (
+        0.55 <= priority < 0.75
+        and persistence >= 0.45
+        and kill_rate < 0.50
+        and blocker < 0.50
+        and not serious_rejection
+    ):
+        return "WATCHLIST"
+
+    # ----- HAVE_A_LOOK -----
+    if (
+        0.30 <= priority < 0.55
+        and persistence >= 0.20
+        and kill_rate < 0.80
+        and blocker < 0.70
+    ):
+        return "HAVE_A_LOOK"
+
+    return "IGNORE"
+
+
+def compute_action_counts(items: list[dict[str, Any]]) -> dict[str, int]:
+    counts = {k: 0 for k in _ACTION_KEYS}
+    for it in items:
+        action = classify_next_human_action(it).lower()
+        if action in counts:
+            counts[action] += 1
+    return counts
+
+
+# ---------------------------------------------------------------------------
+# Public API
+# ---------------------------------------------------------------------------
 
 
 def promote_signal_events_to_inbox(
@@ -352,9 +649,11 @@ def promote_signal_events_to_inbox(
     get_signal_events=None,
     now: datetime | None = None,
 ) -> list[dict[str, Any]]:
-    """Read recent signal_events and project them into InboxItem-shaped dicts.
+    """Read recent signal_events and project them into deduplicated inbox candidates.
 
-    Parameters are dependency-injection friendly so tests can pass fakes.
+    50 raw OHLCV candles for the same symbol become ONE InboxItem with
+    event_count=50 and duplicate_suppressed_count=49. Parameters are
+    dependency-injection friendly so tests can pass fakes.
     """
     safe_hours = _clamp_int(int(hours or DEFAULT_HOURS), 1, MAX_HOURS)
     safe_limit = _clamp_int(int(limit or DEFAULT_LIMIT), 1, MAX_LIMIT)
@@ -372,8 +671,9 @@ def promote_signal_events_to_inbox(
         except Exception:
             return []
 
-    # Pull more than `limit` so we can filter by freshness then slice.
-    raw_rows = get_signal_events(source_name=None, limit=max(safe_limit * 3, safe_limit + 50))
+    # Pull a wide window — we need many raw rows to dedup correctly. Hard cap
+    # to avoid loading the whole table for huge backfills.
+    raw_rows = get_signal_events(source_name=None, limit=5000)
     if not isinstance(raw_rows, list):
         return []
 
@@ -382,42 +682,50 @@ def promote_signal_events_to_inbox(
         if not isinstance(row, dict):
             continue
         ts = _parse_iso(str(row.get("fetched_at", "")))
-        if ts is None:
-            continue
-        if ts < cutoff:
+        if ts is None or ts < cutoff:
             continue
         fresh_rows.append(row)
 
-    # Count occurrences per (source_name, derived ticker) to feed persistence.
-    counts: dict[tuple[str, str], int] = {}
-    derived_tickers: list[str] = []
+    # Bucket by (source, entry_type, normalized anchor).
+    buckets: dict[str, list[dict[str, Any]]] = {}
+    bucket_ticker_for_xref: dict[str, str] = {}
     for row in fresh_rows:
         payload = row.get("raw_payload") or {}
         if not isinstance(payload, dict):
             payload = {}
-        source = str(row.get("source_name", ""))
-        ticker = _ticker_for_event(source, payload)
-        derived_tickers.append(ticker)
-        key = (source, ticker)
-        counts[key] = counts.get(key, 0) + 1
+        source = str(row.get("source_name", "") or "")
+        display_ticker = _ticker_for_event(source, payload)
+        key = _group_key_for_event(source, payload, display_ticker)
+        buckets.setdefault(key, []).append(row)
+        bucket_ticker_for_xref.setdefault(key, display_ticker)
 
-    items: list[dict[str, Any]] = []
-    for row, ticker in zip(fresh_rows, derived_tickers):
-        source = str(row.get("source_name", ""))
-        ct = counts.get((source, ticker), 1)
-        items.append(
-            _signal_event_to_inbox_item(
-                row,
+    # Cross-source support: for each normalized ticker (case-insensitive)
+    # count how many distinct source_names produced a group.
+    ticker_to_sources: dict[str, set[str]] = {}
+    for key, rows in buckets.items():
+        norm = _normalized_ticker_for_cross_source(bucket_ticker_for_xref.get(key, ""))
+        if not norm:
+            continue
+        src = str(rows[0].get("source_name", "") or "")
+        ticker_to_sources.setdefault(norm, set()).add(src)
+
+    aggregated: list[dict[str, Any]] = []
+    for key, rows in buckets.items():
+        norm = _normalized_ticker_for_cross_source(bucket_ticker_for_xref.get(key, ""))
+        xref = max(1, len(ticker_to_sources.get(norm, {""})))
+        aggregated.append(
+            _aggregate_group(
+                rows,
+                cross_source_support=xref,
                 overlay=overlay,
-                same_ticker_count=ct,
                 has_reflection_fn=has_reflection_fn,
                 has_ai_summary_fn=has_ai_summary_fn,
                 now=now,
             )
         )
 
-    items.sort(key=lambda it: it.get("observed_at", ""), reverse=True)
-    return items[:safe_limit]
+    aggregated.sort(key=lambda it: (it.get("last_observed_at", "") or ""), reverse=True)
+    return aggregated[:safe_limit]
 
 
 def build_inbox_diagnostics(
@@ -429,8 +737,9 @@ def build_inbox_diagnostics(
     """Diagnostic snapshot for the /signals/diagnostics endpoint.
 
     Returns counts per source, latest signal_event timestamp, the count of
-    candidates that *would* be promoted, and an explicit `mock_fallback=False`
-    flag so the frontend can detect honest "no fresh signals" states.
+    candidates that *would* be promoted (post-dedup) plus the raw fresh count,
+    and an explicit `mock_fallback=False` flag so the frontend can detect
+    honest "no fresh signals" states.
     """
     safe_hours = _clamp_int(int(hours or DEFAULT_HOURS), 1, MAX_HOURS)
     now = now or datetime.now(timezone.utc)
@@ -448,6 +757,8 @@ def build_inbox_diagnostics(
                 "signal_events_total": 0,
                 "fresh_window_hours": safe_hours,
                 "promoted_candidate_count": 0,
+                "fresh_event_count": 0,
+                "duplicate_suppressed_count": 0,
                 "mock_fallback": False,
                 "advisory_status": _ADVISORY_STATUS,
                 "execution_mode": _EXECUTION_MODE,
@@ -457,7 +768,7 @@ def build_inbox_diagnostics(
             }
 
     try:
-        all_rows = get_signal_events(source_name=None, limit=2000)
+        all_rows = get_signal_events(source_name=None, limit=5000)
     except Exception as exc:
         return {
             "error": f"persistence_call_failed:{type(exc).__name__}",
@@ -468,6 +779,8 @@ def build_inbox_diagnostics(
             "source_counts": {},
             "fresh_source_counts": {},
             "promoted_candidate_count": 0,
+            "fresh_event_count": 0,
+            "duplicate_suppressed_count": 0,
             "mock_fallback": False,
             "advisory_status": _ADVISORY_STATUS,
             "execution_mode": _EXECUTION_MODE,
@@ -484,6 +797,7 @@ def build_inbox_diagnostics(
     latest_ts: str | None = None
     newest_fresh_ts: str | None = None
     fresh_count = 0
+    fresh_rows: list[dict[str, Any]] = []
 
     for row in all_rows:
         if not isinstance(row, dict):
@@ -497,8 +811,22 @@ def build_inbox_diagnostics(
         if ts is not None and ts >= cutoff:
             fresh_count += 1
             fresh_source_counts[source] = fresh_source_counts.get(source, 0) + 1
+            fresh_rows.append(row)
             if newest_fresh_ts is None or ts_str > newest_fresh_ts:
                 newest_fresh_ts = ts_str
+
+    # Re-bucket the fresh rows to compute deduped candidate count.
+    buckets: dict[str, int] = {}
+    for row in fresh_rows:
+        payload = row.get("raw_payload") or {}
+        if not isinstance(payload, dict):
+            payload = {}
+        source = str(row.get("source_name", "") or "")
+        display_ticker = _ticker_for_event(source, payload)
+        key = _group_key_for_event(source, payload, display_ticker)
+        buckets[key] = buckets.get(key, 0) + 1
+    promoted_candidate_count = len(buckets)
+    duplicate_suppressed = max(0, fresh_count - promoted_candidate_count)
 
     return {
         "signal_events_total": len(all_rows),
@@ -507,7 +835,9 @@ def build_inbox_diagnostics(
         "newest_fresh_event_at": newest_fresh_ts,
         "source_counts": dict(sorted(source_counts.items())),
         "fresh_source_counts": dict(sorted(fresh_source_counts.items())),
-        "promoted_candidate_count": fresh_count,
+        "promoted_candidate_count": promoted_candidate_count,
+        "fresh_event_count": fresh_count,
+        "duplicate_suppressed_count": duplicate_suppressed,
         "mock_fallback": False,
         "advisory_status": _ADVISORY_STATUS,
         "execution_mode": _EXECUTION_MODE,
@@ -524,4 +854,6 @@ __all__ = [
     "MAX_LIMIT",
     "promote_signal_events_to_inbox",
     "build_inbox_diagnostics",
+    "classify_next_human_action",
+    "compute_action_counts",
 ]

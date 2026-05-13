@@ -50,7 +50,18 @@ export interface InboxItem {
   // Bridge metadata — present when the item came from the live-events bridge.
   signal_origin?: 'live_event' | 'legacy_fabric' | string;
   source_name?: string;
+  source_names?: string[];
   age_hours?: number;
+  event_count?: number;
+  duplicate_suppressed_count?: number;
+  cross_source_support_count?: number;
+  representative_event_id?: string;
+  aggregated_event_ids?: string[];
+  first_observed_at?: string;
+  last_observed_at?: string;
+  promotion_reason?: string;
+  execution_gate?: string;
+  broker_api_called?: boolean;
 }
 
 export interface ManualTradeLog {
@@ -139,15 +150,25 @@ export interface FabricStats {
   source_files?: number;
   // Bridge-mode fields (present when /signals derived items from signal_events)
   promoted_candidate_count?: number;
+  duplicate_suppressed_count?: number;
   freshness_window_hours?: number;
   limit?: number;
   [key: string]: number | undefined;
+}
+
+export interface ActionCounts {
+  ignore: number;
+  have_a_look: number;
+  watchlist: number;
+  human_review: number;
+  manual_review_candidate: number;
 }
 
 export interface InboxListResponse {
   operation: string;
   item_count: number;
   items: InboxItem[];
+  action_counts?: ActionCounts;
   fabric_bull_state: string;
   fabric_stats: FabricStats;
   signal_source?: 'live_events' | 'legacy_fabric' | string;
@@ -168,6 +189,8 @@ export interface InboxDiagnosticsResponse {
   source_counts: Record<string, number>;
   fresh_source_counts: Record<string, number>;
   promoted_candidate_count: number;
+  fresh_event_count?: number;
+  duplicate_suppressed_count?: number;
   mock_fallback: boolean;
   advisory_status: string;
   execution_mode: string;

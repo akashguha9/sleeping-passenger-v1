@@ -77,6 +77,19 @@ export default function SignalInboxPage() {
     [items],
   );
 
+  // Action-bucket counts derived from deduplicated items.
+  const actionCounts = useMemo(() => {
+    const c: Record<NextHumanAction, number> = {
+      IGNORE: 0,
+      HAVE_A_LOOK: 0,
+      WATCHLIST: 0,
+      HUMAN_REVIEW: 0,
+      MANUAL_CANDIDATE: 0,
+    };
+    for (const { action } of enriched) c[action.action] += 1;
+    return c;
+  }, [enriched]);
+
   const filtered = useMemo(
     () =>
       enriched
@@ -166,19 +179,26 @@ export default function SignalInboxPage() {
         <div className="flex items-center gap-2 flex-wrap">
           <span className="text-xs text-slate-500 shrink-0">Action:</span>
           <div className="flex gap-1 flex-wrap">
-            {ACTION_FILTERS.map((a) => (
-              <button
-                key={a.value}
-                onClick={() => setActionFilter(a.value)}
-                className={`px-2.5 py-1 rounded text-xs font-medium transition-colors ${
-                  actionFilter === a.value
-                    ? 'bg-slate-600 text-white'
-                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-700'
-                }`}
-              >
-                {a.label}
-              </button>
-            ))}
+            {ACTION_FILTERS.map((a) => {
+              const count =
+                a.value === 'all'
+                  ? items.length
+                  : (actionCounts[a.value as NextHumanAction] ?? 0);
+              return (
+                <button
+                  key={a.value}
+                  onClick={() => setActionFilter(a.value)}
+                  className={`px-2.5 py-1 rounded text-xs font-medium transition-colors ${
+                    actionFilter === a.value
+                      ? 'bg-slate-600 text-white'
+                      : 'text-slate-400 hover:text-slate-200 hover:bg-slate-700'
+                  }`}
+                >
+                  {a.label}{' '}
+                  <span className="font-mono text-[10px] text-slate-500">({count})</span>
+                </button>
+              );
+            })}
           </div>
         </div>
 

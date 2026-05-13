@@ -37,6 +37,7 @@ try:
         DEFAULT_HOURS as _BRIDGE_DEFAULT_HOURS,
         DEFAULT_LIMIT as _BRIDGE_DEFAULT_LIMIT,
         build_inbox_diagnostics,
+        compute_action_counts,
         promote_signal_events_to_inbox,
     )
 except ModuleNotFoundError:
@@ -46,6 +47,7 @@ except ModuleNotFoundError:
         DEFAULT_HOURS as _BRIDGE_DEFAULT_HOURS,
         DEFAULT_LIMIT as _BRIDGE_DEFAULT_LIMIT,
         build_inbox_diagnostics,
+        compute_action_counts,
         promote_signal_events_to_inbox,
     )
 
@@ -347,16 +349,21 @@ def list_inbox_items(
         )
         fabric_stats = dict(report.get("fabric_stats", {}))
     else:
+        suppressed = sum(int(it.get("duplicate_suppressed_count", 0) or 0) for it in items)
         fabric_stats = {
             "promoted_candidate_count": len(items),
+            "duplicate_suppressed_count": suppressed,
             "freshness_window_hours": int(hours),
             "limit": int(limit),
         }
+
+    action_counts = compute_action_counts(items)
 
     return {
         "operation": "list_inbox_items",
         "item_count": len(items),
         "items": items,
+        "action_counts": action_counts,
         "fabric_bull_state": fabric_bull_state,
         "fabric_stats": fabric_stats,
         "signal_source": signal_source,

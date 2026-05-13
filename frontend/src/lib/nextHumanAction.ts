@@ -75,13 +75,6 @@ export const ACTION_BADGE_CLASS: Record<NextHumanAction, string> = {
   MANUAL_CANDIDATE: 'text-emerald-300 bg-emerald-950/40 border-emerald-900/60',
 };
 
-const STRONG_STATES: Set<BullState> = new Set<BullState>([
-  'HURACÁN',
-  'AVENTADOR',
-  'MURCIÉLAGO',
-  'GALLARDO',
-]);
-
 const CHAOS_STATES: Set<BullState> = new Set<BullState>(['DIABLO', 'ISLERO']);
 
 const PLACEHOLDER_SOURCE_HINTS = [
@@ -237,16 +230,22 @@ function hasSeriousRejection(dims: string[]): boolean {
 /**
  * Pure, deterministic classifier. See module docstring for advisory contract.
  *
- * Rules — first match wins:
- *   1. IGNORE — hard blockers (rejected, DIABLO, UNKNOWN source, very high
- *      kill_rate/blocker, very low priority/persistence).
- *   2. MANUAL_CANDIDATE — strong-state + very high priority/persistence,
- *      very low kill/blocker, known source, no rejections, supporting context.
- *   3. HUMAN_REVIEW — high priority/persistence, low kill/blocker, known
- *      source, no serious rejections, not in chaos state.
- *   4. WATCHLIST — solid priority/persistence with acceptable friction.
- *   5. HAVE_A_LOOK — non-trivial but weak evidence.
- *   6. Fallback — IGNORE with "below threshold" reason.
+ * Rules — first match wins. The thresholds intentionally produce a meaningful
+ * distribution across the five buckets so the action filters in the Signal
+ * Inbox don't collapse into a single WATCHLIST blob:
+ *   IGNORE                   — rejected, DIABLO, stale (>72h), unknown source,
+ *                              kill_rate >= 0.85, blocker >= 0.85, or no
+ *                              usable ticker/topic.
+ *   HAVE_A_LOOK              — weak but non-zero: priority 0.30–0.55, low
+ *                              persistence, incomplete confirmation.
+ *   WATCHLIST                — moderate: priority 0.55–0.75, ok persistence,
+ *                              low blockers, still needs confirmation.
+ *   HUMAN_REVIEW             — strong: priority >= 0.75, known source, low
+ *                              blockers, not stale, enough supporting evidence.
+ *   MANUAL_REVIEW_CANDIDATE  — very strong: priority >= 0.85, persistence
+ *                              >= 0.75, kill <= 0.20, blocker <= 0.20, plus
+ *                              cross-source support OR strong event_count
+ *                              OR human/AI context already attached.
  */
 export function deriveNextHumanAction(item: InboxItem): NextHumanActionResult {
   const gates = buildGateDetails(item);
@@ -259,17 +258,17 @@ export function deriveNextHumanAction(item: InboxItem): NextHumanActionResult {
   const dims = item.rejection_dimensions || [];
   const userStatus = item.user_status;
   const hasContext = item.has_reflection || item.has_ai_summary;
+  const eventCount = typeof item.event_count === 'number' ? item.event_count : 1;
+  const crossSource = typeof item.cross_source_support_count === 'number'
+    ? item.cross_source_support_count
+    : 1;
+  const ageHours = typeof item.age_hours === 'number' ? item.age_hours : 0;
+  const ticker = (item.ticker || '').trim();
+  const serious = hasSeriousRejection(dims);
 
-  // ----- Rule A: IGNORE -----
+  // ----- IGNORE -----
   if (userStatus === 'rejected') {
     return makeResult('IGNORE', 'Signal is already rejected.', gates);
-  }
-  if (source === 'UNKNOWN') {
-    return makeResult(
-      'IGNORE',
-      'Source is UNKNOWN, so this signal cannot be trusted yet.',
-      gates,
-    );
   }
   if (state === 'DIABLO') {
     return makeResult(
@@ -278,117 +277,94 @@ export function deriveNextHumanAction(item: InboxItem): NextHumanActionResult {
       gates,
     );
   }
-  if (killRate >= 0.8) {
-    return makeResult(
-      'IGNORE',
-      `Kill rate ${killRate.toFixed(2)} is too high for review.`,
-      gates,
-    );
+  if (killRate >= 0.85) {
+    return makeResult('IGNORE', `Kill rate ${killRate.toFixed(2)} is too high.`, gates);
   }
-  if (blocker >= 0.7) {
-    return makeResult(
-      'IGNORE',
-      `Blocker pressure ${blocker.toFixed(2)} is too high.`,
-      gates,
-    );
+  if (blocker >= 0.85) {
+    return makeResult('IGNORE', `Blocker pressure ${blocker.toFixed(2)} is too high.`, gates);
   }
-  if (priority <= 0.2) {
-    return makeResult(
-      'IGNORE',
-      `Priority ${priority.toFixed(2)} below review floor.`,
-      gates,
-    );
+  if (ageHours > 72) {
+    return makeResult('IGNORE', `${Math.round(ageHours)}h old — stale.`, gates);
   }
-  if (persistence <= 0.2) {
-    return makeResult(
-      'IGNORE',
-      `Persistence ${persistence.toFixed(2)} below review floor.`,
-      gates,
-    );
+  if (source === 'UNKNOWN') {
+    return makeResult('IGNORE', 'Source is UNKNOWN — cannot trust this signal yet.', gates);
   }
-  if (hasSeriousRejection(dims) && blocker >= 0.5) {
-    return makeResult(
-      'IGNORE',
-      `${dims.length} rejection dimensions with blocker pressure ${blocker.toFixed(
-        2,
-      )} — combined block.`,
-      gates,
-    );
+  if (!ticker) {
+    return makeResult('IGNORE', 'No usable ticker or topic on this signal.', gates);
   }
 
-  // ----- Rule E: MANUAL_CANDIDATE (strict gate) -----
-  // UNKNOWN source was already filtered above; require OK (not WEAK).
+  // ----- MANUAL_REVIEW_CANDIDATE -----
   if (
-    STRONG_STATES.has(state) &&
-    priority >= 0.8 &&
+    priority >= 0.85 &&
     persistence >= 0.75 &&
-    killRate <= 0.25 &&
-    blocker <= 0.25 &&
+    killRate <= 0.20 &&
+    blocker <= 0.20 &&
     source === 'OK' &&
-    dims.length === 0 &&
-    hasContext
+    !serious &&
+    (crossSource >= 2 || eventCount >= 3 || hasContext)
   ) {
-    return makeResult(
-      'MANUAL_CANDIDATE',
-      'High-priority, persistent, low-kill signal with known source and supporting context. Still advisory-only and requires human decision.',
-      gates,
-    );
+    const why = crossSource >= 2
+      ? `Strong scores with cross-source support (${crossSource} sources). Advisory-only, requires human decision.`
+      : eventCount >= 3
+        ? `Strong scores with ${eventCount} aggregated events. Advisory-only, requires human decision.`
+        : 'Strong scores with supporting reflection / AI context. Advisory-only, requires human decision.';
+    return makeResult('MANUAL_CANDIDATE', why, gates);
   }
 
-  // ----- Rule D: HUMAN_REVIEW -----
+  // ----- HUMAN_REVIEW -----
   if (
     priority >= 0.75 &&
-    persistence >= 0.7 &&
-    killRate <= 0.3 &&
-    blocker <= 0.3 &&
+    persistence >= 0.55 &&
+    killRate <= 0.30 &&
+    blocker <= 0.30 &&
     source === 'OK' &&
-    !hasSeriousRejection(dims) &&
-    !CHAOS_STATES.has(state)
+    !serious &&
+    !CHAOS_STATES.has(state) &&
+    ageHours <= 48
   ) {
     return makeResult(
       'HUMAN_REVIEW',
-      'Strong priority, persistence, and low kill rate. Human review required before any manual decision.',
+      'Strong priority and persistence, low kill/blocker. Human review required before any manual decision.',
       gates,
     );
   }
 
-  // ----- Rule C: WATCHLIST -----
-  // UNKNOWN source was already filtered above.
+  // ----- WATCHLIST -----
   if (
-    priority >= 0.6 &&
-    persistence >= 0.55 &&
-    killRate < 0.5 &&
-    blocker < 0.5 &&
-    !hasSeriousRejection(dims)
+    priority >= 0.55 &&
+    priority < 0.75 &&
+    persistence >= 0.45 &&
+    killRate < 0.50 &&
+    blocker < 0.50 &&
+    !serious
   ) {
     return makeResult(
       'WATCHLIST',
-      'Signal has enough structure to monitor, but still needs confirmation before human review.',
+      'Moderate priority and good persistence with low blockers — keep monitoring before promoting.',
       gates,
     );
   }
 
-  // ----- Rule B: HAVE_A_LOOK -----
+  // ----- HAVE_A_LOOK -----
   if (
-    priority >= 0.4 &&
-    persistence >= 0.3 &&
-    killRate < 0.8 &&
-    blocker < 0.7
+    priority >= 0.30 &&
+    priority < 0.55 &&
+    persistence >= 0.20 &&
+    killRate < 0.80 &&
+    blocker < 0.70
   ) {
-    let why =
-      'Priority and persistence are non-trivial, but evidence is not strong enough to promote beyond a look.';
+    let why = 'Weak but non-zero candidate — worth a quick look before deciding.';
     if (source === 'WEAK') {
-      why =
-        'Priority and persistence are non-trivial, but source quality is weak — cannot promote to watchlist.';
+      why = 'Weak source confirmation — quick look before promoting.';
     } else if (dims.length === 1) {
-      why = `Priority and persistence are non-trivial, but rejection dimension "${dims[0]}" blocks promotion.`;
+      why = `Rejection dimension "${dims[0]}" blocks promotion past a quick look.`;
     } else if (CHAOS_STATES.has(state)) {
-      why = `Priority and persistence are non-trivial, but signal state ${state} indicates chaos — cannot promote.`;
+      why = `Signal state ${state} indicates chaos — limited to a quick look.`;
     }
     return makeResult('HAVE_A_LOOK', why, gates);
   }
 
-  // ----- Fallback: IGNORE -----
+  // ----- Fallback -----
   return makeResult(
     'IGNORE',
     'Scores below review thresholds across priority/persistence/kill/blocker gates.',
