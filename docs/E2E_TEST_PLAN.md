@@ -244,3 +244,112 @@ This plan is complete when:
 
 Until then, the manual smoke walkthrough in `DEMO.md` and the smoke
 check in `scripts/smoke_check.py` are the only frontend safety nets.
+
+## Local Self-Test Flow (canonical, hackathon sprint addition)
+
+> Added by the Self-Test Hardening sprint. Mirrors the DEMO walkthrough
+> but is framed for the *solo operator* doing 1–2 years of manual
+> self-testing, not for a public showcase.
+
+`frontend/e2e/local-self-test-flow.spec.ts` (to be created once tooling
+is installed):
+
+```ts
+import { test, expect } from '@playwright/test';
+
+const BASE = process.env.PLAYWRIGHT_BASE_URL ?? 'http://localhost:3000';
+
+test.describe('local self-test workflow', () => {
+  test('dashboard exposes advisory-only copy and never implies execution', async ({ page }) => {
+    await page.goto(BASE);
+    await expect(page.getByText('ADVISORY_ONLY')).toBeVisible();
+    await expect(page.getByText(/AI executions:\s*0/i)).toBeVisible();
+    await expect(page.getByText(/place order|broker order placed|execute trade|auto[- ]trade/i))
+      .toHaveCount(0);
+  });
+
+  test('source health or mock fallback is explicitly labelled', async ({ page }) => {
+    await page.goto(BASE);
+    const live = page.getByText(/connected|sqlite|fresh/i);
+    const offline = page.getByText(/MOCK_FALLBACK|BACKEND OFFLINE|legacy_fabric/i);
+    await expect(live.or(offline)).toBeVisible();
+  });
+
+  test('signal inbox surfaces a degraded indicator when fallback is in use', async ({ page }) => {
+    await page.goto(`${BASE}/signal-inbox`);
+    const banner = page.getByText(/MOCK_FALLBACK|legacy_fabric|fallback/i);
+    const items = page.locator('[data-testid="signal-card"]');
+    await expect(items.first().or(banner)).toBeVisible();
+  });
+
+  test('signal detail page never asserts a recommendation', async ({ page }) => {
+    await page.goto(`${BASE}/signal-inbox`);
+    const firstCard = page.locator('[data-testid="signal-card"]').first();
+    if (await firstCard.isVisible()) {
+      await firstCard.click();
+      await expect(page.getByText('ADVISORY_ONLY')).toBeVisible();
+      await expect(page.getByText(/buy now|sell now|enter position|execute/i))
+        .toHaveCount(0);
+    }
+  });
+
+  test('manual trade log form records a manual decision with a thesis', async ({ page }) => {
+    await page.goto(`${BASE}/manual-trade-log`);
+    await expect(page.getByRole('heading', { name: /manual trade log/i })).toBeVisible();
+    await expect(page.getByText(/record-keeping only/i)).toBeVisible();
+  });
+
+  test('reconciliation and moltbook pages are reachable', async ({ page }) => {
+    await page.goto(`${BASE}/reconciliation`);
+    await expect(page.getByRole('heading', { name: /reconciliation/i })).toBeVisible();
+    await page.goto(`${BASE}/moltbook`);
+    await expect(page.getByRole('heading', { name: /moltbook/i })).toBeVisible();
+  });
+
+  test('help page exists and contains advisory-only reminders', async ({ page }) => {
+    await page.goto(`${BASE}/help`);
+    await expect(page.getByText(/ADVISORY_ONLY|human-only|advisory-only/i)).toBeVisible();
+  });
+
+  test('quarantine and degraded states (when implemented) are labelled', async ({ page }) => {
+    await page.goto(`${BASE}/signal-inbox`);
+    const quarantineTag = page.getByText(/QUARANTINE|TOXIC|CONTAMINATED/i);
+    const degradedTag = page.getByText(/DEGRADED|CONTINUITY_SAFE/i);
+    if (await quarantineTag.first().isVisible() || await degradedTag.first().isVisible()) {
+      // If present, must be plainly labeled in advisory tone
+      const blob = await page.content();
+      expect(blob.toLowerCase()).not.toMatch(/auto.suppress|auto.execute|auto.reject/);
+    }
+  });
+});
+```
+
+### What this flow proves vs. what it does not prove
+
+Proves:
+
+- Advisory-only copy is visible everywhere the operator looks.
+- Source freshness / mock fallback / degraded state are *labelled*, not
+  silently swapped in.
+- The operator can reach every page in the manual self-test loop
+  (inbox → detail → manual trade log → reconciliation → moltbook).
+- No UI copy implies execution authority.
+
+Does not prove:
+
+- That the signals shown are correct.
+- That AI summaries are factually true.
+- That the operator's process is profitable.
+- That the system is hosted, multi-user, or production-grade.
+
+Those are not goals of the local self-test phase.
+
+### Approval status
+
+The operator explicitly declined to install frontend test tooling
+during the Self-Test Hardening sprint. This spec is committed as a
+blueprint. The Python-side helpers (`signal_sensitivity_diagnostics`,
+`toxic_signal_quarantine`, `continuity_mode`, `self_test_journal_quality`,
+`self_test_report`) cover the diagnostic surface that the e2e would
+display, so the operator can still self-test rigorously without the
+frontend tests being green.

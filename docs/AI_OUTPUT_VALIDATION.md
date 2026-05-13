@@ -239,6 +239,36 @@ use-case-specific validators continue to handle their three shapes
 a hosted eval harness, an alternate provider — should pass payloads through
 before persisting.
 
+### Integration points now covered (Self-Test Hardening sprint)
+
+| Caller | Behaviour before | Behaviour after |
+|---|---|---|
+| `scripts.signal_inbox_api.add_ai_discussion_summary` | Raw `summary_text` persisted verbatim. No validation_status. No secret redaction at the boundary. | Runs every payload through `validate_ai_interpretation_payload`. Returns `validation_status`, `validation_errors`, `prompt_version`. Redacts secret patterns in the summary text and model label *before* the JSONL log or SQLite insert. Any caller attempt to set `execution_permission`, `can_execute`, `broker_api_called`, `ai_execution_count`, `broker_order_id` via the optional `ai_payload` kwarg is silently overridden to safe values; the override is recorded in `validation_errors`. |
+
+The function signature gained an optional `ai_payload: dict | None`
+keyword-only argument so existing callers that only pass `summary_text`
+continue to work unchanged. When `ai_payload` is provided, the canonical
+AI schema is the authoritative source of truth.
+
+Tests covering this wiring:
+
+`tests/test_ai_schema_integration.py`:
+
+- `test_add_ai_summary_runs_through_validator`
+- `test_add_ai_summary_backwards_compatible_without_payload`
+- `test_malformed_ai_payload_does_not_crash`
+- `test_ai_payload_with_confidence_out_of_range_marks_partial`
+- `test_attempted_execution_permission_is_overridden`
+- `test_broker_order_id_attempt_is_silently_dropped`
+- `test_secret_pattern_in_summary_is_redacted`
+- `test_secret_pattern_in_raw_response_is_redacted`
+- `test_no_execution_permission_in_response_graph`
+- `test_existing_caller_only_summary_text_still_returns_advisory`
+
+Future callers (hosted eval harness, alternate provider adapters) should
+follow the same recipe: build the dict, validate, persist the result of
+the validator — never the raw model output.
+
 Integration recipe:
 
 ```python

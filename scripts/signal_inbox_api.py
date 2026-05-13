@@ -40,6 +40,10 @@ try:
         compute_action_counts,
         promote_signal_events_to_inbox,
     )
+    from scripts.ai_output_schema import (
+        redact_secret_patterns,
+        validate_ai_interpretation_payload,
+    )
 except ModuleNotFoundError:
     from runtime_common import LOG_DIR, append_jsonl, utc_timestamp  # type: ignore[no-redef]
     from global_signal_fabric import build_global_signal_fabric_report  # type: ignore[no-redef]
@@ -49,6 +53,10 @@ except ModuleNotFoundError:
         build_inbox_diagnostics,
         compute_action_counts,
         promote_signal_events_to_inbox,
+    )
+    from ai_output_schema import (  # type: ignore[no-redef]
+        redact_secret_patterns,
+        validate_ai_interpretation_payload,
     )
 
 # Optional SQLite persistence — falls back gracefully to JSONL if unavailable
@@ -573,8 +581,26 @@ def add_ai_discussion_summary(
     summary_text: str,
     *,
     model_label: str = "AI_ADVISORY",
+    ai_payload: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """5. Add an AI discussion summary to a signal (advisory, not a recommendation)."""
+    """5. Add an AI discussion summary to a signal (advisory, not a recommendation).
+
+    Every AI-originating string this function persists is first routed through
+    :func:`scripts.ai_output_schema.validate_ai_interpretation_payload` so that:
+
+    - the canonical safety stamps are locked (no broker call, no execution
+      permission, ai_execution_count=0);
+    - any secret-looking pattern in summary_text or raw_response is redacted
+      *before* it lands on disk;
+    - a ``validation_status`` is returned to the caller and persisted as part
+      of the JSONL log entry so future readers can tell whether the summary
+      was structurally clean, partially recovered, or invalid.
+
+    ``ai_payload`` is an optional structured override. When supplied it is
+    validated and ``summary_text`` is reconciled with the validated payload's
+    summary field. Backwards-compatible: callers that only pass
+    ``summary_text`` still work.
+    """
     if not event_id or not isinstance(event_id, str):
         return _error_response(
             "add_ai_discussion_summary", "event_id must be a non-empty string"
@@ -584,16 +610,55 @@ def add_ai_discussion_summary(
             "add_ai_discussion_summary", "summary_text must be a non-empty string"
         )
 
+    base_payload: dict[str, Any] = {
+        "model_name": None,
+        "provider": None,
+        "summary": str(summary_text),
+        "raw_response": None,
+    }
+    if isinstance(ai_payload, dict):
+        merged: dict[str, Any] = dict(ai_payload)
+        # Caller-supplied summary takes precedence only if it is a non-empty
+        # string; otherwise we keep the positional argument.
+        candidate = merged.get("summary")
+        if not isinstance(candidate, str) or not candidate.strip():
+            merged["summary"] = str(summary_text)
+        base_payload = merged
+    elif ai_payload is not None:
+        # Caller handed us something other than a dict — treat the whole
+        # thing as raw_response so it still goes through redaction, and
+        # record an explicit validation note.
+        base_payload = {
+            "summary": str(summary_text),
+            "raw_response": ai_payload,
+            "validation_status": "partial",
+            "validation_errors": ["ai_payload_type_invalid"],
+        }
+
+    validated = validate_ai_interpretation_payload(base_payload)
+    # The schema validator strips type/shape problems but does NOT redact
+    # secret patterns from the summary field (only from raw_response and
+    # validation_errors). Apply the same redaction at the persistence boundary
+    # so a model that hallucinates an API key into prose cannot leak it.
+    raw_clean = redact_secret_patterns(validated.get("summary") or str(summary_text))
+    clean_summary = raw_clean or "<redacted-secret>"
+
     entry: dict[str, Any] = {
         "summary_id": f"SUM_{uuid.uuid4().hex[:10]}",
         "event_id": event_id,
-        "model_label": str(model_label),
-        "summary_text": str(summary_text),
+        "model_label": redact_secret_patterns(str(model_label)) or "AI_ADVISORY",
+        "summary_text": clean_summary,
         "summarized_at": utc_timestamp(),
         "advisory_status": _ADVISORY_STATUS,
         "human_review_required": True,
         "execution_mode": _EXECUTION_MODE,
         "ai_execution_count": _AI_EXECUTION_COUNT,
+        "broker_api_called": False,
+        "execution_permission": False,
+        "can_execute": False,
+        "validation_status": validated.get("validation_status", "valid"),
+        "validation_errors": list(validated.get("validation_errors") or []),
+        "prompt_version": validated.get("prompt_version"),
         "advisory_note": (
             "AI-generated discussion context only — not a trade recommendation "
             "and does not authorize any execution."
@@ -603,8 +668,8 @@ def add_ai_discussion_summary(
     if _DB_AVAILABLE and _persistence is not None:
         try:
             _persistence.insert_ai_summary(
-                entry["summary_id"], event_id, str(model_label),
-                str(summary_text), entry["summarized_at"],
+                entry["summary_id"], event_id, entry["model_label"],
+                clean_summary, entry["summarized_at"],
             )
         except Exception:
             pass
@@ -614,9 +679,15 @@ def add_ai_discussion_summary(
         "summary_id": entry["summary_id"],
         "event_id": event_id,
         "status": "logged",
+        "validation_status": entry["validation_status"],
+        "validation_errors": entry["validation_errors"],
         "advisory_status": _ADVISORY_STATUS,
         "human_review_required": True,
         "ai_execution_count": _AI_EXECUTION_COUNT,
+        "broker_api_called": False,
+        "execution_permission": False,
+        "can_execute": False,
+        "execution_gate": _EXECUTION_GATE,
         "generated_at": utc_timestamp(),
     }
 

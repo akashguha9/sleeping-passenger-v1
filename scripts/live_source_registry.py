@@ -437,6 +437,169 @@ def _normalise_source_keys(source_keys: Iterable[str] | None) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
+# Source freshness state (added by Self-Test Hardening sprint)
+# ---------------------------------------------------------------------------
+
+FRESHNESS_FRESH = "fresh"
+FRESHNESS_STALE = "stale"
+FRESHNESS_OVERDUE = "overdue"
+FRESHNESS_NEVER_RUN = "never_run"
+FRESHNESS_SKIPPED = "skipped"
+FRESHNESS_FAILED = "failed"
+
+
+def _parse_iso8601(value: Any) -> float | None:
+    """Parse an ISO8601 timestamp into a Unix epoch float. Returns ``None`` on
+    failure rather than raising — the diagnostic must never crash on garbage.
+    """
+    if not isinstance(value, str) or not value.strip():
+        return None
+    import datetime as _dt
+
+    text = value.strip()
+    # Normalise trailing "Z" to "+00:00" so fromisoformat accepts it.
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        dt = _dt.datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=_dt.timezone.utc)
+    return dt.timestamp()
+
+
+def compute_source_freshness(
+    latest_runs: Iterable[Mapping[str, Any]] | None,
+    *,
+    cadence_hours: int = DEFAULT_REFRESH_HOURS,
+    now_epoch: float | None = None,
+    env: Mapping[str, str] | None = None,
+) -> dict[str, dict[str, Any]]:
+    """Compute per-source freshness given the latest ``source_run_log`` rows.
+
+    Parameters
+    ----------
+    latest_runs : iterable of mappings
+        One row per source — usually the output of
+        ``persistence.get_latest_source_run_per_source()``. Each row must
+        carry at minimum ``source_name``, ``status``, ``timestamp_utc``.
+        Recognised statuses: ``OK``, ``SKIP``/``SKIPPED``, ``FAIL``/``ERROR``.
+    cadence_hours : int
+        The expected refresh cadence. Defaults to 6h, matching the
+        registry's ``default_refresh_hours``.
+    now_epoch : float, optional
+        Override the current time (seconds since epoch). Used by tests.
+    env : mapping, optional
+        Forwarded to credential detection so missing-key sources are
+        reported as ``skipped`` rather than ``never_run``.
+
+    Returns
+    -------
+    dict
+        ``{source_key: {freshness_state, last_success_at, next_expected_refresh_at,
+        hours_since_last_success, advisory_status, execution_gate,
+        broker_api_called, ai_execution_count, can_execute,
+        execution_permission, may_inform_human_review, may_execute,
+        may_call_broker, credential_configured}}``
+
+    No secrets are exposed. Sources that lack required credentials are
+    explicitly marked ``skipped`` so the operator does not confuse
+    "configured but stale" with "never configured".
+    """
+    import time as _time
+
+    now = float(now_epoch) if now_epoch is not None else _time.time()
+    cadence = max(1, int(cadence_hours or DEFAULT_REFRESH_HOURS))
+
+    by_source: dict[str, Mapping[str, Any]] = {}
+    if latest_runs:
+        for row in latest_runs:
+            if not isinstance(row, Mapping):
+                continue
+            key = row.get("source_name")
+            if isinstance(key, str) and key:
+                by_source[key] = row
+
+    credential_state = detect_source_credential_state(env)
+    out: dict[str, dict[str, Any]] = {}
+
+    for src in _SOURCE_REGISTRY:
+        key = src["source_key"]
+        row = by_source.get(key)
+        cred = credential_state.get(key, {})
+        cred_configured = bool(cred.get("configured", False))
+
+        last_success_at: str | None = None
+        last_success_epoch: float | None = None
+        status: str | None = None
+
+        if row is not None:
+            status = str(row.get("status") or "").upper() or None
+            ts = row.get("timestamp_utc")
+            epoch = _parse_iso8601(ts)
+            if status == "OK" and epoch is not None:
+                last_success_at = str(ts)
+                last_success_epoch = epoch
+
+        if not cred_configured and src["requires_api_key"]:
+            freshness_state = FRESHNESS_SKIPPED
+            hours_since = None
+            next_expected_refresh_at = None
+        elif last_success_epoch is None:
+            if status in {"FAIL", "ERROR"}:
+                freshness_state = FRESHNESS_FAILED
+            elif status in {"SKIP", "SKIPPED"}:
+                freshness_state = FRESHNESS_SKIPPED
+            else:
+                freshness_state = FRESHNESS_NEVER_RUN
+            hours_since = None
+            next_expected_refresh_at = None
+        else:
+            hours_since = (now - last_success_epoch) / 3600.0
+            if hours_since <= cadence:
+                freshness_state = FRESHNESS_FRESH
+            elif hours_since <= cadence * 2:
+                freshness_state = FRESHNESS_STALE
+            else:
+                freshness_state = FRESHNESS_OVERDUE
+            next_expected_refresh_at = _format_epoch(last_success_epoch + cadence * 3600)
+
+        out[key] = {
+            "source_key": key,
+            "freshness_state": freshness_state,
+            "last_success_at": last_success_at,
+            "hours_since_last_success": (
+                round(hours_since, 4) if hours_since is not None else None
+            ),
+            "next_expected_refresh_at": next_expected_refresh_at,
+            "cadence_hours": cadence,
+            "credential_configured": cred_configured,
+            "adapter_status": src["adapter_status"],
+            "advisory_status": ADVISORY_STATUS,
+            "execution_gate": EXECUTION_GATE_LOCKED,
+            "broker_api_called": False,
+            "ai_execution_count": 0,
+            "execution_permission": False,
+            "can_execute": False,
+            "may_inform_human_review": True,
+            "may_execute": False,
+            "may_call_broker": False,
+        }
+    return out
+
+
+def _format_epoch(epoch: float) -> str:
+    import datetime as _dt
+
+    return (
+        _dt.datetime.fromtimestamp(epoch, tz=_dt.timezone.utc)
+        .isoformat(timespec="seconds")
+        .replace("+00:00", "Z")
+    )
+
+
+# ---------------------------------------------------------------------------
 # Convenience constants
 # ---------------------------------------------------------------------------
 
@@ -451,7 +614,14 @@ __all__ = [
     "ADAPTER_PLANNED",
     "ADAPTER_NOT_CONFIGURED",
     "ALL_SOURCE_KEYS",
+    "FRESHNESS_FRESH",
+    "FRESHNESS_STALE",
+    "FRESHNESS_OVERDUE",
+    "FRESHNESS_NEVER_RUN",
+    "FRESHNESS_SKIPPED",
+    "FRESHNESS_FAILED",
     "build_refresh_plan",
+    "compute_source_freshness",
     "detect_source_credential_state",
     "get_source_family",
     "list_live_source_families",
