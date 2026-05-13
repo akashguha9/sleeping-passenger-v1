@@ -19,9 +19,9 @@
 | 3 | No Dockerfile/compose | P0 | No reproducible build artifact. |
 | 4 | Hardcoded `127.0.0.1` was the default | P1 | Fixed: `API_HOST` / `API_PORT` env vars now control bind. CORS via `ALLOWED_ORIGINS`. |
 | 5 | Sync FastAPI routes | P1 | Blocking under any concurrency. Switch to `async def` + `aiosqlite`/asyncpg before opening to >5 users. |
-| 6 | No automated backup of `runtime/mvp_local.db` | P1 | Manual backup/restore now exists (`scripts/backup_db.py`, `scripts/restore_db.py`). Cron-driven automation is still missing — required before a private beta. |
+| 6 | Automated backup story | P1 | `scripts/backup_db.py` + `scripts/windows/backup_sleepingpassenger_db.ps1` + `docs/WINDOWS_BACKUP_TASK.md` give a Task-Scheduler-ready daily snapshot. Still local-only; off-machine replication unsolved. |
 | 7 | Secrets in `.env` on disk | P2 | Move to OS keyring / vault if leaving the laptop. |
-| 8 | No rate-limiting | P2 | Add `slowapi` once auth is real. |
+| 8 | Rate-limiting | P2 | In-memory sliding-window limiter (`scripts/rate_limiter.py`) now wraps the API. Strict mutating-route limit + softer GET limit, both env-driven. Auto-disabled under pytest. For real exposure put a reverse proxy in front anyway. |
 | 9 | No structured logging | P2 | Plain stdout/file logs in `runtime/logs/`. Add `structlog` for JSON. |
 | 10 | No legal review | P2 | Yahoo OHLCV redistribution, news article body retention, and "advisory" language all need counsel before multi-user. |
 
@@ -40,6 +40,31 @@
 - Smoke check script (`scripts/smoke_check.py`) that hits `/health` and
   verifies the advisory safety stamps before a demo.
 - Persistence truth doctrine (`docs/PERSISTENCE_MODEL.md`).
+
+### Day 11-25 hardening additions
+
+- **Security headers middleware** on every response: `X-Content-Type-Options`,
+  `X-Frame-Options=DENY`, `Referrer-Policy=no-referrer`, conservative
+  `Permissions-Policy`, `Cross-Origin-Resource-Policy`, `X-Robots-Tag`.
+  Tuned for a JSON API (no CSP — frontend ships its own).
+- **Request size guard** — mutating routes reject requests whose
+  `Content-Length` exceeds `MVP_MAX_REQUEST_BYTES` (default 1 MB) with
+  a 413 stamped with the same advisory invariants as 200s.
+- **In-memory rate limiter** (`scripts/rate_limiter.py`) — sliding
+  window, per-client, stricter quota on mutating routes than reads.
+  Auto-disabled under pytest; enabled by default in normal runs.
+- **SQLite hardening** — every connection now applies `journal_mode=WAL`,
+  `busy_timeout=5000`, `synchronous=NORMAL`, `foreign_keys=ON`,
+  `temp_store=MEMORY`. Backup script unchanged (still uses the hot-copy
+  `connection.backup()` API).
+- **API contract** — new `GET /api/version` for cheap uptime/version
+  pings without touching the DB. `/health` now reports
+  `rate_limit_enabled`, `max_request_bytes`, `security_headers_enabled`.
+  `/db/status` reports the applied pragmas and a `wal_enabled` flag.
+- **Windows backup automation** — `scripts/windows/backup_sleepingpassenger_db.ps1`
+  + `docs/WINDOWS_BACKUP_TASK.md` (Task Scheduler walkthrough).
+- **Postgres migration plan** (`docs/POSTGRES_MIGRATION_PLAN.md`) —
+  design, not implementation. SQLite remains canonical.
 
 These are floor-raisers, not deployment readiness.
 

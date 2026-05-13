@@ -50,6 +50,14 @@ _DEFAULT_ALLOWED_ORIGINS = (
 )
 _DEFAULT_ENVIRONMENT = "local"
 
+# Day 11-25 hardening defaults
+_DEFAULT_MAX_REQUEST_BYTES = 1_000_000  # 1 MB JSON ceiling for mutating routes
+_DEFAULT_RATE_LIMIT_WINDOW_SECONDS = 60
+_DEFAULT_RATE_LIMIT_MAX_REQUESTS = 120
+_DEFAULT_MUTATION_RATE_LIMIT_MAX_REQUESTS = 30
+_DEFAULT_SQLITE_BUSY_TIMEOUT_MS = 5000
+_DEFAULT_SQLITE_JOURNAL_MODE = "WAL"
+
 
 def get_api_host() -> str:
     """uvicorn bind host.  Set to 0.0.0.0 inside containers."""
@@ -140,6 +148,154 @@ def safe_db_display_path() -> str:
         return db_path.name
 
 
+def get_max_request_bytes() -> int:
+    """Maximum allowed request body size in bytes.
+
+    Enforced by ``scripts.api_server`` via a Content-Length-based middleware
+    on mutating routes.  Requests larger than this return 413.
+
+    Override with env var ``MVP_MAX_REQUEST_BYTES``; defaults to 1_000_000.
+    Invalid values fall back to the default.  A floor of 1024 is enforced so
+    normal JSON payloads never get clipped.
+    """
+    raw = os.environ.get("MVP_MAX_REQUEST_BYTES", "").strip()
+    if not raw:
+        return _DEFAULT_MAX_REQUEST_BYTES
+    try:
+        value = int(raw)
+    except ValueError:
+        return _DEFAULT_MAX_REQUEST_BYTES
+    if value < 1024:
+        return _DEFAULT_MAX_REQUEST_BYTES
+    return value
+
+
+def security_headers() -> dict[str, str]:
+    """Conservative HTTP security headers for the local API surface.
+
+    Tuned for a localhost JSON API consumed by the Next.js frontend.  We
+    deliberately avoid CSP here because this service does not serve HTML;
+    the frontend renders its own CSP via Next.
+
+    Override the whole map via ``MVP_SECURITY_HEADERS_DISABLED=1`` (returns
+    an empty dict) for niche local debugging.  No granular env tuning yet --
+    add it only when a real consumer asks for it.
+    """
+    if os.environ.get("MVP_SECURITY_HEADERS_DISABLED", "").strip() == "1":
+        return {}
+    return {
+        "X-Content-Type-Options": "nosniff",
+        "X-Frame-Options": "DENY",
+        "Referrer-Policy": "no-referrer",
+        "Permissions-Policy": (
+            "accelerometer=(), camera=(), geolocation=(), gyroscope=(), "
+            "magnetometer=(), microphone=(), payment=(), usb=()"
+        ),
+        "Cross-Origin-Resource-Policy": "same-site",
+        "X-Robots-Tag": "noindex, nofollow",
+    }
+
+
+def _bool_env(name: str, default: bool) -> bool:
+    raw = os.environ.get(name, "").strip().lower()
+    if not raw:
+        return default
+    if raw in {"1", "true", "yes", "on"}:
+        return True
+    if raw in {"0", "false", "no", "off"}:
+        return False
+    return default
+
+
+def rate_limit_enabled() -> bool:
+    """Whether the in-memory rate limiter is active.
+
+    Default behaviour:
+      * Auto-disabled under pytest (``PYTEST_CURRENT_TEST`` is set) so the
+        large existing suite of API tests can fire bursts from one client
+        without tripping the limiter.  Tests that *want* to exercise the
+        limiter set ``MVP_RATE_LIMIT_ENABLED=1`` explicitly via monkeypatch.
+      * Enabled everywhere else, so an out-of-the-box ``python
+        scripts/api_server.py`` has a safety floor against accidental loops.
+
+    Override with ``MVP_RATE_LIMIT_ENABLED=1`` / ``=0``.
+    """
+    raw = os.environ.get("MVP_RATE_LIMIT_ENABLED", "").strip().lower()
+    if raw in {"1", "true", "yes", "on"}:
+        return True
+    if raw in {"0", "false", "no", "off"}:
+        return False
+    if os.environ.get("PYTEST_CURRENT_TEST"):
+        return False
+    return True
+
+
+def _positive_int_env(name: str, default: int, *, minimum: int = 1) -> int:
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        return default
+    if value < minimum:
+        return default
+    return value
+
+
+def rate_limit_window_seconds() -> int:
+    """Sliding window length, in seconds, for the in-memory rate limiter."""
+    return _positive_int_env(
+        "MVP_RATE_LIMIT_WINDOW_SECONDS", _DEFAULT_RATE_LIMIT_WINDOW_SECONDS
+    )
+
+
+def rate_limit_max_requests() -> int:
+    """Per-client request ceiling per window for all routes."""
+    return _positive_int_env(
+        "MVP_RATE_LIMIT_MAX_REQUESTS", _DEFAULT_RATE_LIMIT_MAX_REQUESTS
+    )
+
+
+def rate_limit_mutation_max_requests() -> int:
+    """Stricter per-client ceiling per window for mutating (POST) routes."""
+    return _positive_int_env(
+        "MVP_MUTATION_RATE_LIMIT_MAX_REQUESTS",
+        _DEFAULT_MUTATION_RATE_LIMIT_MAX_REQUESTS,
+    )
+
+
+def sqlite_busy_timeout_ms() -> int:
+    """PRAGMA busy_timeout value applied to every SQLite connection.
+
+    A non-zero busy timeout lets concurrent writers wait briefly instead of
+    failing immediately with ``database is locked``.  This is the single
+    most useful pragma for a single-machine multi-process MVP.
+    """
+    return _positive_int_env(
+        "MVP_SQLITE_BUSY_TIMEOUT_MS",
+        _DEFAULT_SQLITE_BUSY_TIMEOUT_MS,
+        minimum=0,
+    )
+
+
+def sqlite_journal_mode() -> str:
+    """PRAGMA journal_mode applied to every SQLite connection.
+
+    WAL is strongly recommended for the local MVP because it lets readers
+    and writers operate concurrently and is what the backup script's
+    ``connection.backup()`` API copes with best.  Override with
+    ``MVP_SQLITE_JOURNAL_MODE=DELETE`` if you need to inspect a DB on a
+    filesystem that doesn't support WAL (rare).
+    """
+    raw = os.environ.get("MVP_SQLITE_JOURNAL_MODE", "").strip().upper()
+    if not raw:
+        return _DEFAULT_SQLITE_JOURNAL_MODE
+    if raw not in {"WAL", "DELETE", "TRUNCATE", "PERSIST", "MEMORY", "OFF"}:
+        return _DEFAULT_SQLITE_JOURNAL_MODE
+    return raw
+
+
 def runtime_safety_stamps() -> dict[str, object]:
     """Common advisory stamp block used by handlers and responses."""
     return {
@@ -170,4 +326,12 @@ __all__ = [
     "db_available",
     "safe_db_display_path",
     "runtime_safety_stamps",
+    "get_max_request_bytes",
+    "security_headers",
+    "rate_limit_enabled",
+    "rate_limit_window_seconds",
+    "rate_limit_max_requests",
+    "rate_limit_mutation_max_requests",
+    "sqlite_busy_timeout_ms",
+    "sqlite_journal_mode",
 ]

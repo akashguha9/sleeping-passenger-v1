@@ -29,6 +29,10 @@ surface. **Do not delete or weaken these without a written reason.**
 | Inbox bridge | `tests/test_signal_inbox_bridge.py` | dedup, freshness window, candidate promotion |
 | DB backup/restore | `tests/test_db_backup_restore.py` | backup is non-mutating, restore is dry-run by default, pre-restore backup is mandatory, invalid backup files are rejected, same-path restore is refused |
 | Smoke check | `tests/test_smoke_check.py` | offline backend = FAIL, missing safety stamps = FAIL, `broker_api_called=true` or `ai_execution_count>0` = FAIL |
+| Security middleware | `tests/test_security_middleware.py` | security headers on every response, request size guard returns 413 with advisory stamps, 429 returns advisory stamps + Retry-After, rate limit auto-disabled under pytest |
+| Rate limiter (pure) | `tests/test_rate_limiter.py` | sliding-window logic with a controlled clock — limit + window + per-key isolation + reset |
+| SQLite hardening | `tests/test_sqlite_hardening.py` | WAL on by default, busy_timeout applied, foreign_keys on, `/db/status` exposes pragmas, backup still works post-WAL, db_path display does not leak home directory |
+| API version | `tests/test_api_version.py` | `/api/version` returns advisory stamps, never touches the DB, never leaks `MVP_API_TOKEN` |
 
 ### Persistence truth (canonical vs fallback vs mock)
 

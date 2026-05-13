@@ -9,6 +9,7 @@ import { BullStateBadge } from '@/components/BullStateBadge';
 import { AdvisoryOnlyBadge } from '@/components/AdvisoryOnlyBadge';
 import { HumanOnlyBadge } from '@/components/HumanOnlyBadge';
 import { SourceHealthWarnings } from '@/components/SourceHealthWarnings';
+import { deriveNextBestAction } from '@/lib/nextBestAction';
 import Link from 'next/link';
 
 export default function DashboardPage() {
@@ -79,6 +80,16 @@ export default function DashboardPage() {
       </div>
 
       <SourceHealthWarnings />
+
+      {/* Mission control: single "what to do next" panel */}
+      {!loading && (
+        <NextBestActionCard
+          isMock={isMock}
+          health={health}
+          signalCount={items.length}
+          openHumanWorkCount={humanReview}
+        />
+      )}
 
       {/* Safety statement + backend status */}
       <div className="bg-slate-900 border border-slate-700 rounded-lg p-4 flex items-center justify-between gap-4">
@@ -177,6 +188,58 @@ export default function DashboardPage() {
           </div>
         </>
       )}
+    </div>
+  );
+}
+
+function NextBestActionCard({
+  isMock,
+  health,
+  signalCount,
+  openHumanWorkCount,
+}: {
+  isMock: boolean;
+  health: HealthResponse | null;
+  signalCount: number;
+  openHumanWorkCount: number;
+}) {
+  const result = deriveNextBestAction({ isMock, health, signalCount, openHumanWorkCount });
+  // Tailwind classes per severity. Avoid dynamic class concatenation that
+  // Tailwind's JIT cannot statically detect.
+  const tone =
+    result.severity === 3
+      ? { border: 'border-red-700/60', accent: 'text-red-300', bg: 'bg-red-950/30' }
+      : result.severity === 2
+        ? { border: 'border-amber-700/60', accent: 'text-amber-300', bg: 'bg-amber-950/20' }
+        : result.severity === 1
+          ? { border: 'border-sky-700/60', accent: 'text-sky-300', bg: 'bg-sky-950/20' }
+          : { border: 'border-emerald-700/60', accent: 'text-emerald-300', bg: 'bg-emerald-950/20' };
+
+  return (
+    <div
+      data-testid="next-best-action"
+      data-action={result.action}
+      className={`rounded-lg border ${tone.border} ${tone.bg} p-4`}
+    >
+      <div className="flex items-center justify-between gap-4">
+        <div className="flex-1 min-w-0">
+          <div className="text-[10px] font-mono uppercase tracking-widest text-slate-500 mb-1">
+            Next best action
+          </div>
+          <div className={`text-base font-semibold ${tone.accent}`}>{result.headline}</div>
+          <p className="text-xs text-slate-400 mt-1.5 leading-relaxed">{result.detail}</p>
+        </div>
+        {result.cta && (
+          <div className="shrink-0 max-w-[40%]">
+            <div className="text-[10px] font-mono uppercase tracking-widest text-slate-500 mb-1">
+              Suggested
+            </div>
+            <code className="font-mono text-[11px] text-slate-300 bg-slate-900/80 px-2 py-1 rounded border border-slate-700/50 block truncate">
+              {result.cta}
+            </code>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

@@ -28,6 +28,14 @@ export interface HealthResponse {
   ai_execution_count: number;
   human_review_required: boolean;
   version: string;
+  // Day 11-25 additions — optional so older mock fixtures still type-check.
+  db_available?: boolean;
+  db_path?: string;
+  api_token_required?: boolean;
+  environment?: string;
+  rate_limit_enabled?: boolean;
+  max_request_bytes?: number;
+  security_headers_enabled?: boolean;
 }
 
 export interface ApiResult<T> {

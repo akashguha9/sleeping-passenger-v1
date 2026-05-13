@@ -217,6 +217,76 @@ CREATE INDEX IF NOT EXISTS idx_gsa_canonical ON global_security_aliases(canonica
 _initialized: set[str] = set()
 
 
+def _apply_pragmas(conn: sqlite3.Connection) -> None:
+    """Apply local-MVP SQLite hardening pragmas to a fresh connection.
+
+    Pragmas are read on every connect rather than at module import so test
+    code can monkeypatch the env vars and observe the change.  All pragmas
+    are best-effort: failures are silently ignored so a hostile filesystem
+    (e.g. read-only mount during diagnostics) still allows reads.
+
+    Reasons each pragma is here:
+      * ``busy_timeout`` -- two MVP processes (api_server + a runner)
+        occasionally race on a write.  A 5s wait turns ``database is locked``
+        into a brief stall instead of a hard error.
+      * ``journal_mode=WAL`` -- WAL lets readers run concurrently with the
+        writer and is the mode that ``sqlite3.Connection.backup()`` handles
+        most cleanly.  Day-1-10 backup_db.py already uses that API.
+      * ``synchronous=NORMAL`` -- recommended SQLite default once WAL is on;
+        durable across crashes for a single-machine deployment.
+      * ``foreign_keys=ON`` -- defensive; we do not rely on FKs today but
+        new tables added later will be enforced.
+      * ``temp_store=MEMORY`` -- avoids spilling temp btrees to disk on
+        large ``SELECT`` joins during reconciliation list/exports.
+    """
+    try:
+        from scripts.runtime_config import (
+            sqlite_busy_timeout_ms,
+            sqlite_journal_mode,
+        )
+    except ModuleNotFoundError:  # loose-script path
+        from runtime_config import (  # type: ignore[no-redef]
+            sqlite_busy_timeout_ms,
+            sqlite_journal_mode,
+        )
+
+    try:
+        conn.execute(f"PRAGMA busy_timeout = {int(sqlite_busy_timeout_ms())}")
+    except sqlite3.Error:
+        pass
+
+    mode = sqlite_journal_mode()
+    if mode and mode != "DEFAULT":
+        try:
+            conn.execute(f"PRAGMA journal_mode = {mode}")
+        except sqlite3.Error:
+            pass
+
+    for pragma in (
+        "PRAGMA synchronous = NORMAL",
+        "PRAGMA foreign_keys = ON",
+        "PRAGMA temp_store = MEMORY",
+    ):
+        try:
+            conn.execute(pragma)
+        except sqlite3.Error:
+            pass
+
+
+def _read_pragma(conn: sqlite3.Connection, name: str) -> str | int | None:
+    """Read a single pragma value defensively; never raises."""
+    try:
+        row = conn.execute(f"PRAGMA {name}").fetchone()
+    except sqlite3.Error:
+        return None
+    if row is None:
+        return None
+    try:
+        return row[0]
+    except (IndexError, KeyError, TypeError):
+        return None
+
+
 def _additive_migrations(conn: sqlite3.Connection) -> None:
     """Apply additive column migrations for forward-compatibility.
 
@@ -243,6 +313,7 @@ def init_schema(db_path: Path = DB_PATH) -> None:
     db_path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(db_path))
     try:
+        _apply_pragmas(conn)
         conn.executescript(_SCHEMA_SQL)
         _additive_migrations(conn)
         conn.commit()
@@ -258,6 +329,7 @@ def _get_conn(db_path: Path = DB_PATH) -> sqlite3.Connection:
         init_schema(db_path)
     conn = sqlite3.connect(str(db_path))
     conn.row_factory = sqlite3.Row
+    _apply_pragmas(conn)
     return conn
 
 
@@ -787,6 +859,12 @@ def get_db_status(db_path: Path = DB_PATH) -> dict[str, Any]:
         "global_security_aliases",
     ]
     counts: dict[str, int] = {}
+    pragmas: dict[str, Any] = {
+        "journal_mode": None,
+        "busy_timeout_ms": None,
+        "synchronous": None,
+        "foreign_keys": None,
+    }
     try:
         conn = _get_conn(db_path)
         try:
@@ -795,15 +873,34 @@ def get_db_status(db_path: Path = DB_PATH) -> dict[str, Any]:
                     f"SELECT COUNT(*) AS n FROM {table}"  # noqa: S608
                 ).fetchone()
                 counts[table] = int(row["n"]) if row else 0
+            pragmas["journal_mode"] = _read_pragma(conn, "journal_mode")
+            pragmas["busy_timeout_ms"] = _read_pragma(conn, "busy_timeout")
+            pragmas["synchronous"] = _read_pragma(conn, "synchronous")
+            pragmas["foreign_keys"] = _read_pragma(conn, "foreign_keys")
         finally:
             conn.close()
     except Exception:
         counts = {t: -1 for t in tables}
 
+    # Surface a repo-relative display path so /db/status does not leak the
+    # user's home directory when rendered in screenshots/demos.  Falls back
+    # to just the filename if the DB lives outside the repo (e.g. tmp_path
+    # in tests).
+    try:
+        repo_root = Path(__file__).resolve().parents[1]
+        display_path = str(db_path.resolve().relative_to(repo_root).as_posix())
+    except Exception:
+        display_path = db_path.name
+
     return {
-        "db_path": str(db_path),
+        "db_path": display_path,
         "db_exists": db_path.exists(),
         "table_row_counts": counts,
+        "pragmas": pragmas,
+        "wal_enabled": (
+            isinstance(pragmas["journal_mode"], str)
+            and pragmas["journal_mode"].lower() == "wal"
+        ),
         "advisory_status": _ADVISORY_STATUS,
         "ai_execution_count": _AI_EXECUTION_COUNT,
         "broker_api_called": False,

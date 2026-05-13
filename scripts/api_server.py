@@ -131,7 +131,13 @@ try:
         get_api_port,
         get_api_token,
         get_environment_tag,
+        get_max_request_bytes,
+        rate_limit_enabled,
+        rate_limit_max_requests,
+        rate_limit_mutation_max_requests,
+        rate_limit_window_seconds,
         safe_db_display_path,
+        security_headers,
     )
 except ModuleNotFoundError:  # pragma: no cover
     from runtime_config import (  # type: ignore[no-redef]
@@ -142,7 +148,13 @@ except ModuleNotFoundError:  # pragma: no cover
         get_api_port,
         get_api_token,
         get_environment_tag,
+        get_max_request_bytes,
+        rate_limit_enabled,
+        rate_limit_max_requests,
+        rate_limit_mutation_max_requests,
+        rate_limit_window_seconds,
         safe_db_display_path,
+        security_headers,
     )
 
 
@@ -328,6 +340,132 @@ if _FASTAPI_AVAILABLE:
         allow_headers=["Content-Type", "Accept", "Origin", "Authorization"],
     )
 
+    # Lazily built once on first request -- env vars are read inside the
+    # middleware itself so tests can monkeypatch without re-importing.
+    try:
+        from scripts.rate_limiter import RateLimiter
+    except ModuleNotFoundError:  # pragma: no cover
+        from rate_limiter import RateLimiter  # type: ignore[no-redef]
+
+    _RATE_LIMITERS: dict[str, RateLimiter] = {}
+
+    def _get_rate_limiter(scope: str) -> "RateLimiter":
+        """Return (and cache) a limiter for the given scope.
+
+        Two scopes are used: ``"read"`` (all routes) and ``"write"``
+        (mutating routes).  Caching matters because the bucket state lives
+        inside the limiter -- we'd reset every counter on every request if
+        we constructed a fresh limiter each call.
+        """
+        if scope == "write":
+            limit = rate_limit_mutation_max_requests()
+        else:
+            limit = rate_limit_max_requests()
+        window = rate_limit_window_seconds()
+        cached = _RATE_LIMITERS.get(scope)
+        if (
+            cached is None
+            or cached.max_requests != limit
+            or cached.window_seconds != window
+        ):
+            cached = RateLimiter(max_requests=limit, window_seconds=window)
+            _RATE_LIMITERS[scope] = cached
+        return cached
+
+    def _reset_rate_limiters() -> None:
+        """Test helper: drop all rate-limit state.  Not part of the API."""
+        _RATE_LIMITERS.clear()
+
+    _MUTATING_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
+
+    @app.middleware("http")
+    async def _security_and_limits(request: "Request", call_next):
+        """Single middleware that stacks four concerns in one place:
+
+        1. Request size guard (Content-Length-based, 413 on overflow)
+        2. Rate limiting (read scope + stricter write scope)
+        3. Response security headers
+        4. Advisory safety on the synthetic 413/429 responses
+
+        Implemented as one middleware (not three) so the order of effects is
+        explicit and so we don't pay for three async hops per request.
+        """
+        method = request.method.upper()
+        is_mutating = method in _MUTATING_METHODS
+        client_host = (request.client.host if request.client else "unknown") or "unknown"
+
+        # 1. Request size guard.  We only inspect Content-Length here --
+        #    streaming bodies without that header are allowed through; the
+        #    handlers themselves enforce schema validation.  This is
+        #    deliberately conservative: it catches obviously oversized POSTs
+        #    without breaking edge cases like chunked transfer.
+        if is_mutating:
+            try:
+                max_bytes = get_max_request_bytes()
+            except Exception:
+                max_bytes = 1_000_000
+            cl_raw = request.headers.get("content-length")
+            if cl_raw is not None:
+                try:
+                    content_length = int(cl_raw)
+                except ValueError:
+                    content_length = -1
+                if content_length > max_bytes:
+                    payload = {
+                        "error": "request_body_too_large",
+                        "status_code": 413,
+                        "max_request_bytes": max_bytes,
+                        "received_content_length": content_length,
+                        "advisory_status": _ADVISORY_STATUS,
+                        "execution_mode": _EXECUTION_MODE,
+                        "execution_gate": "LOCKED",
+                        "ai_execution_count": _AI_EXECUTION_COUNT,
+                        "broker_api_called": False,
+                        "broker_order_id": "NONE",
+                        "human_review_required": True,
+                    }
+                    response = JSONResponse(status_code=413, content=payload)
+                    for header, value in security_headers().items():
+                        response.headers.setdefault(header, value)
+                    return response
+
+        # 2. Rate limiting.  Mutating requests count against the stricter
+        #    write bucket; everything else (incl. GETs that hit the DB) uses
+        #    the broader read bucket.  Keyed on client_host so a misbehaving
+        #    test client can't starve a real user.
+        if rate_limit_enabled():
+            scope = "write" if is_mutating else "read"
+            limiter = _get_rate_limiter(scope)
+            decision = limiter.check(f"{client_host}:{scope}")
+            if not decision.allowed:
+                payload = {
+                    "error": "rate_limited",
+                    "status_code": 429,
+                    "limit": decision.limit,
+                    "window_seconds": decision.window_seconds,
+                    "scope": scope,
+                    "advisory_status": _ADVISORY_STATUS,
+                    "execution_mode": _EXECUTION_MODE,
+                    "execution_gate": "LOCKED",
+                    "ai_execution_count": _AI_EXECUTION_COUNT,
+                    "broker_api_called": False,
+                    "broker_order_id": "NONE",
+                    "human_review_required": True,
+                }
+                response = JSONResponse(status_code=429, content=payload)
+                response.headers["Retry-After"] = str(decision.retry_after_seconds)
+                for header, value in security_headers().items():
+                    response.headers.setdefault(header, value)
+                return response
+
+        # 3. Hand off to the actual route.  Errors are sanitized by the
+        #    HTTPException / Exception handlers above; both already stamp
+        #    advisory invariants.  We only add headers here.
+        response = await call_next(request)
+        for header, value in security_headers().items():
+            response.headers.setdefault(header, value)
+        return response
+
     @app.on_event("startup")
     def _startup_safety_log() -> None:  # pragma: no cover — side effect only
         if not api_token_required():
@@ -491,6 +629,14 @@ def health() -> dict:
         _allowed = get_allowed_origins()
     except Exception:
         _allowed = []
+    try:
+        _rate_limit_active = rate_limit_enabled()
+    except Exception:
+        _rate_limit_active = False
+    try:
+        _max_bytes = get_max_request_bytes()
+    except Exception:
+        _max_bytes = 0
     return {
         "status": "ok",
         "advisory_status": _ADVISORY_STATUS,
@@ -506,6 +652,36 @@ def health() -> dict:
         "db_path": safe_db_display_path(),
         "api_token_required": api_token_required(),
         "allowed_origins_count": len(_allowed),
+        "rate_limit_enabled": _rate_limit_active,
+        "max_request_bytes": _max_bytes,
+        "security_headers_enabled": bool(security_headers()),
+        "generated_at": datetime.now(timezone.utc)
+        .replace(microsecond=0)
+        .isoformat(),
+    }
+
+
+@app.get("/api/version")
+def api_version() -> dict:
+    """Minimal version + safety-posture endpoint.
+
+    Distinct from /health: this never touches the DB, never calls
+    persistence, and is safe to wire to an external uptime check or a
+    front-page badge.  Same advisory stamps, lighter payload.
+    """
+    from datetime import datetime, timezone
+
+    return {
+        "app_name": "Signal Advisory API",
+        "version": _VERSION,
+        "environment": get_environment_tag(),
+        "advisory_status": _ADVISORY_STATUS,
+        "execution_mode": _EXECUTION_MODE,
+        "execution_gate": "LOCKED",
+        "broker_api_called": False,
+        "broker_order_id": "NONE",
+        "ai_execution_count": _AI_EXECUTION_COUNT,
+        "human_review_required": True,
         "generated_at": datetime.now(timezone.utc)
         .replace(microsecond=0)
         .isoformat(),
