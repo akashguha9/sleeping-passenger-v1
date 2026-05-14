@@ -37,6 +37,41 @@ ADAPTER_PARTIAL = "partial"
 ADAPTER_PLANNED = "planned"
 ADAPTER_NOT_CONFIGURED = "not_configured"
 
+# Source tiers — operator-facing severity for skip/stale events.
+# A stale ``core`` source warrants a louder warning than a stale ``optional``
+# one, and a ``planned`` source missing is not a failure.
+SOURCE_TIER_CORE = "core"
+SOURCE_TIER_SECONDARY = "secondary"
+SOURCE_TIER_OPTIONAL = "optional"
+SOURCE_TIER_PLANNED = "planned"
+
+_SOURCE_TIERS: dict[str, str] = {
+    # Core: free, key-light, broad-coverage daily macro signal.
+    "polymarket": SOURCE_TIER_CORE,
+    "gdelt": SOURCE_TIER_CORE,
+    "newsapi": SOURCE_TIER_CORE,
+    "event_registry": SOURCE_TIER_CORE,
+    "market_data": SOURCE_TIER_CORE,
+    # Secondary: useful when configured but not blocking when absent.
+    "sec_edgar": SOURCE_TIER_SECONDARY,
+    "india": SOURCE_TIER_SECONDARY,
+    "global_filings": SOURCE_TIER_SECONDARY,
+    # Optional: domain-specific, often credential-gated.
+    "etherscan": SOURCE_TIER_OPTIONAL,
+    "grok_xai": SOURCE_TIER_OPTIONAL,
+    # Planned: adapter not implemented yet — missing is not a failure.
+    "asia_disclosure": SOURCE_TIER_PLANNED,
+}
+
+
+def get_source_tier(source_key: str) -> str:
+    """Return the operator-facing tier for ``source_key``.
+
+    Unknown keys return ``optional`` so the UI errs on the quieter side
+    rather than shouting about a source it has never heard of.
+    """
+    return _SOURCE_TIERS.get(str(source_key or "").strip().lower(), SOURCE_TIER_OPTIONAL)
+
 
 _SOURCE_REGISTRY: tuple[dict[str, Any], ...] = (
     {
@@ -269,11 +304,14 @@ def list_live_source_families() -> list[dict[str, Any]]:
     The copy preserves order, which is the order Day 26–35 documentation
     consistently uses. Each entry's ``env_keys`` is a tuple in the registry
     and is materialised as a list in the copy for JSON-friendly output.
+    Each entry also carries an operator-facing ``tier`` (core / secondary /
+    optional / planned) so the UI can grade skip-warnings by severity.
     """
     out: list[dict[str, Any]] = []
     for entry in _SOURCE_REGISTRY:
         clean = dict(entry)
         clean["env_keys"] = list(entry["env_keys"])
+        clean["tier"] = get_source_tier(entry["source_key"])
         out.append(clean)
     return out
 
@@ -292,6 +330,7 @@ def get_source_family(source_key: str) -> dict[str, Any]:
         raise KeyError(f"unknown_source: {key}")
     entry = dict(_SOURCE_BY_KEY[key])
     entry["env_keys"] = list(entry["env_keys"])
+    entry["tier"] = get_source_tier(key)
     return entry
 
 
@@ -576,6 +615,7 @@ def compute_source_freshness(
             "cadence_hours": cadence,
             "credential_configured": cred_configured,
             "adapter_status": src["adapter_status"],
+            "tier": get_source_tier(key),
             "advisory_status": ADVISORY_STATUS,
             "execution_gate": EXECUTION_GATE_LOCKED,
             "broker_api_called": False,
@@ -620,9 +660,14 @@ __all__ = [
     "FRESHNESS_NEVER_RUN",
     "FRESHNESS_SKIPPED",
     "FRESHNESS_FAILED",
+    "SOURCE_TIER_CORE",
+    "SOURCE_TIER_SECONDARY",
+    "SOURCE_TIER_OPTIONAL",
+    "SOURCE_TIER_PLANNED",
     "build_refresh_plan",
     "compute_source_freshness",
     "detect_source_credential_state",
     "get_source_family",
+    "get_source_tier",
     "list_live_source_families",
 ]

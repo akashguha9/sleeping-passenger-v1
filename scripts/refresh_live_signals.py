@@ -258,11 +258,75 @@ def _build_skip_entry(
     return entry
 
 
+def _env_truthy(name: str) -> bool:
+    """Return True if env var ``name`` is a truthy string (yes/true/1/on)."""
+    import os as _os
+
+    return _os.environ.get(name, "").strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
+def _resolve_sec_phase1_kwargs() -> dict[str, Any]:
+    """Build SEC EDGAR kwargs for ``run_phase1`` from environment.
+
+    Recognised env vars (all optional):
+      * ``SEC_DEFAULT_CIK`` — single CIK to fetch (e.g. ``0000320193``).
+        Wins over the watchlist flag if both are set.
+      * ``SEC_DEFAULT_WATCHLIST`` / ``SEC_USE_DEFAULT_WATCHLIST`` —
+        truthy enables the built-in 7-stock watchlist.
+
+    When neither is set, SEC skips cleanly with
+    ``no_cik_or_watchlist_provided`` so the operator sees a precise reason
+    instead of a generic "skipped".
+    """
+    import os as _os
+
+    out: dict[str, Any] = {}
+    cik_raw = (_os.environ.get("SEC_DEFAULT_CIK", "") or "").strip()
+    if cik_raw:
+        out["sec_cik"] = cik_raw
+        return out
+    if _env_truthy("SEC_DEFAULT_WATCHLIST") or _env_truthy("SEC_USE_DEFAULT_WATCHLIST"):
+        out["sec_default_watchlist"] = True
+    return out
+
+
+def _resolve_gdelt_phase1_kwargs() -> dict[str, Any]:
+    """Build GDELT kwargs for ``run_phase1`` from environment.
+
+    Recognised env vars (all optional):
+      * ``GDELT_TIMEOUT_SECONDS`` — int seconds for the primary HTTP call.
+        Below-1 / non-numeric values are ignored.
+    """
+    import os as _os
+
+    out: dict[str, Any] = {}
+    raw = (_os.environ.get("GDELT_TIMEOUT_SECONDS", "") or "").strip()
+    if raw:
+        try:
+            n = int(raw)
+            if n >= 1:
+                out["gdelt_timeout"] = n
+        except ValueError:
+            pass
+    return out
+
+
 def _invoke_phase1_single(source_key: str, *, dry_run: bool) -> dict[str, Any]:
-    """Run a single phase1 source. Returns the SourceRunResult-as-dict."""
+    """Run a single phase1 source. Returns the SourceRunResult-as-dict.
+
+    SEC and GDELT pick up env-driven defaults (SEC_DEFAULT_CIK /
+    SEC_DEFAULT_WATCHLIST, GDELT_TIMEOUT_SECONDS) so the scheduled refresh
+    can fetch filings and respect a tighter timeout without a CLI flag.
+    """
     from scripts.live_source_runner import run_phase1
 
-    report = run_phase1(dry_run=dry_run, sources=[source_key])
+    kwargs: dict[str, Any] = {"dry_run": dry_run, "sources": [source_key]}
+    if source_key == "sec_edgar":
+        kwargs.update(_resolve_sec_phase1_kwargs())
+    elif source_key == "gdelt":
+        kwargs.update(_resolve_gdelt_phase1_kwargs())
+
+    report = run_phase1(**kwargs)
     if not report.sources:
         return {"status": "skipped", "skipped_reason": "phase1_returned_no_source"}
     return report.sources[0].to_dict()
