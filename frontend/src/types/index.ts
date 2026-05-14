@@ -82,6 +82,23 @@ export interface ManualTradeLog {
   human_review_required: boolean;
   broker_order_id: string;
   broker_api_called: boolean;
+  // Operator-discipline / journal-quality fields. All optional so legacy
+  // rows logged before this sprint still validate.
+  invalidation_level?: string;
+  expected_horizon?: string;
+  risk_reason?: string;
+  entry_reason?: string;
+  exit_plan?: string;
+  confidence_before?: number | null;
+  emotional_state?: string;
+  mistake_tags?: string;
+  lesson?: string;
+  // Journal-quality annotations attached by /manual-trades list endpoint.
+  journal_completeness_score?: number;
+  learning_readiness_score?: number;
+  learning_ready?: boolean;
+  missing_journal_fields?: string[];
+  decision_quality_flags?: string[];
 }
 
 export interface TradeReconciliation {
@@ -98,6 +115,12 @@ export interface TradeReconciliation {
   ai_execution_count: number;
   advisory_status: string;
   human_review_required: boolean;
+  // Skill-vs-luck / skill-vs-process attribution fields. Optional.
+  outcome_quality?: string;
+  process_error?: string;
+  process_error_notes?: string;
+  mistake_tags?: string;
+  lesson?: string;
 }
 
 export interface MoltbookEntry {
@@ -233,12 +256,35 @@ export interface SourceHealth {
   status: 'active' | 'stale' | 'unknown';
 }
 
+export interface JournalQualityAggregate {
+  diagnostic: string;
+  entry_count: number;
+  learning_ready_count: number;
+  average_completeness: number;
+  average_learning_readiness: number;
+  factor_pass_rates?: Record<string, number>;
+  validation_status?: string;
+  advisory_status: string;
+  execution_gate: string;
+  broker_api_called: boolean;
+  ai_execution_count: number;
+  execution_permission: boolean;
+  can_execute: boolean;
+}
+
 export interface ManualTradeListResponse {
   operation: string;
   trade_count: number;
   trades: ManualTradeLog[];
+  truth_source?: string;
+  fallback_used?: boolean;
+  canonical?: boolean;
+  journal_quality_aggregate?: JournalQualityAggregate | null;
   advisory_status: string;
   execution_mode: string;
+  execution_gate?: string;
+  execution_permission?: boolean;
+  can_execute?: boolean;
   ai_execution_count: number;
   human_review_required: boolean;
   broker_api_called: boolean;

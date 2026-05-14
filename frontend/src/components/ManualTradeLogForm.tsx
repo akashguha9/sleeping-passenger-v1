@@ -14,6 +14,17 @@ interface FormState {
   leverage: string;
   thesis: string;
   notes: string;
+  // Operator-discipline / journal-quality fields. Strings on the form;
+  // confidence_before is parsed to a number on submit.
+  invalidation_level: string;
+  expected_horizon: string;
+  risk_reason: string;
+  entry_reason: string;
+  exit_plan: string;
+  confidence_before: string;
+  emotional_state: string;
+  mistake_tags: string;
+  lesson: string;
 }
 
 interface Props {
@@ -26,6 +37,24 @@ interface Props {
 const LEVERAGE_MIN = 1.0;
 const LEVERAGE_MAX = 25.0;
 
+// Allowed emotional-state values. Kept short on purpose — long lists
+// produce noise, not discipline. Operator can still type freeform via 'other'.
+const EMOTIONAL_STATES = [
+  '',
+  'calm',
+  'focused',
+  'curious',
+  'fomo',
+  'fear',
+  'revenge',
+  'bored',
+  'euphoric',
+  'tired',
+  'other',
+];
+
+const HORIZON_OPTIONS = ['', 'intraday', '1-2d', '2-5d', '1w', '2-4w', '1-3m', '3m+'];
+
 export function ManualTradeLogForm({ defaultEventId = '', defaultTicker = '', onLogged }: Props) {
   const [form, setForm] = useState<FormState>({
     event_id: defaultEventId,
@@ -36,14 +65,34 @@ export function ManualTradeLogForm({ defaultEventId = '', defaultTicker = '', on
     leverage: '1.0',
     thesis: '',
     notes: '',
+    invalidation_level: '',
+    expected_horizon: '',
+    risk_reason: '',
+    entry_reason: '',
+    exit_plan: '',
+    confidence_before: '',
+    emotional_state: '',
+    mistake_tags: '',
+    lesson: '',
   });
   const [logged, setLogged] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
+  const [softWarnings, setSoftWarnings] = useState<string[]>([]);
 
   function set(field: keyof FormState, value: string) {
     setForm((prev) => ({ ...prev, [field]: value }));
     setError('');
+  }
+
+  function collectSoftWarnings(state: FormState): string[] {
+    const w: string[] = [];
+    if (!state.invalidation_level.trim()) w.push('No invalidation level — you may not know when the thesis is wrong.');
+    if (!state.exit_plan.trim()) w.push('No exit plan — you may freeze on the exit.');
+    if (!state.risk_reason.trim()) w.push('No risk reason — size may not be justified.');
+    if (!state.confidence_before.trim()) w.push('No confidence-before recorded — calibration check will be missing.');
+    if (!state.emotional_state.trim()) w.push('No emotional state — bias check will be missing.');
+    return w;
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -61,6 +110,22 @@ export function ManualTradeLogForm({ defaultEventId = '', defaultTicker = '', on
     if (leverage < LEVERAGE_MIN) { setError(`Leverage must be at least ${LEVERAGE_MIN.toFixed(1)}x.`); return; }
     if (leverage > LEVERAGE_MAX) { setError(`Leverage cannot exceed ${LEVERAGE_MAX.toFixed(1)}x.`); return; }
 
+    // Soft-warn but allow submit — we'd rather capture an imperfect record
+    // than block the operator from logging at all.
+    const warnings = collectSoftWarnings(form);
+    setSoftWarnings(warnings);
+
+    let confidence: number | null = null;
+    const confRaw = form.confidence_before.trim();
+    if (confRaw !== '') {
+      const c = parseFloat(confRaw);
+      if (isNaN(c) || c < 0 || c > 100) {
+        setError('Confidence-before must be a number between 0 and 100 (or 0 and 1).');
+        return;
+      }
+      confidence = c;
+    }
+
     setSubmitting(true);
     try {
       await postManualTrade({
@@ -72,6 +137,15 @@ export function ManualTradeLogForm({ defaultEventId = '', defaultTicker = '', on
         leverage,
         thesis: form.thesis.trim(),
         notes: form.notes.trim(),
+        invalidation_level: form.invalidation_level.trim(),
+        expected_horizon: form.expected_horizon.trim(),
+        risk_reason: form.risk_reason.trim(),
+        entry_reason: form.entry_reason.trim(),
+        exit_plan: form.exit_plan.trim(),
+        confidence_before: confidence,
+        emotional_state: form.emotional_state.trim(),
+        mistake_tags: form.mistake_tags.trim(),
+        lesson: form.lesson.trim(),
       });
       setLogged(true);
       onLogged?.();
@@ -97,12 +171,29 @@ export function ManualTradeLogForm({ defaultEventId = '', defaultTicker = '', on
           ✓
         </div>
         <div className="text-sm font-semibold" style={{ color: 'var(--sp-bone)' }}>
-          Manual Trade Logged
+          Manual Decision Recorded
         </div>
         <div className="text-xs" style={{ color: 'var(--sp-mist)' }}>
-          Recorded for human review. No broker API was called. AI executions:{' '}
+          Logged for human review. No broker API was called. AI executions:{' '}
           <span className="font-mono font-bold" style={{ color: 'var(--sp-cyan)' }}>0</span>
         </div>
+        {softWarnings.length > 0 && (
+          <div
+            className="text-[11px] text-left rounded px-3 py-2 mx-auto max-w-md"
+            style={{
+              color: 'var(--sp-gold)',
+              background: 'rgba(200, 154, 74, 0.06)',
+              border: '1px solid rgba(200, 154, 74, 0.32)',
+            }}
+          >
+            <div className="font-semibold mb-1">Journal-quality gaps logged:</div>
+            <ul className="list-disc pl-4 space-y-0.5">
+              {softWarnings.map((w) => (
+                <li key={w}>{w}</li>
+              ))}
+            </ul>
+          </div>
+        )}
         <div className="flex justify-center gap-2 pt-1">
           <HumanOnlyBadge size="md" />
           <AdvisoryOnlyBadge size="md" />
@@ -129,8 +220,8 @@ export function ManualTradeLogForm({ defaultEventId = '', defaultTicker = '', on
           border: '1px solid rgba(200, 154, 74, 0.18)',
         }}
       >
-        Record-keeping only — this form does not submit orders to any broker. Broker API:{' '}
-        <span className="font-mono" style={{ color: 'var(--sp-gold)' }}>DISABLED</span>. AI executions:{' '}
+        This form logs a manual decision/trade you made externally. It does not place trades, call brokers, or execute orders.
+        Broker API: <span className="font-mono" style={{ color: 'var(--sp-gold)' }}>DISABLED</span>. AI executions:{' '}
         <span className="font-mono font-bold" style={{ color: 'var(--sp-cyan)' }}>0</span>.
       </div>
 
@@ -221,6 +312,111 @@ export function ManualTradeLogForm({ defaultEventId = '', defaultTicker = '', on
           />
         </Field>
 
+        <Section title="Decision Discipline" subtitle="Future-you needs these to attribute outcomes to skill vs. luck.">
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Invalidation level" hint="price/level where thesis is wrong">
+              <input
+                type="text"
+                className="sp-input"
+                placeholder="e.g. 1450 or break of 50EMA"
+                value={form.invalidation_level}
+                onChange={(e) => set('invalidation_level', e.target.value)}
+              />
+            </Field>
+            <Field label="Expected horizon">
+              <select
+                className="sp-input"
+                value={form.expected_horizon}
+                onChange={(e) => set('expected_horizon', e.target.value)}
+              >
+                {HORIZON_OPTIONS.map((h) => (
+                  <option key={h || 'unset'} value={h}>
+                    {h || '(select)'}
+                  </option>
+                ))}
+              </select>
+            </Field>
+          </div>
+          <Field label="Risk reason" hint="why this size is acceptable to lose">
+            <input
+              type="text"
+              className="sp-input"
+              placeholder="e.g. <=0.5R, lottery ticket, sized for vol"
+              value={form.risk_reason}
+              onChange={(e) => set('risk_reason', e.target.value)}
+            />
+          </Field>
+          <Field label="Entry reason" hint="structural / signal-driven reason for entering">
+            <input
+              type="text"
+              className="sp-input"
+              placeholder="e.g. break of structure on increasing vol"
+              value={form.entry_reason}
+              onChange={(e) => set('entry_reason', e.target.value)}
+            />
+          </Field>
+          <Field label="Exit plan" hint="how trade will close">
+            <textarea
+              rows={2}
+              className="sp-input resize-none"
+              placeholder="e.g. trim 50% at 1.5R, stop at invalidation, exit after 5 trading days if no follow-through"
+              value={form.exit_plan}
+              onChange={(e) => set('exit_plan', e.target.value)}
+            />
+          </Field>
+        </Section>
+
+        <Section title="Operator State" subtitle="Calibration over time depends on you recording this honestly.">
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Confidence before" hint="0–1 or 0–100; your own estimate">
+              <input
+                type="number"
+                min="0"
+                max="100"
+                step="0.01"
+                className="sp-input"
+                placeholder="0.55 or 55"
+                value={form.confidence_before}
+                onChange={(e) => set('confidence_before', e.target.value)}
+              />
+            </Field>
+            <Field label="Emotional state">
+              <select
+                className="sp-input"
+                value={form.emotional_state}
+                onChange={(e) => set('emotional_state', e.target.value)}
+              >
+                {EMOTIONAL_STATES.map((s) => (
+                  <option key={s || 'unset'} value={s}>
+                    {s || '(select)'}
+                  </option>
+                ))}
+              </select>
+            </Field>
+          </div>
+        </Section>
+
+        <Section title="Learning" subtitle="Optional at entry — required at reconciliation. Capturing it here gives future-you a baseline.">
+          <Field label="Mistake tags" hint="comma-separated; e.g. late_entry, oversized">
+            <input
+              type="text"
+              className="sp-input"
+              placeholder="optional — fill at reconciliation if not now"
+              value={form.mistake_tags}
+              onChange={(e) => set('mistake_tags', e.target.value)}
+            />
+          </Field>
+          <Field label="Lesson / takeaway" hint="one line future-you should re-read">
+            <input
+              type="text"
+              className="sp-input"
+              placeholder="e.g. wait for retest next time"
+              value={form.lesson}
+              onChange={(e) => set('lesson', e.target.value)}
+            />
+          </Field>
+        </Section>
+
         <Field label="Notes (optional)">
           <input
             type="text"
@@ -252,6 +448,36 @@ export function ManualTradeLogForm({ defaultEventId = '', defaultTicker = '', on
           Record-keeping only · No broker call · AI executions = 0
         </p>
       </form>
+    </div>
+  );
+}
+
+function Section({
+  title,
+  subtitle,
+  children,
+}: {
+  title: string;
+  subtitle?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div
+      className="rounded-md p-3 space-y-3"
+      style={{
+        background: 'rgba(95, 189, 200, 0.03)',
+        border: '1px solid rgba(95, 189, 200, 0.12)',
+      }}
+    >
+      <div>
+        <div className="sp-eyebrow" style={{ color: 'var(--sp-cyan)' }}>{title}</div>
+        {subtitle && (
+          <div className="text-[10px] mt-0.5" style={{ color: 'var(--sp-mist)' }}>
+            {subtitle}
+          </div>
+        )}
+      </div>
+      {children}
     </div>
   );
 }

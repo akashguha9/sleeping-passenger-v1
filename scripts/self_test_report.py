@@ -181,51 +181,77 @@ def _unreconciled_count(conn: sqlite3.Connection) -> int:
     return int(row["n"]) if row else 0
 
 
+def _column_exists(conn: sqlite3.Connection, table: str, column: str) -> bool:
+    try:
+        rows = conn.execute(f"PRAGMA table_info({table})").fetchall()
+    except sqlite3.Error:
+        return False
+    return any(r[1] == column for r in rows)
+
+
 def _journal_quality_average(conn: sqlite3.Connection) -> dict[str, Any]:
+    empty = {
+        "trade_count_considered": 0,
+        "average_completeness": 0.0,
+        "average_learning_readiness": 0.0,
+        "learning_ready_count": 0,
+        "missing_field_distribution": {},
+        "emotional_state_distribution": {},
+        "confidence_before_count": 0,
+        "confidence_before_average": None,
+        "mistake_tags_distribution": {},
+        "lesson_count": 0,
+        "available": False,
+    }
     if not _table_exists(conn, "manual_trades"):
-        return {
-            "trade_count_considered": 0,
-            "average_completeness": 0.0,
-            "average_learning_readiness": 0.0,
-            "learning_ready_count": 0,
-            "available": False,
-        }
+        return empty
     try:
         try:
             from scripts.self_test_journal_quality import (  # type: ignore[import-not-found]
                 score_journal_entries,
+                score_journal_entry,
             )
         except ModuleNotFoundError:
             from self_test_journal_quality import (  # type: ignore[no-redef]
                 score_journal_entries,
+                score_journal_entry,
             )
     except Exception:
-        return {
-            "trade_count_considered": 0,
-            "average_completeness": 0.0,
-            "average_learning_readiness": 0.0,
-            "learning_ready_count": 0,
-            "available": False,
-        }
+        return empty
+
+    # Build a SELECT list that tolerates DBs that haven't had the additive
+    # migration applied yet — we only pull a column when it exists.
+    cols_present = {
+        "invalidation_level": _column_exists(conn, "manual_trades", "invalidation_level"),
+        "expected_horizon": _column_exists(conn, "manual_trades", "expected_horizon"),
+        "risk_reason": _column_exists(conn, "manual_trades", "risk_reason"),
+        "entry_reason": _column_exists(conn, "manual_trades", "entry_reason"),
+        "exit_plan": _column_exists(conn, "manual_trades", "exit_plan"),
+        "confidence_before": _column_exists(conn, "manual_trades", "confidence_before"),
+        "emotional_state": _column_exists(conn, "manual_trades", "emotional_state"),
+        "mistake_tags": _column_exists(conn, "manual_trades", "mistake_tags"),
+        "lesson": _column_exists(conn, "manual_trades", "lesson"),
+    }
+    select_cols = ["trade_id", "event_id", "ticker", "side", "quantity", "thesis", "notes"]
+    for c, present in cols_present.items():
+        if present:
+            select_cols.append(c)
 
     try:
         trade_rows = conn.execute(
-            "SELECT trade_id, event_id, ticker, side, quantity, thesis, notes"
-            " FROM manual_trades"
+            f"SELECT {', '.join(select_cols)} FROM manual_trades"  # noqa: S608
         ).fetchall()
     except sqlite3.Error:
-        return {
-            "trade_count_considered": 0,
-            "average_completeness": 0.0,
-            "average_learning_readiness": 0.0,
-            "learning_ready_count": 0,
-            "available": False,
-        }
+        return empty
 
     entries: list[dict[str, Any]] = []
+    emotional_state_dist: dict[str, int] = {}
+    mistake_tag_dist: dict[str, int] = {}
+    confidence_values: list[float] = []
+    lesson_count = 0
+
     for row in trade_rows:
         trade_id = row["trade_id"]
-        # Pull a reconciliation (most recent) and a moltbook entry for this trade
         outcome = ""
         reconciliation_status = ""
         try:
@@ -239,40 +265,76 @@ def _journal_quality_average(conn: sqlite3.Connection) -> dict[str, Any]:
                 reconciliation_status = str(rec["outcome_status"] or "")
         except sqlite3.Error:
             pass
-        lesson = ""
-        mistake_tags: list[str] = []
-        try:
-            molt = conn.execute(
-                "SELECT lesson_learned, mistake_type FROM moltbook_entries"
-                " WHERE manual_trade_log_id=? ORDER BY logged_at DESC LIMIT 1",
-                (trade_id,),
-            ).fetchone()
-            if molt:
-                lesson = str(molt["lesson_learned"] or "")
-                mistake_type = str(molt["mistake_type"] or "")
-                if mistake_type:
-                    mistake_tags = [mistake_type]
-        except sqlite3.Error:
-            pass
+
+        # Per-row journal-quality fields, defaulting to legacy "no value"
+        # when the additive migration hasn't been run.
+        def _get(name: str, default: Any = "") -> Any:
+            if cols_present.get(name):
+                try:
+                    return row[name]
+                except (IndexError, KeyError):
+                    return default
+            return default
+
+        mistake_tag_raw = str(_get("mistake_tags", "") or "")
+        # mistake_tags is stored as comma-separated string; split for the dist.
+        mistake_tags_list: list[str] = []
+        if mistake_tag_raw:
+            for tag in mistake_tag_raw.split(","):
+                t = tag.strip()
+                if t:
+                    mistake_tags_list.append(t)
+                    mistake_tag_dist[t] = mistake_tag_dist.get(t, 0) + 1
+
+        emotional_state = str(_get("emotional_state", "") or "")
+        if emotional_state:
+            emotional_state_dist[emotional_state] = (
+                emotional_state_dist.get(emotional_state, 0) + 1
+            )
+
+        conf_raw = _get("confidence_before", None)
+        if isinstance(conf_raw, (int, float)) and not isinstance(conf_raw, bool):
+            try:
+                if conf_raw == conf_raw:  # NaN guard
+                    confidence_values.append(float(conf_raw))
+            except (TypeError, ValueError):
+                pass
+
+        lesson_text = str(_get("lesson", "") or "")
+        if lesson_text.strip():
+            lesson_count += 1
 
         entries.append(
             {
                 "signal_id": str(row["event_id"] or ""),
                 "thesis": str(row["thesis"] or ""),
-                "invalidation_level": "",  # not tracked in current schema
-                "expected_horizon": "",
+                "invalidation_level": str(_get("invalidation_level", "") or ""),
+                "expected_horizon": str(_get("expected_horizon", "") or ""),
                 "position_size": float(row["quantity"] or 0.0),
-                "risk_reason": "",
-                "entry_reason": "",
-                "exit_plan": "",
+                "risk_reason": str(_get("risk_reason", "") or ""),
+                "entry_reason": str(_get("entry_reason", "") or ""),
+                "exit_plan": str(_get("exit_plan", "") or ""),
+                "confidence_before": conf_raw,
+                "emotional_state": emotional_state,
                 "post_trade_outcome": outcome,
                 "reconciliation_status": reconciliation_status,
-                "mistake_tags": mistake_tags,
-                "lesson": lesson,
+                "mistake_tags": mistake_tags_list,
+                "lesson": lesson_text,
             }
         )
 
+    # Compute per-row scoring once so we can roll up missing-field distribution.
+    missing_dist: dict[str, int] = {}
+    for entry in entries:
+        per = score_journal_entry(entry)
+        for field in per.get("missing_fields", []):
+            missing_dist[field] = missing_dist.get(field, 0) + 1
+
     agg = score_journal_entries(entries)
+    confidence_avg: float | None = (
+        sum(confidence_values) / len(confidence_values) if confidence_values else None
+    )
+
     return {
         "trade_count_considered": int(agg.get("entry_count", 0)),
         "average_completeness": float(agg.get("average_completeness", 0.0)),
@@ -281,8 +343,60 @@ def _journal_quality_average(conn: sqlite3.Connection) -> dict[str, Any]:
         ),
         "learning_ready_count": int(agg.get("learning_ready_count", 0)),
         "factor_pass_rates": dict(agg.get("factor_pass_rates", {})),
+        "missing_field_distribution": missing_dist,
+        "emotional_state_distribution": emotional_state_dist,
+        "mistake_tags_distribution": mistake_tag_dist,
+        "confidence_before_count": len(confidence_values),
+        "confidence_before_average": (
+            round(confidence_avg, 6) if confidence_avg is not None else None
+        ),
+        "lesson_count": lesson_count,
         "available": True,
     }
+
+
+def _reconciliation_extended_summary(conn: sqlite3.Connection) -> dict[str, Any]:
+    """Outcome-quality / process-error distributions from reconciliation_results."""
+    empty = {
+        "outcome_quality_distribution": {},
+        "process_error_distribution": {},
+        "available": False,
+    }
+    if not _table_exists(conn, "reconciliation_results"):
+        return empty
+    has_oq = _column_exists(conn, "reconciliation_results", "outcome_quality")
+    has_pe = _column_exists(conn, "reconciliation_results", "process_error")
+    if not (has_oq or has_pe):
+        return empty
+    out: dict[str, Any] = {
+        "outcome_quality_distribution": {},
+        "process_error_distribution": {},
+        "available": True,
+    }
+    try:
+        if has_oq:
+            rows = conn.execute(
+                "SELECT outcome_quality AS k, COUNT(*) AS n"
+                " FROM reconciliation_results"
+                " WHERE outcome_quality IS NOT NULL AND outcome_quality != ''"
+                " GROUP BY outcome_quality"
+            ).fetchall()
+            out["outcome_quality_distribution"] = {
+                str(r["k"]): int(r["n"]) for r in rows
+            }
+        if has_pe:
+            rows = conn.execute(
+                "SELECT process_error AS k, COUNT(*) AS n"
+                " FROM reconciliation_results"
+                " WHERE process_error IS NOT NULL AND process_error != ''"
+                " GROUP BY process_error"
+            ).fetchall()
+            out["process_error_distribution"] = {
+                str(r["k"]): int(r["n"]) for r in rows
+            }
+    except sqlite3.Error:
+        pass
+    return out
 
 
 def _source_health_summary(conn: sqlite3.Connection) -> dict[str, Any]:
@@ -407,6 +521,7 @@ def build_report(db_path: Path | None = None) -> dict[str, Any]:
         source_health = _source_health_summary(conn)
         ai_validation = _ai_validation_distribution(conn)
         journal_quality = _journal_quality_average(conn)
+        reconciliation_extended = _reconciliation_extended_summary(conn)
     finally:
         conn.close()
 
@@ -434,6 +549,7 @@ def build_report(db_path: Path | None = None) -> dict[str, Any]:
         "manual_trades_count": manual_trades,
         "unreconciled_trades_count": unreconciled,
         "reconciliation": reconciliation,
+        "reconciliation_extended": reconciliation_extended,
         "signal_decision_distribution": decisions,
         "moltbook": moltbook,
         "source_health": source_health,
@@ -444,6 +560,68 @@ def build_report(db_path: Path | None = None) -> dict[str, Any]:
     }
     report.update(_SAFETY_STAMPS)
     return report
+
+
+def build_self_test_summary(db_path: Path | None = None) -> dict[str, Any]:
+    """Compact dashboard-friendly summary derived from build_report().
+
+    The full ``build_report`` payload is rich but verbose.  The dashboard
+    panel only needs a handful of headline metrics — this helper computes
+    them in one place so the API endpoint and any future frontend share the
+    same source of truth.
+    """
+    report = build_report(db_path)
+    journal = report.get("journal_quality", {}) or {}
+    reconciliation = report.get("reconciliation", {}) or {}
+    extended = report.get("reconciliation_extended", {}) or {}
+    ai_validation = report.get("ai_validation_distribution", {}) or {}
+
+    incomplete_journal_count = (
+        int(journal.get("trade_count_considered", 0))
+        - int(journal.get("learning_ready_count", 0))
+    )
+    if incomplete_journal_count < 0:
+        incomplete_journal_count = 0
+
+    summary = {
+        "report": "self_test_summary",
+        "db_path": report.get("db_path"),
+        "db_available": report.get("db_available", False),
+        "signals_reviewed_count": report.get("signals_reviewed_count", 0),
+        "manual_trades_logged_count": report.get("manual_trades_count", 0),
+        "reconciled_trades_count": reconciliation.get("reconciled_count", 0),
+        "unreconciled_trades_count": report.get("unreconciled_trades_count", 0),
+        "average_journal_completeness": float(
+            journal.get("average_completeness", 0.0)
+        ),
+        "average_learning_readiness": float(
+            journal.get("average_learning_readiness", 0.0)
+        ),
+        "learning_ready_count": int(journal.get("learning_ready_count", 0)),
+        "incomplete_journal_count": incomplete_journal_count,
+        "emotional_state_distribution": dict(
+            journal.get("emotional_state_distribution", {})
+        ),
+        "mistake_tags_distribution": dict(
+            journal.get("mistake_tags_distribution", {})
+        ),
+        "missing_field_distribution": dict(
+            journal.get("missing_field_distribution", {})
+        ),
+        "confidence_before_average": journal.get("confidence_before_average"),
+        "lesson_count": int(journal.get("lesson_count", 0)),
+        "outcome_quality_distribution": dict(
+            extended.get("outcome_quality_distribution", {})
+        ),
+        "process_error_distribution": dict(
+            extended.get("process_error_distribution", {})
+        ),
+        "ai_validation_distribution": dict(ai_validation.get("counts", {})),
+        "limitations": list(report.get("limitations", [])),
+        "advisory_disclaimer": ADVISORY_DISCLAIMER,
+    }
+    summary.update(_SAFETY_STAMPS)
+    return summary
 
 
 # ---------------------------------------------------------------------------
@@ -542,11 +720,51 @@ def _render_markdown(report: dict[str, Any]) -> str:
             f"- Average learning readiness: **{jq['average_learning_readiness']:.3f}**"
         )
         lines.append(f"- Learning-ready trades: **{jq['learning_ready_count']}**")
+        lines.append(f"- Lessons recorded: **{jq.get('lesson_count', 0)}**")
+        if jq.get("confidence_before_average") is not None:
+            lines.append(
+                f"- Confidence-before avg: **{jq['confidence_before_average']:.3f}** "
+                f"across {jq.get('confidence_before_count', 0)} record(s)"
+            )
         if jq.get("factor_pass_rates"):
             lines.append("- Factor pass rates:")
             for k, v in sorted(jq["factor_pass_rates"].items()):
                 lines.append(f"  - {k}: {v:.3f}")
+        if jq.get("missing_field_distribution"):
+            lines.append("- Most-missing fields:")
+            for k, v in sorted(
+                jq["missing_field_distribution"].items(),
+                key=lambda kv: -kv[1],
+            )[:8]:
+                lines.append(f"  - {k}: {v}")
+        if jq.get("emotional_state_distribution"):
+            lines.append("- Emotional-state distribution:")
+            for k, v in sorted(jq["emotional_state_distribution"].items()):
+                lines.append(f"  - {k}: {v}")
+        if jq.get("mistake_tags_distribution"):
+            lines.append("- Mistake-tag distribution:")
+            for k, v in sorted(
+                jq["mistake_tags_distribution"].items(),
+                key=lambda kv: -kv[1],
+            )[:10]:
+                lines.append(f"  - {k}: {v}")
         lines.append("")
+    rext = report.get("reconciliation_extended", {})
+    if rext.get("available"):
+        oq = rext.get("outcome_quality_distribution", {})
+        pe = rext.get("process_error_distribution", {})
+        if oq or pe:
+            lines.append("## Reconciliation — Attribution")
+            lines.append("")
+            if oq:
+                lines.append("- Outcome quality distribution:")
+                for k, v in sorted(oq.items()):
+                    lines.append(f"  - {k}: {v}")
+            if pe:
+                lines.append("- Process-error distribution:")
+                for k, v in sorted(pe.items()):
+                    lines.append(f"  - {k}: {v}")
+            lines.append("")
     lines.append("## Limitations")
     lines.append("")
     for lim in report.get("limitations", []):
@@ -608,6 +826,7 @@ __all__ = [
     "EXECUTION_GATE_LOCKED",
     "ADVISORY_DISCLAIMER",
     "build_report",
+    "build_self_test_summary",
 ]
 
 

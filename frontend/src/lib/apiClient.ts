@@ -150,6 +150,16 @@ export async function postManualTrade(body: {
   notes?: string;
   logged_by?: string;
   leverage?: number;
+  // Operator-discipline journal fields. All optional — older clients still work.
+  invalidation_level?: string;
+  expected_horizon?: string;
+  risk_reason?: string;
+  entry_reason?: string;
+  exit_plan?: string;
+  confidence_before?: number | null;
+  emotional_state?: string;
+  mistake_tags?: string;
+  lesson?: string;
 }): Promise<unknown> {
   return apiFetch('/manual-trades', {
     method: 'POST',
@@ -165,6 +175,11 @@ export async function reconcileTrade(
     outcome_notes?: string;
     pnl_estimate?: number;
     outcome_status?: string;
+    outcome_quality?: string;
+    process_error?: string;
+    process_error_notes?: string;
+    mistake_tags?: string;
+    lesson?: string;
   },
 ): Promise<unknown> {
   return apiFetch(`/manual-trades/${encodeURIComponent(tradeId)}/reconcile`, {

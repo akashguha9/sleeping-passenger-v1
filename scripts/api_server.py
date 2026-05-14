@@ -584,6 +584,17 @@ class ManualTradeBody(BaseModel):
     notes: str = ""
     logged_by: str = "human"
     leverage: float = 1.0
+    # Operator-discipline / journal-quality fields. All optional; backwards
+    # compatible — frontends that omit them keep working.
+    invalidation_level: str = ""
+    expected_horizon: str = ""
+    risk_reason: str = ""
+    entry_reason: str = ""
+    exit_plan: str = ""
+    confidence_before: float | None = None
+    emotional_state: str = ""
+    mistake_tags: str = ""
+    lesson: str = ""
 
 
 class ReconcileBody(BaseModel):
@@ -592,6 +603,12 @@ class ReconcileBody(BaseModel):
     outcome_notes: str = ""
     pnl_estimate: float = 0.0
     outcome_status: str = "UNKNOWN"
+    # Skill-vs-luck / skill-vs-process attribution fields. All optional.
+    outcome_quality: str = ""
+    process_error: str = ""
+    process_error_notes: str = ""
+    mistake_tags: str = ""
+    lesson: str = ""
 
 
 class ChartBootstrapBody(BaseModel):
@@ -779,6 +796,15 @@ def post_manual_trade(
         notes=body.notes,
         logged_by=body.logged_by,
         leverage=body.leverage,
+        invalidation_level=body.invalidation_level,
+        expected_horizon=body.expected_horizon,
+        risk_reason=body.risk_reason,
+        entry_reason=body.entry_reason,
+        exit_plan=body.exit_plan,
+        confidence_before=body.confidence_before,
+        emotional_state=body.emotional_state,
+        mistake_tags=body.mistake_tags,
+        lesson=body.lesson,
     )
 
 
@@ -795,6 +821,11 @@ def post_reconcile(
         outcome_notes=body.outcome_notes,
         pnl_estimate=body.pnl_estimate,
         outcome_status=body.outcome_status,
+        outcome_quality=body.outcome_quality,
+        process_error=body.process_error,
+        process_error_notes=body.process_error_notes,
+        mistake_tags=body.mistake_tags,
+        lesson=body.lesson,
     )
 
 
@@ -842,6 +873,67 @@ def get_source_health_summary() -> dict:
     Advisory-only — no execution implications.
     """
     return _get_source_health_summary()
+
+
+# ---------------------------------------------------------------------------
+# Live source freshness — per-source fresh/stale/overdue/skipped/failed
+# ---------------------------------------------------------------------------
+
+
+@app.get("/live-sources/status")
+def get_live_sources_status() -> dict:
+    """Return per-source freshness state derived from source_run_log.
+
+    Surface the same truth ``compute_source_freshness`` produces for the
+    CLI: freshness_state (fresh/stale/overdue/never_run/skipped/failed),
+    next_expected_refresh_at, credential_configured, adapter_status.  Never
+    exposes env values; missing credential -> skipped; planned adapter !=
+    implemented.  Advisory-only.
+    """
+    try:
+        try:
+            from scripts.live_source_registry import compute_source_freshness
+            from scripts.persistence import get_latest_source_run_per_source
+        except ModuleNotFoundError:
+            from live_source_registry import compute_source_freshness  # type: ignore[no-redef]
+            from persistence import get_latest_source_run_per_source  # type: ignore[no-redef]
+        latest = get_latest_source_run_per_source()
+        freshness = compute_source_freshness(latest)
+    except Exception as exc:
+        return {
+            "operation": "get_live_sources_status",
+            "sources": {},
+            "source_count": 0,
+            "freshness_distribution": {},
+            "error": str(exc),
+            "advisory_status": _ADVISORY_STATUS,
+            "execution_gate": "LOCKED",
+            "broker_api_called": False,
+            "ai_execution_count": _AI_EXECUTION_COUNT,
+            "execution_permission": False,
+            "can_execute": False,
+            "human_review_required": True,
+        }
+
+    dist: dict = {}
+    for entry in freshness.values():
+        state = entry.get("freshness_state", "unknown")
+        dist[state] = dist.get(state, 0) + 1
+
+    return {
+        "operation": "get_live_sources_status",
+        "sources": freshness,
+        "source_count": len(freshness),
+        "freshness_distribution": dist,
+        "advisory_status": _ADVISORY_STATUS,
+        "execution_mode": _EXECUTION_MODE,
+        "execution_gate": "LOCKED",
+        "broker_api_called": False,
+        "ai_execution_count": _AI_EXECUTION_COUNT,
+        "execution_permission": False,
+        "can_execute": False,
+        "human_review_required": True,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -1018,6 +1110,40 @@ def get_security_coverage_endpoint(symbol: str) -> dict:
 @app.get("/db/status")
 def get_db_status() -> dict:
     return _get_db_status()
+
+
+# ---------------------------------------------------------------------------
+# Self-test summary — dashboard rollup
+# ---------------------------------------------------------------------------
+
+
+@app.get("/self-test/summary")
+def get_self_test_summary() -> dict:
+    """Compact dashboard-friendly self-test rollup.
+
+    Mirrors ``python scripts/self_test_report.py --json`` but at API-call
+    latency.  Read-only: never writes the DB, never calls a broker, never
+    increments ai_execution_count.
+    """
+    try:
+        try:
+            from scripts.self_test_report import build_self_test_summary
+        except ModuleNotFoundError:
+            from self_test_report import build_self_test_summary  # type: ignore[no-redef]
+        return build_self_test_summary()
+    except Exception as exc:  # pragma: no cover — defensive guard
+        return {
+            "report": "self_test_summary",
+            "db_available": False,
+            "error": str(exc),
+            "advisory_status": _ADVISORY_STATUS,
+            "execution_gate": "LOCKED",
+            "broker_api_called": False,
+            "ai_execution_count": _AI_EXECUTION_COUNT,
+            "execution_permission": False,
+            "can_execute": False,
+            "human_review_required": True,
+        }
 
 
 # ---------------------------------------------------------------------------

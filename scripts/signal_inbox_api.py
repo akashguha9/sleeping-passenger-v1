@@ -164,6 +164,17 @@ class ManualTradeLog:
     human_review_required: bool = True
     broker_order_id: str = "NONE"
     broker_api_called: bool = False
+    # Operator-discipline / journal-quality fields. All optional, all
+    # record-only — never grant execution permission.
+    invalidation_level: str = ""
+    expected_horizon: str = ""
+    risk_reason: str = ""
+    entry_reason: str = ""
+    exit_plan: str = ""
+    confidence_before: float | None = None
+    emotional_state: str = ""
+    mistake_tags: str = ""
+    lesson: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -184,6 +195,12 @@ class TradeReconciliation:
     ai_execution_count: int = _AI_EXECUTION_COUNT
     advisory_status: str = _ADVISORY_STATUS
     human_review_required: bool = True
+    # Skill-vs-luck / skill-vs-process attribution fields. All optional.
+    outcome_quality: str = ""
+    process_error: str = ""
+    process_error_notes: str = ""
+    mistake_tags: str = ""
+    lesson: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -283,6 +300,76 @@ def _error_response(operation: str, message: str) -> dict[str, Any]:
     }
 
 
+def _decorate_inbox_diagnostics(item: dict[str, Any]) -> dict[str, Any]:
+    """Attach signal-sensitivity and toxic-quarantine diagnostics to an inbox item.
+
+    All helpers are pure, deterministic, and never call live APIs.  If a
+    helper raises or imports fail, the item is returned unchanged so the
+    /signals endpoint never crashes because a diagnostic helper had a bad
+    day.  No broker call, no execution permission added by this annotation.
+    """
+    try:
+        try:
+            from scripts.signal_sensitivity_diagnostics import (
+                diagnose_signal_sensitivity,
+            )
+        except ModuleNotFoundError:
+            from signal_sensitivity_diagnostics import (  # type: ignore[no-redef]
+                diagnose_signal_sensitivity,
+            )
+        try:
+            from scripts.toxic_signal_quarantine import classify_toxic_signal
+        except ModuleNotFoundError:
+            from toxic_signal_quarantine import classify_toxic_signal  # type: ignore[no-redef]
+    except Exception:
+        return item
+
+    annotated = dict(item)
+
+    try:
+        sens = diagnose_signal_sensitivity(item)
+        annotated["chaos_sensitivity_score"] = sens.get("chaos_sensitivity_score")
+        annotated["classification_stability_score"] = sens.get(
+            "classification_stability_score"
+        )
+        annotated["fragile"] = bool(sens.get("fragile", False))
+        annotated["sensitivity_recommendation"] = sens.get("recommendation")
+        annotated["baseline_classification"] = sens.get("baseline_classification")
+    except Exception:
+        annotated.setdefault("chaos_sensitivity_score", None)
+        annotated.setdefault("classification_stability_score", None)
+        annotated.setdefault("fragile", False)
+        annotated.setdefault("sensitivity_recommendation", "not_applicable")
+
+    try:
+        tox = classify_toxic_signal(item)
+        annotated["contamination_score"] = tox.get("contamination_score")
+        annotated["toxic_quarantine_state"] = tox.get("toxic_quarantine_state")
+        annotated["quarantine_reasons"] = list(tox.get("quarantine_reasons", []))
+        annotated["promotion_allowed"] = bool(tox.get("promotion_allowed", True))
+    except Exception:
+        annotated.setdefault("contamination_score", None)
+        annotated.setdefault("toxic_quarantine_state", "clean")
+        annotated.setdefault("quarantine_reasons", [])
+        annotated.setdefault("promotion_allowed", True)
+
+    # AI validation status passthrough (already populated by the bridge in
+    # some flows). We default to "not_applicable" so the badge layer has
+    # a stable string to switch on.
+    annotated.setdefault("ai_validation_status", item.get("ai_validation_status") or "not_applicable")
+
+    # Re-stamp the canonical safety invariants. Diagnostic enrichment must
+    # NEVER grant execution permission; we re-write the keys defensively in
+    # case a helper returned something different.
+    annotated["advisory_status"] = _ADVISORY_STATUS
+    annotated["execution_gate"] = _EXECUTION_GATE
+    annotated["broker_api_called"] = False
+    annotated["ai_execution_count"] = _AI_EXECUTION_COUNT
+    annotated["execution_permission"] = False
+    annotated["can_execute"] = False
+    return annotated
+
+
 def _ticker_summary_to_event_dict(ts: dict[str, Any]) -> dict[str, Any]:
     return {
         "signal_id": f"FABRIC_{ts['ticker']}",
@@ -367,6 +454,20 @@ def list_inbox_items(
 
     action_counts = compute_action_counts(items)
 
+    # Decorate each inbox item with fragility + quarantine diagnostics so the
+    # UI can render badges without re-fetching.  Pure helpers; never grant
+    # execution permission.
+    items = [_decorate_inbox_diagnostics(it) for it in items]
+
+    # Per-list summary counts so a dashboard panel can show "5 fragile,
+    # 2 quarantined" without re-scanning the list on the frontend.
+    fragile_count = sum(1 for it in items if it.get("fragile"))
+    quarantined_count = sum(
+        1
+        for it in items
+        if it.get("toxic_quarantine_state") in {"quarantine", "block_from_promotion"}
+    )
+
     # Persistence truth model (see docs/PERSISTENCE_MODEL.md):
     #   sqlite     -> canonical
     #   anything else -> not canonical; UI should surface a cue
@@ -387,9 +488,15 @@ def list_inbox_items(
         "truth_source": truth_source,
         "fallback_used": fallback_used,
         "canonical": canonical,
+        "fragile_signal_count": fragile_count,
+        "quarantined_signal_count": quarantined_count,
         "advisory_status": _ADVISORY_STATUS,
         "human_review_required": True,
         "execution_mode": _EXECUTION_MODE,
+        "execution_gate": _EXECUTION_GATE,
+        "execution_permission": False,
+        "can_execute": False,
+        "broker_api_called": False,
         "ai_execution_count": _AI_EXECUTION_COUNT,
         "generated_at": utc_timestamp(),
     }
@@ -428,6 +535,7 @@ def get_signal_detail(event_id: str) -> dict[str, Any]:
 
     overlay = _build_inbox_overlay()
     item = _build_item_from_event(event_dict, overlay)
+    item_dict = _decorate_inbox_diagnostics(item.to_dict())
 
     reflections: list[dict[str, Any]] = []
     ai_summaries: list[dict[str, Any]] = []
@@ -449,7 +557,7 @@ def get_signal_detail(event_id: str) -> dict[str, Any]:
     return {
         "operation": "get_signal_detail",
         "event_id": event_id,
-        "signal": item.to_dict(),
+        "signal": item_dict,
         "ticker_summary": ticker_summary,
         "reflections": reflections,
         "ai_summaries": ai_summaries,
@@ -732,6 +840,54 @@ def mark_signal(event_id: str, status: str) -> dict[str, Any]:
 _LEVERAGE_MIN = 1.0
 _LEVERAGE_MAX = 25.0
 
+# Cap on freeform text fields so a hostile or careless client can't fill the
+# DB.  This is the same intent as the existing thesis/notes upper bound the
+# frontend implicitly enforces — applied at the persistence boundary as belt-
+# and-braces.  The numbers are deliberately generous; the goal is "no abuse",
+# not "trim user prose".
+_JOURNAL_TEXT_MAX = 2000
+
+
+def _safe_journal_text(value: Any) -> str:
+    """Coerce arbitrary journal-text input to a bounded safe string.
+
+    None / non-string -> empty string.  Strings are stripped and truncated to
+    ``_JOURNAL_TEXT_MAX``.  No HTML / SQL escaping (SQLite parametrisation
+    handles the latter; the former is the frontend's responsibility).
+    """
+    if value is None:
+        return ""
+    if not isinstance(value, str):
+        try:
+            value = str(value)
+        except Exception:
+            return ""
+    cleaned = value.strip()
+    if len(cleaned) > _JOURNAL_TEXT_MAX:
+        cleaned = cleaned[:_JOURNAL_TEXT_MAX]
+    return cleaned
+
+
+def _safe_confidence_before(value: Any) -> float | None:
+    """Mirror the persistence-layer normaliser at the API boundary.
+
+    Accepts None, fraction in [0, 1], or percentage in [0, 100].  Anything
+    else returns None.  Never raises.
+    """
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return None
+    try:
+        n = float(value)
+    except (TypeError, ValueError):
+        return None
+    if n != n:
+        return None
+    if n < 0.0 or n > 100.0:
+        return None
+    return n
+
 
 def log_manual_trade(
     *,
@@ -744,6 +900,15 @@ def log_manual_trade(
     notes: str = "",
     logged_by: str = "human",
     leverage: float = 1.0,
+    invalidation_level: str = "",
+    expected_horizon: str = "",
+    risk_reason: str = "",
+    entry_reason: str = "",
+    exit_plan: str = "",
+    confidence_before: float | None = None,
+    emotional_state: str = "",
+    mistake_tags: str = "",
+    lesson: str = "",
 ) -> dict[str, Any]:
     """7. Log a manual trade execution (HUMAN_ONLY; no broker API called).
 
@@ -755,6 +920,12 @@ def log_manual_trade(
     >= 1.0 and <= 25.0.  Missing / null defaults to 1.0.  Storing leverage
     here does NOT enable any broker margin behaviour — this remains pure
     record-keeping.
+
+    The operator-discipline keyword args
+    (invalidation_level, expected_horizon, risk_reason, entry_reason,
+    exit_plan, confidence_before, emotional_state, mistake_tags, lesson)
+    are optional journal-quality fields.  Bad / unknown payloads degrade
+    silently to empty strings or NULL — they never reject the log.
     """
     if not event_id or not isinstance(event_id, str):
         return _error_response("log_manual_trade", "event_id must be a non-empty string")
@@ -793,6 +964,15 @@ def log_manual_trade(
         notes=str(notes),
         logged_by=str(logged_by),
         leverage=leverage_val,
+        invalidation_level=_safe_journal_text(invalidation_level),
+        expected_horizon=_safe_journal_text(expected_horizon),
+        risk_reason=_safe_journal_text(risk_reason),
+        entry_reason=_safe_journal_text(entry_reason),
+        exit_plan=_safe_journal_text(exit_plan),
+        confidence_before=_safe_confidence_before(confidence_before),
+        emotional_state=_safe_journal_text(emotional_state),
+        mistake_tags=_safe_journal_text(mistake_tags),
+        lesson=_safe_journal_text(lesson),
     )
     append_jsonl(MANUAL_TRADE_LOG, trade.to_dict(), stamp=False)
     if _DB_AVAILABLE and _persistence is not None:
@@ -802,6 +982,15 @@ def log_manual_trade(
                 trade.quantity, trade.price, trade.executed_at,
                 trade.thesis, trade.notes, trade.logged_by,
                 leverage=trade.leverage,
+                invalidation_level=trade.invalidation_level,
+                expected_horizon=trade.expected_horizon,
+                risk_reason=trade.risk_reason,
+                entry_reason=trade.entry_reason,
+                exit_plan=trade.exit_plan,
+                confidence_before=trade.confidence_before,
+                emotional_state=trade.emotional_state,
+                mistake_tags=trade.mistake_tags,
+                lesson=trade.lesson,
             )
         except Exception:
             pass
@@ -815,11 +1004,23 @@ def log_manual_trade(
         "quantity": trade.quantity,
         "price": trade.price,
         "leverage": trade.leverage,
+        "invalidation_level": trade.invalidation_level,
+        "expected_horizon": trade.expected_horizon,
+        "risk_reason": trade.risk_reason,
+        "entry_reason": trade.entry_reason,
+        "exit_plan": trade.exit_plan,
+        "confidence_before": trade.confidence_before,
+        "emotional_state": trade.emotional_state,
+        "mistake_tags": trade.mistake_tags,
+        "lesson": trade.lesson,
         "status": "logged",
         "execution_mode": _EXECUTION_MODE,
         "ai_execution_count": _AI_EXECUTION_COUNT,
         "broker_api_called": False,
         "broker_order_id": "NONE",
+        "execution_gate": _EXECUTION_GATE,
+        "execution_permission": False,
+        "can_execute": False,
         "advisory_status": _ADVISORY_STATUS,
         "human_review_required": True,
         "generated_at": utc_timestamp(),
@@ -834,8 +1035,18 @@ def reconcile_trade(
     outcome_notes: str = "",
     pnl_estimate: float = 0.0,
     outcome_status: str = "UNKNOWN",
+    outcome_quality: str = "",
+    process_error: str = "",
+    process_error_notes: str = "",
+    mistake_tags: str = "",
+    lesson: str = "",
 ) -> dict[str, Any]:
-    """8. Reconcile a previously logged manual trade with its actual outcome."""
+    """8. Reconcile a previously logged manual trade with its actual outcome.
+
+    The keyword-only attribution fields (outcome_quality, process_error,
+    process_error_notes, mistake_tags, lesson) let the operator separate
+    market noise from process errors.  All optional, all record-only.
+    """
     if not trade_id or not isinstance(trade_id, str):
         return _error_response("reconcile_trade", "trade_id must be a non-empty string")
 
@@ -866,6 +1077,11 @@ def reconcile_trade(
         outcome_notes=str(outcome_notes),
         pnl_estimate=float(pnl_estimate),
         outcome_status=normalized_status,
+        outcome_quality=_safe_journal_text(outcome_quality),
+        process_error=_safe_journal_text(process_error),
+        process_error_notes=_safe_journal_text(process_error_notes),
+        mistake_tags=_safe_journal_text(mistake_tags),
+        lesson=_safe_journal_text(lesson),
     )
     append_jsonl(RECONCILIATIONS_LOG, rec.to_dict(), stamp=False)
     if _DB_AVAILABLE and _persistence is not None:
@@ -874,6 +1090,11 @@ def reconcile_trade(
                 rec.reconciliation_id, rec.trade_id, rec.event_id,
                 rec.reconciled_at, rec.actual_fill_price, rec.actual_quantity,
                 rec.outcome_notes, rec.pnl_estimate, rec.outcome_status,
+                outcome_quality=rec.outcome_quality,
+                process_error=rec.process_error,
+                process_error_notes=rec.process_error_notes,
+                mistake_tags=rec.mistake_tags,
+                lesson=rec.lesson,
             )
         except Exception:
             pass
@@ -885,22 +1106,94 @@ def reconcile_trade(
         "event_id": event_id,
         "outcome_status": normalized_status,
         "pnl_estimate": pnl_estimate,
+        "outcome_quality": rec.outcome_quality,
+        "process_error": rec.process_error,
+        "process_error_notes": rec.process_error_notes,
+        "mistake_tags": rec.mistake_tags,
+        "lesson": rec.lesson,
         "status": "logged",
         "execution_mode": _EXECUTION_MODE,
         "ai_execution_count": _AI_EXECUTION_COUNT,
+        "execution_gate": _EXECUTION_GATE,
+        "execution_permission": False,
+        "can_execute": False,
+        "broker_api_called": False,
         "advisory_status": _ADVISORY_STATUS,
         "human_review_required": True,
         "generated_at": utc_timestamp(),
     }
 
 
-def list_manual_trades() -> dict[str, Any]:
+def _annotate_journal_quality(trade: dict[str, Any]) -> dict[str, Any]:
+    """Attach journal-quality metadata to a manual-trade dict.
+
+    Calls into :mod:`scripts.self_test_journal_quality` to compute
+    completeness / learning-ready / missing-field flags.  Always tolerant —
+    if the helper isn't importable or the trade dict is malformed, returns
+    the trade unchanged.  Never mutates the original dict.
+    """
+    try:
+        try:
+            from scripts.self_test_journal_quality import score_journal_entry
+        except ModuleNotFoundError:
+            from self_test_journal_quality import score_journal_entry  # type: ignore[no-redef]
+    except Exception:
+        return trade
+
+    # Map manual-trade row fields onto the journal-quality scorer's expected
+    # field names.  signal_id mirrors event_id; position_size mirrors
+    # quantity so the risk_rationale factor lights up when the operator
+    # captured size.
+    annotated = dict(trade)
+    scorer_input = {
+        "signal_id": trade.get("event_id", ""),
+        "thesis": trade.get("thesis", ""),
+        "invalidation_level": trade.get("invalidation_level", ""),
+        "expected_horizon": trade.get("expected_horizon", ""),
+        "position_size": trade.get("quantity", 0),
+        "risk_reason": trade.get("risk_reason", ""),
+        "entry_reason": trade.get("entry_reason", ""),
+        "exit_plan": trade.get("exit_plan", ""),
+        "confidence_before": trade.get("confidence_before"),
+        "emotional_state": trade.get("emotional_state", ""),
+        "post_trade_outcome": "",  # filled at reconciliation time
+        "reconciliation_status": "",
+        "mistake_tags": trade.get("mistake_tags", ""),
+        "lesson": trade.get("lesson", ""),
+    }
+    try:
+        result = score_journal_entry(scorer_input)
+        annotated["journal_completeness_score"] = result.get(
+            "journal_completeness_score", 0.0
+        )
+        annotated["learning_readiness_score"] = result.get(
+            "learning_readiness_score", 0.0
+        )
+        annotated["learning_ready"] = result.get("learning_ready", False)
+        annotated["missing_journal_fields"] = list(result.get("missing_fields", []))
+        annotated["decision_quality_flags"] = list(
+            result.get("decision_quality_flags", [])
+        )
+    except Exception:
+        # Diagnostic failure must never break the list endpoint.
+        return trade
+    return annotated
+
+
+def list_manual_trades(*, include_journal_quality: bool = True) -> dict[str, Any]:
     """List all logged manual trades.
 
     SQLite is canonical (truth_source="sqlite").  Falls back to JSONL only
     when SQLite is unavailable; that response is marked
     truth_source="jsonl_fallback", fallback_used=True, canonical=False.
     See docs/PERSISTENCE_MODEL.md.
+
+    When ``include_journal_quality`` is True (default), each trade is
+    annotated with ``journal_completeness_score``, ``learning_readiness_score``,
+    ``learning_ready``, ``missing_journal_fields``, and
+    ``decision_quality_flags`` so the dashboard can surface "am I learning?"
+    without a second round trip.  Set False if the caller wants raw rows
+    (e.g. CSV export).
     """
     trades: list[dict[str, Any]] = []
     truth_source = "jsonl_fallback"
@@ -918,15 +1211,49 @@ def list_manual_trades() -> dict[str, Any]:
     canonical = truth_source == "sqlite"
     fallback_used = not canonical
 
+    annotated_trades = trades
+    aggregate_quality: dict[str, Any] | None = None
+    if include_journal_quality and trades:
+        annotated_trades = [_annotate_journal_quality(t) for t in trades]
+        try:
+            try:
+                from scripts.self_test_journal_quality import score_journal_entries
+            except ModuleNotFoundError:
+                from self_test_journal_quality import score_journal_entries  # type: ignore[no-redef]
+            scorer_inputs = [
+                {
+                    "signal_id": t.get("event_id", ""),
+                    "thesis": t.get("thesis", ""),
+                    "invalidation_level": t.get("invalidation_level", ""),
+                    "expected_horizon": t.get("expected_horizon", ""),
+                    "position_size": t.get("quantity", 0),
+                    "risk_reason": t.get("risk_reason", ""),
+                    "entry_reason": t.get("entry_reason", ""),
+                    "exit_plan": t.get("exit_plan", ""),
+                    "confidence_before": t.get("confidence_before"),
+                    "emotional_state": t.get("emotional_state", ""),
+                    "mistake_tags": t.get("mistake_tags", ""),
+                    "lesson": t.get("lesson", ""),
+                }
+                for t in trades
+            ]
+            aggregate_quality = score_journal_entries(scorer_inputs)
+        except Exception:
+            aggregate_quality = None
+
     return {
         "operation": "list_manual_trades",
-        "trade_count": len(trades),
-        "trades": trades,
+        "trade_count": len(annotated_trades),
+        "trades": annotated_trades,
         "truth_source": truth_source,
         "fallback_used": fallback_used,
         "canonical": canonical,
+        "journal_quality_aggregate": aggregate_quality,
         "advisory_status": _ADVISORY_STATUS,
         "execution_mode": _EXECUTION_MODE,
+        "execution_gate": _EXECUTION_GATE,
+        "execution_permission": False,
+        "can_execute": False,
         "ai_execution_count": _AI_EXECUTION_COUNT,
         "human_review_required": True,
         "broker_api_called": False,

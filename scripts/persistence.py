@@ -81,7 +81,16 @@ CREATE TABLE IF NOT EXISTS manual_trades (
     advisory_status TEXT NOT NULL DEFAULT 'ADVISORY_ONLY',
     human_review_required INTEGER NOT NULL DEFAULT 1,
     broker_order_id TEXT NOT NULL DEFAULT 'NONE',
-    broker_api_called INTEGER NOT NULL DEFAULT 0
+    broker_api_called INTEGER NOT NULL DEFAULT 0,
+    invalidation_level TEXT NOT NULL DEFAULT '',
+    expected_horizon TEXT NOT NULL DEFAULT '',
+    risk_reason TEXT NOT NULL DEFAULT '',
+    entry_reason TEXT NOT NULL DEFAULT '',
+    exit_plan TEXT NOT NULL DEFAULT '',
+    confidence_before REAL,
+    emotional_state TEXT NOT NULL DEFAULT '',
+    mistake_tags TEXT NOT NULL DEFAULT '',
+    lesson TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_mt_event_id ON manual_trades(event_id);
 CREATE TABLE IF NOT EXISTS reconciliation_results (
@@ -97,7 +106,12 @@ CREATE TABLE IF NOT EXISTS reconciliation_results (
     execution_mode TEXT NOT NULL DEFAULT 'HUMAN_ONLY',
     ai_execution_count INTEGER NOT NULL DEFAULT 0,
     advisory_status TEXT NOT NULL DEFAULT 'ADVISORY_ONLY',
-    human_review_required INTEGER NOT NULL DEFAULT 1
+    human_review_required INTEGER NOT NULL DEFAULT 1,
+    outcome_quality TEXT NOT NULL DEFAULT '',
+    process_error TEXT NOT NULL DEFAULT '',
+    process_error_notes TEXT NOT NULL DEFAULT '',
+    mistake_tags TEXT NOT NULL DEFAULT '',
+    lesson TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_rr_trade_id ON reconciliation_results(trade_id);
 CREATE TABLE IF NOT EXISTS moltbook_entries (
@@ -295,13 +309,31 @@ def _additive_migrations(conn: sqlite3.Connection) -> None:
     """
     migrations = (
         ("manual_trades", "leverage", "REAL NOT NULL DEFAULT 1.0"),
+        # Operator-discipline / journal-quality columns. Additive only.
+        # Each defaults to '' (TEXT) or NULL (REAL) so existing rows stay legal.
+        ("manual_trades", "invalidation_level", "TEXT NOT NULL DEFAULT ''"),
+        ("manual_trades", "expected_horizon", "TEXT NOT NULL DEFAULT ''"),
+        ("manual_trades", "risk_reason", "TEXT NOT NULL DEFAULT ''"),
+        ("manual_trades", "entry_reason", "TEXT NOT NULL DEFAULT ''"),
+        ("manual_trades", "exit_plan", "TEXT NOT NULL DEFAULT ''"),
+        ("manual_trades", "confidence_before", "REAL"),
+        ("manual_trades", "emotional_state", "TEXT NOT NULL DEFAULT ''"),
+        ("manual_trades", "mistake_tags", "TEXT NOT NULL DEFAULT ''"),
+        ("manual_trades", "lesson", "TEXT NOT NULL DEFAULT ''"),
+        # Reconciliation outcome-quality / process-error fields.
+        ("reconciliation_results", "outcome_quality", "TEXT NOT NULL DEFAULT ''"),
+        ("reconciliation_results", "process_error", "TEXT NOT NULL DEFAULT ''"),
+        ("reconciliation_results", "process_error_notes", "TEXT NOT NULL DEFAULT ''"),
+        ("reconciliation_results", "mistake_tags", "TEXT NOT NULL DEFAULT ''"),
+        ("reconciliation_results", "lesson", "TEXT NOT NULL DEFAULT ''"),
     )
     for table, column, ddl in migrations:
         try:
-            existing = {
-                row[1]
-                for row in conn.execute(f"PRAGMA table_info({table})").fetchall()
-            }
+            table_info = conn.execute(f"PRAGMA table_info({table})").fetchall()
+            if not table_info:
+                # Table absent (e.g. partial test fixture) — skip cleanly.
+                continue
+            existing = {row[1] for row in table_info}
             if column not in existing:
                 conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")
         except sqlite3.OperationalError:
@@ -549,6 +581,30 @@ def get_all_ai_summaries(db_path: Path = DB_PATH) -> list[dict[str, Any]]:
 # ---------------------------------------------------------------------------
 
 
+def _normalize_confidence_before(value: Any) -> float | None:
+    """Accept None / numeric in [0,1] / numeric in [0,100]. Reject other types.
+
+    None -> None (not yet recorded).  Numeric > 1 and <= 100 is treated as a
+    percentage and returned unchanged so future readers can decide their
+    own scale; the journal-quality scorer treats any positive number as
+    "filled".  Anything else returns None so a bad client payload cannot
+    break the insert.
+    """
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return None
+    try:
+        n = float(value)
+    except (TypeError, ValueError):
+        return None
+    if n != n:  # NaN guard
+        return None
+    if n < 0.0 or n > 100.0:
+        return None
+    return n
+
+
 def insert_manual_trade(
     trade_id: str,
     event_id: str,
@@ -563,28 +619,57 @@ def insert_manual_trade(
     db_path: Path = DB_PATH,
     *,
     leverage: float = 1.0,
+    invalidation_level: str = "",
+    expected_horizon: str = "",
+    risk_reason: str = "",
+    entry_reason: str = "",
+    exit_plan: str = "",
+    confidence_before: float | None = None,
+    emotional_state: str = "",
+    mistake_tags: str = "",
+    lesson: str = "",
 ) -> None:
     """Insert a manual trade record. ``leverage`` is record-only (record-keeping
-    of human leverage choice — no broker margin/execution implications)."""
+    of human leverage choice — no broker margin/execution implications).
+
+    The operator-discipline keyword args (invalidation_level, expected_horizon,
+    risk_reason, entry_reason, exit_plan, confidence_before, emotional_state,
+    mistake_tags, lesson) are all optional. They are journal-quality fields and
+    never grant any execution permission; broker_api_called stays False and
+    ai_execution_count stays 0.
+    """
     try:
         lev = float(leverage) if leverage is not None else 1.0
     except (TypeError, ValueError):
         lev = 1.0
     if lev < 1.0:
         lev = 1.0
+    conf = _normalize_confidence_before(confidence_before)
     conn = _get_conn(db_path)
     try:
         conn.execute(
             "INSERT OR IGNORE INTO manual_trades"
             " (trade_id, event_id, ticker, side, quantity, price, executed_at,"
             "  thesis, notes, logged_by, leverage, execution_mode, ai_execution_count,"
-            "  advisory_status, human_review_required, broker_order_id, broker_api_called)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "  advisory_status, human_review_required, broker_order_id, broker_api_called,"
+            "  invalidation_level, expected_horizon, risk_reason, entry_reason,"
+            "  exit_plan, confidence_before, emotional_state, mistake_tags, lesson)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,"
+            "         ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 trade_id, event_id, ticker, side, quantity, price, executed_at,
                 thesis, notes, logged_by, lev,
                 _EXECUTION_MODE, _AI_EXECUTION_COUNT,
                 _ADVISORY_STATUS, 1, "NONE", 0,
+                str(invalidation_level or ""),
+                str(expected_horizon or ""),
+                str(risk_reason or ""),
+                str(entry_reason or ""),
+                str(exit_plan or ""),
+                conf,
+                str(emotional_state or ""),
+                str(mistake_tags or ""),
+                str(lesson or ""),
             ),
         )
         conn.commit()
@@ -645,7 +730,20 @@ def insert_reconciliation(
     pnl_estimate: float,
     outcome_status: str,
     db_path: Path = DB_PATH,
+    *,
+    outcome_quality: str = "",
+    process_error: str = "",
+    process_error_notes: str = "",
+    mistake_tags: str = "",
+    lesson: str = "",
 ) -> None:
+    """Insert a reconciliation row.
+
+    The keyword-only outcome-quality / process-error / mistake-tag / lesson
+    arguments are optional and exist for skill-vs-luck / skill-vs-process
+    attribution.  None of them grant execution permission; this is
+    record-keeping only.
+    """
     conn = _get_conn(db_path)
     try:
         conn.execute(
@@ -653,14 +751,21 @@ def insert_reconciliation(
             " (reconciliation_id, trade_id, event_id, reconciled_at,"
             "  actual_fill_price, actual_quantity, outcome_notes,"
             "  pnl_estimate, outcome_status, execution_mode, ai_execution_count,"
-            "  advisory_status, human_review_required)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "  advisory_status, human_review_required,"
+            "  outcome_quality, process_error, process_error_notes,"
+            "  mistake_tags, lesson)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 reconciliation_id, trade_id, event_id, reconciled_at,
                 actual_fill_price, actual_quantity, outcome_notes,
                 pnl_estimate, outcome_status,
                 _EXECUTION_MODE, _AI_EXECUTION_COUNT,
                 _ADVISORY_STATUS, 1,
+                str(outcome_quality or ""),
+                str(process_error or ""),
+                str(process_error_notes or ""),
+                str(mistake_tags or ""),
+                str(lesson or ""),
             ),
         )
         conn.commit()
