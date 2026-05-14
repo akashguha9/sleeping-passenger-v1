@@ -41,6 +41,15 @@ surface. **Do not delete or weaken these without a written reason.**
 | Source refresh audit | `tests/test_source_refresh_audit.py` | registry-only audit works, missing credentials counted skipped, no secret exposure, run-history reliability, days-filter applied, per-source safety stamps |
 | Error contracts | `tests/test_error_contracts.py` | envelope shape, word-boundary secret redaction, severity coerced, check_result coerces invalid status, safety stamps |
 | Pre-real-money preflight | `tests/test_pre_real_money_preflight.py` | healthy repo passes, DB failure blocks, security failure blocks, unreconciled backlog escalates to BLOCK/FULL_REVIEW, no secret exposure, no DB writes |
+| Signal field geometry | `tests/test_signal_field_geometry.py` | trace classification, phase alignment, resonance, damping, geometry labels, hypothesis-only flag, safety stamps locked, deterministic |
+| Echo risk + source independence | `tests/test_echo_risk_engine.py` | independence vs. echo, canonical-URL dedupe, primary-source lowers risk, AI-echo guard, confirmation_quality classes, safety stamps |
+| Signal decay + waste manager | `tests/test_signal_decay_waste.py` | per-type half-life, social hype decays faster than filings, stale/duplicate/contradicted/failed-thesis classes, waste-load score, recommendations, safety stamps |
+| Fission branch mapper | `tests/test_fission_branch_mapper.py` | central-bank shock branches across families, high uncertainty → map_only, low severity → do_not_promote, branch energies clamped, safety stamps, no execution language |
+| Fusion thesis engine | `tests/test_fusion_thesis_engine.py` | independent aligned signals → valid_fusion, repeated same source → echo_not_fusion, high heat low containment → overheated_uncontained, deterministic, safety stamps |
+| Operator control rods | `tests/test_operator_control_rods.py` | calm = low heat, revenge/fomo/sleep deficit/altered state → gallardo block, containment reduces meltdown, `broker_execute` always false, manual_trade_logging gated on compliance, safety stamps |
+| Adaptive signal router | `tests/test_adaptive_signal_router.py` | high nutrient/low terrain → reinforce, hostile terrain → quarantine, echo/contradiction shrinks weight, summary state counts, no DB/live calls, safety stamps |
+| Signal reactor orchestrator | `tests/test_signal_reactor.py` | echo cluster → ECHO_SUPPRESSED, independent aligned → FUSION_REVIEW_CANDIDATE, unclear shock → FISSION_MAP_ONLY, operator heat → OPERATOR_CONTROL_RODS, stale → WASTE_DECAY, CLI `--example --json` works, `broker_execute` always false, nested outputs all safety-locked |
+| Signal reactor safety invariants | `tests/test_signal_reactor_safety_invariants.py` | walks every public function on every new module, asserts canonical safety stamps and no execution permission anywhere, asserts module source has no forbidden execution tokens or banned theatrical runtime names |
 
 ### Persistence truth (canonical vs fallback vs mock)
 

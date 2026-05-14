@@ -101,6 +101,8 @@ remains advisory-only.
 | [docs/REFLECTION_FRAMEWORKS.md](docs/REFLECTION_FRAMEWORKS.md) | Sober engineering translation of biological / physical / probabilistic metaphors into diagnostic principles |
 | [docs/FRAMEWORK_COMPONENT_MAP.md](docs/FRAMEWORK_COMPONENT_MAP.md) | Maps each reflection concept to a professional name, repo layer, priority, and test strategy |
 | [docs/DIAGNOSTIC_FRAMEWORK_ROADMAP.md](docs/DIAGNOSTIC_FRAMEWORK_ROADMAP.md) | Sequenced roadmap for future diagnostics (sensitivity, distribution shift, toxic quarantine, continuity mode) — none implemented yet |
+| [docs/SIGNAL_REACTOR_MODEL.md](docs/SIGNAL_REACTOR_MODEL.md) | Doctrine for the Signal Reactor + Adaptive Routing model — translation table, master formula, banned theatrical names, safety invariants |
+| [docs/SIGNAL_REACTOR_USAGE.md](docs/SIGNAL_REACTOR_USAGE.md) | How to read the advisory payload from `scripts/signal_reactor.py --example --json`, what each reactor state means, why "review candidate" is not execution |
 
 The historical reference content (operator-control layer, perception-control
 layer, phase 1/2 ingestion runbooks, chart-structure API, etc.) is preserved

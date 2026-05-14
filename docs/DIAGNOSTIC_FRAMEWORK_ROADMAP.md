@@ -238,6 +238,38 @@ itself; UI surfaces remain optional.
 
 ---
 
+### 2.5 Signal Reactor + Adaptive Routing Model — IMPLEMENTED
+
+**Status:** Implemented in the Signal Reactor + Adaptive Routing Model
+Upgrade sprint. See `docs/SIGNAL_REACTOR_MODEL.md` for the doctrine and
+`docs/SIGNAL_REACTOR_USAGE.md` for runtime usage.
+
+Implemented modules (all pure, deterministic, advisory-only — no DB
+writes, no live APIs, no broker imports):
+
+- `scripts/signal_field_geometry.py` — direction/phase/resonance/damping.
+- `scripts/echo_risk_engine.py` — echo risk, source independence, AI echo guard.
+- `scripts/signal_decay_waste.py` — half-life decay, waste-load summary.
+- `scripts/fission_branch_mapper.py` — branch energies, branch clarity.
+- `scripts/fusion_thesis_engine.py` — evidence density, fusion validity.
+- `scripts/operator_control_rods.py` — operator heat, containment, meltdown
+  risk, gallardo block.
+- `scripts/adaptive_signal_router.py` — nutrient value, terrain penalty,
+  route weight, route state.
+- `scripts/signal_reactor.py` — pure orchestrator producing one advisory
+  payload, exposing CLI `python scripts/signal_reactor.py --example --json`.
+
+Tests live under `tests/test_signal_*` and
+`tests/test_signal_reactor_safety_invariants.py`. The safety invariants
+test walks every public function's output recursively and asserts that
+no nested record claims execution permission.
+
+This raises the Signal Reactor / Adaptive Routing entry from *future*
+to *implemented (advisory-only)*. The reactor is not wired into the
+inbox API or the frontend yet — that is a follow-up sprint.
+
+---
+
 ## 3. P2 — Later Candidates
 
 Implement only after the P1 set is stable and the UX implications of
@@ -249,6 +281,8 @@ quarantine + continuity have been observed live in a local showcase.
 - `signal_rhythm_integrity`
 - `stale_signal_clearance`
 - `signal_metabolism_diagnostics`
+- Reactor UI badges (state, decision-grade energy, gallardo block).
+- Reactor threshold calibration once self-test outcomes are labeled.
 
 ---
 

@@ -359,3 +359,40 @@ that day. The MVP does not enforce this — the operator does.
 - Re-read `docs/SELF_TEST_BOTTLENECK_AUDIT.md` — what's still red?
 - Verify no broker / execution words have crept into `api_server.py`
   via `python scripts/local_security_audit.py --json`.
+
+---
+
+## 10. Signal Reactor Review Ritual (advisory-only)
+
+When a signal feels promising, do **not** trust the feeling. Run the
+seven-step reactor review before logging anything. The reactor is at
+`scripts/signal_reactor.py`; the doctrine is in
+`docs/SIGNAL_REACTOR_MODEL.md` and the runtime guide in
+`docs/SIGNAL_REACTOR_USAGE.md`.
+
+1. **Preflight.** Confirm the safety lock is intact (`local_security_audit`
+   still green; no broker words in the API source).
+2. **Source freshness.** Check `source_refresh_audit` — are the feeds
+   actually live, or am I staring at stale data?
+3. **Echo risk.** Run the cluster through `echo_risk_engine`. If
+   `confirmation_quality` is `echo_amplification` or
+   `missing_primary_source`, stop.
+4. **Operator heat.** Run `operator_control_rods.classify_meltdown_risk`
+   on the current operator state. If `gallardo_block=True`, log the
+   block and *do not log a manual trade*.
+5. **Fission / fusion.** If the trigger is an event, run
+   `fission_branch_mapper`; if it is a cluster of weak independent
+   signals, run `fusion_thesis_engine`. Map only what the data
+   supports.
+6. **Waste load.** Run `signal_decay_waste.summarize_waste_load` on
+   the inbox. If `waste_state` is `overloaded` or `cleanup_required`,
+   clean up before adding new positions.
+7. **Manual decision.** Only log a manual trade if every previous step
+   passes and the reactor state is `WARM_WATCH` or
+   `FUSION_REVIEW_CANDIDATE`. *Review candidate is not execution;* it
+   is the operator's prompt to look at the chart, not a permission slip.
+8. **Reconcile.** Whether you act or not, journal the decision. The
+   reconciliation queue is where learning compounds.
+
+`python scripts/signal_reactor.py --example --json` shows the shape of
+the advisory payload; use it as a mental template, not a target.

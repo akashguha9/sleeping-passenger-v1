@@ -94,6 +94,25 @@ deterministic snapshot seed.
 |---|---|
 | `scripts/reflection_frameworks.py` | Metadata-only companion to `docs/REFLECTION_FRAMEWORKS.md`. No live calls. No DB writes. No filesystem writes. Not imported by `api_server.py` or `persistence.py`. Exposes the framework component inventory, banned theatrical terms, priority/status enums, a deterministic validator, and a metadata scorecard. Every component blob carries the canonical advisory-only safety stamps (`advisory_status=ADVISORY_ONLY`, `execution_gate=LOCKED`, `broker_api_called=false`, `ai_execution_count=0`, `execution_permission=false`, `can_execute=false`). Covered by `tests/test_reflection_frameworks.py`. |
 
+## Signal Reactor diagnostics (pure helpers, advisory-only, no runtime wiring yet)
+
+Added in the *Signal Reactor + Adaptive Routing Model Upgrade* sprint.
+Each module is pure (no DB writes, no live APIs, no broker imports),
+deterministic, and stamped with the canonical advisory-only safety
+contract on every output. Not imported by `api_server.py` or the
+inbox API yet — wiring is the next sprint.
+
+| Script | Role |
+|---|---|
+| `scripts/signal_field_geometry.py` | Classifies a single trace and the geometry of a small cluster (direction, phase alignment, resonance, damping, spike/echo/fan-out/compressing/chaotic). Tests: `tests/test_signal_field_geometry.py`. |
+| `scripts/echo_risk_engine.py` | Separates independent confirmation from repetition; emits `echo_risk_score`, `confirmation_quality`, AI-echo guard. Tests: `tests/test_echo_risk_engine.py`. |
+| `scripts/signal_decay_waste.py` | Half-life decay per signal type, stale/duplicate/contradicted/failed-thesis classes, waste-load summary. Tests: `tests/test_signal_decay_waste.py`. |
+| `scripts/fission_branch_mapper.py` | Maps an explosive event into branch-energy scores; emits `branch_clarity_score` and `recommendation` (`map_only`, `watch_branches`, …). Tests: `tests/test_fission_branch_mapper.py`. |
+| `scripts/fusion_thesis_engine.py` | Combines weak independent signals into a thesis only when independence + density + containment + durability all clear. Tests: `tests/test_fusion_thesis_engine.py`. |
+| `scripts/operator_control_rods.py` | Operator-heat, containment-capacity, meltdown-risk, control-rod insertion, gallardo block. Distinct from `scripts/operator_control.py` (work-block / state ledger). Tests: `tests/test_operator_control_rods.py`. |
+| `scripts/adaptive_signal_router.py` | Nutrient value + terrain penalty + route weight + route state (`reinforce`/`watch`/`decay`/`prune`/`quarantine`). Tests: `tests/test_adaptive_signal_router.py`. |
+| `scripts/signal_reactor.py` | Pure orchestrator that calls every helper above and emits one advisory payload (`signal_reactor_state`, `decision_grade_energy`, `allowed_actions.broker_execute=false` always). CLI: `python scripts/signal_reactor.py --example --json`. Tests: `tests/test_signal_reactor.py`, `tests/test_signal_reactor_safety_invariants.py`. |
+
 ## Research / not-verified
 
 These scripts exist, have tests, and compile — but they are **not reached

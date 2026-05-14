@@ -71,6 +71,15 @@ not as new top-level subsystems.
 | Mitochondria | `signal_metabolism_diagnostics` | None. | missing | P2 | No | Implement after history depth exists. |
 | Sunflower | `toxic_signal_quarantine` | None as explicit state. | missing | P1 | No | Quarantine state machine; never auto-delete. |
 | Botox | `reaction_inhibition_gate` | Advisory-only safety lock (action side). | **existing, canonical** | P0 | n/a — preserve | Same lock as boundary, viewed from the action side. |
+| Pendulum field | `signal_field_geometry` | `scripts/signal_field_geometry.py`. | **implemented (advisory)** | P0 | yes | Cluster geometry: convergent/divergent/resonant/damping/spiking/echoing/fan-out/compressing/chaotic. |
+| Digital signs | `signal_field_geometry.classify_signal_trace` | `scripts/signal_field_geometry.py`. | **implemented (advisory)** | P0 | yes | Labels traces (`frequency_spike`, `repetition_echo`, `absence_gap`, …) without claiming truth. |
+| Echo / repetition | `echo_risk_engine` | `scripts/echo_risk_engine.py`. | **implemented (advisory)** | P0 | yes | Separates `independent_confirmation` from `echo_amplification`. AI-echo guard included. |
+| Half-life / waste | `signal_decay_waste` | `scripts/signal_decay_waste.py`. | **implemented (advisory)** | P0 | yes | Per-type half-life decay + waste-load classifier (`clean`/`accumulating`/`overloaded`/`cleanup_required`). |
+| Fission shock | `fission_branch_mapper` | `scripts/fission_branch_mapper.py`. | **implemented (advisory)** | P0 | yes | Maps consequences into branch families; never authorizes a trade. |
+| Fusion thesis | `fusion_thesis_engine` | `scripts/fusion_thesis_engine.py`. | **implemented (advisory)** | P0 | yes | Independent + dense + contained + durable, otherwise `echo_not_fusion` or `overheated_uncontained`. |
+| Control rods / meltdown | `operator_control_rods` | `scripts/operator_control_rods.py`. | **implemented (advisory)** | P0 | yes | Operator heat → containment → meltdown risk → gallardo block. `broker_execute=False` always. |
+| Slime-mold network | `adaptive_signal_router` | `scripts/adaptive_signal_router.py`. | **implemented (advisory)** | P1 | yes | Nutrient/terrain/route weight + state (`reinforce`/`watch`/`decay`/`prune`/`quarantine`). |
+| Composite reactor | `signal_reactor` | `scripts/signal_reactor.py`. | **implemented (advisory)** | P0 | yes | Pure orchestrator. Emits `signal_reactor_state` and `decision_grade_energy`. CLI: `--example --json`. |
 
 ---
 
