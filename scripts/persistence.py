@@ -344,6 +344,20 @@ def _additive_migrations(conn: sqlite3.Connection) -> None:
         ("manual_trades", "emotional_state", "TEXT NOT NULL DEFAULT ''"),
         ("manual_trades", "mistake_tags", "TEXT NOT NULL DEFAULT ''"),
         ("manual_trades", "lesson", "TEXT NOT NULL DEFAULT ''"),
+        # Reactor-at-decision snapshot columns (Sprint 7B). All optional;
+        # NULL/'' means the operator did not capture a reactor snapshot when
+        # logging this trade. Calibration code treats absence as "no
+        # snapshot" and never invents values. None of these grant execution
+        # permission; they are pure record-keeping for hindsight calibration.
+        ("manual_trades", "reactor_state_at_decision", "TEXT NOT NULL DEFAULT ''"),
+        ("manual_trades", "decision_grade_energy_at_decision", "REAL"),
+        ("manual_trades", "echo_risk_score_at_decision", "REAL"),
+        ("manual_trades", "meltdown_risk_at_decision", "REAL"),
+        ("manual_trades", "fusion_validity_at_decision", "TEXT NOT NULL DEFAULT ''"),
+        ("manual_trades", "fission_branch_clarity_at_decision", "REAL"),
+        ("manual_trades", "operator_heat_at_decision", "REAL"),
+        ("manual_trades", "gallardo_block_at_decision", "INTEGER NOT NULL DEFAULT 0"),
+        ("manual_trades", "preflight_state_at_decision", "TEXT NOT NULL DEFAULT ''"),
         # Reconciliation outcome-quality / process-error fields.
         ("reconciliation_results", "outcome_quality", "TEXT NOT NULL DEFAULT ''"),
         ("reconciliation_results", "process_error", "TEXT NOT NULL DEFAULT ''"),
@@ -629,6 +643,28 @@ def _normalize_confidence_before(value: Any) -> float | None:
     return n
 
 
+def _normalize_unit_score(value: Any) -> float | None:
+    """Coerce a reactor score to a float in [0, 1] or None.
+
+    Reactor scores live in the unit interval. A bad payload (string, NaN,
+    out-of-range, bool) yields None so the insert cannot fail and the
+    calibration report can see "no snapshot" instead of garbage.
+    """
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return None
+    try:
+        n = float(value)
+    except (TypeError, ValueError):
+        return None
+    if n != n:
+        return None
+    if n < 0.0 or n > 1.0:
+        return None
+    return n
+
+
 def insert_manual_trade(
     trade_id: str,
     event_id: str,
@@ -652,6 +688,15 @@ def insert_manual_trade(
     emotional_state: str = "",
     mistake_tags: str = "",
     lesson: str = "",
+    reactor_state_at_decision: str = "",
+    decision_grade_energy_at_decision: float | None = None,
+    echo_risk_score_at_decision: float | None = None,
+    meltdown_risk_at_decision: float | None = None,
+    fusion_validity_at_decision: str = "",
+    fission_branch_clarity_at_decision: float | None = None,
+    operator_heat_at_decision: float | None = None,
+    gallardo_block_at_decision: bool | int | None = None,
+    preflight_state_at_decision: str = "",
 ) -> None:
     """Insert a manual trade record. ``leverage`` is record-only (record-keeping
     of human leverage choice — no broker margin/execution implications).
@@ -661,6 +706,12 @@ def insert_manual_trade(
     mistake_tags, lesson) are all optional. They are journal-quality fields and
     never grant any execution permission; broker_api_called stays False and
     ai_execution_count stays 0.
+
+    The reactor-at-decision snapshot kwargs (reactor_state_at_decision,
+    decision_grade_energy_at_decision, …) are also optional. They capture
+    the Signal Reactor advisory state the operator saw at decision time so
+    later calibration can ask "did the reactor warn correctly?".  Storing
+    them never authorises trades; the safety stamps below are unchanged.
     """
     try:
         lev = float(leverage) if leverage is not None else 1.0
@@ -669,32 +720,67 @@ def insert_manual_trade(
     if lev < 1.0:
         lev = 1.0
     conf = _normalize_confidence_before(confidence_before)
+    dge = _normalize_unit_score(decision_grade_energy_at_decision)
+    echo = _normalize_unit_score(echo_risk_score_at_decision)
+    meltdown = _normalize_unit_score(meltdown_risk_at_decision)
+    fission = _normalize_unit_score(fission_branch_clarity_at_decision)
+    heat = _normalize_unit_score(operator_heat_at_decision)
+    gallardo = 1 if gallardo_block_at_decision else 0
+
     conn = _get_conn(db_path)
     try:
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(manual_trades)")}
+        has_reactor_cols = "reactor_state_at_decision" in cols
+        base_cols = (
+            "trade_id, event_id, ticker, side, quantity, price, executed_at,"
+            " thesis, notes, logged_by, leverage, execution_mode, ai_execution_count,"
+            " advisory_status, human_review_required, broker_order_id, broker_api_called,"
+            " invalidation_level, expected_horizon, risk_reason, entry_reason,"
+            " exit_plan, confidence_before, emotional_state, mistake_tags, lesson"
+        )
+        base_vals: tuple[Any, ...] = (
+            trade_id, event_id, ticker, side, quantity, price, executed_at,
+            thesis, notes, logged_by, lev,
+            _EXECUTION_MODE, _AI_EXECUTION_COUNT,
+            _ADVISORY_STATUS, 1, "NONE", 0,
+            str(invalidation_level or ""),
+            str(expected_horizon or ""),
+            str(risk_reason or ""),
+            str(entry_reason or ""),
+            str(exit_plan or ""),
+            conf,
+            str(emotional_state or ""),
+            str(mistake_tags or ""),
+            str(lesson or ""),
+        )
+        if has_reactor_cols:
+            cols_sql = (
+                base_cols
+                + ", reactor_state_at_decision, decision_grade_energy_at_decision,"
+                "   echo_risk_score_at_decision, meltdown_risk_at_decision,"
+                "   fusion_validity_at_decision, fission_branch_clarity_at_decision,"
+                "   operator_heat_at_decision, gallardo_block_at_decision,"
+                "   preflight_state_at_decision"
+            )
+            placeholders = ", ".join(["?"] * (len(base_vals) + 9))
+            vals = base_vals + (
+                str(reactor_state_at_decision or ""),
+                dge,
+                echo,
+                meltdown,
+                str(fusion_validity_at_decision or ""),
+                fission,
+                heat,
+                gallardo,
+                str(preflight_state_at_decision or ""),
+            )
+        else:
+            cols_sql = base_cols
+            placeholders = ", ".join(["?"] * len(base_vals))
+            vals = base_vals
         conn.execute(
-            "INSERT OR IGNORE INTO manual_trades"
-            " (trade_id, event_id, ticker, side, quantity, price, executed_at,"
-            "  thesis, notes, logged_by, leverage, execution_mode, ai_execution_count,"
-            "  advisory_status, human_review_required, broker_order_id, broker_api_called,"
-            "  invalidation_level, expected_horizon, risk_reason, entry_reason,"
-            "  exit_plan, confidence_before, emotional_state, mistake_tags, lesson)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,"
-            "         ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (
-                trade_id, event_id, ticker, side, quantity, price, executed_at,
-                thesis, notes, logged_by, lev,
-                _EXECUTION_MODE, _AI_EXECUTION_COUNT,
-                _ADVISORY_STATUS, 1, "NONE", 0,
-                str(invalidation_level or ""),
-                str(expected_horizon or ""),
-                str(risk_reason or ""),
-                str(entry_reason or ""),
-                str(exit_plan or ""),
-                conf,
-                str(emotional_state or ""),
-                str(mistake_tags or ""),
-                str(lesson or ""),
-            ),
+            f"INSERT OR IGNORE INTO manual_trades ({cols_sql}) VALUES ({placeholders})",
+            vals,
         )
         conn.commit()
     finally:

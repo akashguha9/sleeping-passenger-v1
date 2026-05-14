@@ -184,6 +184,168 @@ def _process_error_distribution(conn: sqlite3.Connection) -> dict[str, int]:
     return {str(r["k"]): int(r["n"]) for r in rows}
 
 
+_WARNING_REACTOR_STATES = frozenset(
+    {"HOT_CONTAINMENT_REQUIRED", "OPERATOR_CONTROL_RODS", "ECHO_SUPPRESSED"}
+)
+_BENIGN_REACTOR_STATES = frozenset({"COLD_OBSERVE", "WARM_WATCH"})
+_FAVOURABLE_REACTOR_STATES = frozenset({"FUSION_REVIEW_CANDIDATE"})
+_OPERATOR_HEAT_HIGH_THRESHOLD = 0.6
+_ECHO_RISK_HIGH_THRESHOLD = 0.6
+
+
+def _calibration_aggregates(conn: sqlite3.Connection) -> dict[str, Any]:
+    """Per-trade calibration roll-up from manual_trades + reconciliation_results.
+
+    Only counts rows where the reactor-at-decision snapshot is present
+    (``reactor_state_at_decision`` non-empty).  Each row is classified by
+    a small, conservative rule set; ratios are NOT exposed because sample
+    sizes are tiny and the labels are imperfect proxies for skill.
+
+    Returns a dict with:
+      - reactor_snapshot_count           (n trades with reactor snapshot)
+      - reactor_snapshot_with_outcome    (subset that has a reconciliation)
+      - calibration_labels               (dict[label, int])
+      - high_operator_heat_count         (snapshot rows with heat >= 0.6)
+      - high_echo_risk_count             (snapshot rows with echo >= 0.6)
+      - gallardo_block_at_decision_count
+      - fusion_validity_buckets          (dict[bucket, int])
+      - lessons_captured                 (rows with non-empty lesson)
+    """
+    empty: dict[str, Any] = {
+        "reactor_snapshot_count": 0,
+        "reactor_snapshot_with_outcome": 0,
+        "calibration_labels": {},
+        "high_operator_heat_count": 0,
+        "high_echo_risk_count": 0,
+        "gallardo_block_at_decision_count": 0,
+        "fusion_validity_buckets": {},
+        "lessons_captured": 0,
+    }
+    if not _table_exists(conn, "manual_trades"):
+        return empty
+    # All 9 reactor-at-decision columns must be present before we attempt
+    # calibration; otherwise existing fixture DBs would raise OperationalError.
+    for col in REACTOR_DECISION_FIELDS:
+        if not _column_exists(conn, "manual_trades", col):
+            return empty
+
+    rec_join = _table_exists(conn, "reconciliation_results")
+    select_extra = (
+        ", rr.outcome_status, rr.process_error, rr.outcome_quality"
+        if rec_join
+        else ", '' AS outcome_status, '' AS process_error, '' AS outcome_quality"
+    )
+    join_clause = (
+        " LEFT JOIN reconciliation_results rr ON rr.trade_id = mt.trade_id"
+        if rec_join
+        else ""
+    )
+    try:
+        rows = conn.execute(
+            f"SELECT mt.reactor_state_at_decision AS reactor_state,"
+            f"  mt.decision_grade_energy_at_decision AS dge,"
+            f"  mt.echo_risk_score_at_decision AS echo,"
+            f"  mt.meltdown_risk_at_decision AS meltdown,"
+            f"  mt.fusion_validity_at_decision AS fusion,"
+            f"  mt.fission_branch_clarity_at_decision AS fission,"
+            f"  mt.operator_heat_at_decision AS heat,"
+            f"  mt.gallardo_block_at_decision AS gallardo,"
+            f"  mt.preflight_state_at_decision AS preflight,"
+            f"  mt.lesson AS lesson"
+            f"  {select_extra}"
+            f" FROM manual_trades mt"
+            f" {join_clause}"
+        ).fetchall()
+    except sqlite3.Error:
+        return empty
+
+    snapshot_rows = [r for r in rows if (r["reactor_state"] or "").strip()]
+    if not snapshot_rows:
+        return empty
+
+    labels: dict[str, int] = {
+        "reactor_warned_correctly": 0,
+        "reactor_false_positive": 0,
+        "reactor_false_negative": 0,
+        "reactor_helped": 0,
+        "reactor_no_call": 0,
+        "gallardo_block_ignored": 0,
+        "operator_heat_damage_suspected": 0,
+        "insufficient_outcome_data": 0,
+    }
+    fusion_buckets: dict[str, int] = {}
+    high_heat = 0
+    high_echo = 0
+    gallardo_count = 0
+    lessons = 0
+    with_outcome = 0
+
+    for r in snapshot_rows:
+        state = (r["reactor_state"] or "").strip()
+        outcome = (r["outcome_status"] or "").strip().upper() if rec_join else ""
+        gallardo = bool(r["gallardo"])
+        heat = r["heat"]
+        echo = r["echo"]
+        process_error = (r["process_error"] or "").strip() if rec_join else ""
+        fusion = (r["fusion"] or "").strip() or "unknown"
+        lesson = (r["lesson"] or "").strip()
+
+        fusion_buckets[fusion] = fusion_buckets.get(fusion, 0) + 1
+        if gallardo:
+            gallardo_count += 1
+        if heat is not None and heat >= _OPERATOR_HEAT_HIGH_THRESHOLD:
+            high_heat += 1
+        if echo is not None and echo >= _ECHO_RISK_HIGH_THRESHOLD:
+            high_echo += 1
+        if lesson:
+            lessons += 1
+
+        if outcome in {"WIN", "LOSS", "BREAKEVEN"}:
+            with_outcome += 1
+        else:
+            labels["insufficient_outcome_data"] += 1
+            continue
+
+        # Gallardo block ignored: the operator logged a trade despite the
+        # block being active at decision time.  We can't measure "obeyed"
+        # from the trade table alone — that's the absence of a log.
+        if gallardo:
+            labels["gallardo_block_ignored"] += 1
+
+        if state in _WARNING_REACTOR_STATES:
+            if outcome == "LOSS":
+                labels["reactor_warned_correctly"] += 1
+            elif outcome == "WIN":
+                labels["reactor_false_positive"] += 1
+            # BREAKEVEN: no label increment — ambiguous.
+        elif state in _BENIGN_REACTOR_STATES:
+            if outcome == "LOSS":
+                labels["reactor_false_negative"] += 1
+        elif state in _FAVOURABLE_REACTOR_STATES:
+            if outcome == "WIN":
+                labels["reactor_helped"] += 1
+        else:
+            labels["reactor_no_call"] += 1
+
+        if (
+            heat is not None
+            and heat >= _OPERATOR_HEAT_HIGH_THRESHOLD
+            and process_error
+        ):
+            labels["operator_heat_damage_suspected"] += 1
+
+    return {
+        "reactor_snapshot_count": len(snapshot_rows),
+        "reactor_snapshot_with_outcome": with_outcome,
+        "calibration_labels": labels,
+        "high_operator_heat_count": high_heat,
+        "high_echo_risk_count": high_echo,
+        "gallardo_block_at_decision_count": gallardo_count,
+        "fusion_validity_buckets": fusion_buckets,
+        "lessons_captured": lessons,
+    }
+
+
 def _journal_completeness_summary(conn: sqlite3.Connection) -> dict[str, Any]:
     """Average journal completeness across reconciled trades, using
     `self_test_journal_quality.score_journal_entry` if available."""
@@ -334,14 +496,21 @@ def build_report(db_path: Path | None = None) -> dict[str, Any]:
         outcome_dist = _outcome_distribution(conn)
         process_error_dist = _process_error_distribution(conn)
         journal = _journal_completeness_summary(conn)
+        calibration = _calibration_aggregates(conn)
 
         # Confidence band derives from the reconciled-trade count — that
         # is the only number where signal-vs-outcome attribution exists.
         confidence = _confidence_band(reconciled_count)
+        # A second, stricter band: how many trades have BOTH a reactor
+        # snapshot at decision time AND a reconciled outcome.  This is
+        # the real ceiling for reactor calibration claims.
+        calibration_confidence = _confidence_band(
+            int(calibration.get("reactor_snapshot_with_outcome", 0))
+        )
 
-        # Inventory missing reactor-at-decision fields.  None of these
-        # are persisted yet; this is intentionally surfaced as a gap so
-        # the operator knows reactor hit-rate cannot be computed.
+        # Inventory missing reactor-at-decision fields.  When a migration
+        # has not yet added them, calibration cannot be computed and the
+        # report surfaces this as a hard gap.
         missing_decision_fields: list[str] = []
         for col in REACTOR_DECISION_FIELDS:
             # manual_trades is the natural place to attach them.
@@ -358,10 +527,16 @@ def build_report(db_path: Path | None = None) -> dict[str, Any]:
             limitations.append("no_reconciled_trades_yet")
         if missing_decision_fields:
             limitations.append("reactor_at_decision_fields_not_persisted")
+        elif int(calibration.get("reactor_snapshot_count", 0)) == 0:
+            limitations.append("no_trades_with_reactor_snapshot_yet")
+        elif int(calibration.get("reactor_snapshot_with_outcome", 0)) == 0:
+            limitations.append("no_reactor_snapshot_paired_with_outcome_yet")
         if not journal.get("available"):
             limitations.append("journal_quality_helper_unavailable")
         if confidence in ("very_low", "low"):
             limitations.append("sample_size_too_small_for_calibration_claims")
+        if calibration_confidence in ("very_low", "low"):
+            limitations.append("calibration_sample_too_small_for_reactor_claims")
     finally:
         conn.close()
 
@@ -376,8 +551,10 @@ def build_report(db_path: Path | None = None) -> dict[str, Any]:
         "outcome_distribution": outcome_dist,
         "process_error_distribution": process_error_dist,
         "journal": journal,
+        "calibration": calibration,
         "reactor_self_check": reactor_self_check,
         "confidence_band": confidence,
+        "calibration_confidence_band": calibration_confidence,
         "confidence_thresholds": {
             "very_low_lt": VERY_LOW_THRESHOLD,
             "low_lt": LOW_THRESHOLD,
@@ -388,14 +565,16 @@ def build_report(db_path: Path | None = None) -> dict[str, Any]:
         "advisory_disclaimer": ADVISORY_DISCLAIMER,
         # Explicit non-claims — what this report CANNOT honestly say yet.
         "non_claims": [
-            "reactor_hit_rate is NOT computed; reactor_state at decision "
-            "time is not yet persisted.",
-            "gallardo_block value-vs-cost is NOT computed; obeyed/ignored "
-            "history is not yet tracked.",
-            "Echo-risk utility is NOT computed; echo_risk_score at "
-            "decision time is not yet persisted.",
-            "Calibration confidence is bounded by reconciled-trade "
-            "sample size; do not infer skill from small n.",
+            "reactor_hit_rate is NOT exposed as a ratio; per-label counts "
+            "are reported so the operator can read raw evidence.",
+            "gallardo_block 'obeyed' is NOT measurable from manual_trades "
+            "alone; only 'ignored' (a logged trade despite the block) is.",
+            "Echo-risk utility is NOT computed as a ratio; only counts of "
+            "high-echo decisions are exposed.",
+            "Calibration confidence is bounded by the count of trades "
+            "with BOTH a reactor snapshot AND a reconciled outcome.",
+            "Per-label counts at small n are descriptive evidence, not "
+            "estimates of skill; do not infer alpha from these numbers.",
         ],
     }
     out.update(_SAFETY_STAMPS)
@@ -415,6 +594,21 @@ def _render_text(payload: dict[str, Any]) -> str:
     lines.append(f"Manual trades logged   : {payload['manual_trade_count']}")
     lines.append(f"Reconciled trades      : {payload['reconciled_count']}")
     lines.append(f"Confidence band        : {payload['confidence_band']}")
+    lines.append(
+        f"Calibration confidence : {payload.get('calibration_confidence_band', 'very_low')}"
+    )
+    calibration = payload.get("calibration") or {}
+    if calibration:
+        lines.append(
+            f"Reactor snapshot count : {calibration.get('reactor_snapshot_count', 0)}"
+            f" (with outcome: {calibration.get('reactor_snapshot_with_outcome', 0)})"
+        )
+        lab = calibration.get("calibration_labels") or {}
+        if any(lab.values()):
+            lines.append("Calibration labels (counts only — not ratios):")
+            for k, v in sorted(lab.items()):
+                if v:
+                    lines.append(f"  - {k}: {v}")
     journal = payload.get("journal", {}) or {}
     if journal.get("available"):
         lines.append(

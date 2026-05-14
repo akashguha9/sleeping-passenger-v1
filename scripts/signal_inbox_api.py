@@ -175,6 +175,19 @@ class ManualTradeLog:
     emotional_state: str = ""
     mistake_tags: str = ""
     lesson: str = ""
+    # Reactor-at-decision snapshot (Sprint 7B). Optional record-only fields
+    # capturing what the Signal Reactor reported when the operator decided.
+    # None / "" means "no snapshot captured" — calibration code distinguishes
+    # this from a captured-but-zero value.  Never grants execution permission.
+    reactor_state_at_decision: str = ""
+    decision_grade_energy_at_decision: float | None = None
+    echo_risk_score_at_decision: float | None = None
+    meltdown_risk_at_decision: float | None = None
+    fusion_validity_at_decision: str = ""
+    fission_branch_clarity_at_decision: float | None = None
+    operator_heat_at_decision: float | None = None
+    gallardo_block_at_decision: bool = False
+    preflight_state_at_decision: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -1010,6 +1023,40 @@ def _safe_confidence_before(value: Any) -> float | None:
     return n
 
 
+def _safe_unit_score(value: Any) -> float | None:
+    """API-boundary normaliser for reactor scores in [0, 1].
+
+    Accepts None or a numeric in [0, 1].  Anything else returns None so a
+    bad client payload cannot corrupt the calibration snapshot.
+    """
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return None
+    try:
+        n = float(value)
+    except (TypeError, ValueError):
+        return None
+    if n != n:
+        return None
+    if n < 0.0 or n > 1.0:
+        return None
+    return n
+
+
+def _safe_bool(value: Any) -> bool:
+    """Coerce any truthy/falsy payload to a strict bool. None -> False."""
+    if value is None:
+        return False
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        return value.strip().lower() in {"true", "1", "yes", "y", "on"}
+    return False
+
+
 def log_manual_trade(
     *,
     event_id: str,
@@ -1030,6 +1077,15 @@ def log_manual_trade(
     emotional_state: str = "",
     mistake_tags: str = "",
     lesson: str = "",
+    reactor_state_at_decision: str = "",
+    decision_grade_energy_at_decision: float | None = None,
+    echo_risk_score_at_decision: float | None = None,
+    meltdown_risk_at_decision: float | None = None,
+    fusion_validity_at_decision: str = "",
+    fission_branch_clarity_at_decision: float | None = None,
+    operator_heat_at_decision: float | None = None,
+    gallardo_block_at_decision: bool | None = None,
+    preflight_state_at_decision: str = "",
 ) -> dict[str, Any]:
     """7. Log a manual trade execution (HUMAN_ONLY; no broker API called).
 
@@ -1094,6 +1150,19 @@ def log_manual_trade(
         emotional_state=_safe_journal_text(emotional_state),
         mistake_tags=_safe_journal_text(mistake_tags),
         lesson=_safe_journal_text(lesson),
+        reactor_state_at_decision=_safe_journal_text(reactor_state_at_decision),
+        decision_grade_energy_at_decision=_safe_unit_score(
+            decision_grade_energy_at_decision
+        ),
+        echo_risk_score_at_decision=_safe_unit_score(echo_risk_score_at_decision),
+        meltdown_risk_at_decision=_safe_unit_score(meltdown_risk_at_decision),
+        fusion_validity_at_decision=_safe_journal_text(fusion_validity_at_decision),
+        fission_branch_clarity_at_decision=_safe_unit_score(
+            fission_branch_clarity_at_decision
+        ),
+        operator_heat_at_decision=_safe_unit_score(operator_heat_at_decision),
+        gallardo_block_at_decision=_safe_bool(gallardo_block_at_decision),
+        preflight_state_at_decision=_safe_journal_text(preflight_state_at_decision),
     )
     append_jsonl(MANUAL_TRADE_LOG, trade.to_dict(), stamp=False)
     if _DB_AVAILABLE and _persistence is not None:
@@ -1112,6 +1181,15 @@ def log_manual_trade(
                 emotional_state=trade.emotional_state,
                 mistake_tags=trade.mistake_tags,
                 lesson=trade.lesson,
+                reactor_state_at_decision=trade.reactor_state_at_decision,
+                decision_grade_energy_at_decision=trade.decision_grade_energy_at_decision,
+                echo_risk_score_at_decision=trade.echo_risk_score_at_decision,
+                meltdown_risk_at_decision=trade.meltdown_risk_at_decision,
+                fusion_validity_at_decision=trade.fusion_validity_at_decision,
+                fission_branch_clarity_at_decision=trade.fission_branch_clarity_at_decision,
+                operator_heat_at_decision=trade.operator_heat_at_decision,
+                gallardo_block_at_decision=trade.gallardo_block_at_decision,
+                preflight_state_at_decision=trade.preflight_state_at_decision,
             )
         except Exception:
             pass
