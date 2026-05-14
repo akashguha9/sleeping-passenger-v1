@@ -19,6 +19,7 @@ import type {
   SecuritySearchResponse,
   SecurityDetailResponse,
   SecurityCoverageResponse,
+  ReconciliationQueueResponse,
 } from '@/types';
 
 export interface HealthResponse {
@@ -186,6 +187,20 @@ export async function reconcileTrade(
     method: 'POST',
     body: JSON.stringify(body),
   });
+}
+
+export async function getReconciliationQueue(
+  limit = 100,
+): Promise<ReconciliationQueueResponse | null> {
+  try {
+    const params = new URLSearchParams();
+    params.set('limit', String(limit));
+    return await apiFetch<ReconciliationQueueResponse>(
+      `/self-test/reconciliation-queue?${params.toString()}`,
+    );
+  } catch {
+    return null;
+  }
 }
 
 export async function getMoltbook(): Promise<ApiResult<MoltbookListResponse>> {

@@ -36,10 +36,14 @@ Usage
     python scripts/self_test_report.py --json
     python scripts/self_test_report.py --db-path runtime/mvp_local.db
     python scripts/self_test_report.py --markdown docs/SELF_TEST_REPORT.md
+    python scripts/self_test_report.py --days 30 --json
+    python scripts/self_test_report.py --period monthly --json
+    python scripts/self_test_report.py --include-reconciliation-queue --json
 """
 from __future__ import annotations
 
 import argparse
+import datetime as _dt
 import json
 import sqlite3
 from pathlib import Path
@@ -476,8 +480,202 @@ def _moltbook_summary(conn: sqlite3.Connection) -> dict[str, Any]:
     }
 
 
-def build_report(db_path: Path | None = None) -> dict[str, Any]:
-    """Build the report dict. Read-only; never raises."""
+def _period_window(
+    days: int | None, period: str | None, now: _dt.datetime | None = None,
+) -> tuple[_dt.datetime | None, _dt.datetime | None]:
+    """Resolve --days / --period into (start, end) inclusive datetimes.
+
+    Returns ``(None, None)`` when no filter was requested.
+    """
+    if not days and not period:
+        return None, None
+    now = now or _dt.datetime.now(_dt.timezone.utc)
+    if not days and period:
+        days = {"daily": 1, "weekly": 7, "monthly": 30, "quarterly": 90}.get(
+            period.lower(), 30
+        )
+    days = max(1, int(days or 30))
+    start = now - _dt.timedelta(days=days)
+    return start, now
+
+
+def _period_count(
+    conn: sqlite3.Connection,
+    table: str,
+    column: str,
+    start: _dt.datetime,
+    end: _dt.datetime,
+) -> int:
+    if not _table_exists(conn, table):
+        return 0
+    try:
+        row = conn.execute(
+            f"SELECT COUNT(*) AS n FROM {table}"  # noqa: S608
+            f" WHERE {column} >= ? AND {column} <= ?",
+            (start.isoformat(), end.isoformat()),
+        ).fetchone()
+    except sqlite3.Error:
+        return 0
+    return int(row["n"]) if row else 0
+
+
+def _period_unreconciled(
+    conn: sqlite3.Connection, start: _dt.datetime, end: _dt.datetime
+) -> int:
+    if not _table_exists(conn, "manual_trades"):
+        return 0
+    try:
+        row = conn.execute(
+            "SELECT COUNT(*) AS n FROM manual_trades mt"
+            " WHERE mt.executed_at >= ? AND mt.executed_at <= ?"
+            " AND NOT EXISTS ("
+            "   SELECT 1 FROM reconciliation_results rr"
+            "   WHERE rr.trade_id = mt.trade_id"
+            " )",
+            (start.isoformat(), end.isoformat()),
+        ).fetchone()
+    except sqlite3.Error:
+        return 0
+    return int(row["n"]) if row else 0
+
+
+def _build_process_quality_summary(conn: sqlite3.Connection) -> dict[str, Any]:
+    """Roll up process_quality_classifier across all reconciled trades.
+
+    The classifier is pure; this helper just gathers inputs from the DB
+    and feeds them in. Returns ``available=False`` if the classifier or
+    required tables are unavailable.
+    """
+    empty = {"available": False}
+    if not _table_exists(conn, "manual_trades") or not _table_exists(
+        conn, "reconciliation_results"
+    ):
+        return empty
+    try:
+        try:
+            from scripts.process_quality_classifier import (  # type: ignore[import-not-found]
+                aggregate,
+            )
+            from scripts.self_test_journal_quality import (  # type: ignore[import-not-found]
+                score_journal_entry,
+            )
+        except ModuleNotFoundError:
+            from process_quality_classifier import aggregate  # type: ignore[no-redef]
+            from self_test_journal_quality import (  # type: ignore[no-redef]
+                score_journal_entry,
+            )
+    except Exception:
+        return empty
+
+    cols_present = {
+        c: _column_exists(conn, "manual_trades", c)
+        for c in (
+            "invalidation_level", "expected_horizon", "risk_reason",
+            "entry_reason", "exit_plan", "confidence_before",
+            "emotional_state", "mistake_tags", "lesson",
+        )
+    }
+    select_cols = ["mt.trade_id", "mt.event_id", "mt.ticker", "mt.side",
+                   "mt.quantity", "mt.thesis"]
+    for c, present in cols_present.items():
+        if present:
+            select_cols.append(f"mt.{c}")
+    has_outcome_quality = _column_exists(
+        conn, "reconciliation_results", "outcome_quality"
+    )
+    has_process_error = _column_exists(
+        conn, "reconciliation_results", "process_error"
+    )
+    has_process_error_notes = _column_exists(
+        conn, "reconciliation_results", "process_error_notes"
+    )
+    recon_cols = ["rr.outcome_status", "rr.outcome_notes"]
+    if has_outcome_quality:
+        recon_cols.append("rr.outcome_quality")
+    if has_process_error:
+        recon_cols.append("rr.process_error")
+    if has_process_error_notes:
+        recon_cols.append("rr.process_error_notes")
+
+    select_clause = ", ".join(select_cols + recon_cols)
+
+    try:
+        rows = conn.execute(
+            f"SELECT {select_clause}"  # noqa: S608
+            " FROM manual_trades mt"
+            " INNER JOIN reconciliation_results rr ON rr.trade_id = mt.trade_id"
+        ).fetchall()
+    except sqlite3.Error:
+        return empty
+
+    records: list[dict[str, Any]] = []
+    for row in rows:
+        row_dict = {k: row[k] for k in row.keys()}
+        entry = {
+            "signal_id": str(row_dict.get("event_id") or ""),
+            "thesis": str(row_dict.get("thesis") or ""),
+            "invalidation_level": str(row_dict.get("invalidation_level") or ""),
+            "expected_horizon": str(row_dict.get("expected_horizon") or ""),
+            "position_size": float(row_dict.get("quantity") or 0.0),
+            "risk_reason": str(row_dict.get("risk_reason") or ""),
+            "entry_reason": str(row_dict.get("entry_reason") or ""),
+            "exit_plan": str(row_dict.get("exit_plan") or ""),
+            "confidence_before": row_dict.get("confidence_before"),
+            "emotional_state": str(row_dict.get("emotional_state") or ""),
+            "post_trade_outcome": str(row_dict.get("outcome_notes") or ""),
+            "reconciliation_status": str(row_dict.get("outcome_status") or ""),
+            "mistake_tags": [
+                t.strip()
+                for t in str(row_dict.get("mistake_tags") or "").split(",")
+                if t.strip()
+            ],
+            "lesson": str(row_dict.get("lesson") or ""),
+        }
+        quality = score_journal_entry(entry)
+        rec = {
+            "outcome_status": row_dict.get("outcome_status"),
+            "process_error": row_dict.get("process_error"),
+            "process_error_notes": row_dict.get("process_error_notes"),
+            "journal_completeness_score": quality.get(
+                "journal_completeness_score", 0.0
+            ),
+            "learning_ready": quality.get("learning_ready", False),
+            "thesis": entry["thesis"],
+            "invalidation_level": entry["invalidation_level"],
+            "exit_plan": entry["exit_plan"],
+            "risk_reason": entry["risk_reason"],
+        }
+        records.append(rec)
+
+    agg = aggregate(records)
+    agg["available"] = True
+    return agg
+
+
+def build_report(
+    db_path: Path | None = None,
+    *,
+    days: int | None = None,
+    period: str | None = None,
+    include_reconciliation_queue: bool = False,
+    now: _dt.datetime | None = None,
+) -> dict[str, Any]:
+    """Build the report dict. Read-only; never raises.
+
+    Parameters
+    ----------
+    db_path : Path | None
+        DB to inspect.
+    days : int | None
+        If set, include period_* metrics covering the last ``days`` days.
+    period : str | None
+        Convenience alias for days: 'daily'(1) / 'weekly'(7) / 'monthly'(30)
+        / 'quarterly'(90).  Overridden by an explicit ``days``.
+    include_reconciliation_queue : bool
+        Embed the full reconciliation queue summary (read-only).
+    now : datetime | None
+        Override the current time for deterministic tests.
+    """
     db_path = Path(db_path) if db_path else _default_db_path()
     limitations: list[str] = []
 
@@ -522,6 +720,33 @@ def build_report(db_path: Path | None = None) -> dict[str, Any]:
         ai_validation = _ai_validation_distribution(conn)
         journal_quality = _journal_quality_average(conn)
         reconciliation_extended = _reconciliation_extended_summary(conn)
+        process_quality = _build_process_quality_summary(conn)
+
+        period_start, period_end = _period_window(days, period, now=now)
+        period_payload: dict[str, Any] | None = None
+        if period_start and period_end:
+            period_payload = {
+                "period_start": period_start.isoformat(timespec="seconds").replace(
+                    "+00:00", "Z"
+                ),
+                "period_end": period_end.isoformat(timespec="seconds").replace(
+                    "+00:00", "Z"
+                ),
+                "days": int((period_end - period_start).total_seconds() // 86400),
+                "trades_logged_in_period": _period_count(
+                    conn, "manual_trades", "executed_at", period_start, period_end
+                ),
+                "reconciled_in_period": _period_count(
+                    conn,
+                    "reconciliation_results",
+                    "reconciled_at",
+                    period_start,
+                    period_end,
+                ),
+                "unreconciled_in_period": _period_unreconciled(
+                    conn, period_start, period_end
+                ),
+            }
     finally:
         conn.close()
 
@@ -555,9 +780,29 @@ def build_report(db_path: Path | None = None) -> dict[str, Any]:
         "source_health": source_health,
         "ai_validation_distribution": ai_validation,
         "journal_quality": journal_quality,
+        "process_quality": process_quality,
         "limitations": limitations,
         "advisory_disclaimer": ADVISORY_DISCLAIMER,
     }
+    if period_payload is not None:
+        report["period"] = period_payload
+    if include_reconciliation_queue:
+        try:
+            try:
+                from scripts.reconciliation_queue import build_queue  # type: ignore[import-not-found]
+            except ModuleNotFoundError:
+                from reconciliation_queue import build_queue  # type: ignore[no-redef]
+            queue_payload = build_queue(db_path, limit=50, now=now)
+            report["reconciliation_queue"] = {
+                "summary": queue_payload.get("summary", {}),
+                "items": queue_payload.get("items", []),
+                "operator_action": queue_payload.get("operator_action", ""),
+                "warnings": queue_payload.get("warnings", []),
+                "truncated": queue_payload.get("truncated", False),
+                "truncated_to": queue_payload.get("truncated_to"),
+            }
+        except Exception:
+            limitations.append("reconciliation_queue_helper_unavailable")
     report.update(_SAFETY_STAMPS)
     return report
 
@@ -798,13 +1043,36 @@ def _build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Also write a Markdown rendering to this path.",
     )
+    p.add_argument(
+        "--days",
+        type=int,
+        default=None,
+        help="Include period_* metrics covering the last N days.",
+    )
+    p.add_argument(
+        "--period",
+        type=str,
+        choices=("daily", "weekly", "monthly", "quarterly"),
+        default=None,
+        help="Convenience for --days (daily=1, weekly=7, monthly=30, quarterly=90).",
+    )
+    p.add_argument(
+        "--include-reconciliation-queue",
+        action="store_true",
+        help="Embed the reconciliation queue summary into the report.",
+    )
     return p
 
 
 def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
     db_path = Path(args.db_path) if args.db_path else _default_db_path()
-    report = build_report(db_path)
+    report = build_report(
+        db_path,
+        days=args.days,
+        period=args.period,
+        include_reconciliation_queue=args.include_reconciliation_queue,
+    )
 
     if args.json:
         print(json.dumps(report, sort_keys=True, indent=2, default=str))

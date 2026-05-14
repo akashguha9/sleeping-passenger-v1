@@ -275,6 +275,8 @@ npm run dev
 # Self-test report
 python scripts/self_test_report.py
 python scripts/self_test_report.py --json
+python scripts/self_test_report.py --days 30 --json
+python scripts/self_test_report.py --period monthly --json
 python scripts/self_test_report.py --markdown docs/SELF_TEST_REPORT.md
 
 # Backup
@@ -291,3 +293,69 @@ python scripts/signal_sensitivity_diagnostics.py --json path/to/signal.json
 Nothing in this list calls a broker. Nothing in this list executes a
 trade. Nothing in this list grants execution permission anywhere in
 the system. That is the point.
+
+---
+
+## 9. Pre-real-money daily checklist (Operating Discipline sprint)
+
+> Added by the Local Operating Discipline + Reconciliation Closure
+> sprint. Run these BEFORE any day you intend to log real-money manual
+> trades. None of these commands touch a broker; all are read-only.
+
+```powershell
+# One-command bundle (db integrity + security + sources + queue + summary)
+python scripts/pre_real_money_preflight.py --json
+
+# Or run the parts individually:
+python scripts/db_integrity_check.py --json
+python scripts/local_security_audit.py --json
+python scripts/source_refresh_audit.py --days 7 --json
+python scripts/reconciliation_queue.py --json
+python scripts/self_test_report.py --days 30 --json
+```
+
+The preflight returns `ok: true` only when:
+
+- DB integrity check passes (`PRAGMA integrity_check == ok`, journal
+  columns present on both `manual_trades` and `reconciliation_results`).
+- Local security audit has no FAIL (no tracked `.env`/`.db`, no
+  forbidden execution surface in `scripts/api_server.py`).
+- Unreconciled-trade backlog is below the BLOCK threshold (see below).
+
+### Backlog discipline thresholds
+
+| Unreconciled count | State | Operator rule |
+|---|---|---|
+| 0–9 | clean | Proceed normally. |
+| 10–24 | WARN | Proceed but clear the queue within the week. |
+| 25–49 | BLOCK | Do NOT log new real-money trades today. Reconcile first. |
+| 50+ | FULL REVIEW | Stop. Spend the day reconciling and writing lessons. |
+
+### Discipline gate formula
+
+```
+Manual_Trade_Allowed_By_Discipline =
+    Preflight_OK
+  × Journal_Fields_Ready
+  × Source_Status_Known
+  × Unreconciled_Backlog_Under_Limit
+  × Operator_State_Not_Compromised
+```
+
+If any factor is zero, the operator does not log a real-money trade
+that day. The MVP does not enforce this — the operator does.
+
+### Weekly hygiene
+
+- Run `python scripts/backup_db.py --label weekly` once a week.
+- Run `python scripts/db_integrity_check.py --json` and verify the
+  latest backup is openable.
+- Run `python scripts/self_test_report.py --period monthly --json`
+  and re-read the limitations section.
+
+### Monthly hygiene
+
+- Reconcile every unreconciled trade older than 14 days.
+- Re-read `docs/SELF_TEST_BOTTLENECK_AUDIT.md` — what's still red?
+- Verify no broker / execution words have crept into `api_server.py`
+  via `python scripts/local_security_audit.py --json`.

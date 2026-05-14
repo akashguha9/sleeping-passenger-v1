@@ -103,6 +103,26 @@ The bar is **not**:
 It is a disciplined local advisory machine that *teaches the operator
 whether their process is real* over months and years.
 
+## 3b. Local Operating Discipline Sprint — status update
+
+> Added by the Local Operating Discipline + Reconciliation Closure
+> sprint.  Each row updates a row from §1 above without rewriting
+> history.
+
+| Bottleneck | Status after sprint | Evidence |
+|---|---|---|
+| Reconciliation queue | **fixed** | `scripts/reconciliation_queue.py` + `tests/test_reconciliation_queue.py` (15 tests); `/self-test/reconciliation-queue` API; live summary panel on frontend reconciliation page. |
+| Process quality classifier | **fixed (helper)** | `scripts/process_quality_classifier.py` + `tests/test_process_quality_classifier.py` (14 tests); rolled into `self_test_report.process_quality`. UI surfacing still pending. |
+| Self-test report monthly mode | **fixed** | `self_test_report.py --days N --period monthly`; `period` block in payload; tests in `test_self_test_report_monthly.py`. |
+| DB integrity check | **fixed** | `scripts/db_integrity_check.py` + `tests/test_db_integrity_check.py` (12 tests). Verifies `PRAGMA integrity_check`, required tables, journal columns, backup openable. |
+| Local security audit | **fixed** | `scripts/local_security_audit.py` + `tests/test_local_security_audit.py` (19 tests). Secret-shape detection; ALLOWED_ORIGINS scope; no execution surface in api_server. |
+| Source refresh audit | **fixed** | `scripts/source_refresh_audit.py` + `tests/test_source_refresh_audit.py` (10 tests). Reliability + cadence-compliance from `source_run_log`. |
+| Error contracts | **fixed (helper)** | `scripts/error_contracts.py` + `tests/test_error_contracts.py` (14 tests). Word-boundary secret redaction. |
+| Pre-real-money preflight | **fixed** | `scripts/pre_real_money_preflight.py` + `tests/test_pre_real_money_preflight.py` (12 tests). One bundler; blocks on DB / security / unreconciled-backlog thresholds. |
+| Frontend tests still missing | **open** | Tooling not installed (operator declined again). `docs/E2E_TEST_PLAN.md` updated with the reconciliation queue panel spec. |
+| Off-machine backup | **open** | Backup directory verification exists; off-machine copy is still a manual step. |
+| 30/60/90-day continuity proof | **open** | `--days 30` works against an empty DB, but no continuous-week proof has been run yet. |
+
 ## 4. Out-of-Scope, Documented for Later
 
 These are listed here only so the next operator does not re-derive

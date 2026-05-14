@@ -353,3 +353,40 @@ blueprint. The Python-side helpers (`signal_sensitivity_diagnostics`,
 `self_test_report`) cover the diagnostic surface that the e2e would
 display, so the operator can still self-test rigorously without the
 frontend tests being green.
+
+## Reconciliation Queue Panel (Operating Discipline sprint addition)
+
+> Added by the Local Operating Discipline + Reconciliation Closure
+> sprint. Backs the new `/self-test/reconciliation-queue` endpoint and
+> the live-queue summary panel inserted above the existing mock-driven
+> reconciliation list.
+
+`frontend/src/app/reconciliation/__tests__/page.test.tsx` (Vitest +
+RTL) — to be created once tooling is installed:
+
+- Renders "Live Reconciliation Queue" heading with the backend-source
+  label.
+- When `getReconciliationQueue` resolves with a payload:
+  - Shows `summary.unreconciled_count` as a numeric badge.
+  - Shows `oldest_unreconciled_age_days` rounded to one decimal.
+  - Shows `average_journal_completeness` as a percentage.
+  - Shows `learning_ready_count`.
+  - Shows the operator_action sentence verbatim.
+  - Shows up to 5 most-missing fields with their counts.
+- When `getReconciliationQueue` resolves with `null` (backend
+  unreachable): shows the "Backend unreachable" amber notice and
+  falls back to the mock list below.
+- The panel never renders any text matching `/place order|execute|send
+  to broker|auto[- ]trade/i`.
+- The panel's button copy is restricted to allow-list words: `Log
+  Reconciliation`, `Reconcile outcome`, `Record result`,
+  `Save lesson`, `Classify process`.
+
+`frontend/e2e/reconciliation-queue.spec.ts` (Playwright):
+
+- Visit `/reconciliation`. If backend is up, the queue panel must
+  render either real numbers OR an empty-queue notice.
+- If backend is down, the amber "Backend unreachable" banner must
+  be visible AND the existing mock-driven list below must still
+  render.
+- Submitting a Log Reconciliation form refreshes the queue panel.

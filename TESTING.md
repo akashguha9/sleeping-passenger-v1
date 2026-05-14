@@ -33,6 +33,14 @@ surface. **Do not delete or weaken these without a written reason.**
 | Rate limiter (pure) | `tests/test_rate_limiter.py` | sliding-window logic with a controlled clock — limit + window + per-key isolation + reset |
 | SQLite hardening | `tests/test_sqlite_hardening.py` | WAL on by default, busy_timeout applied, foreign_keys on, `/db/status` exposes pragmas, backup still works post-WAL, db_path display does not leak home directory |
 | API version | `tests/test_api_version.py` | `/api/version` returns advisory stamps, never touches the DB, never leaks `MVP_API_TOKEN` |
+| Reconciliation queue | `tests/test_reconciliation_queue.py` | unreconciled-trade filter, journal-quality attached, age computed, summary distributions, no DB writes, safety stamps locked |
+| Process quality classifier | `tests/test_process_quality_classifier.py` | 4-state matrix, incomplete record, unknown outcome, skill/luck score aggregation, deterministic, no execution permission |
+| Self-test report monthly mode | `tests/test_self_test_report_monthly.py` | `--days N` / `--period monthly` filter, process_quality embed, reconciliation_queue embed, no DB writes |
+| DB integrity check | `tests/test_db_integrity_check.py` | `PRAGMA integrity_check`, required tables/columns, backup openable, stale backup WARN, no DB writes, safety stamps |
+| Local security audit | `tests/test_local_security_audit.py` | secret values never printed, placeholder token WARN, wildcard CORS WARN, tracked-env/db detection, no execution surface in api_server, safety stamps |
+| Source refresh audit | `tests/test_source_refresh_audit.py` | registry-only audit works, missing credentials counted skipped, no secret exposure, run-history reliability, days-filter applied, per-source safety stamps |
+| Error contracts | `tests/test_error_contracts.py` | envelope shape, word-boundary secret redaction, severity coerced, check_result coerces invalid status, safety stamps |
+| Pre-real-money preflight | `tests/test_pre_real_money_preflight.py` | healthy repo passes, DB failure blocks, security failure blocks, unreconciled backlog escalates to BLOCK/FULL_REVIEW, no secret exposure, no DB writes |
 
 ### Persistence truth (canonical vs fallback vs mock)
 

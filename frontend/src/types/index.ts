@@ -291,6 +291,70 @@ export interface ManualTradeListResponse {
   generated_at: string;
 }
 
+export interface ReconciliationQueueItem {
+  trade_id: string;
+  event_id: string;
+  ticker: string;
+  side: string;
+  quantity: number;
+  price: number;
+  executed_at: string;
+  age_days: number | null;
+  thesis: string;
+  invalidation_level: string;
+  expected_horizon: string;
+  risk_reason: string;
+  entry_reason: string;
+  exit_plan: string;
+  confidence_before: number | null;
+  emotional_state: string;
+  mistake_tags: string;
+  lesson: string;
+  journal_completeness_score: number;
+  learning_readiness_score: number;
+  learning_ready: boolean;
+  missing_journal_fields: string[];
+  needs_reconciliation: boolean;
+  advisory_status: string;
+  execution_gate: string;
+  broker_api_called: boolean;
+  ai_execution_count: number;
+  execution_permission: boolean;
+  can_execute: boolean;
+}
+
+export interface ReconciliationQueueSummary {
+  unreconciled_count: number;
+  oldest_unreconciled_age_days: number | null;
+  average_journal_completeness: number;
+  average_learning_readiness: number;
+  learning_ready_count: number;
+  missing_field_distribution: Record<string, number>;
+  by_ticker: Record<string, number>;
+  by_emotional_state: Record<string, number>;
+  by_expected_horizon: Record<string, number>;
+}
+
+export interface ReconciliationQueueResponse {
+  report: string;
+  db_path: string;
+  db_available: boolean;
+  items: ReconciliationQueueItem[];
+  summary: ReconciliationQueueSummary;
+  warnings: string[];
+  operator_action: string;
+  advisory_disclaimer: string;
+  generated_at: string;
+  truncated?: boolean;
+  truncated_to?: number;
+  advisory_status: string;
+  execution_gate: string;
+  broker_api_called: boolean;
+  ai_execution_count: number;
+  execution_permission: boolean;
+  can_execute: boolean;
+}
+
 export type SourceHealthSeverity = 'ok' | 'info' | 'warning' | 'error';
 
 export interface SourceHealthSummaryEntry {

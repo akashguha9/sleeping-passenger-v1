@@ -1146,6 +1146,44 @@ def get_self_test_summary() -> dict:
         }
 
 
+@app.get("/self-test/reconciliation-queue")
+def get_reconciliation_queue(limit: int = 100) -> dict:
+    """Local reconciliation queue: unreconciled manual trades + summary.
+
+    Read-only.  Never places, modifies, or cancels broker orders.  Mirrors
+    ``python scripts/reconciliation_queue.py --json`` so the same payload
+    powers both CLI and frontend.
+    """
+    try:
+        try:
+            from scripts.reconciliation_queue import build_queue
+        except ModuleNotFoundError:
+            from reconciliation_queue import build_queue  # type: ignore[no-redef]
+        # Hard-cap the limit to avoid pathological payloads if a curious
+        # operator types ``?limit=999999`` into the URL bar.
+        bounded = max(0, min(int(limit or 0), 500))
+        return build_queue(limit=bounded)
+    except Exception as exc:  # pragma: no cover — defensive guard
+        return {
+            "report": "reconciliation_queue",
+            "db_available": False,
+            "items": [],
+            "summary": {"unreconciled_count": 0},
+            "warnings": [f"handler_error:{type(exc).__name__}"],
+            "operator_action": (
+                "Reconciliation queue handler raised an error; check server "
+                "logs and DB integrity."
+            ),
+            "advisory_status": _ADVISORY_STATUS,
+            "execution_gate": "LOCKED",
+            "broker_api_called": False,
+            "ai_execution_count": _AI_EXECUTION_COUNT,
+            "execution_permission": False,
+            "can_execute": False,
+            "human_review_required": True,
+        }
+
+
 # ---------------------------------------------------------------------------
 # Moltbook
 # ---------------------------------------------------------------------------

@@ -1,11 +1,12 @@
 'use client';
 
-import { useState } from 'react';
-import { reconcileTrade } from '@/lib/apiClient';
+import { useEffect, useState } from 'react';
+import { getReconciliationQueue, reconcileTrade } from '@/lib/apiClient';
 import { MOCK_MANUAL_TRADES, MOCK_RECONCILIATIONS } from '@/lib/mockData';
 import { ReconciliationCard } from '@/components/ReconciliationCard';
 import { HumanOnlyBadge } from '@/components/HumanOnlyBadge';
 import { AdvisoryOnlyBadge } from '@/components/AdvisoryOnlyBadge';
+import type { ReconciliationQueueResponse } from '@/types';
 
 type OutcomeStatus = 'WIN' | 'LOSS' | 'BREAKEVEN' | 'UNKNOWN';
 
@@ -21,6 +22,22 @@ export default function ReconciliationPage() {
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [error, setError] = useState('');
+  const [queue, setQueue] = useState<ReconciliationQueueResponse | null>(null);
+  const [queueLoading, setQueueLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const data = await getReconciliationQueue(50);
+      if (!cancelled) {
+        setQueue(data);
+        setQueueLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [submitted]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -69,6 +86,62 @@ export default function ReconciliationPage() {
         Reconciliation is for record-keeping only. Broker API:{' '}
         <span className="text-emerald-400 font-mono font-semibold">NOT CONNECTED</span>. AI executions:{' '}
         <span className="text-emerald-400 font-mono font-bold">0</span>. All data is ADVISORY_ONLY.
+      </div>
+
+      <div className="bg-slate-900 border border-slate-700 rounded-lg p-4">
+        <div className="flex items-baseline justify-between mb-2">
+          <h2 className="text-sm font-semibold text-slate-200">Live Reconciliation Queue</h2>
+          <span className="text-[10px] uppercase tracking-wider text-slate-500">
+            Source: backend /self-test/reconciliation-queue
+          </span>
+        </div>
+        {queueLoading ? (
+          <div className="text-xs text-slate-500">Loading queue…</div>
+        ) : queue === null ? (
+          <div className="text-xs text-amber-400">
+            Backend unreachable — showing mock trades below for visual context only. Start the FastAPI server to see your real queue.
+          </div>
+        ) : (
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+            <div>
+              <div className="text-slate-500">Unreconciled</div>
+              <div className="text-lg font-mono text-white">{queue.summary.unreconciled_count}</div>
+            </div>
+            <div>
+              <div className="text-slate-500">Oldest age (days)</div>
+              <div className="text-lg font-mono text-white">
+                {queue.summary.oldest_unreconciled_age_days === null
+                  ? '–'
+                  : queue.summary.oldest_unreconciled_age_days.toFixed(1)}
+              </div>
+            </div>
+            <div>
+              <div className="text-slate-500">Avg journal completeness</div>
+              <div className="text-lg font-mono text-white">
+                {(queue.summary.average_journal_completeness * 100).toFixed(0)}%
+              </div>
+            </div>
+            <div>
+              <div className="text-slate-500">Learning-ready</div>
+              <div className="text-lg font-mono text-white">
+                {queue.summary.learning_ready_count}
+              </div>
+            </div>
+            <div className="col-span-2 md:col-span-4 text-[11px] text-slate-400 mt-1">
+              {queue.operator_action}
+            </div>
+            {Object.keys(queue.summary.missing_field_distribution || {}).length > 0 && (
+              <div className="col-span-2 md:col-span-4 text-[11px] text-slate-500">
+                <span className="text-slate-400">Most-missing fields: </span>
+                {Object.entries(queue.summary.missing_field_distribution)
+                  .sort(([, a], [, b]) => b - a)
+                  .slice(0, 5)
+                  .map(([k, v]) => `${k}(${v})`)
+                  .join(', ')}
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
