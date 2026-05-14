@@ -7,6 +7,7 @@ import { BullStateBadge } from './BullStateBadge';
 import { AdvisoryOnlyBadge } from './AdvisoryOnlyBadge';
 import { NextHumanActionBadge } from './NextHumanActionBadge';
 import { GateDetailsPanel } from './GateDetailsPanel';
+import { ReactorBadge } from './ReactorBadge';
 import { deriveNextHumanAction } from '@/lib/nextHumanAction';
 
 const STATUS_STYLE: Record<string, string> = {
@@ -34,6 +35,11 @@ export function SignalCard({ item }: Props) {
             <span className="text-lg font-bold text-white font-mono">{item.ticker}</span>
             <BullStateBadge state={item.signal_state} />
             <NextHumanActionBadge action={action.action} label={action.label} size="md" />
+            <ReactorBadge
+              state={item.reactor_state}
+              gallardoBlock={item.gallardo_block}
+              reactorAvailable={item.reactor_available}
+            />
           </div>
           <div className="flex items-center gap-2 shrink-0">
             <span className={`text-xs px-2 py-0.5 rounded font-medium ${statusCls}`}>

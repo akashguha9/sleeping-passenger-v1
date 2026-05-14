@@ -179,6 +179,48 @@ def run_preflight(
         elif unreconciled >= UNRECONCILED_WARN_THRESHOLD:
             warnings.append("unreconciled_backlog_warn")
 
+    # 6. Signal reactor — diagnostic self-check.
+    #
+    # Reactor is wired as a *diagnostic* sixth subcheck.  A healthy reactor
+    # returning COLD_OBSERVE on a synthetic empty cluster is normal — it
+    # contributes no warning.  Two failure modes do matter:
+    #   - reactor module unimportable  -> WARNING (advisory layer degraded)
+    #   - reactor returns broken safety invariants  -> BLOCKING (the
+    #     advisory layer's safety contract is breached, which is exactly
+    #     the kind of regression preflight must catch)
+    # Existing unreconciled-backlog blocking remains primary and is never
+    # weakened by reactor enthusiasm; the reactor cannot unlock execution
+    # — it can only fail the safety contract.
+    sr_run = _import_check("signal_reactor", "evaluate_signal_reactor")
+    if sr_run is None:
+        warnings.append("signal_reactor_unavailable")
+    else:
+        sr_result = _safe_call(sr_run, [])
+        if not isinstance(sr_result, dict):
+            warnings.append("signal_reactor_unavailable")
+        else:
+            sr_safety = sr_result.get("safety") or {}
+            invariants_ok = (
+                sr_result.get("advisory_status") == "ADVISORY_ONLY"
+                and sr_result.get("execution_gate") == "LOCKED"
+                and sr_safety.get("broker_api_called") is False
+                and sr_safety.get("ai_execution_count") == 0
+                and sr_safety.get("execution_permission") is False
+                and sr_safety.get("can_execute") is False
+            )
+            payload["subchecks"]["signal_reactor"] = {
+                "ok": bool(invariants_ok),
+                "reactor_state": str(
+                    sr_result.get("signal_reactor_state") or "INSUFFICIENT_DATA"
+                ),
+                "recommendation": str(sr_result.get("recommendation") or "observe"),
+                "safety_invariants_ok": bool(invariants_ok),
+                "advisory_status": sr_result.get("advisory_status"),
+                "execution_gate": sr_result.get("execution_gate"),
+            }
+            if not invariants_ok:
+                blocking_issues.append("signal_reactor_safety_invariant_failed")
+
     payload["ok"] = len(blocking_issues) == 0
 
     if not payload["ok"]:

@@ -468,6 +468,63 @@ def _ai_validation_distribution(conn: sqlite3.Connection) -> dict[str, Any]:
     return {"available": True, "counts": counts, "total": total}
 
 
+def _reactor_self_check() -> dict[str, Any]:
+    """Deterministic, data-free check that the signal reactor is healthy.
+
+    Runs the reactor on a synthetic empty cluster (which legitimately yields
+    COLD_OBSERVE) and confirms the returned payload still carries the
+    canonical safety invariants.  Pure: no DB read, no live API.
+
+    Returns
+    -------
+    dict with
+        available : bool                — reactor module importable & callable
+        reactor_state : str             — reactor's reported state on synth input
+        recommendation : str            — reactor's recommendation
+        safety_invariants_ok : bool     — all safety stamps survived intact
+        import_error : str | None
+    """
+    out: dict[str, Any] = {
+        "available": False,
+        "reactor_state": "INSUFFICIENT_DATA",
+        "recommendation": "observe",
+        "safety_invariants_ok": False,
+        "import_error": None,
+    }
+    try:
+        try:
+            from scripts.signal_reactor import evaluate_signal_reactor  # type: ignore[import-not-found]
+        except ModuleNotFoundError:
+            from signal_reactor import evaluate_signal_reactor  # type: ignore[no-redef]
+    except Exception as exc:
+        out["import_error"] = f"{type(exc).__name__}: {exc}"
+        return out
+
+    try:
+        payload = evaluate_signal_reactor([])
+    except Exception as exc:
+        out["import_error"] = f"evaluate_failed:{type(exc).__name__}: {exc}"
+        return out
+    if not isinstance(payload, dict):
+        out["import_error"] = "reactor_returned_non_dict"
+        return out
+
+    safety = payload.get("safety") or {}
+    invariants_ok = (
+        payload.get("advisory_status") == "ADVISORY_ONLY"
+        and payload.get("execution_gate") == "LOCKED"
+        and safety.get("broker_api_called") is False
+        and safety.get("ai_execution_count") == 0
+        and safety.get("execution_permission") is False
+        and safety.get("can_execute") is False
+    )
+    out["available"] = True
+    out["reactor_state"] = str(payload.get("signal_reactor_state") or "INSUFFICIENT_DATA")
+    out["recommendation"] = str(payload.get("recommendation") or "observe")
+    out["safety_invariants_ok"] = bool(invariants_ok)
+    return out
+
+
 def _moltbook_summary(conn: sqlite3.Connection) -> dict[str, Any]:
     if not _table_exists(conn, "moltbook_entries"):
         return {"available": False}
@@ -721,6 +778,7 @@ def build_report(
         journal_quality = _journal_quality_average(conn)
         reconciliation_extended = _reconciliation_extended_summary(conn)
         process_quality = _build_process_quality_summary(conn)
+        reactor_self_check = _reactor_self_check()
 
         period_start, period_end = _period_window(days, period, now=now)
         period_payload: dict[str, Any] | None = None
@@ -762,6 +820,10 @@ def build_report(
         limitations.append("ai_validation_jsonl_log_absent")
     if not journal_quality.get("available"):
         limitations.append("journal_quality_helper_unavailable")
+    if not reactor_self_check.get("available"):
+        limitations.append("signal_reactor_unavailable")
+    elif not reactor_self_check.get("safety_invariants_ok"):
+        limitations.append("signal_reactor_safety_invariant_failed")
     limitations.append("pnl_unverified_by_broker")
 
     report = {
@@ -781,6 +843,7 @@ def build_report(
         "ai_validation_distribution": ai_validation,
         "journal_quality": journal_quality,
         "process_quality": process_quality,
+        "reactor_self_check": reactor_self_check,
         "limitations": limitations,
         "advisory_disclaimer": ADVISORY_DISCLAIMER,
     }
@@ -820,6 +883,7 @@ def build_self_test_summary(db_path: Path | None = None) -> dict[str, Any]:
     reconciliation = report.get("reconciliation", {}) or {}
     extended = report.get("reconciliation_extended", {}) or {}
     ai_validation = report.get("ai_validation_distribution", {}) or {}
+    reactor = report.get("reactor_self_check", {}) or {}
 
     incomplete_journal_count = (
         int(journal.get("trade_count_considered", 0))
@@ -862,6 +926,11 @@ def build_self_test_summary(db_path: Path | None = None) -> dict[str, Any]:
             extended.get("process_error_distribution", {})
         ),
         "ai_validation_distribution": dict(ai_validation.get("counts", {})),
+        "reactor_available": bool(reactor.get("available", False)),
+        "reactor_state": str(reactor.get("reactor_state", "INSUFFICIENT_DATA")),
+        "reactor_safety_invariants_ok": bool(
+            reactor.get("safety_invariants_ok", False)
+        ),
         "limitations": list(report.get("limitations", [])),
         "advisory_disclaimer": ADVISORY_DISCLAIMER,
     }
@@ -1010,6 +1079,21 @@ def _render_markdown(report: dict[str, Any]) -> str:
                 for k, v in sorted(pe.items()):
                     lines.append(f"  - {k}: {v}")
             lines.append("")
+    rc = report.get("reactor_self_check", {}) or {}
+    if rc:
+        lines.append("## Signal Reactor Self-Check")
+        lines.append("")
+        lines.append(f"- Available: **{rc.get('available', False)}**")
+        lines.append(
+            f"- Synthetic run reactor_state: **{rc.get('reactor_state', 'INSUFFICIENT_DATA')}**"
+        )
+        lines.append(f"- Recommendation: **{rc.get('recommendation', 'observe')}**")
+        lines.append(
+            f"- Safety invariants OK: **{rc.get('safety_invariants_ok', False)}**"
+        )
+        if rc.get("import_error"):
+            lines.append(f"- Import error: `{rc['import_error']}`")
+        lines.append("")
     lines.append("## Limitations")
     lines.append("")
     for lim in report.get("limitations", []):

@@ -1,22 +1,31 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { getManualTrades } from '@/lib/apiClient';
-import type { ManualTradeListResponse, ManualTradeLog } from '@/types';
+import { getManualTrades, getReconciliationQueue } from '@/lib/apiClient';
+import type {
+  ManualTradeListResponse,
+  ManualTradeLog,
+  ReconciliationQueueResponse,
+} from '@/types';
 import { ManualTradeLogForm } from '@/components/ManualTradeLogForm';
 import { HumanOnlyBadge } from '@/components/HumanOnlyBadge';
 import { AdvisoryOnlyBadge } from '@/components/AdvisoryOnlyBadge';
+import { BacklogReadinessBadge } from '@/components/BacklogReadinessBadge';
 import { SourceHealthWarnings } from '@/components/SourceHealthWarnings';
 
 export default function ManualTradeLogPage() {
   const [result, setResult] = useState<ManualTradeListResponse | null>(null);
+  const [queue, setQueue] = useState<ReconciliationQueueResponse | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    getManualTrades().then((data) => {
-      setResult(data);
-      setLoading(false);
-    });
+    Promise.all([getManualTrades(), getReconciliationQueue(50)]).then(
+      ([tradesData, queueData]) => {
+        setResult(tradesData);
+        setQueue(queueData);
+        setLoading(false);
+      },
+    );
   }, []);
 
   const trades = result?.trades ?? [];
@@ -37,9 +46,19 @@ export default function ManualTradeLogPage() {
             Record trades you have already placed manually — no orders are routed from here.
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <HumanOnlyBadge size="md" />
           <AdvisoryOnlyBadge size="md" />
+          <BacklogReadinessBadge
+            size="md"
+            input={{
+              unreconciled_count: queue?.summary?.unreconciled_count,
+              average_journal_completeness:
+                queue?.summary?.average_journal_completeness,
+              oldest_unreconciled_age_days:
+                queue?.summary?.oldest_unreconciled_age_days,
+            }}
+          />
         </div>
       </div>
 

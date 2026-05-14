@@ -1,12 +1,16 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { getReconciliationQueue, reconcileTrade } from '@/lib/apiClient';
+import { getReconciliationQueue, getManualTrades, reconcileTrade } from '@/lib/apiClient';
 import { MOCK_MANUAL_TRADES, MOCK_RECONCILIATIONS } from '@/lib/mockData';
 import { ReconciliationCard } from '@/components/ReconciliationCard';
 import { HumanOnlyBadge } from '@/components/HumanOnlyBadge';
 import { AdvisoryOnlyBadge } from '@/components/AdvisoryOnlyBadge';
-import type { ReconciliationQueueResponse } from '@/types';
+import { BacklogReadinessBadge } from '@/components/BacklogReadinessBadge';
+import type {
+  ManualTradeListResponse,
+  ReconciliationQueueResponse,
+} from '@/types';
 
 type OutcomeStatus = 'WIN' | 'LOSS' | 'BREAKEVEN' | 'UNKNOWN';
 
@@ -24,13 +28,18 @@ export default function ReconciliationPage() {
   const [error, setError] = useState('');
   const [queue, setQueue] = useState<ReconciliationQueueResponse | null>(null);
   const [queueLoading, setQueueLoading] = useState(true);
+  const [manualTrades, setManualTrades] = useState<ManualTradeListResponse | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const data = await getReconciliationQueue(50);
+      const [queueData, tradesData] = await Promise.all([
+        getReconciliationQueue(50),
+        getManualTrades(),
+      ]);
       if (!cancelled) {
-        setQueue(data);
+        setQueue(queueData);
+        setManualTrades(tradesData);
         setQueueLoading(false);
       }
     })();
@@ -66,8 +75,17 @@ export default function ReconciliationPage() {
     }
   }
 
-  const reconciledTradeIds = new Set(MOCK_RECONCILIATIONS.map((r) => r.trade_id));
-  const unreconciledTrades = MOCK_MANUAL_TRADES.filter((t) => !reconciledTradeIds.has(t.trade_id));
+  // Reconciled panel: prefer real backend manual_trades + their attached
+  // recon results.  Fall back to MOCK_RECONCILIATIONS only when the API
+  // is unreachable so the UI still has something to render in offline mode.
+  const usingMockReconciled = manualTrades === null;
+  const reconciledMockIds = new Set(MOCK_RECONCILIATIONS.map((r) => r.trade_id));
+  const unreconciledTrades = usingMockReconciled
+    ? MOCK_MANUAL_TRADES.filter((t) => !reconciledMockIds.has(t.trade_id))
+    : (manualTrades?.trades ?? []).filter((t) => !(t.learning_ready ?? false));
+  const realReconciledTrades = (manualTrades?.trades ?? []).filter(
+    (t) => t.learning_ready === true,
+  );
 
   return (
     <div className="max-w-4xl mx-auto space-y-5">
@@ -89,12 +107,28 @@ export default function ReconciliationPage() {
       </div>
 
       <div className="bg-slate-900 border border-slate-700 rounded-lg p-4">
-        <div className="flex items-baseline justify-between mb-2">
-          <h2 className="text-sm font-semibold text-slate-200">Live Reconciliation Queue</h2>
+        <div className="flex items-baseline justify-between mb-2 flex-wrap gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
+            <h2 className="text-sm font-semibold text-slate-200">Live Reconciliation Queue</h2>
+            <BacklogReadinessBadge
+              input={{
+                unreconciled_count: queue?.summary?.unreconciled_count,
+                average_journal_completeness:
+                  queue?.summary?.average_journal_completeness,
+                oldest_unreconciled_age_days:
+                  queue?.summary?.oldest_unreconciled_age_days,
+              }}
+            />
+          </div>
           <span className="text-[10px] uppercase tracking-wider text-slate-500">
             Source: backend /self-test/reconciliation-queue
           </span>
         </div>
+        <p className="text-[11px] text-slate-500 mb-3 leading-snug">
+          Backlog block is the primary preflight gate. Reactor diagnostics
+          cannot override a BLOCKED backlog. Reconciliation is record-keeping
+          only — it does not place, modify, or cancel broker orders.
+        </p>
         {queueLoading ? (
           <div className="text-xs text-slate-500">Loading queue…</div>
         ) : queue === null ? (
@@ -147,20 +181,49 @@ export default function ReconciliationPage() {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
         {/* Reconciled trades */}
         <div>
-          <h2 className="text-sm font-semibold text-slate-300 mb-3">
-            Reconciled ({MOCK_RECONCILIATIONS.length})
+          <h2 className="text-sm font-semibold text-slate-300 mb-3 flex items-center gap-2">
+            Reconciled (
+            {usingMockReconciled ? MOCK_RECONCILIATIONS.length : realReconciledTrades.length}
+            )
+            {usingMockReconciled && (
+              <span
+                className="text-[10px] font-mono uppercase tracking-widest text-amber-400 bg-amber-950/30 border border-amber-900/40 rounded px-1.5 py-0.5"
+                data-testid="reconciled-mock-fallback"
+              >
+                MOCK_FALLBACK
+              </span>
+            )}
           </h2>
-          {MOCK_RECONCILIATIONS.length === 0 ? (
+          {usingMockReconciled ? (
+            MOCK_RECONCILIATIONS.length === 0 ? (
+              <div className="text-sm text-slate-500 text-center py-8 bg-slate-800/40 rounded-lg border border-slate-700/40">
+                No reconciled trades yet.
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {MOCK_RECONCILIATIONS.map((rec) => {
+                  const trade = MOCK_MANUAL_TRADES.find((t) => t.trade_id === rec.trade_id);
+                  if (!trade) return null;
+                  return (
+                    <ReconciliationCard
+                      key={rec.reconciliation_id}
+                      trade={trade}
+                      reconciliation={rec}
+                    />
+                  );
+                })}
+              </div>
+            )
+          ) : realReconciledTrades.length === 0 ? (
             <div className="text-sm text-slate-500 text-center py-8 bg-slate-800/40 rounded-lg border border-slate-700/40">
-              No reconciled trades yet.
+              No learning-ready trades yet. A trade becomes learning-ready when
+              its journal fields are complete and it has been reconciled.
             </div>
           ) : (
             <div className="space-y-3">
-              {MOCK_RECONCILIATIONS.map((rec) => {
-                const trade = MOCK_MANUAL_TRADES.find((t) => t.trade_id === rec.trade_id);
-                if (!trade) return null;
-                return <ReconciliationCard key={rec.reconciliation_id} trade={trade} reconciliation={rec} />;
-              })}
+              {realReconciledTrades.map((t) => (
+                <ReconciliationCard key={t.trade_id} trade={t} />
+              ))}
             </div>
           )}
         </div>
@@ -176,9 +239,25 @@ export default function ReconciliationPage() {
               All trades reconciled.
             </div>
           ) : (
-            <div className="space-y-3 mb-5">
+            <div className="space-y-3 mb-5" data-testid="awaiting-reconciliation-list">
               {unreconciledTrades.map((t) => (
-                <ReconciliationCard key={t.trade_id} trade={t} />
+                <div key={t.trade_id} className="space-y-1">
+                  <ReconciliationCard trade={t} />
+                  {!usingMockReconciled && (
+                    <JournalGapsRow
+                      tradeId={t.trade_id}
+                      completeness={
+                        (t as { journal_completeness_score?: number })
+                          .journal_completeness_score
+                      }
+                      missingFields={
+                        (t as { missing_journal_fields?: string[] }).missing_journal_fields
+                      }
+                      lesson={(t as { lesson?: string }).lesson}
+                      mistakeTags={(t as { mistake_tags?: string }).mistake_tags}
+                    />
+                  )}
+                </div>
               ))}
             </div>
           )}
@@ -283,6 +362,75 @@ export default function ReconciliationPage() {
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+interface JournalGapsRowProps {
+  tradeId: string;
+  completeness?: number;
+  missingFields?: string[];
+  lesson?: string;
+  mistakeTags?: string;
+}
+
+/**
+ * Per-trade chip row that surfaces what the operator still has to fill
+ * in before this trade is learning-ready.  Advisory display only — it
+ * does not call any reconcile endpoint or mutate state.
+ */
+function JournalGapsRow({
+  tradeId,
+  completeness,
+  missingFields,
+  lesson,
+  mistakeTags,
+}: JournalGapsRowProps) {
+  const missing = missingFields ?? [];
+  const pct =
+    typeof completeness === 'number' && !Number.isNaN(completeness)
+      ? Math.round(completeness * 100)
+      : null;
+  return (
+    <div
+      className="text-[10px] font-mono text-slate-500 px-3 py-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 border border-slate-800 rounded bg-slate-900/40"
+      data-testid="journal-gaps-row"
+      data-trade-id={tradeId}
+    >
+      {pct !== null && (
+        <span
+          className={
+            pct < 40 ? 'text-red-300' : pct < 70 ? 'text-amber-300' : 'text-emerald-300'
+          }
+          data-testid="journal-completeness-pct"
+        >
+          journal {pct}%
+        </span>
+      )}
+      {missing.length > 0 && (
+        <span data-testid="missing-fields-chip">
+          missing: {missing.slice(0, 4).join(', ')}
+          {missing.length > 4 ? '…' : ''}
+        </span>
+      )}
+      {!lesson && (
+        <span
+          className="text-amber-400"
+          data-testid="lesson-missing-chip"
+          title="Lesson empty — capture one before this trade can teach the loop."
+        >
+          lesson: not captured
+        </span>
+      )}
+      {!mistakeTags && (
+        <span
+          className="text-slate-500"
+          data-testid="mistake-tags-missing-chip"
+          title="mistake_tags empty — add one at reconciliation time."
+        >
+          mistake_tags: none
+        </span>
+      )}
     </div>
   );
 }

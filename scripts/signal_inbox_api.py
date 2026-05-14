@@ -300,6 +300,105 @@ def _error_response(operation: str, message: str) -> dict[str, Any]:
     }
 
 
+_REACTOR_DEFAULT_FIELDS: dict[str, Any] = {
+    "reactor_state": "INSUFFICIENT_DATA",
+    "decision_grade_energy": None,
+    "echo_risk_score": None,
+    "meltdown_risk_score": None,
+    "fusion_validity": "insufficient_data",
+    "fission_branch_clarity": None,
+    "operator_heat_score": None,
+    "gallardo_block": False,
+    "reactor_recommendation": "observe",
+    "reactor_available": False,
+}
+
+
+def _inbox_item_to_reactor_signal(item: dict[str, Any]) -> dict[str, Any]:
+    """Adapt an inbox-item dict to the shape ``evaluate_signal_reactor``
+    expects in its cluster argument.
+
+    Only fields already present on the inbox item are mapped over; nothing
+    is invented.  Missing inputs let the reactor degrade to
+    ``insufficient_data`` rather than fabricating numbers.
+    """
+    out: dict[str, Any] = {}
+    priority = item.get("priority_score")
+    if isinstance(priority, (int, float)) and not isinstance(priority, bool):
+        out["intensity"] = float(priority)
+        out["initial_strength"] = float(priority)
+    persistence = item.get("persistence_score")
+    if isinstance(persistence, (int, float)) and not isinstance(persistence, bool):
+        out["evidence_strength"] = float(persistence)
+        out["durability_score"] = float(persistence)
+    contamination = item.get("contamination_score")
+    if isinstance(contamination, (int, float)) and not isinstance(contamination, bool):
+        out["echo_risk_score"] = float(contamination)
+    kill = item.get("kill_rate_score")
+    if isinstance(kill, (int, float)) and not isinstance(kill, bool):
+        # High kill rate -> low reliability/independence.  Cap to [0, 1].
+        out["reliability"] = max(0.0, min(1.0, 1.0 - float(kill)))
+        out["independence_score"] = max(0.0, min(1.0, 1.0 - float(kill)))
+    signal_type = item.get("entry_type")
+    if isinstance(signal_type, str) and signal_type:
+        out["signal_type"] = signal_type
+    return out
+
+
+def _decorate_with_reactor_diagnostics(item: dict[str, Any]) -> dict[str, Any]:
+    """Attach signal-reactor advisory fields to an inbox item.
+
+    Pure, defensive: any import or evaluation failure leaves the item with
+    the documented default fields rather than raising.  The reactor output
+    is advisory-only; this function re-stamps the canonical safety
+    invariants after enrichment.
+    """
+    annotated = dict(item)
+    for key, default in _REACTOR_DEFAULT_FIELDS.items():
+        annotated.setdefault(key, default)
+
+    def _stamp_safety(d: dict[str, Any]) -> dict[str, Any]:
+        d["advisory_status"] = _ADVISORY_STATUS
+        d["execution_gate"] = _EXECUTION_GATE
+        d["broker_api_called"] = False
+        d["ai_execution_count"] = _AI_EXECUTION_COUNT
+        d["execution_permission"] = False
+        d["can_execute"] = False
+        return d
+
+    try:
+        try:
+            from scripts.signal_reactor import evaluate_signal_reactor
+        except ModuleNotFoundError:
+            from signal_reactor import evaluate_signal_reactor  # type: ignore[no-redef]
+    except Exception:
+        return _stamp_safety(annotated)
+
+    try:
+        reactor_input = _inbox_item_to_reactor_signal(item)
+        payload = evaluate_signal_reactor([reactor_input])
+        if not isinstance(payload, dict):
+            return _stamp_safety(annotated)
+    except Exception:
+        return _stamp_safety(annotated)
+
+    state = payload.get("signal_reactor_state") or "INSUFFICIENT_DATA"
+    annotated["reactor_state"] = str(state)
+    annotated["decision_grade_energy"] = payload.get("decision_grade_energy")
+    annotated["echo_risk_score"] = payload.get("echo_risk_score")
+    annotated["meltdown_risk_score"] = payload.get("meltdown_risk_score")
+    annotated["fusion_validity"] = payload.get("fusion_validity", "insufficient_data")
+    annotated["fission_branch_clarity"] = payload.get("fission_branch_clarity")
+    annotated["operator_heat_score"] = payload.get("operator_heat_score")
+    annotated["gallardo_block"] = bool(payload.get("gallardo_block", False))
+    annotated["reactor_recommendation"] = str(payload.get("recommendation") or "observe")
+    annotated["reactor_available"] = True
+
+    # Re-stamp canonical safety invariants — reactor enrichment must NEVER
+    # grant execution permission, regardless of state.
+    return _stamp_safety(annotated)
+
+
 def _decorate_inbox_diagnostics(item: dict[str, Any]) -> dict[str, Any]:
     """Attach signal-sensitivity and toxic-quarantine diagnostics to an inbox item.
 
@@ -367,6 +466,11 @@ def _decorate_inbox_diagnostics(item: dict[str, Any]) -> dict[str, Any]:
     annotated["ai_execution_count"] = _AI_EXECUTION_COUNT
     annotated["execution_permission"] = False
     annotated["can_execute"] = False
+
+    # Signal-reactor enrichment is layered on top of the sensitivity /
+    # quarantine diagnostics so the reactor sees both the raw priority and
+    # the contamination score derived just above.
+    annotated = _decorate_with_reactor_diagnostics(annotated)
     return annotated
 
 
@@ -468,6 +572,20 @@ def list_inbox_items(
         if it.get("toxic_quarantine_state") in {"quarantine", "block_from_promotion"}
     )
 
+    # Reactor-state aggregate counts so the inbox surface can show
+    # "3 ECHO_SUPPRESSED, 2 OPERATOR_CONTROL_RODS" at a glance.  Failure
+    # to compute leaves the counts at zero rather than crashing.
+    reactor_state_counts: dict[str, int] = {}
+    reactor_gallardo_block_count = 0
+    reactor_unavailable_count = 0
+    for it in items:
+        state = str(it.get("reactor_state") or "INSUFFICIENT_DATA")
+        reactor_state_counts[state] = reactor_state_counts.get(state, 0) + 1
+        if it.get("gallardo_block"):
+            reactor_gallardo_block_count += 1
+        if it.get("reactor_available") is False:
+            reactor_unavailable_count += 1
+
     # Persistence truth model (see docs/PERSISTENCE_MODEL.md):
     #   sqlite     -> canonical
     #   anything else -> not canonical; UI should surface a cue
@@ -490,6 +608,9 @@ def list_inbox_items(
         "canonical": canonical,
         "fragile_signal_count": fragile_count,
         "quarantined_signal_count": quarantined_count,
+        "reactor_state_counts": reactor_state_counts,
+        "reactor_gallardo_block_count": reactor_gallardo_block_count,
+        "reactor_unavailable_count": reactor_unavailable_count,
         "advisory_status": _ADVISORY_STATUS,
         "human_review_required": True,
         "execution_mode": _EXECUTION_MODE,

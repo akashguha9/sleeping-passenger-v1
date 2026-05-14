@@ -15,6 +15,7 @@ import { ReflectionChatPanel } from '@/components/ReflectionChatPanel';
 import { ManualTradeLogForm } from '@/components/ManualTradeLogForm';
 import { NextHumanActionBadge } from '@/components/NextHumanActionBadge';
 import { GateDetailsPanel } from '@/components/GateDetailsPanel';
+import { ReactorDiagnosticsPanel } from '@/components/ReactorDiagnosticsPanel';
 import { deriveNextHumanAction } from '@/lib/nextHumanAction';
 
 const STATUS_COLORS: Record<string, string> = {
@@ -117,6 +118,22 @@ export default function SignalDetailPage() {
             <span className="text-amber-400 font-semibold">ADVISORY_ONLY</span>. Viewing this signal does not constitute a recommendation, trigger, or authorization to execute any trade. AI execution count:{' '}
             <span className="text-emerald-400 font-mono font-bold">0</span>.
           </div>
+
+          {/* Reactor diagnostics — advisory-only; never grants permission. */}
+          <ReactorDiagnosticsPanel
+            diagnostics={{
+              reactor_state: signal.reactor_state,
+              decision_grade_energy: signal.decision_grade_energy,
+              echo_risk_score: signal.echo_risk_score,
+              meltdown_risk_score: signal.meltdown_risk_score,
+              fusion_validity: signal.fusion_validity,
+              fission_branch_clarity: signal.fission_branch_clarity,
+              operator_heat_score: signal.operator_heat_score,
+              gallardo_block: signal.gallardo_block,
+              reactor_recommendation: signal.reactor_recommendation,
+              reactor_available: signal.reactor_available,
+            }}
+          />
 
           {/* Next human action panel */}
           {(() => {

@@ -26,7 +26,44 @@ export type MistakeCategory =
   | 'no_trade_correct'
   | 'no_trade_missed_opportunity';
 
-export interface InboxItem {
+// Signal Reactor states — canonical enum mirroring scripts/signal_reactor.py.
+// "INSUFFICIENT_DATA" is the safe default the frontend uses when the
+// backend hasn't computed a reactor verdict for this item.
+export type ReactorState =
+  | 'COLD_OBSERVE'
+  | 'WARM_WATCH'
+  | 'FUSION_REVIEW_CANDIDATE'
+  | 'FISSION_MAP_ONLY'
+  | 'HOT_CONTAINMENT_REQUIRED'
+  | 'WASTE_DECAY'
+  | 'ECHO_SUPPRESSED'
+  | 'OPERATOR_CONTROL_RODS'
+  | 'INSUFFICIENT_DATA';
+
+export type ReactorFusionValidity =
+  | 'valid_fusion'
+  | 'weak_fusion'
+  | 'echo_not_fusion'
+  | 'overheated_uncontained'
+  | 'insufficient_data';
+
+// Common reactor-diagnostic shape attached to inbox items by the backend
+// (`scripts.signal_inbox_api._decorate_with_reactor_diagnostics`).  All
+// fields are optional on the wire so older payloads still type-check.
+export interface ReactorDiagnostics {
+  reactor_state?: ReactorState | string;
+  decision_grade_energy?: number | null;
+  echo_risk_score?: number | null;
+  meltdown_risk_score?: number | null;
+  fusion_validity?: ReactorFusionValidity | string;
+  fission_branch_clarity?: number | null;
+  operator_heat_score?: number | null;
+  gallardo_block?: boolean;
+  reactor_recommendation?: string;
+  reactor_available?: boolean;
+}
+
+export interface InboxItem extends ReactorDiagnostics {
   event_id: string;
   ticker: string;
   signal_state: string;
