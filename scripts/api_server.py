@@ -880,31 +880,55 @@ def get_source_health_summary() -> dict:
 # ---------------------------------------------------------------------------
 
 
-@app.get("/live-sources/status")
-def get_live_sources_status() -> dict:
-    """Return per-source freshness state derived from source_run_log.
+_STALE_THRESHOLD_HOURS = 6
+_SCHEDULER_HINT_PS = (
+    ".\\scripts\\windows\\register_live_signal_refresh_task.ps1 "
+    "(every 6h Scheduled Task)"
+)
+_SCHEDULER_HINT_MANUAL = (
+    "python scripts/refresh_live_signals.py --write"
+)
 
-    Surface the same truth ``compute_source_freshness`` produces for the
-    CLI: freshness_state (fresh/stale/overdue/never_run/skipped/failed),
-    next_expected_refresh_at, credential_configured, adapter_status.  Never
-    exposes env values; missing credential -> skipped; planned adapter !=
-    implemented.  Advisory-only.
-    """
+
+def _build_live_sources_status(
+    *,
+    stale_threshold_hours: int = _STALE_THRESHOLD_HOURS,
+    now_iso: str | None = None,
+) -> dict:
+    """Pure builder for /live-sources/status. Imported by tests."""
+    import datetime as _dt
+
     try:
         try:
             from scripts.live_source_registry import compute_source_freshness
-            from scripts.persistence import get_latest_source_run_per_source
+            from scripts.persistence import (
+                get_latest_source_run_per_source,
+                get_latest_refresh_run_per_source,
+            )
         except ModuleNotFoundError:
             from live_source_registry import compute_source_freshness  # type: ignore[no-redef]
-            from persistence import get_latest_source_run_per_source  # type: ignore[no-redef]
-        latest = get_latest_source_run_per_source()
-        freshness = compute_source_freshness(latest)
+            from persistence import (  # type: ignore[no-redef]
+                get_latest_source_run_per_source,
+                get_latest_refresh_run_per_source,
+            )
+        latest_runs = get_latest_source_run_per_source()
+        freshness = compute_source_freshness(latest_runs)
+        try:
+            refresh_runs = get_latest_refresh_run_per_source()
+        except Exception:
+            refresh_runs = {}
     except Exception as exc:
         return {
             "operation": "get_live_sources_status",
             "sources": {},
             "source_count": 0,
             "freshness_distribution": {},
+            "stale_sources": [],
+            "source_errors": {},
+            "refresh_configured": False,
+            "stale_threshold_hours": int(stale_threshold_hours),
+            "scheduler_hint": _SCHEDULER_HINT_PS,
+            "manual_refresh_command": _SCHEDULER_HINT_MANUAL,
             "error": str(exc),
             "advisory_status": _ADVISORY_STATUS,
             "execution_gate": "LOCKED",
@@ -914,6 +938,86 @@ def get_live_sources_status() -> dict:
             "can_execute": False,
             "human_review_required": True,
         }
+
+    now_dt = (
+        _dt.datetime.fromisoformat(now_iso.replace("Z", "+00:00"))
+        if now_iso
+        else _dt.datetime.now(_dt.timezone.utc)
+    )
+    if now_dt.tzinfo is None:
+        now_dt = now_dt.replace(tzinfo=_dt.timezone.utc)
+
+    refresh_configured = bool(refresh_runs)
+    stale_sources: list[str] = []
+    source_errors: dict[str, str] = {}
+    latest_attempt_iso: str | None = None
+    latest_success_iso: str | None = None
+
+    for source_key, entry in freshness.items():
+        refresh_row = refresh_runs.get(source_key, {})
+        last_attempt_at = refresh_row.get("finished_at") or refresh_row.get("started_at")
+        last_success_at = (
+            refresh_row.get("finished_at")
+            if int(refresh_row.get("success", 0) or 0)
+            else None
+        )
+        refresh_age_hours: float | None = None
+        if last_attempt_at:
+            try:
+                attempt_dt = _dt.datetime.fromisoformat(
+                    str(last_attempt_at).replace("Z", "+00:00")
+                )
+                if attempt_dt.tzinfo is None:
+                    attempt_dt = attempt_dt.replace(tzinfo=_dt.timezone.utc)
+                refresh_age_hours = round(
+                    (now_dt - attempt_dt).total_seconds() / 3600.0, 4
+                )
+            except ValueError:
+                refresh_age_hours = None
+
+        last_refresh_success = bool(int(refresh_row.get("success", 0) or 0))
+        last_refresh_skipped = bool(int(refresh_row.get("skipped", 0) or 0))
+        last_refresh_error = str(refresh_row.get("error_message") or "")
+        last_refresh_skip_reason = str(refresh_row.get("skipped_reason") or "")
+
+        freshness_state = entry.get("freshness_state", "unknown")
+        # A source is stale if its latest_success is older than the threshold
+        # OR if the most recent refresh attempt is older than the threshold,
+        # OR if the source has never had a successful refresh attempt.
+        hours_since_success = entry.get("hours_since_last_success")
+        is_stale = False
+        if freshness_state in {"stale", "overdue", "never_run", "failed"}:
+            is_stale = True
+        if isinstance(hours_since_success, (int, float)) and hours_since_success > stale_threshold_hours:
+            is_stale = True
+        if refresh_age_hours is not None and refresh_age_hours > stale_threshold_hours:
+            is_stale = True
+        if not refresh_configured and freshness_state != "skipped":
+            is_stale = True
+
+        if is_stale and freshness_state != "skipped":
+            stale_sources.append(source_key)
+        if last_refresh_error:
+            source_errors[source_key] = last_refresh_error[:200]
+        elif last_refresh_skip_reason and last_refresh_skipped:
+            source_errors[source_key] = f"skipped: {last_refresh_skip_reason[:180]}"
+
+        entry["last_refresh_attempt"] = last_attempt_at
+        entry["last_refresh_success_at"] = last_success_at
+        entry["last_refresh_success"] = last_refresh_success
+        entry["last_refresh_skipped"] = last_refresh_skipped
+        entry["refresh_age_hours"] = refresh_age_hours
+        entry["stale_threshold_hours"] = int(stale_threshold_hours)
+        entry["is_stale"] = bool(is_stale)
+        if last_refresh_error:
+            entry["last_refresh_error"] = last_refresh_error[:200]
+        if last_refresh_skip_reason:
+            entry["last_refresh_skipped_reason"] = last_refresh_skip_reason[:200]
+
+        if last_attempt_at and (latest_attempt_iso is None or str(last_attempt_at) > latest_attempt_iso):
+            latest_attempt_iso = str(last_attempt_at)
+        if last_success_at and (latest_success_iso is None or str(last_success_at) > latest_success_iso):
+            latest_success_iso = str(last_success_at)
 
     dist: dict = {}
     for entry in freshness.values():
@@ -925,6 +1029,14 @@ def get_live_sources_status() -> dict:
         "sources": freshness,
         "source_count": len(freshness),
         "freshness_distribution": dist,
+        "stale_sources": stale_sources,
+        "source_errors": source_errors,
+        "refresh_configured": refresh_configured,
+        "stale_threshold_hours": int(stale_threshold_hours),
+        "last_refresh_attempt": latest_attempt_iso,
+        "last_refresh_success": latest_success_iso,
+        "scheduler_hint": _SCHEDULER_HINT_PS,
+        "manual_refresh_command": _SCHEDULER_HINT_MANUAL,
         "advisory_status": _ADVISORY_STATUS,
         "execution_mode": _EXECUTION_MODE,
         "execution_gate": "LOCKED",
@@ -934,6 +1046,28 @@ def get_live_sources_status() -> dict:
         "can_execute": False,
         "human_review_required": True,
     }
+
+
+@app.get("/live-sources/status")
+def get_live_sources_status() -> dict:
+    """Return per-source freshness state derived from source_run_log
+    plus refresh metadata from live_source_refresh_runs.
+
+    Surface the same truth ``compute_source_freshness`` produces for the
+    CLI: freshness_state (fresh/stale/overdue/never_run/skipped/failed),
+    next_expected_refresh_at, credential_configured, adapter_status. Adds
+    refresh-attempt diagnostics (refresh_age_hours, stale_sources,
+    source_errors, scheduler_hint, refresh_configured) so the frontend can
+    show a stale-source badge.
+
+    Backward compatible: the original ``sources``, ``source_count`` and
+    ``freshness_distribution`` fields are preserved. New stale-related
+    fields are additive.
+
+    Never exposes env values; missing credential -> skipped; planned
+    adapter != implemented. Advisory-only.
+    """
+    return _build_live_sources_status()
 
 
 # ---------------------------------------------------------------------------

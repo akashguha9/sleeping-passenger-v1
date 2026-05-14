@@ -12,6 +12,7 @@ import type {
   ManualTradeListResponse,
   SourceHealthResponse,
   SourceHealthSummaryResponse,
+  LiveSourcesStatusResponse,
   DbStatusResponse,
   LiveSignalsResponse,
   ChartStructureResponse,
@@ -253,6 +254,14 @@ export async function getSourceHealth(): Promise<SourceHealthResponse | null> {
 export async function getSourceHealthSummary(): Promise<SourceHealthSummaryResponse | null> {
   try {
     return await apiFetch<SourceHealthSummaryResponse>('/source-health/summary');
+  } catch {
+    return null;
+  }
+}
+
+export async function getLiveSourcesStatus(): Promise<LiveSourcesStatusResponse | null> {
+  try {
+    return await apiFetch<LiveSourcesStatusResponse>('/live-sources/status');
   } catch {
     return null;
   }

@@ -440,6 +440,67 @@ export interface SourceHealthResponse {
   generated_at: string;
 }
 
+export interface LiveSourceStatusEntry {
+  source_key: string;
+  freshness_state:
+    | 'fresh'
+    | 'stale'
+    | 'overdue'
+    | 'never_run'
+    | 'skipped'
+    | 'failed'
+    | string;
+  last_success_at: string | null;
+  hours_since_last_success: number | null;
+  next_expected_refresh_at: string | null;
+  cadence_hours: number;
+  credential_configured: boolean;
+  adapter_status: string;
+  advisory_status: string;
+  execution_gate: string;
+  broker_api_called: boolean;
+  ai_execution_count: number;
+  execution_permission: boolean;
+  can_execute: boolean;
+  may_inform_human_review: boolean;
+  may_execute: boolean;
+  may_call_broker: boolean;
+  // Refresh-attempt diagnostics added by /live-sources/status
+  last_refresh_attempt?: string | null;
+  last_refresh_success_at?: string | null;
+  last_refresh_success?: boolean;
+  last_refresh_skipped?: boolean;
+  last_refresh_error?: string;
+  last_refresh_skipped_reason?: string;
+  refresh_age_hours?: number | null;
+  stale_threshold_hours?: number;
+  is_stale?: boolean;
+}
+
+export interface LiveSourcesStatusResponse {
+  operation: string;
+  sources: Record<string, LiveSourceStatusEntry>;
+  source_count: number;
+  freshness_distribution: Record<string, number>;
+  stale_sources?: string[];
+  source_errors?: Record<string, string>;
+  refresh_configured?: boolean;
+  stale_threshold_hours?: number;
+  last_refresh_attempt?: string | null;
+  last_refresh_success?: string | null;
+  scheduler_hint?: string;
+  manual_refresh_command?: string;
+  advisory_status: string;
+  execution_mode?: string;
+  execution_gate: string;
+  broker_api_called: boolean;
+  ai_execution_count: number;
+  execution_permission: boolean;
+  can_execute: boolean;
+  human_review_required: boolean;
+  error?: string;
+}
+
 export interface DbStatusResponse {
   db_path: string;
   db_exists: boolean;

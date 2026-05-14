@@ -181,6 +181,30 @@ CREATE TABLE IF NOT EXISTS source_run_log (
 );
 CREATE INDEX IF NOT EXISTS idx_srl_source ON source_run_log(source_name);
 CREATE INDEX IF NOT EXISTS idx_srl_ts ON source_run_log(timestamp_utc);
+CREATE TABLE IF NOT EXISTS live_source_refresh_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id TEXT NOT NULL,
+    source_name TEXT NOT NULL,
+    attempted INTEGER NOT NULL DEFAULT 1,
+    success INTEGER NOT NULL DEFAULT 0,
+    skipped INTEGER NOT NULL DEFAULT 0,
+    started_at TEXT NOT NULL,
+    finished_at TEXT NOT NULL,
+    duration_seconds REAL NOT NULL DEFAULT 0,
+    rows_before INTEGER NOT NULL DEFAULT 0,
+    rows_after INTEGER NOT NULL DEFAULT 0,
+    rows_added INTEGER NOT NULL DEFAULT 0,
+    error_message TEXT NOT NULL DEFAULT '',
+    skipped_reason TEXT NOT NULL DEFAULT '',
+    db_path TEXT NOT NULL DEFAULT '',
+    advisory_only INTEGER NOT NULL DEFAULT 1,
+    execution_gate TEXT NOT NULL DEFAULT 'LOCKED',
+    broker_api_called INTEGER NOT NULL DEFAULT 0,
+    can_execute INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_lsrr_run ON live_source_refresh_runs(run_id);
+CREATE INDEX IF NOT EXISTS idx_lsrr_source ON live_source_refresh_runs(source_name);
+CREATE INDEX IF NOT EXISTS idx_lsrr_started ON live_source_refresh_runs(started_at);
 CREATE TABLE IF NOT EXISTS global_securities (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     canonical_symbol TEXT NOT NULL UNIQUE,
@@ -1222,6 +1246,103 @@ def get_latest_source_run_per_source(
     return result
 
 
+def record_live_source_refresh_run(
+    run_id: str,
+    source_name: str,
+    attempted: bool,
+    success: bool,
+    skipped: bool,
+    started_at: str,
+    finished_at: str,
+    duration_seconds: float,
+    rows_before: int = 0,
+    rows_after: int = 0,
+    rows_added: int = 0,
+    error_message: str = "",
+    skipped_reason: str = "",
+    db_path: Path | None = None,
+) -> None:
+    """Persist one per-source refresh outcome row.
+
+    Advisory invariants stamped on every row. Never raises into the caller —
+    a missing schema or transient lock must not crash the orchestrator.
+
+    ``db_path`` resolves to the *current* module-level ``DB_PATH`` when not
+    supplied, so tests that monkeypatch ``persistence.DB_PATH`` see the
+    override (Python function defaults bind at definition time, which we
+    deliberately avoid here).
+    """
+    target = db_path if db_path is not None else DB_PATH
+    conn = _get_conn(target)
+    try:
+        conn.execute(
+            "INSERT INTO live_source_refresh_runs"
+            " (run_id, source_name, attempted, success, skipped, started_at,"
+            "  finished_at, duration_seconds, rows_before, rows_after,"
+            "  rows_added, error_message, skipped_reason, db_path,"
+            "  advisory_only, execution_gate, broker_api_called, can_execute)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'LOCKED', 0, 0)",
+            (
+                run_id,
+                source_name,
+                1 if attempted else 0,
+                1 if success else 0,
+                1 if skipped else 0,
+                started_at,
+                finished_at,
+                float(duration_seconds),
+                int(rows_before),
+                int(rows_after),
+                int(rows_added),
+                str(error_message or "")[:500],
+                str(skipped_reason or "")[:500],
+                str(target),
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_latest_refresh_run_per_source(
+    db_path: Path | None = None,
+) -> dict[str, dict[str, Any]]:
+    """Return one row per source — the most recent refresh attempt.
+
+    Used by the live-signals API to surface refresh_age_hours and stale state.
+    Returns an empty dict if the table is missing (degrade gracefully).
+
+    Resolves ``DB_PATH`` lazily so tests that monkeypatch
+    ``persistence.DB_PATH`` see the override.
+    """
+    target = db_path if db_path is not None else DB_PATH
+    conn = _get_conn(target)
+    try:
+        try:
+            rows = conn.execute(
+                "SELECT lsrr.*"
+                " FROM live_source_refresh_runs lsrr"
+                " INNER JOIN ("
+                "   SELECT source_name, MAX(id) AS max_id"
+                "   FROM live_source_refresh_runs GROUP BY source_name"
+                " ) latest ON latest.source_name = lsrr.source_name"
+                " AND latest.max_id = lsrr.id"
+            ).fetchall()
+        except sqlite3.OperationalError:
+            return {}
+    finally:
+        conn.close()
+    out: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        d = dict(row)
+        d["advisory_status"] = _ADVISORY_STATUS
+        d["execution_gate"] = "LOCKED"
+        d["broker_api_called"] = False
+        d["can_execute"] = False
+        out[str(d["source_name"])] = d
+    return out
+
+
 def count_signal_events_by_source(
     db_path: Path = DB_PATH,
 ) -> dict[str, int]:
@@ -1493,6 +1614,8 @@ __all__ = [
     "log_source_run",
     "get_source_run_log",
     "get_latest_source_run_per_source",
+    "record_live_source_refresh_run",
+    "get_latest_refresh_run_per_source",
     "count_signal_events_by_source",
     "upsert_global_security",
     "get_global_security",

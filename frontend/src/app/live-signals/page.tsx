@@ -1,11 +1,16 @@
 'use client';
 
 import { useState, useEffect, useMemo } from 'react';
-import { getLiveSignals, getSourceHealthSummary } from '@/lib/apiClient';
+import {
+  getLiveSignals,
+  getSourceHealthSummary,
+  getLiveSourcesStatus,
+} from '@/lib/apiClient';
 import type {
   LiveSignalEvent,
   LiveSignalSource,
   LiveSignalsResponse,
+  LiveSourcesStatusResponse,
   SourceHealthSummaryEntry,
   SourceHealthSummaryResponse,
 } from '@/types';
@@ -439,6 +444,7 @@ export default function LiveSignalsPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [data, setData] = useState<LiveSignalsResponse | null>(null);
   const [health, setHealth] = useState<SourceHealthSummaryResponse | null>(null);
+  const [refreshStatus, setRefreshStatus] = useState<LiveSourcesStatusResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [backendOffline, setBackendOffline] = useState(false);
 
@@ -447,7 +453,8 @@ export default function LiveSignalsPage() {
     Promise.all([
       getLiveSignals(sourceFilter || undefined, 200),
       getSourceHealthSummary(),
-    ]).then(([result, h]) => {
+      getLiveSourcesStatus(),
+    ]).then(([result, h, r]) => {
       if (!result) {
         setBackendOffline(true);
       } else {
@@ -455,6 +462,7 @@ export default function LiveSignalsPage() {
         setData(result);
       }
       setHealth(h);
+      setRefreshStatus(r);
       setLoading(false);
     });
   }, [sourceFilter]);
@@ -500,6 +508,8 @@ export default function LiveSignalsPage() {
 
       <SourceHealthWarnings initial={health} />
 
+      <StaleRefreshBanner status={refreshStatus} />
+
       <div
         className="rounded-lg px-4 py-3"
         style={{
@@ -536,9 +546,20 @@ export default function LiveSignalsPage() {
       {!loading && data && (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           <StatTile label="Total Signals" value={String(data.count)} />
-          {Object.entries(sourceCounts).map(([src, cnt]) => (
-            <StatTile key={src} label={SOURCE_LABELS[src] ?? src} value={String(cnt)} />
-          ))}
+          {Object.entries(sourceCounts).map(([src, cnt]) => {
+            const entry = refreshStatus?.sources?.[src];
+            const isStale = Boolean(entry?.is_stale);
+            const ageHours = entry?.refresh_age_hours;
+            return (
+              <StatTile
+                key={src}
+                label={SOURCE_LABELS[src] ?? src}
+                value={String(cnt)}
+                stale={isStale}
+                ageHours={typeof ageHours === 'number' ? ageHours : null}
+              />
+            );
+          })}
           {latestTs && <StatTile label="Latest Fetched" value={formatTs(latestTs)} small />}
         </div>
       )}
@@ -601,15 +622,122 @@ export default function LiveSignalsPage() {
   );
 }
 
-function StatTile({ label, value, small }: { label: string; value: string; small?: boolean }) {
+function StatTile({
+  label,
+  value,
+  small,
+  stale,
+  ageHours,
+}: {
+  label: string;
+  value: string;
+  small?: boolean;
+  stale?: boolean;
+  ageHours?: number | null;
+}) {
   return (
     <div className="sp-card px-4 py-3">
-      <div className="sp-eyebrow mb-1">{label}</div>
+      <div className="flex items-center justify-between mb-1 gap-2">
+        <div className="sp-eyebrow">{label}</div>
+        {stale && (
+          <span
+            className="text-[9px] font-mono uppercase tracking-widest px-1.5 py-0.5 rounded shrink-0"
+            style={{
+              color: 'var(--sp-gold)',
+              border: '1px solid rgba(214, 168, 90, 0.35)',
+              background: 'rgba(214, 168, 90, 0.06)',
+            }}
+            title={
+              typeof ageHours === 'number'
+                ? `Last refresh attempt ~${ageHours.toFixed(1)}h ago. Run the local refresh.`
+                : 'No recent refresh attempt recorded. Run the local refresh.'
+            }
+          >
+            STALE
+          </span>
+        )}
+      </div>
       <div
         className={small ? 'text-xs font-mono' : 'text-2xl font-semibold font-mono'}
         style={{ color: small ? 'var(--sp-mist)' : 'var(--sp-bone)' }}
       >
         {value}
+      </div>
+      {stale && typeof ageHours === 'number' && (
+        <div className="text-[10px] font-mono mt-1" style={{ color: 'var(--sp-mist)' }}>
+          age {ageHours.toFixed(1)}h
+        </div>
+      )}
+    </div>
+  );
+}
+
+function StaleRefreshBanner({ status }: { status: LiveSourcesStatusResponse | null }) {
+  if (!status) return null;
+  const stale = status.stale_sources ?? [];
+  const refreshConfigured = status.refresh_configured ?? false;
+  const threshold = status.stale_threshold_hours ?? 6;
+  const manualCmd =
+    status.manual_refresh_command ?? 'python scripts/refresh_live_signals.py --write';
+  const schedulerCmd =
+    status.scheduler_hint ??
+    '.\\scripts\\windows\\register_live_signal_refresh_task.ps1 (every 6h Scheduled Task)';
+
+  if (refreshConfigured && stale.length === 0) {
+    return null;
+  }
+
+  const headline = !refreshConfigured
+    ? 'Source data may be stale — no local 6-hour refresh attempt recorded yet.'
+    : `Source data may be stale (${stale.length} source${stale.length === 1 ? '' : 's'} older than ${threshold}h).`;
+
+  return (
+    <div
+      className="rounded-lg px-4 py-3 space-y-2"
+      style={{
+        background: 'rgba(214, 168, 90, 0.05)',
+        border: '1px solid rgba(214, 168, 90, 0.28)',
+      }}
+    >
+      <div className="flex items-start gap-2 flex-wrap">
+        <span className="sp-chip sp-chip-warn shrink-0">STALE</span>
+        <p className="text-sm" style={{ color: 'var(--sp-bone)' }}>{headline}</p>
+      </div>
+      {stale.length > 0 && (
+        <p className="text-xs" style={{ color: 'var(--sp-mist)' }}>
+          Stale sources:{' '}
+          <span className="font-mono" style={{ color: 'var(--sp-bone)' }}>
+            {stale.map((s) => SOURCE_LABELS[s] ?? s).join(', ')}
+          </span>
+        </p>
+      )}
+      <p className="text-xs" style={{ color: 'var(--sp-mist)' }}>
+        Run the local refresh script or enable the 6-hour scheduled task. Advisory only —
+        refreshing data does not authorize trades.
+      </p>
+      <div className="grid gap-2 md:grid-cols-2">
+        <pre
+          className="text-[11px] font-mono px-3 py-2 rounded"
+          style={{
+            color: 'var(--sp-bone)',
+            background: 'rgba(13, 16, 21, 0.7)',
+            border: '1px solid var(--sp-line)',
+            whiteSpace: 'pre-wrap',
+          }}
+        >
+          {manualCmd}
+        </pre>
+        <pre
+          className="text-[11px] font-mono px-3 py-2 rounded"
+          style={{
+            color: 'var(--sp-bone)',
+            background: 'rgba(13, 16, 21, 0.7)',
+            border: '1px solid var(--sp-line)',
+            whiteSpace: 'pre-wrap',
+          }}
+        >
+          {schedulerCmd}
+        </pre>
       </div>
     </div>
   );
