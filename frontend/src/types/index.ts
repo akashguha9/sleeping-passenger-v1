@@ -440,6 +440,15 @@ export interface SourceHealthResponse {
   generated_at: string;
 }
 
+export type SourceHealthLabel =
+  | 'healthy'
+  | 'watch'
+  | 'degraded'
+  | 'unhealthy'
+  | 'planned_not_scored'
+  | 'optional_config_missing'
+  | string;
+
 export interface LiveSourceStatusEntry {
   source_key: string;
   freshness_state:
@@ -475,6 +484,30 @@ export interface LiveSourceStatusEntry {
   refresh_age_hours?: number | null;
   stale_threshold_hours?: number;
   is_stale?: boolean;
+  // Sprint 7D.1 — reliability scoring
+  health_score?: number | null;
+  health_label?: SourceHealthLabel;
+  health_reasons?: string[];
+  stale_severity?: 'none' | 'soft' | 'moderate' | 'loud' | string;
+  config_state?: 'configured' | 'optional_missing' | 'required_missing' | 'planned' | string;
+  last_success_age_hours?: number | null;
+  operator_message?: string;
+  tier?: 'core' | 'secondary' | 'optional' | 'planned' | string;
+}
+
+export interface SourceHealthSummary {
+  health_label_distribution: Record<string, number>;
+  core_health_label: SourceHealthLabel;
+  average_scored_health: number | null;
+  scored_count: number;
+  planned_count: number;
+  optional_missing_config_count: number;
+  advisory_status?: string;
+  execution_gate?: string;
+  broker_api_called?: boolean;
+  ai_execution_count?: number;
+  execution_permission?: boolean;
+  can_execute?: boolean;
 }
 
 export interface LiveSourcesStatusResponse {
@@ -490,6 +523,7 @@ export interface LiveSourcesStatusResponse {
   last_refresh_success?: string | null;
   scheduler_hint?: string;
   manual_refresh_command?: string;
+  health_summary?: SourceHealthSummary;
   advisory_status: string;
   execution_mode?: string;
   execution_gate: string;
@@ -499,6 +533,56 @@ export interface LiveSourcesStatusResponse {
   can_execute: boolean;
   human_review_required: boolean;
   error?: string;
+}
+
+// ---------------------------------------------------------------------------
+// Learning completeness (Sprint 7C.1) — advisory-only, read-only
+// ---------------------------------------------------------------------------
+
+export interface LearningCompletenessItem {
+  trade_id: string;
+  event_id: string;
+  ticker: string;
+  side: string;
+  executed_at: string;
+  outcome_status: string;
+  outcome_quality: string;
+  process_error: string;
+  mistake_tags: string;
+  lesson_pre_trade: string;
+  lesson_reconciliation: string;
+  learning_complete: boolean;
+  missing_fields: string[];
+  blocked_reason: string;
+}
+
+export interface LearningCompletenessResponse {
+  report: string;
+  db_path?: string;
+  db_available: boolean;
+  reconciled_count: number;
+  learning_complete_count: number;
+  learning_incomplete_count: number;
+  // Convenience aliases for the frontend.
+  complete_count?: number;
+  incomplete_count?: number;
+  missing_field_distribution: Record<string, number>;
+  trade_mode_distribution?: Record<string, number>;
+  paper_trade_count?: number;
+  real_manual_trade_count?: number;
+  items: LearningCompletenessItem[];
+  warnings: string[];
+  operator_action: string;
+  advisory_disclaimer: string;
+  truncated?: boolean;
+  truncated_to?: number;
+  advisory_status: string;
+  execution_gate: string;
+  broker_api_called: boolean;
+  ai_execution_count: number;
+  execution_permission: boolean;
+  can_execute: boolean;
+  human_review_required: boolean;
 }
 
 export interface DbStatusResponse {

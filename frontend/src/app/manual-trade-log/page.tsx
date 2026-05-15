@@ -12,6 +12,8 @@ import { HumanOnlyBadge } from '@/components/HumanOnlyBadge';
 import { AdvisoryOnlyBadge } from '@/components/AdvisoryOnlyBadge';
 import { BacklogReadinessBadge } from '@/components/BacklogReadinessBadge';
 import { SourceHealthWarnings } from '@/components/SourceHealthWarnings';
+import { LocalApiTokenPanel } from '@/components/LocalApiTokenPanel';
+import { AdvisoryEmptyState } from '@/components/AdvisoryEmptyState';
 
 export default function ManualTradeLogPage() {
   const [result, setResult] = useState<ManualTradeListResponse | null>(null);
@@ -64,6 +66,8 @@ export default function ManualTradeLogPage() {
 
       <SourceHealthWarnings compact />
 
+      <LocalApiTokenPanel />
+
       {isOffline && (
         <div
           className="rounded-lg px-4 py-2.5 flex items-center gap-3 text-xs"
@@ -113,9 +117,22 @@ export default function ManualTradeLogPage() {
               Loading…
             </div>
           ) : trades.length === 0 ? (
-            <div className="sp-card-soft p-6 text-center text-sm" style={{ color: 'var(--sp-mist)' }}>
-              {isOffline ? 'Backend offline — trade data unavailable.' : 'No trades logged yet.'}
-            </div>
+            isOffline ? (
+              <AdvisoryEmptyState
+                variant="api_failure"
+                title="Backend offline"
+                message="The FastAPI server is unreachable, so the trade list cannot be loaded."
+                hint="No execution action is available from this surface."
+                command="python scripts/api_server.py"
+              />
+            ) : (
+              <AdvisoryEmptyState
+                variant="no_data"
+                title="No trades logged yet"
+                message="No manual or paper journal entries yet. Log one above to begin building the journal."
+                hint="Paper-trade ledger workflow: python scripts/export_paper_trade_template.py"
+              />
+            )
           ) : (
             <div className="space-y-3">
               {trades.map((t) => (

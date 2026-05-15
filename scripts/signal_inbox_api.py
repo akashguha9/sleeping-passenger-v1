@@ -188,6 +188,12 @@ class ManualTradeLog:
     operator_heat_at_decision: float | None = None
     gallardo_block_at_decision: bool = False
     preflight_state_at_decision: str = ""
+    # Sprint 7B.2 — Paper-trade ledger support.  trade_mode classifies a
+    # row as 'PAPER' (rehearsal/simulation), 'REAL_MANUAL' (operator-entered
+    # real trade — record-keeping only), or 'UNKNOWN'.  Storing this NEVER
+    # implies broker execution.  Paper rows carry the same advisory stamps
+    # (broker_api_called=False, ai_execution_count=0, execution_gate=LOCKED).
+    trade_mode: str = "REAL_MANUAL"
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -1057,6 +1063,29 @@ def _safe_bool(value: Any) -> bool:
     return False
 
 
+_TRADE_MODE_ALLOWED: frozenset[str] = frozenset({"PAPER", "REAL_MANUAL", "UNKNOWN"})
+
+
+def _safe_trade_mode(value: Any) -> str:
+    """Normalise trade_mode at the API boundary.
+
+    'PAPER'       — rehearsal / simulation (no real capital, no broker)
+    'REAL_MANUAL' — operator-entered real trade (record-keeping only)
+    'UNKNOWN'     — explicit unknown (rare; preferred for legacy backfills)
+
+    Anything else (None, empty, typo, hostile payload) falls through to
+    'REAL_MANUAL' — the historical default that matches every row logged
+    before Sprint 7B.2.  This means paper trades MUST be explicitly opted
+    into; you cannot accidentally label a real trade as paper.
+    """
+    if value is None:
+        return "REAL_MANUAL"
+    text = str(value).strip().upper()
+    if text in _TRADE_MODE_ALLOWED:
+        return text
+    return "REAL_MANUAL"
+
+
 def log_manual_trade(
     *,
     event_id: str,
@@ -1086,6 +1115,7 @@ def log_manual_trade(
     operator_heat_at_decision: float | None = None,
     gallardo_block_at_decision: bool | None = None,
     preflight_state_at_decision: str = "",
+    trade_mode: str = "REAL_MANUAL",
 ) -> dict[str, Any]:
     """7. Log a manual trade execution (HUMAN_ONLY; no broker API called).
 
@@ -1163,6 +1193,7 @@ def log_manual_trade(
         operator_heat_at_decision=_safe_unit_score(operator_heat_at_decision),
         gallardo_block_at_decision=_safe_bool(gallardo_block_at_decision),
         preflight_state_at_decision=_safe_journal_text(preflight_state_at_decision),
+        trade_mode=_safe_trade_mode(trade_mode),
     )
     append_jsonl(MANUAL_TRADE_LOG, trade.to_dict(), stamp=False)
     if _DB_AVAILABLE and _persistence is not None:
@@ -1190,6 +1221,7 @@ def log_manual_trade(
                 operator_heat_at_decision=trade.operator_heat_at_decision,
                 gallardo_block_at_decision=trade.gallardo_block_at_decision,
                 preflight_state_at_decision=trade.preflight_state_at_decision,
+                trade_mode=trade.trade_mode,
             )
         except Exception:
             pass
@@ -1212,6 +1244,24 @@ def log_manual_trade(
         "emotional_state": trade.emotional_state,
         "mistake_tags": trade.mistake_tags,
         "lesson": trade.lesson,
+        "reactor_state_at_decision": trade.reactor_state_at_decision,
+        "decision_grade_energy_at_decision": trade.decision_grade_energy_at_decision,
+        "echo_risk_score_at_decision": trade.echo_risk_score_at_decision,
+        "meltdown_risk_at_decision": trade.meltdown_risk_at_decision,
+        "fusion_validity_at_decision": trade.fusion_validity_at_decision,
+        "fission_branch_clarity_at_decision": trade.fission_branch_clarity_at_decision,
+        "operator_heat_at_decision": trade.operator_heat_at_decision,
+        "gallardo_block_at_decision": trade.gallardo_block_at_decision,
+        "preflight_state_at_decision": trade.preflight_state_at_decision,
+        "trade_mode": trade.trade_mode,
+        # Paper-trade safety stamps. For PAPER rows: paper_trade_only=True,
+        # real_capital_at_risk=False. For REAL_MANUAL rows: paper_trade_only=
+        # False, real_capital_at_risk only reflects that the operator says
+        # they hand-entered a real trade — the system NEVER places it.
+        "paper_trade_only": trade.trade_mode == "PAPER",
+        "real_capital_at_risk": False if trade.trade_mode == "PAPER" else (
+            trade.trade_mode == "REAL_MANUAL"
+        ),
         "status": "logged",
         "execution_mode": _EXECUTION_MODE,
         "ai_execution_count": _AI_EXECUTION_COUNT,

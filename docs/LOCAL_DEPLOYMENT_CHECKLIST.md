@@ -59,6 +59,12 @@ preference.
 - [ ] No real-money credentials are stored anywhere in the repo.
 - [ ] `MVP_API_TOKEN` is either unset (permissive local dev) or set
   via the local `.env` (never committed).
+- [ ] If `MVP_API_TOKEN` is set, the frontend operator pastes the token
+  into the **Local API token** panel on the Manual Trade Log page once
+  per browser session.  The token is stored in `sessionStorage` only
+  (cleared when the tab closes), is never displayed in full after save,
+  is never sent via GET requests, and **does not authorise trade
+  execution** — `execution_gate=LOCKED` stays locked regardless.
 - [ ] No personal/medical/financial data is dumped into log files
   that get shipped to anyone.
 - [ ] The Moltbook does not contain personally identifying notes that

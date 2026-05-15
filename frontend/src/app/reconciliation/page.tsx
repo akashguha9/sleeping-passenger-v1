@@ -1,15 +1,22 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { getReconciliationQueue, getManualTrades, reconcileTrade } from '@/lib/apiClient';
+import {
+  getReconciliationQueue,
+  getManualTrades,
+  reconcileTrade,
+  getLearningCompleteness,
+} from '@/lib/apiClient';
 import { MOCK_MANUAL_TRADES, MOCK_RECONCILIATIONS } from '@/lib/mockData';
 import { ReconciliationCard } from '@/components/ReconciliationCard';
 import { HumanOnlyBadge } from '@/components/HumanOnlyBadge';
 import { AdvisoryOnlyBadge } from '@/components/AdvisoryOnlyBadge';
 import { BacklogReadinessBadge } from '@/components/BacklogReadinessBadge';
+import { LearningCompletenessCard } from '@/components/LearningCompletenessCard';
 import type {
   ManualTradeListResponse,
   ReconciliationQueueResponse,
+  LearningCompletenessResponse,
 } from '@/types';
 
 type OutcomeStatus = 'WIN' | 'LOSS' | 'BREAKEVEN' | 'UNKNOWN';
@@ -29,17 +36,20 @@ export default function ReconciliationPage() {
   const [queue, setQueue] = useState<ReconciliationQueueResponse | null>(null);
   const [queueLoading, setQueueLoading] = useState(true);
   const [manualTrades, setManualTrades] = useState<ManualTradeListResponse | null>(null);
+  const [learning, setLearning] = useState<LearningCompletenessResponse | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const [queueData, tradesData] = await Promise.all([
+      const [queueData, tradesData, learningData] = await Promise.all([
         getReconciliationQueue(50),
         getManualTrades(),
+        getLearningCompleteness(20),
       ]);
       if (!cancelled) {
         setQueue(queueData);
         setManualTrades(tradesData);
+        setLearning(learningData);
         setQueueLoading(false);
       }
     })();
@@ -105,6 +115,8 @@ export default function ReconciliationPage() {
         <span className="text-emerald-400 font-mono font-semibold">NOT CONNECTED</span>. AI executions:{' '}
         <span className="text-emerald-400 font-mono font-bold">0</span>. All data is ADVISORY_ONLY.
       </div>
+
+      <LearningCompletenessCard data={learning} />
 
       <div className="bg-slate-900 border border-slate-700 rounded-lg p-4">
         <div className="flex items-baseline justify-between mb-2 flex-wrap gap-2">

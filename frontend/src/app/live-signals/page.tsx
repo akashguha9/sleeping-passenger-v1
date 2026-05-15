@@ -17,6 +17,7 @@ import type {
 import { AdvisoryOnlyBadge } from '@/components/AdvisoryOnlyBadge';
 import { HumanOnlyBadge } from '@/components/HumanOnlyBadge';
 import { SourceHealthWarnings } from '@/components/SourceHealthWarnings';
+import { SourceHealthBadge } from '@/components/SourceHealthBadge';
 
 const SOURCE_OPTIONS: { value: '' | LiveSignalSource; label: string }[] = [
   { value: '', label: 'All Sources' },
@@ -508,6 +509,8 @@ export default function LiveSignalsPage() {
 
       <SourceHealthWarnings initial={health} />
 
+      <SourceHealthOverviewStrip status={refreshStatus} />
+
       <StaleRefreshBanner status={refreshStatus} />
 
       <div
@@ -671,6 +674,75 @@ function StatTile({
     </div>
   );
 }
+
+/**
+ * Sprint 7D.1 — render a compact strip of per-source health chips.
+ * Pulls from /live-sources/status.health_summary + per-source health_label.
+ * Read-only.  Never implies execution authority.
+ */
+function SourceHealthOverviewStrip({
+  status,
+}: {
+  status: LiveSourcesStatusResponse | null;
+}) {
+  if (!status) return null;
+  const summary = status.health_summary;
+  const sources = status.sources ?? {};
+  const entries = Object.entries(sources);
+  if (entries.length === 0 && !summary) return null;
+
+  const coreLabel = summary?.core_health_label ?? 'healthy';
+  const avg = summary?.average_scored_health;
+
+  return (
+    <div
+      className="rounded-lg px-4 py-3 space-y-2"
+      style={{
+        background: 'rgba(13, 16, 21, 0.6)',
+        border: '1px solid var(--sp-line)',
+      }}
+      data-testid="source-health-overview-strip"
+      data-core-health-label={coreLabel}
+      data-advisory-only="true"
+      data-execution-permission="false"
+    >
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div className="text-xs font-mono uppercase tracking-wider" style={{ color: 'var(--sp-mist)' }}>
+          Source reliability
+        </div>
+        <div className="text-[11px] font-mono" style={{ color: 'var(--sp-bone)' }}>
+          core: <span className="uppercase">{coreLabel}</span>
+          {typeof avg === 'number' && (
+            <span className="ml-2 opacity-70">avg {avg.toFixed(2)}</span>
+          )}
+        </div>
+      </div>
+      <div className="flex flex-wrap gap-2">
+        {entries.map(([key, entry]) => (
+          <div key={key} className="flex items-center gap-2">
+            <span className="text-[10px] font-mono" style={{ color: 'var(--sp-mist)' }}>
+              {key}
+            </span>
+            <SourceHealthBadge
+              entry={{
+                health_label: entry.health_label,
+                health_score: entry.health_score,
+                health_reasons: entry.health_reasons,
+                operator_message: entry.operator_message,
+                tier: entry.tier,
+              }}
+            />
+          </div>
+        ))}
+      </div>
+      <p className="text-[10px]" style={{ color: 'var(--sp-mist)' }}>
+        Reliability scoring is advisory-only and does not authorize any
+        trade or broker action.
+      </p>
+    </div>
+  );
+}
+
 
 function StaleRefreshBanner({ status }: { status: LiveSourcesStatusResponse | null }) {
   if (!status) return null;

@@ -358,6 +358,12 @@ def _additive_migrations(conn: sqlite3.Connection) -> None:
         ("manual_trades", "operator_heat_at_decision", "REAL"),
         ("manual_trades", "gallardo_block_at_decision", "INTEGER NOT NULL DEFAULT 0"),
         ("manual_trades", "preflight_state_at_decision", "TEXT NOT NULL DEFAULT ''"),
+        # Sprint 7B.2 — Paper-trade ledger support.  ``trade_mode`` is
+        # additive; legacy rows default to 'REAL_MANUAL' (operator-entered
+        # hand record of real activity), paper imports set 'PAPER'.  This
+        # column NEVER grants execution permission.  Paper rows are
+        # simulation/rehearsal data and never imply broker_api_called.
+        ("manual_trades", "trade_mode", "TEXT NOT NULL DEFAULT 'REAL_MANUAL'"),
         # Reconciliation outcome-quality / process-error fields.
         ("reconciliation_results", "outcome_quality", "TEXT NOT NULL DEFAULT ''"),
         ("reconciliation_results", "process_error", "TEXT NOT NULL DEFAULT ''"),
@@ -697,6 +703,7 @@ def insert_manual_trade(
     operator_heat_at_decision: float | None = None,
     gallardo_block_at_decision: bool | int | None = None,
     preflight_state_at_decision: str = "",
+    trade_mode: str = "REAL_MANUAL",
 ) -> None:
     """Insert a manual trade record. ``leverage`` is record-only (record-keeping
     of human leverage choice — no broker margin/execution implications).
@@ -727,10 +734,18 @@ def insert_manual_trade(
     heat = _normalize_unit_score(operator_heat_at_decision)
     gallardo = 1 if gallardo_block_at_decision else 0
 
+    # Normalise trade_mode at the persistence boundary so hostile / typo
+    # values can never corrupt calibration filters.  Unknown values fall
+    # through to REAL_MANUAL (the safe legacy semantic).
+    mode_norm = str(trade_mode or "REAL_MANUAL").strip().upper()
+    if mode_norm not in {"PAPER", "REAL_MANUAL", "UNKNOWN"}:
+        mode_norm = "REAL_MANUAL"
+
     conn = _get_conn(db_path)
     try:
         cols = {row[1] for row in conn.execute("PRAGMA table_info(manual_trades)")}
         has_reactor_cols = "reactor_state_at_decision" in cols
+        has_trade_mode = "trade_mode" in cols
         base_cols = (
             "trade_id, event_id, ticker, side, quantity, price, executed_at,"
             " thesis, notes, logged_by, leverage, execution_mode, ai_execution_count,"
@@ -762,7 +777,6 @@ def insert_manual_trade(
                 "   operator_heat_at_decision, gallardo_block_at_decision,"
                 "   preflight_state_at_decision"
             )
-            placeholders = ", ".join(["?"] * (len(base_vals) + 9))
             vals = base_vals + (
                 str(reactor_state_at_decision or ""),
                 dge,
@@ -776,8 +790,11 @@ def insert_manual_trade(
             )
         else:
             cols_sql = base_cols
-            placeholders = ", ".join(["?"] * len(base_vals))
             vals = base_vals
+        if has_trade_mode:
+            cols_sql = cols_sql + ", trade_mode"
+            vals = vals + (mode_norm,)
+        placeholders = ", ".join(["?"] * len(vals))
         conn.execute(
             f"INSERT OR IGNORE INTO manual_trades ({cols_sql}) VALUES ({placeholders})",
             vals,

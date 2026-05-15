@@ -595,6 +595,29 @@ class ManualTradeBody(BaseModel):
     emotional_state: str = ""
     mistake_tags: str = ""
     lesson: str = ""
+    # Reactor-at-decision snapshot (Sprint 7B.1). Closes the HTTP path so
+    # operators logging a trade through the API can attach the Signal
+    # Reactor advisory state they saw at decision time. All optional —
+    # legacy clients keep working. Values are normalized server-side
+    # (scores clamped to [0,1], booleans coerced, hostile input → empty)
+    # by log_manual_trade. Capturing a reactor snapshot here NEVER grants
+    # execution permission; broker_api_called stays False and
+    # ai_execution_count stays 0.
+    reactor_state_at_decision: str = ""
+    decision_grade_energy_at_decision: float | None = None
+    echo_risk_score_at_decision: float | None = None
+    meltdown_risk_at_decision: float | None = None
+    fusion_validity_at_decision: str = ""
+    fission_branch_clarity_at_decision: float | None = None
+    operator_heat_at_decision: float | None = None
+    gallardo_block_at_decision: bool | None = None
+    preflight_state_at_decision: str = ""
+    # Sprint 7B.2 — paper-trade ledger classification.  Default
+    # "REAL_MANUAL" preserves the legacy semantic.  Setting "PAPER" marks
+    # this row as rehearsal/simulation — broker_api_called stays False
+    # and execution_gate stays LOCKED.  Hostile / typo values normalise
+    # to REAL_MANUAL server-side.
+    trade_mode: str = "REAL_MANUAL"
 
 
 class ReconcileBody(BaseModel):
@@ -805,6 +828,16 @@ def post_manual_trade(
         emotional_state=body.emotional_state,
         mistake_tags=body.mistake_tags,
         lesson=body.lesson,
+        reactor_state_at_decision=body.reactor_state_at_decision,
+        decision_grade_energy_at_decision=body.decision_grade_energy_at_decision,
+        echo_risk_score_at_decision=body.echo_risk_score_at_decision,
+        meltdown_risk_at_decision=body.meltdown_risk_at_decision,
+        fusion_validity_at_decision=body.fusion_validity_at_decision,
+        fission_branch_clarity_at_decision=body.fission_branch_clarity_at_decision,
+        operator_heat_at_decision=body.operator_heat_at_decision,
+        gallardo_block_at_decision=body.gallardo_block_at_decision,
+        preflight_state_at_decision=body.preflight_state_at_decision,
+        trade_mode=body.trade_mode,
     )
 
 
@@ -837,6 +870,112 @@ def post_reconcile(
 @app.get("/manual-trades")
 def get_manual_trades() -> dict:
     return list_manual_trades()
+
+
+# ---------------------------------------------------------------------------
+# Learning completeness (Sprint 7C.1) — read-only API surface for the
+# CLI report at scripts/learning_completeness_report.py.  Exposes what
+# trades still need an outcome/process/lesson label so the operator can
+# close the learning loop without leaving the app.  Never grants
+# execution permission; never claims learning is complete.
+# ---------------------------------------------------------------------------
+
+
+@app.get("/learning-completeness")
+def get_learning_completeness(limit: int | None = 50) -> dict:
+    """Return the learning-completeness report payload.
+
+    Read-only.  Safe to call when the DB is missing or empty — returns a
+    populated empty-state payload with explanatory warnings.  Includes
+    paper/manual distinction via ``trade_mode_distribution`` when the
+    underlying rows carry that column.
+    """
+    try:
+        try:
+            from scripts.learning_completeness_report import build_report
+        except ModuleNotFoundError:
+            from learning_completeness_report import build_report  # type: ignore[no-redef]
+    except Exception as exc:
+        return {
+            "report": "learning_completeness_report",
+            "db_available": False,
+            "reconciled_count": 0,
+            "learning_complete_count": 0,
+            "learning_incomplete_count": 0,
+            "missing_field_distribution": {},
+            "items": [],
+            "warnings": [f"import_failed:{type(exc).__name__}"],
+            "trade_mode_distribution": {},
+            "advisory_status": _ADVISORY_STATUS,
+            "execution_gate": "LOCKED",
+            "broker_api_called": False,
+            "ai_execution_count": _AI_EXECUTION_COUNT,
+            "execution_permission": False,
+            "can_execute": False,
+            "human_review_required": True,
+            "operator_action": (
+                "Could not load the learning-completeness module.  This "
+                "endpoint stays advisory-only; no execution action is "
+                "available."
+            ),
+            "advisory_disclaimer": (
+                "Learning-completeness is advisory-only.  Marking a trade "
+                "learning-complete records that the operator filled in "
+                "review fields; it never places, modifies, or cancels any "
+                "order."
+            ),
+        }
+    safe_limit: int | None
+    if limit is None:
+        safe_limit = None
+    else:
+        try:
+            n = int(limit)
+        except (TypeError, ValueError):
+            n = 50
+        safe_limit = max(0, min(n, 500))
+    payload = build_report(limit=safe_limit)
+
+    # Ensure full safety-stamp contract — the CLI report omits a few
+    # fields (e.g. human_review_required) the API layer always returns.
+    payload.setdefault("human_review_required", True)
+    payload.setdefault("execution_mode", _EXECUTION_MODE)
+
+    # Augment with trade_mode distribution if the column exists.  The CLI
+    # report already returns dicts of incomplete items; we re-query
+    # cheaply to count paper vs real_manual without changing the CLI
+    # contract.
+    payload.setdefault("trade_mode_distribution", {})
+    try:
+        try:
+            from scripts.persistence import DB_PATH as _DB_PATH
+        except ModuleNotFoundError:
+            from persistence import DB_PATH as _DB_PATH  # type: ignore[no-redef]
+        import sqlite3 as _sqlite3
+        if _DB_PATH and _DB_PATH.exists():
+            uri = f"file:{_DB_PATH.as_posix()}?mode=ro"
+            conn = _sqlite3.connect(uri, uri=True)
+            try:
+                conn.row_factory = _sqlite3.Row
+                cols = {r[1] for r in conn.execute("PRAGMA table_info(manual_trades)")}
+                if "trade_mode" in cols:
+                    rows = conn.execute(
+                        "SELECT COALESCE(NULLIF(TRIM(trade_mode),''),'UNKNOWN') AS tm,"
+                        " COUNT(*) AS n FROM manual_trades GROUP BY tm"
+                    ).fetchall()
+                    dist = {str(r["tm"]).upper(): int(r["n"]) for r in rows}
+                    payload["trade_mode_distribution"] = dist
+                    payload["paper_trade_count"] = dist.get("PAPER", 0)
+                    payload["real_manual_trade_count"] = dist.get("REAL_MANUAL", 0)
+            finally:
+                conn.close()
+    except Exception:
+        pass
+
+    # Convenience aliases for the frontend card.
+    payload.setdefault("incomplete_count", payload.get("learning_incomplete_count", 0))
+    payload.setdefault("complete_count", payload.get("learning_complete_count", 0))
+    return payload
 
 
 # ---------------------------------------------------------------------------
@@ -1024,6 +1163,38 @@ def _build_live_sources_status(
         state = entry.get("freshness_state", "unknown")
         dist[state] = dist.get(state, 0) + 1
 
+    # Sprint 7D.1 — compute reliability score per source and aggregate.
+    # Failures here MUST NOT crash the endpoint; if scoring fails we leave
+    # the underlying entries untouched and skip aggregation.
+    try:
+        try:
+            from scripts.source_health_score import score_source, aggregate_health
+        except ModuleNotFoundError:
+            from source_health_score import score_source, aggregate_health  # type: ignore[no-redef]
+        for src_key, entry in freshness.items():
+            try:
+                scored = score_source(entry)
+            except Exception:
+                continue
+            # Merge non-overlapping keys; never overwrite freshness/tier.
+            for k, v in scored.items():
+                if k in {"tier", "advisory_status", "execution_gate",
+                         "broker_api_called", "ai_execution_count",
+                         "execution_permission", "can_execute"}:
+                    # tier already on entry; safety stamps already present
+                    continue
+                entry[k] = v
+        health_summary = aggregate_health(freshness)
+    except Exception:
+        health_summary = {
+            "health_label_distribution": {},
+            "core_health_label": "healthy",
+            "average_scored_health": None,
+            "scored_count": 0,
+            "planned_count": 0,
+            "optional_missing_config_count": 0,
+        }
+
     return {
         "operation": "get_live_sources_status",
         "sources": freshness,
@@ -1037,6 +1208,7 @@ def _build_live_sources_status(
         "last_refresh_success": latest_success_iso,
         "scheduler_hint": _SCHEDULER_HINT_PS,
         "manual_refresh_command": _SCHEDULER_HINT_MANUAL,
+        "health_summary": health_summary,
         "advisory_status": _ADVISORY_STATUS,
         "execution_mode": _EXECUTION_MODE,
         "execution_gate": "LOCKED",

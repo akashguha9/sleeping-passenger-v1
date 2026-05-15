@@ -21,6 +21,7 @@ import type {
   SecurityDetailResponse,
   SecurityCoverageResponse,
   ReconciliationQueueResponse,
+  LearningCompletenessResponse,
 } from '@/types';
 
 export interface HealthResponse {
@@ -50,11 +51,91 @@ export interface MoltbookListResponse {
   item_count: number;
 }
 
+// Sprint 8.1 — local-only operator-token support.
+//
+// When `MVP_API_TOKEN` is set on the backend, mutating POST routes
+// require an `Authorization: Bearer <token>` header.  The token is
+// stored in **sessionStorage** (cleared when the tab closes) under
+// `mvp_api_token` and is NEVER committed, NEVER exposed via
+// `NEXT_PUBLIC_*`, and NEVER logged.  GET requests do not send the token
+// by default — it is attached only to non-GET methods.
+//
+// Token-mode is local operator convenience, NOT a SaaS auth scheme.
+// Setting a token does not authorise trades; the backend always returns
+// `execution_gate=LOCKED` and `broker_api_called=false`.
+const TOKEN_STORAGE_KEY = 'mvp_api_token';
+
+export function getStoredApiToken(): string | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    return window.sessionStorage.getItem(TOKEN_STORAGE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+export function setStoredApiToken(token: string): void {
+  if (typeof window === 'undefined') return;
+  try {
+    const trimmed = token.trim();
+    if (!trimmed) {
+      window.sessionStorage.removeItem(TOKEN_STORAGE_KEY);
+    } else {
+      window.sessionStorage.setItem(TOKEN_STORAGE_KEY, trimmed);
+    }
+  } catch {
+    // sessionStorage may be unavailable (private mode, SSR, etc.) — no-op.
+  }
+}
+
+export function clearStoredApiToken(): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.sessionStorage.removeItem(TOKEN_STORAGE_KEY);
+  } catch {
+    // no-op
+  }
+}
+
+export function hasStoredApiToken(): boolean {
+  return Boolean(getStoredApiToken());
+}
+
+function buildHeaders(init?: RequestInit): Record<string, string> {
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    ...((init?.headers as Record<string, string>) ?? {}),
+  };
+  const method = (init?.method ?? 'GET').toUpperCase();
+  if (method !== 'GET' && method !== 'HEAD') {
+    const token = getStoredApiToken();
+    if (token && !headers['Authorization']) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+  }
+  return headers;
+}
+
+export class ApiTokenRequiredError extends Error {
+  status: number;
+  constructor(status = 401) {
+    super(
+      'Write endpoint requires local MVP_API_TOKEN. Set the token for this browser session before retrying. This token does not authorize trade execution.',
+    );
+    this.name = 'ApiTokenRequiredError';
+    this.status = status;
+  }
+}
+
 async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
+  const headers = buildHeaders(init);
   const res = await fetch(`${API_BASE}${path}`, {
     ...init,
-    headers: { 'Content-Type': 'application/json', ...init?.headers },
+    headers,
   });
+  if (res.status === 401 || res.status === 403) {
+    throw new ApiTokenRequiredError(res.status);
+  }
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return res.json() as Promise<T>;
 }
@@ -188,6 +269,20 @@ export async function reconcileTrade(
     method: 'POST',
     body: JSON.stringify(body),
   });
+}
+
+export async function getLearningCompleteness(
+  limit = 50,
+): Promise<LearningCompletenessResponse | null> {
+  try {
+    const params = new URLSearchParams();
+    params.set('limit', String(limit));
+    return await apiFetch<LearningCompletenessResponse>(
+      `/learning-completeness?${params.toString()}`,
+    );
+  } catch {
+    return null;
+  }
 }
 
 export async function getReconciliationQueue(
