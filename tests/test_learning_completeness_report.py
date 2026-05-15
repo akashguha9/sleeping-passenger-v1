@@ -40,6 +40,7 @@ def _log_trade(
     exit_plan: str = "trail",
     lesson: str = "log lesson",
     mistake_tags: str = "",
+    created_via: str = "manual_trade_log",
 ) -> None:
     persistence.insert_manual_trade(
         trade_id=trade_id,
@@ -60,6 +61,7 @@ def _log_trade(
         exit_plan=exit_plan,
         lesson=lesson,
         mistake_tags=mistake_tags,
+        created_via=created_via,
     )
 
 
@@ -304,3 +306,39 @@ def test_cli_text_mode(tmp_path, capsys):
 def test_cli_missing_db_returns_nonzero(tmp_path):
     rc = lcr.main(["--db-path", str(tmp_path / "absent.db")])
     assert rc != 0
+
+
+# ---------------------------------------------------------------------------
+# Provenance contract — only count rows entered via Manual Trade Log
+# ---------------------------------------------------------------------------
+
+
+def test_seed_rows_excluded_from_learning_completeness(tmp_path):
+    """SPY/QQQ seed rows with empty provenance must not be counted."""
+    db = tmp_path / "mvp.db"
+    _build_db(db)
+    # Two seed rows (empty provenance) — must NOT appear in any count.
+    _log_trade(db, "SEED_SPY", event_id="EV_SPY", created_via="")
+    _reconcile_full(db, "SEED_SPY")
+    _log_trade(db, "SEED_QQQ", event_id="EV_QQQ", created_via="")
+    _reconcile_full(db, "SEED_QQQ", outcome_quality="")
+    # One human row.
+    _log_trade(db, "MT_human", event_id="EV_H", created_via="manual_trade_log")
+    _reconcile_full(db, "MT_human")
+    payload = lcr.build_report(db)
+    assert payload["reconciled_count"] == 1
+    assert payload["learning_complete_count"] == 1
+    assert payload["learning_incomplete_count"] == 0
+    # Distribution must reflect only the human row's missing fields.
+    dist = payload["missing_field_distribution"]
+    assert "outcome_quality" not in dist
+
+
+def test_unknown_provenance_row_excluded_from_learning(tmp_path):
+    db = tmp_path / "mvp.db"
+    _build_db(db)
+    _log_trade(db, "T_imp", event_id="EV_I", created_via="imported_csv")
+    _reconcile_full(db, "T_imp", outcome_quality="")
+    payload = lcr.build_report(db)
+    assert payload["reconciled_count"] == 0
+    assert payload["items"] == []

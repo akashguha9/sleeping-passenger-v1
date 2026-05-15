@@ -112,6 +112,14 @@ DEFAULT_LOG_CANCEL_REASON: str = (
     "exclude from P/L and exposure"
 )
 
+# Provenance marker stamped on every manual_trades row created through the
+# Manual Trade Log UI/API.  The Reconciliation queue, Learning Completeness
+# report, and Cancel Log guard all gate on this exact value to keep
+# seed/demo/sample/import rows out of the live operator surfaces.  Unknown
+# (empty) provenance is excluded by default — see docs in
+# reconciliation_queue.py and learning_completeness_report.py.
+MANUAL_TRADE_LOG_PROVENANCE: str = "manual_trade_log"
+
 
 # ---------------------------------------------------------------------------
 # Dataclasses
@@ -209,6 +217,12 @@ class ManualTradeLog:
     # implies broker execution.  Paper rows carry the same advisory stamps
     # (broker_api_called=False, ai_execution_count=0, execution_gate=LOCKED).
     trade_mode: str = "REAL_MANUAL"
+    # Provenance marker for the Reconciliation queue contract.  The Manual
+    # Trade Log creation path stamps this with 'manual_trade_log'.  Anything
+    # else (smoke seeds, demo fixtures, JSONL imports, unknown legacy rows)
+    # leaves it empty and is excluded from the live Reconciliation queue.
+    # Storing this NEVER grants execution permission.
+    created_via: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -1209,6 +1223,13 @@ def log_manual_trade(
         gallardo_block_at_decision=_safe_bool(gallardo_block_at_decision),
         preflight_state_at_decision=_safe_journal_text(preflight_state_at_decision),
         trade_mode=_safe_trade_mode(trade_mode),
+        # Stamp Manual Trade Log provenance on every row created through
+        # this API path.  This is what scopes the Reconciliation queue and
+        # Learning Completeness report to operator-entered trades only.
+        # Seed/demo/import scripts that call persistence.insert_manual_trade
+        # directly do NOT receive this stamp — they remain '' (unknown
+        # provenance) and are excluded from the live queue.
+        created_via=MANUAL_TRADE_LOG_PROVENANCE,
     )
     append_jsonl(MANUAL_TRADE_LOG, trade.to_dict(), stamp=False)
     if _DB_AVAILABLE and _persistence is not None:
@@ -1237,6 +1258,7 @@ def log_manual_trade(
                 gallardo_block_at_decision=trade.gallardo_block_at_decision,
                 preflight_state_at_decision=trade.preflight_state_at_decision,
                 trade_mode=trade.trade_mode,
+                created_via=trade.created_via,
             )
         except Exception:
             pass
@@ -1458,6 +1480,25 @@ def cancel_manual_trade_log(
         resp["status"] = "not_found"
         return resp
 
+    # Provenance guard: Cancel Log is a Reconciliation-tab affordance for
+    # the operator's own duplicate / mis-logged Manual Trade Log rows.
+    # Refuse it for seed/demo/import/unknown-provenance rows so the
+    # operator can never accidentally rewrite the history of rows they
+    # did not enter through this UI.  No broker call; ai_execution_count
+    # stays 0.
+    row_provenance = str(trade_row.get("created_via") or "").strip()
+    if row_provenance != MANUAL_TRADE_LOG_PROVENANCE:
+        resp = _error_response(
+            "cancel_manual_trade_log",
+            "Only human manual log records can be cancelled from Reconciliation.",
+        )
+        resp["status"] = "refused"
+        resp["reason"] = "non_manual_trade_log_origin"
+        resp["created_via"] = row_provenance
+        resp["broker_api_called"] = False
+        resp["ai_execution_count"] = _AI_EXECUTION_COUNT
+        return resp
+
     # Defence in depth: this app never sets broker_api_called=True, but
     # ``_to_dict`` always rewrites the read value to False to lock the
     # invariant.  So we check the *raw* SQLite column directly here: if a
@@ -1622,7 +1663,11 @@ def _annotate_journal_quality(trade: dict[str, Any]) -> dict[str, Any]:
     return annotated
 
 
-def list_manual_trades(*, include_journal_quality: bool = True) -> dict[str, Any]:
+def list_manual_trades(
+    *,
+    include_journal_quality: bool = True,
+    origin: str | None = None,
+) -> dict[str, Any]:
     """List all logged manual trades.
 
     SQLite is canonical (truth_source="sqlite").  Falls back to JSONL only
@@ -1636,6 +1681,16 @@ def list_manual_trades(*, include_journal_quality: bool = True) -> dict[str, Any
     ``decision_quality_flags`` so the dashboard can surface "am I learning?"
     without a second round trip.  Set False if the caller wants raw rows
     (e.g. CSV export).
+
+    Parameters
+    ----------
+    origin : str | None
+        Optional provenance filter.  When set to ``"manual_trade_log"`` the
+        response contains only rows the operator entered through the Manual
+        Trade Log UI/API (rows whose ``created_via`` column equals
+        ``"manual_trade_log"``).  Used by the Reconciliation tab to keep
+        seed/demo/import rows out of the live operator surface.  ``None``
+        (default) returns every row for audit on the Manual Trade Log page.
     """
     trades: list[dict[str, Any]] = []
     truth_source = "jsonl_fallback"
@@ -1671,6 +1726,18 @@ def list_manual_trades(*, include_journal_quality: bool = True) -> dict[str, Any
 
     canonical = truth_source == "sqlite"
     fallback_used = not canonical
+
+    # Optional provenance filter for the Reconciliation tab.  When the
+    # caller asks for origin="manual_trade_log" we drop every row whose
+    # created_via marker is anything else (empty / unknown legacy rows,
+    # smoke seeds, demo fixtures).  Unknown provenance is excluded — the
+    # contract is opt-in, not opt-out.  No-op when origin is None.
+    if origin is not None:
+        wanted = str(origin or "").strip()
+        trades = [
+            t for t in trades
+            if str(t.get("created_via") or "").strip() == wanted
+        ]
 
     annotated_trades = trades
     aggregate_quality: dict[str, Any] | None = None
@@ -1733,6 +1800,7 @@ __all__ = [
     "VALID_RECONCILIATION_STATUSES",
     "VALID_LOG_CANCEL_STATUSES",
     "DEFAULT_LOG_CANCEL_REASON",
+    "MANUAL_TRADE_LOG_PROVENANCE",
     "InboxItem",
     "ValidationResult",
     "ManualTradeLog",

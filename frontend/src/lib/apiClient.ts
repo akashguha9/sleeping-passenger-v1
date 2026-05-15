@@ -348,9 +348,17 @@ export async function postMoltbook(body: {
   return apiFetch('/moltbook', { method: 'POST', body: JSON.stringify(body) });
 }
 
-export async function getManualTrades(): Promise<ManualTradeListResponse | null> {
+export async function getManualTrades(
+  options?: { origin?: 'manual_trade_log' | string },
+): Promise<ManualTradeListResponse | null> {
+  const params = new URLSearchParams();
+  if (options?.origin) {
+    params.set('origin', options.origin);
+  }
+  const qs = params.toString();
+  const path = qs ? `/manual-trades?${qs}` : '/manual-trades';
   try {
-    return await apiFetch<ManualTradeListResponse>('/manual-trades');
+    return await apiFetch<ManualTradeListResponse>(path);
   } catch {
     return null;
   }

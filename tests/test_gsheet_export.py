@@ -167,6 +167,11 @@ def test_export_manual_trade_log_returns_csv(tmp_path, monkeypatch):
     gs = _import_gsheet()
     monkeypatch.setattr(inbox, "MANUAL_TRADE_LOG", tmp_path / "trades.jsonl")
     monkeypatch.setattr(gs, "MANUAL_TRADE_LOG", tmp_path / "trades.jsonl")
+    # Without this, log_manual_trade writes to the operator's real
+    # runtime DB and pollutes the Reconciliation queue with synthetic
+    # SPY rows.  CSV-export tests only need the JSONL side, so disabling
+    # SQLite persistence here is harmless.
+    monkeypatch.setattr(inbox, "_DB_AVAILABLE", False)
     inbox.log_manual_trade(
         event_id="FABRIC_SPY", ticker="SPY", side="BUY",
         quantity=5, price=450, thesis="test thesis"
@@ -187,6 +192,7 @@ def test_export_reconciliation_log_returns_csv(tmp_path, monkeypatch):
     monkeypatch.setattr(inbox, "MANUAL_TRADE_LOG", tmp_path / "trades.jsonl")
     monkeypatch.setattr(inbox, "RECONCILIATIONS_LOG", tmp_path / "recs.jsonl")
     monkeypatch.setattr(gs, "RECONCILIATIONS_LOG", tmp_path / "recs.jsonl")
+    monkeypatch.setattr(inbox, "_DB_AVAILABLE", False)
     inbox.log_manual_trade(
         event_id="FABRIC_SPY", ticker="SPY", side="BUY", quantity=1, price=450, thesis="t"
     )

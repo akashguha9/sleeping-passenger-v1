@@ -49,9 +49,15 @@ export default function ReconciliationPage() {
   useEffect(() => {
     let cancelled = false;
     (async () => {
+      // Reconciliation tab is a human-manual-log surface only.  We pin the
+      // /manual-trades query to origin=manual_trade_log so seed/demo/import
+      // rows (e.g. SPY/QQQ smoke rows) never appear in either the
+      // Awaiting Reconciliation list or the Reconciled column.  The
+      // Manual Trade Log page still calls getManualTrades() with no
+      // filter for full-history audit.
       const [queueData, tradesData, learningData] = await Promise.all([
         getReconciliationQueue(50),
-        getManualTrades(),
+        getManualTrades({ origin: 'manual_trade_log' }),
         getLearningCompleteness(20),
       ]);
       if (!cancelled) {
@@ -145,6 +151,14 @@ export default function ReconciliationPage() {
         Reconciliation is for record-keeping only. Broker API:{' '}
         <span className="text-emerald-400 font-mono font-semibold">NOT CONNECTED</span>. AI executions:{' '}
         <span className="text-emerald-400 font-mono font-bold">0</span>. All data is ADVISORY_ONLY.
+      </div>
+
+      <div
+        className="text-[11px] text-slate-400 bg-slate-900/40 border border-slate-800 rounded px-3 py-2"
+        data-testid="reconciliation-provenance-note"
+      >
+        Reconciliation shows only trades entered via Manual Trade Log.
+        Seed/demo/system rows are excluded.
       </div>
 
       <LearningCompletenessCard data={learning} />
@@ -278,8 +292,11 @@ export default function ReconciliationPage() {
           </h2>
 
           {unreconciledTrades.length === 0 ? (
-            <div className="text-sm text-slate-500 text-center py-8 bg-slate-800/40 rounded-lg border border-slate-700/40">
-              All trades reconciled.
+            <div
+              className="text-sm text-slate-500 text-center py-8 bg-slate-800/40 rounded-lg border border-slate-700/40"
+              data-testid="awaiting-reconciliation-empty"
+            >
+              No human manual logs awaiting reconciliation.
             </div>
           ) : (
             <div className="space-y-3 mb-5" data-testid="awaiting-reconciliation-list">
@@ -300,13 +317,15 @@ export default function ReconciliationPage() {
                       mistakeTags={(t as { mistake_tags?: string }).mistake_tags}
                     />
                   )}
-                  {!usingMockReconciled && (
-                    <CancelManualLogButton
-                      tradeId={t.trade_id}
-                      ticker={t.ticker}
-                      onCancelled={handleLogCancelled}
-                    />
-                  )}
+                  {!usingMockReconciled &&
+                    (t as { created_via?: string }).created_via ===
+                      'manual_trade_log' && (
+                      <CancelManualLogButton
+                        tradeId={t.trade_id}
+                        ticker={t.ticker}
+                        onCancelled={handleLogCancelled}
+                      />
+                    )}
                 </div>
               ))}
             </div>

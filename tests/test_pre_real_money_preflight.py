@@ -49,7 +49,8 @@ def _make_full_repo(tmp_path: Path) -> tuple[Path, Path]:
                 confidence_before REAL,
                 emotional_state TEXT DEFAULT '',
                 mistake_tags TEXT DEFAULT '',
-                lesson TEXT DEFAULT ''
+                lesson TEXT DEFAULT '',
+                created_via TEXT DEFAULT ''
             );
             CREATE TABLE reconciliation_results (
                 reconciliation_id TEXT PRIMARY KEY,
@@ -83,10 +84,10 @@ def _insert_unreconciled(db: Path, count: int) -> None:
         for i in range(count):
             conn.execute(
                 "INSERT INTO manual_trades (trade_id, event_id, ticker, side, quantity,"
-                " price, executed_at, thesis, notes)"
-                " VALUES (?,?,?,?,?,?,?,?,?)",
+                " price, executed_at, thesis, notes, created_via)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?)",
                 (f"T{i}", f"EV{i}", "QQQ", "BUY", 10, 100.0,
-                 "2026-05-10T00:00:00Z", "test", ""),
+                 "2026-05-10T00:00:00Z", "test", "", "manual_trade_log"),
             )
         conn.commit()
     finally:

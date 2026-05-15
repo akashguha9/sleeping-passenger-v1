@@ -143,6 +143,12 @@ export interface ManualTradeLog {
   reconciliation_status?: string;
   cancel_reason?: string;
   cancelled_at?: string;
+  // Provenance marker for the Reconciliation queue contract.  Rows the
+  // operator entered through the Manual Trade Log UI/API carry
+  // 'manual_trade_log'.  Empty / unknown rows (smoke seeds, demo
+  // fixtures, JSONL imports) are excluded from the live Reconciliation
+  // queue.  Storing this NEVER grants execution permission.
+  created_via?: string;
 }
 
 export interface TradeReconciliation {

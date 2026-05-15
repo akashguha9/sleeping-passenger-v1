@@ -42,7 +42,8 @@ def _create_schema(db_path: Path) -> None:
                 confidence_before REAL,
                 emotional_state TEXT DEFAULT '',
                 mistake_tags TEXT DEFAULT '',
-                lesson TEXT DEFAULT ''
+                lesson TEXT DEFAULT '',
+                created_via TEXT DEFAULT ''
             );
             CREATE TABLE reconciliation_results (
                 reconciliation_id TEXT PRIMARY KEY,
@@ -94,10 +95,11 @@ def _insert_trade(
         conn.execute(
             "INSERT INTO manual_trades (trade_id, event_id, ticker, side, quantity, price,"
             " executed_at, thesis, invalidation_level, expected_horizon,"
-            " risk_reason, entry_reason, exit_plan)"
-            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            " risk_reason, entry_reason, exit_plan, created_via)"
+            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (trade_id, f"EV_{trade_id}", ticker, "BUY", 10, 100.0,
-             executed_at, thesis, invalidation, horizon, risk, entry, exit_plan),
+             executed_at, thesis, invalidation, horizon, risk, entry, exit_plan,
+             "manual_trade_log"),
         )
         conn.commit()
     finally:

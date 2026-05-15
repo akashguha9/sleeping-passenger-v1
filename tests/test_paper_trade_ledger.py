@@ -334,8 +334,12 @@ def test_export_round_trips_paper_rows(tmp_db: Path, tmp_path: Path) -> None:
     assert rows[0]["symbol"] == "RT"
 
 
-def test_log_manual_trade_paper_mode_response_stamps() -> None:
+def test_log_manual_trade_paper_mode_response_stamps(
+    tmp_path, monkeypatch
+) -> None:
     """log_manual_trade(trade_mode='PAPER') response carries paper stamps."""
+    monkeypatch.setattr(signal_inbox_api, "MANUAL_TRADE_LOG", tmp_path / "mt.jsonl")
+    monkeypatch.setattr(signal_inbox_api, "_DB_AVAILABLE", False)
     resp = signal_inbox_api.log_manual_trade(
         event_id="EV_PAPER_RESPONSE",
         ticker="ZZZ",
@@ -352,7 +356,11 @@ def test_log_manual_trade_paper_mode_response_stamps() -> None:
     assert resp["execution_gate"] == "LOCKED"
 
 
-def test_log_manual_trade_hostile_trade_mode_falls_through_to_real_manual() -> None:
+def test_log_manual_trade_hostile_trade_mode_falls_through_to_real_manual(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.setattr(signal_inbox_api, "MANUAL_TRADE_LOG", tmp_path / "mt.jsonl")
+    monkeypatch.setattr(signal_inbox_api, "_DB_AVAILABLE", False)
     resp = signal_inbox_api.log_manual_trade(
         event_id="EV_HOSTILE_MODE",
         ticker="ZZZ",

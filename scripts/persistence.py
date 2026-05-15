@@ -373,6 +373,13 @@ def _additive_migrations(conn: sqlite3.Connection) -> None:
         ("manual_trades", "reconciliation_status", "TEXT NOT NULL DEFAULT ''"),
         ("manual_trades", "cancel_reason", "TEXT NOT NULL DEFAULT ''"),
         ("manual_trades", "cancelled_at", "TEXT NOT NULL DEFAULT ''"),
+        # Sprint: Reconciliation provenance.  ``created_via`` records which
+        # surface created the row.  Only rows where created_via='manual_trade_log'
+        # appear in the live Reconciliation queue and Learning Completeness
+        # report.  Legacy rows default to '' (unknown provenance) and are
+        # excluded from the queue by design.  Storing this NEVER grants
+        # execution permission; the safety stamps are unchanged.
+        ("manual_trades", "created_via", "TEXT NOT NULL DEFAULT ''"),
         # Reconciliation outcome-quality / process-error fields.
         ("reconciliation_results", "outcome_quality", "TEXT NOT NULL DEFAULT ''"),
         ("reconciliation_results", "process_error", "TEXT NOT NULL DEFAULT ''"),
@@ -713,6 +720,7 @@ def insert_manual_trade(
     gallardo_block_at_decision: bool | int | None = None,
     preflight_state_at_decision: str = "",
     trade_mode: str = "REAL_MANUAL",
+    created_via: str = "",
 ) -> None:
     """Insert a manual trade record. ``leverage`` is record-only (record-keeping
     of human leverage choice — no broker margin/execution implications).
@@ -750,11 +758,17 @@ def insert_manual_trade(
     if mode_norm not in {"PAPER", "REAL_MANUAL", "UNKNOWN"}:
         mode_norm = "REAL_MANUAL"
 
+    # Normalise created_via at persistence boundary so hostile/typo values
+    # cannot pollute the provenance contract.  Empty string is the safe
+    # legacy default ("unknown provenance" — excluded from Reconciliation).
+    created_via_norm = str(created_via or "").strip()
+
     conn = _get_conn(db_path)
     try:
         cols = {row[1] for row in conn.execute("PRAGMA table_info(manual_trades)")}
         has_reactor_cols = "reactor_state_at_decision" in cols
         has_trade_mode = "trade_mode" in cols
+        has_created_via = "created_via" in cols
         base_cols = (
             "trade_id, event_id, ticker, side, quantity, price, executed_at,"
             " thesis, notes, logged_by, leverage, execution_mode, ai_execution_count,"
@@ -803,6 +817,9 @@ def insert_manual_trade(
         if has_trade_mode:
             cols_sql = cols_sql + ", trade_mode"
             vals = vals + (mode_norm,)
+        if has_created_via:
+            cols_sql = cols_sql + ", created_via"
+            vals = vals + (created_via_norm,)
         placeholders = ", ".join(["?"] * len(vals))
         conn.execute(
             f"INSERT OR IGNORE INTO manual_trades ({cols_sql}) VALUES ({placeholders})",

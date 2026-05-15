@@ -259,6 +259,76 @@ def test_cancel_does_not_increment_ai_execution_count(tmp_db: Path) -> None:
         assert t.get("ai_execution_count", 0) == 0
 
 
+def test_human_manual_log_carries_created_via_provenance(tmp_db: Path) -> None:
+    """Every row logged via the Manual Trade Log API stamps created_via."""
+    resp = signal_inbox_api.log_manual_trade(
+        event_id="EV_PROV",
+        ticker="ICICIBANK.NS",
+        side="BUY",
+        quantity=1.0,
+        price=100.0,
+        thesis="provenance smoke",
+    )
+    conn = sqlite3.connect(str(tmp_db))
+    try:
+        row = conn.execute(
+            "SELECT created_via FROM manual_trades WHERE trade_id=?",
+            (resp["trade_id"],),
+        ).fetchone()
+    finally:
+        conn.close()
+    assert row is not None
+    assert row[0] == "manual_trade_log"
+
+
+def test_cancel_refused_for_non_manual_log_origin(tmp_db: Path) -> None:
+    """Seed/demo/unknown-provenance rows must refuse Cancel Log."""
+    # Insert a seed-style row directly via persistence (mimics what
+    # smoke seeds / gsheet fixtures / JSONL imports do — they bypass the
+    # Manual Trade Log API and leave created_via empty).
+    persistence.insert_manual_trade(
+        "MT_seed_spy",
+        "EV_SEED",
+        "SPY",
+        "BUY",
+        10.0,
+        450.0,
+        "2026-05-10T06:11:39+00:00",
+        "Strong persistence in recent window",
+        "",
+        "human",
+        db_path=tmp_db,
+        # NOTE: no created_via -> stays empty -> excluded
+    )
+    resp = signal_inbox_api.cancel_manual_trade_log("MT_seed_spy")
+    assert resp["status"] == "refused"
+    assert resp["reason"] == "non_manual_trade_log_origin"
+    assert resp["broker_api_called"] is False
+    assert resp["ai_execution_count"] == 0
+
+
+def test_cancel_refused_for_explicit_seed_provenance(tmp_db: Path) -> None:
+    """A row stamped with anything other than manual_trade_log refuses."""
+    persistence.insert_manual_trade(
+        "MT_imported_csv",
+        "EV_IMP",
+        "AAPL",
+        "BUY",
+        1.0,
+        100.0,
+        "2026-05-10T06:11:39+00:00",
+        "imported audit row",
+        "",
+        "import_script",
+        db_path=tmp_db,
+        created_via="imported_csv",
+    )
+    resp = signal_inbox_api.cancel_manual_trade_log("MT_imported_csv")
+    assert resp["status"] == "refused"
+    assert resp["reason"] == "non_manual_trade_log_origin"
+    assert resp["created_via"] == "imported_csv"
+
+
 def test_cancel_does_not_affect_learning_completeness(tmp_db: Path) -> None:
     """A cancelled log must not be counted as a learning-incomplete row.
 

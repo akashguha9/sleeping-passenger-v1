@@ -254,6 +254,10 @@ def test_mark_signal_empty_event_id():
 def test_log_manual_trade_human_only(tmp_path, monkeypatch):
     api = _import_api()
     monkeypatch.setattr(api, "MANUAL_TRADE_LOG", tmp_path / "trades.jsonl")
+    # Disable SQLite writes for this test — without this monkey-patch
+    # log_manual_trade writes into the operator's real runtime DB and
+    # pollutes the Reconciliation queue with synthetic SPY/QQQ rows.
+    monkeypatch.setattr(api, "_DB_AVAILABLE", False)
     result = api.log_manual_trade(
         event_id="FABRIC_SPY",
         ticker="SPY",
@@ -274,6 +278,7 @@ def test_log_manual_trade_human_only(tmp_path, monkeypatch):
 def test_log_manual_trade_persisted_correctly(tmp_path, monkeypatch):
     api = _import_api()
     monkeypatch.setattr(api, "MANUAL_TRADE_LOG", tmp_path / "trades.jsonl")
+    monkeypatch.setattr(api, "_DB_AVAILABLE", False)
     result = api.log_manual_trade(
         event_id="FABRIC_QQQ",
         ticker="QQQ",
@@ -333,6 +338,7 @@ def test_reconcile_trade_advisory_fields(tmp_path, monkeypatch):
     api = _import_api()
     monkeypatch.setattr(api, "MANUAL_TRADE_LOG", tmp_path / "trades.jsonl")
     monkeypatch.setattr(api, "RECONCILIATIONS_LOG", tmp_path / "recs.jsonl")
+    monkeypatch.setattr(api, "_DB_AVAILABLE", False)
     api.log_manual_trade(
         event_id="FABRIC_SPY", ticker="SPY", side="BUY",
         quantity=1, price=450, thesis="test"
@@ -357,6 +363,7 @@ def test_reconcile_trade_invalid_status_defaults_unknown(tmp_path, monkeypatch):
     api = _import_api()
     monkeypatch.setattr(api, "MANUAL_TRADE_LOG", tmp_path / "trades.jsonl")
     monkeypatch.setattr(api, "RECONCILIATIONS_LOG", tmp_path / "recs.jsonl")
+    monkeypatch.setattr(api, "_DB_AVAILABLE", False)
     result = api.reconcile_trade(
         "MT_fake",
         actual_fill_price=100.0,

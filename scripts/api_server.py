@@ -904,8 +904,17 @@ def post_cancel_manual_trade_log(
 
 
 @app.get("/manual-trades")
-def get_manual_trades() -> dict:
-    return list_manual_trades()
+def get_manual_trades(origin: str | None = None) -> dict:
+    """List logged manual trades.
+
+    The optional ``origin`` query parameter scopes the response to a single
+    provenance bucket.  Pass ``origin=manual_trade_log`` to receive only
+    rows the operator entered through the Manual Trade Log UI/API; this is
+    what the Reconciliation page uses to keep seed/demo/import rows out
+    of the live operator surface.  Omitting the parameter returns every
+    row for audit on the Manual Trade Log page.
+    """
+    return list_manual_trades(origin=origin)
 
 
 # ---------------------------------------------------------------------------
@@ -995,10 +1004,22 @@ def get_learning_completeness(limit: int | None = 50) -> dict:
                 conn.row_factory = _sqlite3.Row
                 cols = {r[1] for r in conn.execute("PRAGMA table_info(manual_trades)")}
                 if "trade_mode" in cols:
-                    rows = conn.execute(
-                        "SELECT COALESCE(NULLIF(TRIM(trade_mode),''),'UNKNOWN') AS tm,"
-                        " COUNT(*) AS n FROM manual_trades GROUP BY tm"
-                    ).fetchall()
+                    # Restrict trade_mode distribution to rows created
+                    # through the Manual Trade Log UI/API so the count
+                    # matches the Learning Completeness numbers and does
+                    # not balloon from seed/demo/import rows.
+                    if "created_via" in cols:
+                        rows = conn.execute(
+                            "SELECT COALESCE(NULLIF(TRIM(trade_mode),''),'UNKNOWN') AS tm,"
+                            " COUNT(*) AS n FROM manual_trades"
+                            " WHERE COALESCE(created_via, '') = ?"
+                            " GROUP BY tm",
+                            ("manual_trade_log",),
+                        ).fetchall()
+                    else:
+                        # Old DB without the provenance column — emit an
+                        # empty distribution rather than leaking seeds.
+                        rows = []
                     dist = {str(r["tm"]).upper(): int(r["n"]) for r in rows}
                     payload["trade_mode_distribution"] = dist
                     payload["paper_trade_count"] = dist.get("PAPER", 0)

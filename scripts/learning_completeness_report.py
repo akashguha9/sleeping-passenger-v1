@@ -65,6 +65,15 @@ from typing import Any
 ADVISORY_STATUS = "ADVISORY_ONLY"
 EXECUTION_GATE_LOCKED = "LOCKED"
 
+# Provenance contract — mirrors MANUAL_TRADE_LOG_PROVENANCE in
+# scripts/signal_inbox_api.py.  Learning completeness counts only rows
+# the operator entered through the Manual Trade Log UI/API.  Smoke seeds,
+# demo fixtures, JSONL imports, and historical sample rows (e.g. SPY/QQQ
+# "Strong persistence…" / "Exit on kill rate…" rows from
+# local_mvp_smoke_test.py) carry an empty / unknown provenance and are
+# excluded — they are not part of the operator's decision journal.
+MANUAL_TRADE_LOG_PROVENANCE = "manual_trade_log"
+
 ADVISORY_DISCLAIMER = (
     "Learning-completeness report is advisory-only.  Marking a trade "
     "learning-complete records that the operator filled in the required "
@@ -283,13 +292,41 @@ def build_report(
                 )
                 select_rr.append(f"rr.{col} AS {alias}")
 
+        # Provenance filter — only count rows the operator entered
+        # through the Manual Trade Log UI/API.  Empty / unknown
+        # provenance is excluded by design so seed/demo/import rows do
+        # not pollute the Learning Completeness counts (missing field
+        # distribution, oldest incomplete trades, complete-vs-incomplete
+        # split).
+        if "created_via" in mt_cols:
+            provenance_clause = " AND COALESCE(mt.created_via, '') = ?"
+            provenance_params: tuple[Any, ...] = (MANUAL_TRADE_LOG_PROVENANCE,)
+        else:
+            warnings.append("manual_trades_missing_created_via_column")
+            provenance_clause = " AND 1=0"
+            provenance_params = ()
+        # Defence in depth: never count a row that ever claimed a broker
+        # call or AI execution, even though this app never sets either.
+        broker_clause = (
+            " AND COALESCE(mt.broker_api_called, 0) = 0"
+            if "broker_api_called" in mt_cols else ""
+        )
+        ai_clause = (
+            " AND COALESCE(mt.ai_execution_count, 0) = 0"
+            if "ai_execution_count" in mt_cols else ""
+        )
         select_clause = ", ".join(select_mt + select_rr)
         try:
             rows = conn.execute(
                 f"SELECT {select_clause} FROM manual_trades mt"  # noqa: S608
                 " INNER JOIN reconciliation_results rr"
                 "  ON rr.trade_id = mt.trade_id"
-                " ORDER BY mt.executed_at ASC"
+                " WHERE 1=1"
+                + provenance_clause
+                + broker_clause
+                + ai_clause
+                + " ORDER BY mt.executed_at ASC",
+                provenance_params,
             ).fetchall()
         except sqlite3.Error as exc:
             warnings.append(f"query_failed:{type(exc).__name__}")
@@ -427,6 +464,7 @@ __all__ = [
     "EXECUTION_GATE_LOCKED",
     "ADVISORY_DISCLAIMER",
     "OPERATOR_ACTION",
+    "MANUAL_TRADE_LOG_PROVENANCE",
     "build_report",
     "_classify_row",
 ]

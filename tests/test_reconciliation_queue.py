@@ -29,12 +29,20 @@ from scripts import reconciliation_queue as rq
 # ---------------------------------------------------------------------------
 
 
-def _create_schema(db_path: Path, *, with_recon: bool = True) -> None:
+def _create_schema(
+    db_path: Path,
+    *,
+    with_recon: bool = True,
+    with_created_via: bool = True,
+) -> None:
     db_path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(db_path))
     try:
+        provenance_col = (
+            ", created_via TEXT DEFAULT ''" if with_created_via else ""
+        )
         conn.executescript(
-            """
+            f"""
             CREATE TABLE manual_trades (
                 trade_id TEXT PRIMARY KEY,
                 event_id TEXT,
@@ -53,7 +61,11 @@ def _create_schema(db_path: Path, *, with_recon: bool = True) -> None:
                 confidence_before REAL,
                 emotional_state TEXT DEFAULT '',
                 mistake_tags TEXT DEFAULT '',
-                lesson TEXT DEFAULT ''
+                lesson TEXT DEFAULT '',
+                reconciliation_status TEXT DEFAULT '',
+                broker_api_called INTEGER DEFAULT 0,
+                ai_execution_count INTEGER DEFAULT 0
+                {provenance_col}
             );
             """
         )
@@ -98,20 +110,36 @@ def _insert_trade(
     emotional_state: str = "",
     mistake_tags: str = "",
     lesson: str = "",
+    reconciliation_status: str = "",
+    created_via: str = "manual_trade_log",
+    broker_api_called: int = 0,
+    ai_execution_count: int = 0,
 ) -> None:
     conn = sqlite3.connect(str(db_path))
     try:
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(manual_trades)")}
+        base_cols = [
+            "trade_id", "event_id", "ticker", "side", "quantity", "price",
+            "executed_at", "thesis", "invalidation_level", "expected_horizon",
+            "risk_reason", "entry_reason", "exit_plan", "confidence_before",
+            "emotional_state", "mistake_tags", "lesson",
+            "reconciliation_status", "broker_api_called", "ai_execution_count",
+        ]
+        base_vals = [
+            trade_id, event_id, ticker, side, quantity, price,
+            executed_at, thesis, invalidation_level, expected_horizon,
+            risk_reason, entry_reason, exit_plan, confidence_before,
+            emotional_state, mistake_tags, lesson,
+            reconciliation_status, broker_api_called, ai_execution_count,
+        ]
+        if "created_via" in cols:
+            base_cols.append("created_via")
+            base_vals.append(created_via)
+        placeholders = ",".join("?" for _ in base_cols)
         conn.execute(
-            "INSERT INTO manual_trades (trade_id, event_id, ticker, side, quantity, price,"
-            " executed_at, thesis, invalidation_level, expected_horizon, risk_reason,"
-            " entry_reason, exit_plan, confidence_before, emotional_state, mistake_tags, lesson)"
-            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-            (
-                trade_id, event_id, ticker, side, quantity, price,
-                executed_at, thesis, invalidation_level, expected_horizon,
-                risk_reason, entry_reason, exit_plan, confidence_before,
-                emotional_state, mistake_tags, lesson,
-            ),
+            f"INSERT INTO manual_trades ({', '.join(base_cols)})"
+            f" VALUES ({placeholders})",
+            tuple(base_vals),
         )
         conn.commit()
     finally:
@@ -379,3 +407,154 @@ def test_cli_json_missing_db(tmp_path, capsys):
     assert rc == 1
     out = capsys.readouterr().out
     assert "db_missing" in out
+
+
+# ---------------------------------------------------------------------------
+# Provenance contract — Reconciliation is a human-manual-log queue only
+# ---------------------------------------------------------------------------
+
+
+def test_human_manual_trade_log_row_appears(tmp_path):
+    """A row created through the Manual Trade Log path is in the queue."""
+    db_path = tmp_path / "queue.db"
+    _create_schema(db_path)
+    _insert_trade(
+        db_path,
+        trade_id="MT_human1",
+        ticker="ICICIBANK.NS",
+        created_via="manual_trade_log",
+    )
+    payload = rq.build_queue(db_path)
+    ids = [it["trade_id"] for it in payload["items"]]
+    assert ids == ["MT_human1"]
+    assert payload["summary"]["unreconciled_count"] == 1
+
+
+def test_seed_row_excluded_from_queue(tmp_path):
+    """Seed/sample rows with empty provenance must not appear."""
+    db_path = tmp_path / "queue.db"
+    _create_schema(db_path)
+    _insert_trade(
+        db_path,
+        trade_id="MT_seed_spy",
+        ticker="SPY",
+        thesis="Strong persistence in recent window",
+        created_via="",  # empty == unknown provenance, excluded
+    )
+    _insert_trade(
+        db_path,
+        trade_id="MT_seed_qqq",
+        ticker="QQQ",
+        side="SELL",
+        thesis="Exit on kill rate spike",
+        created_via="",
+    )
+    _insert_trade(
+        db_path,
+        trade_id="MT_human1",
+        ticker="ICICIBANK.NS",
+        created_via="manual_trade_log",
+    )
+    payload = rq.build_queue(db_path)
+    ids = [it["trade_id"] for it in payload["items"]]
+    assert ids == ["MT_human1"]
+    tickers = [it["ticker"] for it in payload["items"]]
+    assert "SPY" not in tickers
+    assert "QQQ" not in tickers
+
+
+def test_unknown_provenance_legacy_row_excluded(tmp_path):
+    """Rows with an unrecognized provenance string are still excluded."""
+    db_path = tmp_path / "queue.db"
+    _create_schema(db_path)
+    _insert_trade(
+        db_path, trade_id="MT_legacy", created_via="imported_csv"
+    )
+    payload = rq.build_queue(db_path)
+    assert payload["items"] == []
+    assert payload["summary"]["unreconciled_count"] == 0
+
+
+def test_cancelled_human_log_excluded(tmp_path):
+    """A soft-cancelled human manual log no longer awaits reconciliation."""
+    db_path = tmp_path / "queue.db"
+    _create_schema(db_path)
+    _insert_trade(
+        db_path,
+        trade_id="MT_human1",
+        ticker="ICICIBANK.NS",
+        created_via="manual_trade_log",
+        reconciliation_status="CANCELLED_DUPLICATE",
+    )
+    payload = rq.build_queue(db_path)
+    assert payload["items"] == []
+
+
+def test_reconciled_human_log_excluded(tmp_path):
+    """A reconciled human manual log is not in the awaiting queue."""
+    db_path = tmp_path / "queue.db"
+    _create_schema(db_path)
+    _insert_trade(
+        db_path,
+        trade_id="MT_human1",
+        ticker="ICICIBANK.NS",
+        created_via="manual_trade_log",
+    )
+    _insert_reconciliation(db_path, trade_id="MT_human1")
+    payload = rq.build_queue(db_path)
+    assert payload["items"] == []
+
+
+def test_broker_api_called_row_excluded_even_with_provenance(tmp_path):
+    """Defence in depth: a row that ever claimed a broker call is excluded."""
+    db_path = tmp_path / "queue.db"
+    _create_schema(db_path)
+    _insert_trade(
+        db_path,
+        trade_id="MT_corrupt",
+        created_via="manual_trade_log",
+        broker_api_called=1,
+    )
+    payload = rq.build_queue(db_path)
+    assert payload["items"] == []
+
+
+def test_ai_execution_count_nonzero_row_excluded(tmp_path):
+    """Defence in depth: ai_execution_count!=0 is excluded."""
+    db_path = tmp_path / "queue.db"
+    _create_schema(db_path)
+    _insert_trade(
+        db_path,
+        trade_id="MT_corrupt",
+        created_via="manual_trade_log",
+        ai_execution_count=1,
+    )
+    payload = rq.build_queue(db_path)
+    assert payload["items"] == []
+
+
+def test_missing_created_via_column_emits_warning_and_excludes_all(tmp_path):
+    """Very old DBs lacking the provenance column must not leak seeds."""
+    db_path = tmp_path / "queue.db"
+    _create_schema(db_path, with_created_via=False)
+    _insert_trade(db_path, trade_id="T1")
+    payload = rq.build_queue(db_path)
+    assert payload["items"] == []
+    assert "manual_trades_missing_created_via_column" in payload["warnings"]
+
+
+def test_safety_stamps_locked_on_queue_envelope(tmp_path):
+    """No code path may flip broker_api_called or ai_execution_count."""
+    db_path = tmp_path / "queue.db"
+    _create_schema(db_path)
+    _insert_trade(
+        db_path, trade_id="MT_human1", created_via="manual_trade_log"
+    )
+    payload = rq.build_queue(db_path)
+    assert payload["broker_api_called"] is False
+    assert payload["ai_execution_count"] == 0
+    assert payload["execution_permission"] is False
+    assert payload["can_execute"] is False
+    for item in payload["items"]:
+        assert item["broker_api_called"] is False
+        assert item["ai_execution_count"] == 0

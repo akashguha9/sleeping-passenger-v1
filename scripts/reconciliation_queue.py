@@ -11,8 +11,20 @@ Read-only.  No DB writes.  No broker calls.  No execution permission.
 
 Definition of "unreconciled"
 ----------------------------
-A row in ``manual_trades`` is unreconciled if no row exists in
-``reconciliation_results`` with the same ``trade_id``.
+A row in ``manual_trades`` is unreconciled if ALL of the following hold:
+
+1. It was created through the Manual Trade Log UI/API
+   (``created_via = 'manual_trade_log'``).  Rows with empty / unknown
+   provenance (smoke seeds, demo fixtures, JSONL imports, historical
+   sample rows like SPY/QQQ "Strong persistence…" / "Exit on kill rate…")
+   are excluded — Reconciliation is the live operator surface, not a
+   dump of every row in the table.
+2. It has not been soft-cancelled (``reconciliation_status`` is not
+   ``CANCELLED_DUPLICATE`` / ``CANCELLED_LOG``).
+3. It has no row in ``reconciliation_results`` with the same ``trade_id``.
+4. Defence in depth: ``broker_api_called`` is 0 and
+   ``ai_execution_count`` is 0.  This app never sets either, but a
+   corrupt/imported row that did would still be excluded.
 
 Output shape
 ------------
@@ -53,6 +65,15 @@ from typing import Any
 
 ADVISORY_STATUS = "ADVISORY_ONLY"
 EXECUTION_GATE_LOCKED = "LOCKED"
+
+# Provenance contract for the Reconciliation queue.  ONLY rows whose
+# created_via column equals this exact value appear in the live queue.
+# Empty / unknown provenance (legacy rows, smoke seeds, demo fixtures,
+# JSONL imports) is excluded by design — Reconciliation is the human
+# operator's record-keeping surface, not a dump of every row in the
+# manual_trades table.  Mirrors MANUAL_TRADE_LOG_PROVENANCE in
+# scripts/signal_inbox_api.py.
+MANUAL_TRADE_LOG_PROVENANCE = "manual_trade_log"
 
 ADVISORY_DISCLAIMER = (
     "Reconciliation queue is advisory-only. Listing a trade here does not "
@@ -271,6 +292,36 @@ def build_queue(
                 " AND COALESCE(mt.reconciliation_status, '') NOT IN"
                 " ('CANCELLED_DUPLICATE', 'CANCELLED_LOG')"
             )
+        # Provenance filter: only show rows the operator entered through
+        # the Manual Trade Log UI/API.  Empty / unknown provenance is
+        # excluded by default so smoke seeds, demo fixtures, JSONL
+        # imports, and historical sample rows (e.g. SPY 'Strong
+        # persistence…', QQQ 'Exit on kill rate…' rows from
+        # local_mvp_smoke_test.py and gsheet-export fixtures) never
+        # pollute the live queue.  When the column is missing on a very
+        # old DB we emit a warning and refuse to fall back to unfiltered
+        # listing — better to surface an empty queue than to leak seeds.
+        if "created_via" in cols:
+            provenance_clause = (
+                " AND COALESCE(mt.created_via, '') = ?"
+            )
+            provenance_params: tuple[Any, ...] = (MANUAL_TRADE_LOG_PROVENANCE,)
+        else:
+            warnings.append("manual_trades_missing_created_via_column")
+            provenance_clause = " AND 1=0"  # exclude everything
+            provenance_params = ()
+        # Defence in depth: refuse to surface rows that ever claimed
+        # broker_api_called=1 or ai_execution_count!=0, even though this
+        # app never sets either.  Keeps the contract honest if a corrupt
+        # row is ever imported.
+        broker_clause = (
+            " AND COALESCE(mt.broker_api_called, 0) = 0"
+            if "broker_api_called" in cols else ""
+        )
+        ai_clause = (
+            " AND COALESCE(mt.ai_execution_count, 0) = 0"
+            if "ai_execution_count" in cols else ""
+        )
         select_clause = ", ".join(select_cols)
         try:
             rows = conn.execute(
@@ -278,7 +329,13 @@ def build_queue(
                 " WHERE NOT EXISTS ("
                 "   SELECT 1 FROM reconciliation_results rr"
                 "   WHERE rr.trade_id = mt.trade_id"
-                " )" + cancel_clause + " ORDER BY mt.executed_at ASC"
+                " )"
+                + cancel_clause
+                + provenance_clause
+                + broker_clause
+                + ai_clause
+                + " ORDER BY mt.executed_at ASC",
+                provenance_params,
             ).fetchall()
         except sqlite3.Error as exc:
             warnings.append(f"query_failed:{type(exc).__name__}")
@@ -480,6 +537,7 @@ __all__ = [
     "EXECUTION_GATE_LOCKED",
     "ADVISORY_DISCLAIMER",
     "OPERATOR_ACTION",
+    "MANUAL_TRADE_LOG_PROVENANCE",
     "build_queue",
 ]
 
