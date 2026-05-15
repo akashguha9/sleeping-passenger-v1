@@ -364,6 +364,15 @@ def _additive_migrations(conn: sqlite3.Connection) -> None:
         # column NEVER grants execution permission.  Paper rows are
         # simulation/rehearsal data and never imply broker_api_called.
         ("manual_trades", "trade_mode", "TEXT NOT NULL DEFAULT 'REAL_MANUAL'"),
+        # Soft-cancel columns for duplicate / mis-logged manual entries.
+        # Empty reconciliation_status means "active / unreconciled".  Setting
+        # it to 'CANCELLED_DUPLICATE' removes the row from the live
+        # reconciliation queue without deleting the audit row.  This is pure
+        # record-keeping: cancellation NEVER calls the broker, NEVER cancels
+        # a real order, and NEVER touches ai_execution_count.
+        ("manual_trades", "reconciliation_status", "TEXT NOT NULL DEFAULT ''"),
+        ("manual_trades", "cancel_reason", "TEXT NOT NULL DEFAULT ''"),
+        ("manual_trades", "cancelled_at", "TEXT NOT NULL DEFAULT ''"),
         # Reconciliation outcome-quality / process-error fields.
         ("reconciliation_results", "outcome_quality", "TEXT NOT NULL DEFAULT ''"),
         ("reconciliation_results", "process_error", "TEXT NOT NULL DEFAULT ''"),
@@ -839,6 +848,92 @@ def get_all_manual_trades(db_path: Path = DB_PATH) -> list[dict[str, Any]]:
     finally:
         conn.close()
     return [_to_dict(r) for r in rows]
+
+
+def get_manual_trade(
+    trade_id: str, db_path: Path = DB_PATH
+) -> dict[str, Any] | None:
+    """Return one manual-trade row by trade_id, or None if absent."""
+    conn = _get_conn(db_path)
+    try:
+        row = conn.execute(
+            "SELECT * FROM manual_trades WHERE trade_id=? LIMIT 1",
+            (trade_id,),
+        ).fetchone()
+    finally:
+        conn.close()
+    return _to_dict(row) if row else None
+
+
+def get_manual_trade_raw_broker_flag(
+    trade_id: str, db_path: Path = DB_PATH
+) -> int | None:
+    """Return the *raw* broker_api_called column for one trade.
+
+    ``_to_dict`` rewrites broker_api_called to False on every read to lock
+    the advisory invariant.  The Reconciliation tab's "Cancel Log" path
+    needs the *unsanitized* value as a defence-in-depth check: if a row
+    somehow ever carried broker_api_called=1 (corrupt/imported data), we
+    refuse to silently soft-cancel it.  Returns None when the row or
+    column is absent.
+    """
+    conn = _get_conn(db_path)
+    try:
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(manual_trades)")}
+        if "broker_api_called" not in cols:
+            return None
+        row = conn.execute(
+            "SELECT broker_api_called FROM manual_trades WHERE trade_id=? LIMIT 1",
+            (trade_id,),
+        ).fetchone()
+    finally:
+        conn.close()
+    if row is None:
+        return None
+    try:
+        return int(row[0] or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def cancel_manual_trade(
+    trade_id: str,
+    cancelled_at: str,
+    *,
+    cancel_reason: str = "",
+    status: str = "CANCELLED_DUPLICATE",
+    db_path: Path = DB_PATH,
+) -> bool:
+    """Soft-cancel a manual trade log row.
+
+    Sets ``reconciliation_status`` to ``status`` (defaults to
+    ``CANCELLED_DUPLICATE``) and records the cancellation timestamp and
+    reason on the existing row.  Never deletes the row — the audit trail
+    of "this log was created then cancelled" is preserved.  Never calls
+    a broker; never touches ai_execution_count or broker_api_called.
+
+    Returns True when a row was updated, False when no row matched.
+    """
+    conn = _get_conn(db_path)
+    try:
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(manual_trades)")}
+        if "reconciliation_status" not in cols:
+            return False
+        cur = conn.execute(
+            "UPDATE manual_trades"
+            " SET reconciliation_status=?, cancel_reason=?, cancelled_at=?"
+            " WHERE trade_id=?",
+            (
+                str(status or "CANCELLED_DUPLICATE"),
+                str(cancel_reason or ""),
+                str(cancelled_at or ""),
+                str(trade_id or ""),
+            ),
+        )
+        conn.commit()
+        return cur.rowcount > 0
+    finally:
+        conn.close()
 
 
 # ---------------------------------------------------------------------------
@@ -1703,6 +1798,9 @@ __all__ = [
     "get_trades_for_event",
     "get_event_id_for_trade",
     "get_all_manual_trades",
+    "get_manual_trade",
+    "get_manual_trade_raw_broker_flag",
+    "cancel_manual_trade",
     "insert_reconciliation",
     "get_reconciliations_for_trade",
     "get_all_reconciliations",

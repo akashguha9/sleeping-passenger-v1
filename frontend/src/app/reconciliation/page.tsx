@@ -9,6 +9,7 @@ import {
 } from '@/lib/apiClient';
 import { MOCK_MANUAL_TRADES, MOCK_RECONCILIATIONS } from '@/lib/mockData';
 import { ReconciliationCard } from '@/components/ReconciliationCard';
+import { CancelManualLogButton } from '@/components/CancelManualLogButton';
 import { HumanOnlyBadge } from '@/components/HumanOnlyBadge';
 import { AdvisoryOnlyBadge } from '@/components/AdvisoryOnlyBadge';
 import { BacklogReadinessBadge } from '@/components/BacklogReadinessBadge';
@@ -37,6 +38,13 @@ export default function ReconciliationPage() {
   const [queueLoading, setQueueLoading] = useState(true);
   const [manualTrades, setManualTrades] = useState<ManualTradeListResponse | null>(null);
   const [learning, setLearning] = useState<LearningCompletenessResponse | null>(null);
+  // Trades the operator just cancelled via "Cancel Log".  Used to hide
+  // them immediately even before the next /manual-trades round-trip lands.
+  // Cancellation is record-keeping only — no broker call, no execution.
+  const [locallyCancelled, setLocallyCancelled] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const [refreshTick, setRefreshTick] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -56,7 +64,7 @@ export default function ReconciliationPage() {
     return () => {
       cancelled = true;
     };
-  }, [submitted]);
+  }, [submitted, refreshTick]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -90,12 +98,35 @@ export default function ReconciliationPage() {
   // is unreachable so the UI still has something to render in offline mode.
   const usingMockReconciled = manualTrades === null;
   const reconciledMockIds = new Set(MOCK_RECONCILIATIONS.map((r) => r.trade_id));
+  const isCancelledLog = (t: { reconciliation_status?: string; trade_id: string }) => {
+    const status = (t.reconciliation_status ?? '').toUpperCase();
+    return (
+      status === 'CANCELLED_DUPLICATE' ||
+      status === 'CANCELLED_LOG' ||
+      locallyCancelled.has(t.trade_id)
+    );
+  };
   const unreconciledTrades = usingMockReconciled
-    ? MOCK_MANUAL_TRADES.filter((t) => !reconciledMockIds.has(t.trade_id))
-    : (manualTrades?.trades ?? []).filter((t) => !(t.learning_ready ?? false));
+    ? MOCK_MANUAL_TRADES.filter(
+        (t) => !reconciledMockIds.has(t.trade_id) && !isCancelledLog(t),
+      )
+    : (manualTrades?.trades ?? []).filter(
+        (t) => !(t.learning_ready ?? false) && !isCancelledLog(t),
+      );
   const realReconciledTrades = (manualTrades?.trades ?? []).filter(
     (t) => t.learning_ready === true,
   );
+
+  function handleLogCancelled(tradeId: string) {
+    setLocallyCancelled((prev) => {
+      const next = new Set(prev);
+      next.add(tradeId);
+      return next;
+    });
+    // Re-fetch the queue + trades so the unreconciled counter, journal
+    // gaps row, and learning completeness card all reflect the cancel.
+    setRefreshTick((n) => n + 1);
+  }
 
   return (
     <div className="max-w-4xl mx-auto space-y-5">
@@ -267,6 +298,13 @@ export default function ReconciliationPage() {
                       }
                       lesson={(t as { lesson?: string }).lesson}
                       mistakeTags={(t as { mistake_tags?: string }).mistake_tags}
+                    />
+                  )}
+                  {!usingMockReconciled && (
+                    <CancelManualLogButton
+                      tradeId={t.trade_id}
+                      ticker={t.ticker}
+                      onCancelled={handleLogCancelled}
                     />
                   )}
                 </div>

@@ -80,6 +80,7 @@ REFLECTIONS_LOG: Path = LOG_DIR / "user_reflections.jsonl"
 AI_SUMMARIES_LOG: Path = LOG_DIR / "ai_discussion_summaries.jsonl"
 MANUAL_TRADE_LOG: Path = LOG_DIR / "manual_trade_log.jsonl"
 RECONCILIATIONS_LOG: Path = LOG_DIR / "trade_reconciliations.jsonl"
+MANUAL_TRADE_CANCELLATIONS_LOG: Path = LOG_DIR / "manual_trade_cancellations.jsonl"
 
 # ---------------------------------------------------------------------------
 # Advisory stamp constants — never change these
@@ -95,6 +96,20 @@ VALID_USER_STATUSES: frozenset[str] = frozenset(
 )
 VALID_RECONCILIATION_STATUSES: frozenset[str] = frozenset(
     {"WIN", "LOSS", "BREAKEVEN", "UNKNOWN"}
+)
+
+# Soft-cancel statuses for the manual trade log.  Used by the
+# Reconciliation tab's "Cancel Log" action.  These are NOT trading outcomes
+# — they mark a row as a record-keeping mistake (e.g. a duplicate log) so
+# the reconciliation queue can ignore it without losing the audit trail.
+# Cancellation NEVER calls a broker, NEVER cancels a real order, and NEVER
+# increments ai_execution_count.
+VALID_LOG_CANCEL_STATUSES: frozenset[str] = frozenset(
+    {"CANCELLED_DUPLICATE", "CANCELLED_LOG"}
+)
+DEFAULT_LOG_CANCEL_REASON: str = (
+    "duplicate manual log; broker API not called; AI executions = 0; "
+    "exclude from P/L and exposure"
 )
 
 
@@ -1373,6 +1388,184 @@ def reconcile_trade(
     }
 
 
+def cancel_manual_trade_log(
+    trade_id: str,
+    *,
+    reason: str = "",
+    status: str = "CANCELLED_DUPLICATE",
+) -> dict[str, Any]:
+    """Soft-cancel a manual trade log row (record-keeping only).
+
+    Use this when the operator logged the same manual trade twice (or
+    otherwise mis-logged) and wants the duplicate to stop showing up in
+    "Awaiting Reconciliation".  This is the inverse of
+    :func:`log_manual_trade` from the operator's point of view, BUT it is
+    NOT a trade-cancellation.  It never calls a broker, never sends a
+    cancel to any exchange, and never mutates ``ai_execution_count``.
+
+    Behaviour
+    ---------
+    * SQLite is canonical.  The row's ``reconciliation_status`` is set to
+      ``status`` (default ``CANCELLED_DUPLICATE``), ``cancel_reason`` is
+      recorded, and ``cancelled_at`` is stamped.
+    * A cancellation record is also appended to
+      ``MANUAL_TRADE_CANCELLATIONS_LOG`` as an audit trail.  The original
+      log row is preserved; the cancellation is overlaid, never deleted.
+    * If the row has already been reconciled (a
+      ``reconciliation_results`` row exists for it), the cancel is
+      refused — reconciled trades represent learned outcomes and must not
+      vanish from the journal.
+    * If the row's ``broker_api_called`` flag is set (which should be
+      impossible in this app, but defended in depth) the cancel is
+      refused.
+    """
+    if not trade_id or not isinstance(trade_id, str):
+        return _error_response(
+            "cancel_manual_trade_log", "trade_id must be a non-empty string"
+        )
+    normalized_status = str(status or "CANCELLED_DUPLICATE").upper().strip()
+    if normalized_status not in VALID_LOG_CANCEL_STATUSES:
+        normalized_status = "CANCELLED_DUPLICATE"
+    cancel_reason = str(reason or DEFAULT_LOG_CANCEL_REASON).strip()
+    cancelled_at = utc_timestamp()
+
+    trade_row: dict[str, Any] | None = None
+    already_reconciled = False
+    if _DB_AVAILABLE and _persistence is not None:
+        try:
+            trade_row = _persistence.get_manual_trade(trade_id)
+        except Exception:
+            trade_row = None
+        if trade_row is not None:
+            try:
+                existing = _persistence.get_reconciliations_for_trade(trade_id)
+                already_reconciled = bool(existing)
+            except Exception:
+                already_reconciled = False
+    if trade_row is None:
+        # JSONL fallback — defensive.  When SQLite is unavailable we still
+        # let the operator audit-cancel the log; the queue endpoint reads
+        # SQLite anyway, so this branch is mostly belt-and-braces.
+        for raw in _load_jsonl(MANUAL_TRADE_LOG):
+            if raw.get("trade_id") == trade_id:
+                trade_row = dict(raw)
+                break
+    if trade_row is None:
+        resp = _error_response(
+            "cancel_manual_trade_log",
+            f"manual trade log {trade_id!r} not found",
+        )
+        resp["status"] = "not_found"
+        return resp
+
+    # Defence in depth: this app never sets broker_api_called=True, but
+    # ``_to_dict`` always rewrites the read value to False to lock the
+    # invariant.  So we check the *raw* SQLite column directly here: if a
+    # corrupt/imported row claims a broker call ever happened, refuse to
+    # silently soft-cancel it.
+    raw_broker_flag = 0
+    if _DB_AVAILABLE and _persistence is not None:
+        try:
+            raw_flag = _persistence.get_manual_trade_raw_broker_flag(trade_id)
+        except Exception:
+            raw_flag = None
+        if raw_flag is None:
+            # No DB row — fall back to the JSONL-sourced value.
+            raw_broker_flag = int(trade_row.get("broker_api_called", 0) or 0)
+        else:
+            raw_broker_flag = int(raw_flag)
+    else:
+        raw_broker_flag = int(trade_row.get("broker_api_called", 0) or 0)
+    if raw_broker_flag != 0:
+        resp = _error_response(
+            "cancel_manual_trade_log",
+            "refusing to cancel a log marked broker_api_called=True",
+        )
+        resp["status"] = "refused"
+        resp["broker_api_called"] = True
+        return resp
+
+    if already_reconciled:
+        resp = _error_response(
+            "cancel_manual_trade_log",
+            "trade has been reconciled; cancel the reconciliation row first",
+        )
+        resp["status"] = "refused"
+        resp["reconciled"] = True
+        resp["broker_api_called"] = False
+        return resp
+
+    existing_status = str(trade_row.get("reconciliation_status") or "").upper()
+    if existing_status in VALID_LOG_CANCEL_STATUSES:
+        # Idempotent: already cancelled.  Return success without writing
+        # a second audit row.
+        return {
+            "operation": "cancel_manual_trade_log",
+            "trade_id": trade_id,
+            "reconciliation_status": existing_status,
+            "cancel_reason": str(trade_row.get("cancel_reason") or ""),
+            "cancelled_at": str(trade_row.get("cancelled_at") or ""),
+            "status": "already_cancelled",
+            "execution_mode": _EXECUTION_MODE,
+            "ai_execution_count": _AI_EXECUTION_COUNT,
+            "execution_gate": _EXECUTION_GATE,
+            "execution_permission": False,
+            "can_execute": False,
+            "broker_api_called": False,
+            "advisory_status": _ADVISORY_STATUS,
+            "human_review_required": True,
+            "record_keeping_only": True,
+            "generated_at": utc_timestamp(),
+        }
+
+    sqlite_updated = False
+    if _DB_AVAILABLE and _persistence is not None:
+        try:
+            sqlite_updated = _persistence.cancel_manual_trade(
+                trade_id,
+                cancelled_at,
+                cancel_reason=cancel_reason,
+                status=normalized_status,
+            )
+        except Exception:
+            sqlite_updated = False
+
+    audit_record = {
+        "trade_id": trade_id,
+        "event_id": str(trade_row.get("event_id") or ""),
+        "ticker": str(trade_row.get("ticker") or ""),
+        "reconciliation_status": normalized_status,
+        "cancel_reason": cancel_reason,
+        "cancelled_at": cancelled_at,
+        "broker_api_called": False,
+        "ai_execution_count": _AI_EXECUTION_COUNT,
+        "execution_mode": _EXECUTION_MODE,
+        "advisory_status": _ADVISORY_STATUS,
+        "record_keeping_only": True,
+    }
+    append_jsonl(MANUAL_TRADE_CANCELLATIONS_LOG, audit_record, stamp=False)
+
+    return {
+        "operation": "cancel_manual_trade_log",
+        "trade_id": trade_id,
+        "reconciliation_status": normalized_status,
+        "cancel_reason": cancel_reason,
+        "cancelled_at": cancelled_at,
+        "sqlite_updated": sqlite_updated,
+        "status": "cancelled",
+        "execution_mode": _EXECUTION_MODE,
+        "ai_execution_count": _AI_EXECUTION_COUNT,
+        "execution_gate": _EXECUTION_GATE,
+        "execution_permission": False,
+        "can_execute": False,
+        "broker_api_called": False,
+        "advisory_status": _ADVISORY_STATUS,
+        "human_review_required": True,
+        "record_keeping_only": True,
+        "generated_at": utc_timestamp(),
+    }
+
+
 def _annotate_journal_quality(trade: dict[str, Any]) -> dict[str, Any]:
     """Attach journal-quality metadata to a manual-trade dict.
 
@@ -1455,6 +1648,25 @@ def list_manual_trades(*, include_journal_quality: bool = True) -> dict[str, Any
             truth_source = "jsonl_fallback"
     if truth_source != "sqlite":
         trades = _load_jsonl(MANUAL_TRADE_LOG)
+        # Overlay JSONL cancellations so the JSONL fallback agrees with
+        # SQLite: a cancelled log shows reconciliation_status=CANCELLED_*
+        # and is filtered out of the active-unreconciled view by the
+        # frontend.  Cancellation NEVER deletes the original log line.
+        cancellations: dict[str, dict[str, Any]] = {}
+        for rec in _load_jsonl(MANUAL_TRADE_CANCELLATIONS_LOG):
+            tid = str(rec.get("trade_id") or "")
+            if tid:
+                cancellations[tid] = rec
+        if cancellations:
+            for t in trades:
+                tid = str(t.get("trade_id") or "")
+                rec = cancellations.get(tid)
+                if rec is not None:
+                    t["reconciliation_status"] = str(
+                        rec.get("reconciliation_status") or "CANCELLED_DUPLICATE"
+                    )
+                    t["cancel_reason"] = str(rec.get("cancel_reason") or "")
+                    t["cancelled_at"] = str(rec.get("cancelled_at") or "")
         truth_source = "jsonl_fallback"
 
     canonical = truth_source == "sqlite"
@@ -1516,8 +1728,11 @@ __all__ = [
     "AI_SUMMARIES_LOG",
     "MANUAL_TRADE_LOG",
     "RECONCILIATIONS_LOG",
+    "MANUAL_TRADE_CANCELLATIONS_LOG",
     "VALID_USER_STATUSES",
     "VALID_RECONCILIATION_STATUSES",
+    "VALID_LOG_CANCEL_STATUSES",
+    "DEFAULT_LOG_CANCEL_REASON",
     "InboxItem",
     "ValidationResult",
     "ManualTradeLog",
@@ -1531,5 +1746,6 @@ __all__ = [
     "mark_signal",
     "log_manual_trade",
     "reconcile_trade",
+    "cancel_manual_trade_log",
     "list_manual_trades",
 ]

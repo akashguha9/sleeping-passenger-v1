@@ -271,6 +271,24 @@ export async function reconcileTrade(
   });
 }
 
+// Soft-cancel a duplicate / mis-logged manual trade log entry.  This is
+// record-keeping only — the backend route NEVER calls a broker, NEVER
+// cancels a real order, and NEVER changes ai_execution_count.  It only
+// flips the local journal row's reconciliation_status so it stops
+// appearing in the "Awaiting Reconciliation" queue.
+export async function cancelManualTradeLog(
+  tradeId: string,
+  body: { reason?: string; status?: string } = {},
+): Promise<unknown> {
+  return apiFetch(`/manual-trades/${encodeURIComponent(tradeId)}/cancel`, {
+    method: 'POST',
+    body: JSON.stringify({
+      reason: body.reason ?? '',
+      status: body.status ?? 'CANCELLED_DUPLICATE',
+    }),
+  });
+}
+
 export async function getLearningCompleteness(
   limit = 50,
 ): Promise<LearningCompletenessResponse | null> {

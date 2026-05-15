@@ -71,6 +71,7 @@ try:
     from scripts.signal_inbox_api import (
         add_ai_discussion_summary,
         add_user_reflection,
+        cancel_manual_trade_log,
         get_inbox_diagnostics,
         get_signal_detail,
         list_inbox_items,
@@ -93,6 +94,7 @@ except ModuleNotFoundError:
     from signal_inbox_api import (  # type: ignore[no-redef]
         add_ai_discussion_summary,
         add_user_reflection,
+        cancel_manual_trade_log,
         get_inbox_diagnostics,
         get_signal_detail,
         list_inbox_items,
@@ -634,6 +636,14 @@ class ReconcileBody(BaseModel):
     lesson: str = ""
 
 
+class CancelManualTradeLogBody(BaseModel):
+    # Both optional.  ``reason`` defaults to the standard duplicate-log
+    # reason on the backend.  ``status`` is constrained server-side to the
+    # CANCELLED_* enum and otherwise falls back to CANCELLED_DUPLICATE.
+    reason: str = ""
+    status: str = "CANCELLED_DUPLICATE"
+
+
 class ChartBootstrapBody(BaseModel):
     symbol: str
     period: str = "max"
@@ -860,6 +870,32 @@ def post_reconcile(
         mistake_tags=body.mistake_tags,
         lesson=body.lesson,
     )
+
+
+@app.post("/manual-trades/{trade_id}/cancel")
+def post_cancel_manual_trade_log(
+    trade_id: str,
+    body: CancelManualTradeLogBody | None = None,
+    _auth: None = Depends(require_api_token),
+) -> dict:
+    """Soft-cancel a duplicate / mis-logged manual trade log entry.
+
+    Record-keeping only.  This route NEVER places, modifies, or cancels a
+    broker order; it only marks the local journal row as cancelled so it
+    stops appearing in the reconciliation queue.  ``ai_execution_count``
+    stays 0; ``broker_api_called`` stays False.
+    """
+    payload = body or CancelManualTradeLogBody()
+    result = cancel_manual_trade_log(
+        trade_id,
+        reason=payload.reason,
+        status=payload.status,
+    )
+    if isinstance(result, dict) and result.get("status") == "not_found":
+        raise HTTPException(status_code=404, detail=result.get("error", "not found"))
+    if isinstance(result, dict) and result.get("status") == "refused":
+        raise HTTPException(status_code=400, detail=result.get("error", "refused"))
+    return result
 
 
 # ---------------------------------------------------------------------------

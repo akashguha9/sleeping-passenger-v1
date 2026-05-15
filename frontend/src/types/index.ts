@@ -136,6 +136,13 @@ export interface ManualTradeLog {
   learning_ready?: boolean;
   missing_journal_fields?: string[];
   decision_quality_flags?: string[];
+  // Soft-cancel fields populated by the Reconciliation tab's "Cancel Log"
+  // action.  Cancellation is record-keeping only — broker_api_called and
+  // ai_execution_count are unaffected.  Empty string / undefined means
+  // "not cancelled".
+  reconciliation_status?: string;
+  cancel_reason?: string;
+  cancelled_at?: string;
 }
 
 export interface TradeReconciliation {

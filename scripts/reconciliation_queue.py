@@ -260,6 +260,17 @@ def build_queue(
             warnings.append("manual_trades_missing_trade_id_column")
             return base
 
+        # Exclude soft-cancelled log rows (e.g. duplicate manual entries the
+        # operator cancelled from the Reconciliation tab).  Cancelled rows
+        # keep their audit trail in manual_trades but must not appear here
+        # as "awaiting reconciliation" — they were record-keeping mistakes,
+        # not trades waiting on an outcome.
+        cancel_clause = ""
+        if "reconciliation_status" in cols:
+            cancel_clause = (
+                " AND COALESCE(mt.reconciliation_status, '') NOT IN"
+                " ('CANCELLED_DUPLICATE', 'CANCELLED_LOG')"
+            )
         select_clause = ", ".join(select_cols)
         try:
             rows = conn.execute(
@@ -267,7 +278,7 @@ def build_queue(
                 " WHERE NOT EXISTS ("
                 "   SELECT 1 FROM reconciliation_results rr"
                 "   WHERE rr.trade_id = mt.trade_id"
-                " ) ORDER BY mt.executed_at ASC"
+                " )" + cancel_clause + " ORDER BY mt.executed_at ASC"
             ).fetchall()
         except sqlite3.Error as exc:
             warnings.append(f"query_failed:{type(exc).__name__}")

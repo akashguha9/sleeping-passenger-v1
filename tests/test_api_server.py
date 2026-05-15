@@ -174,6 +174,23 @@ def client():
         "generated_at": "2026-01-01T00:00:00Z",
     }
 
+    _cancel_log_resp = {
+        **_advisory,
+        "operation": "cancel_manual_trade_log",
+        "trade_id": "TRADE_001",
+        "reconciliation_status": "CANCELLED_DUPLICATE",
+        "cancel_reason": "duplicate manual log",
+        "cancelled_at": "2026-01-01T00:00:00Z",
+        "sqlite_updated": True,
+        "status": "cancelled",
+        "execution_gate": "LOCKED",
+        "execution_permission": False,
+        "can_execute": False,
+        "broker_api_called": False,
+        "record_keeping_only": True,
+        "generated_at": "2026-01-01T00:00:00Z",
+    }
+
     _moltbook_list_resp = {
         **_advisory,
         "operation": "list_moltbook_entries",
@@ -201,6 +218,10 @@ def client():
         patch("scripts.api_server.mark_signal", return_value=_decision_resp),
         patch("scripts.api_server.log_manual_trade", return_value=_trade_resp),
         patch("scripts.api_server.reconcile_trade", return_value=_reconcile_resp),
+        patch(
+            "scripts.api_server.cancel_manual_trade_log",
+            return_value=_cancel_log_resp,
+        ),
         patch("scripts.api_server.list_moltbook_entries", return_value=_moltbook_list_resp),
         patch("scripts.api_server.log_moltbook_entry", return_value=_moltbook_log_resp),
         patch("scripts.api_server.export_signal_inbox_log", return_value=_csv),
@@ -505,6 +526,101 @@ def test_post_reconcile_requires_actual_fill_price(client):
     payload = {k: v for k, v in _RECONCILE_PAYLOAD.items() if k != "actual_fill_price"}
     r = client.post("/manual-trades/TRADE_001/reconcile", json=payload)
     assert r.status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# 9b. POST /manual-trades/{trade_id}/cancel — soft-cancel for duplicate logs
+# ---------------------------------------------------------------------------
+
+_CANCEL_LOG_PAYLOAD = {
+    "reason": "duplicate manual log",
+    "status": "CANCELLED_DUPLICATE",
+}
+
+
+def test_post_cancel_log_status_ok(client):
+    r = client.post(
+        "/manual-trades/TRADE_001/cancel", json=_CANCEL_LOG_PAYLOAD
+    )
+    assert r.status_code == 200
+
+
+def test_post_cancel_log_advisory_status(client):
+    data = client.post(
+        "/manual-trades/TRADE_001/cancel", json=_CANCEL_LOG_PAYLOAD
+    ).json()
+    assert data["advisory_status"] == "ADVISORY_ONLY"
+
+
+def test_post_cancel_log_ai_execution_count_zero(client):
+    data = client.post(
+        "/manual-trades/TRADE_001/cancel", json=_CANCEL_LOG_PAYLOAD
+    ).json()
+    assert data["ai_execution_count"] == 0
+
+
+def test_post_cancel_log_broker_api_not_called(client):
+    data = client.post(
+        "/manual-trades/TRADE_001/cancel", json=_CANCEL_LOG_PAYLOAD
+    ).json()
+    assert data["broker_api_called"] is False
+    assert data["execution_gate"] == "LOCKED"
+    assert data["can_execute"] is False
+
+
+def test_post_cancel_log_returns_cancelled_status_field(client):
+    data = client.post(
+        "/manual-trades/TRADE_001/cancel", json=_CANCEL_LOG_PAYLOAD
+    ).json()
+    assert data["status"] == "cancelled"
+    assert data["reconciliation_status"] == "CANCELLED_DUPLICATE"
+    assert data["record_keeping_only"] is True
+
+
+def test_post_cancel_log_accepts_empty_body(client):
+    # Body is optional — backend fills defaults.
+    r = client.post("/manual-trades/TRADE_001/cancel", json={})
+    assert r.status_code == 200
+
+
+def test_post_cancel_log_returns_404_when_not_found(client):
+    not_found_resp = {
+        "operation": "cancel_manual_trade_log",
+        "error": "manual trade log 'NOPE' not found",
+        "status": "not_found",
+        "advisory_status": "ADVISORY_ONLY",
+        "human_review_required": True,
+        "execution_mode": "HUMAN_ONLY",
+        "ai_execution_count": 0,
+        "generated_at": "2026-01-01T00:00:00Z",
+    }
+    with patch(
+        "scripts.api_server.cancel_manual_trade_log",
+        return_value=not_found_resp,
+    ):
+        r = client.post("/manual-trades/NOPE/cancel", json={})
+    assert r.status_code == 404
+
+
+def test_post_cancel_log_returns_400_when_refused(client):
+    refused_resp = {
+        "operation": "cancel_manual_trade_log",
+        "error": "trade has been reconciled; cancel the reconciliation row first",
+        "status": "refused",
+        "reconciled": True,
+        "broker_api_called": False,
+        "advisory_status": "ADVISORY_ONLY",
+        "human_review_required": True,
+        "execution_mode": "HUMAN_ONLY",
+        "ai_execution_count": 0,
+        "generated_at": "2026-01-01T00:00:00Z",
+    }
+    with patch(
+        "scripts.api_server.cancel_manual_trade_log",
+        return_value=refused_resp,
+    ):
+        r = client.post("/manual-trades/TRADE_001/cancel", json={})
+    assert r.status_code == 400
 
 
 # ---------------------------------------------------------------------------
