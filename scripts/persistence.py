@@ -1351,6 +1351,13 @@ def get_signal_events_for_symbol(
     Uses SQLite json_extract to filter by raw_payload.symbol at the DB level.
     This avoids the per-symbol cap issue when multiple symbols share source_name
     and the table has many rows (e.g., after a full historical backfill).
+
+    Sort order: by the *candle* timestamp embedded in raw_payload.timestamp,
+    descending — NOT by fetched_at.  fetched_at is the wall-clock time the
+    backfill ran, which is identical across an entire historical batch and
+    therefore unreliable for "give me the latest N candles".  Sorting by the
+    payload timestamp guarantees the latest N candles regardless of how the
+    rows were inserted.
     """
     conn = _get_conn(db_path)
     try:
@@ -1358,7 +1365,10 @@ def get_signal_events_for_symbol(
             "SELECT * FROM signal_events"
             " WHERE source_name = ?"
             " AND json_extract(raw_payload, '$.symbol') = ?"
-            " ORDER BY fetched_at DESC LIMIT ?",
+            " ORDER BY"
+            "   COALESCE(json_extract(raw_payload, '$.timestamp'), fetched_at) DESC,"
+            "   id DESC"
+            " LIMIT ?",
             (source_name, symbol.upper(), limit),
         ).fetchall()
     finally:

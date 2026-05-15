@@ -802,6 +802,41 @@ export interface ChartStructureReport {
   advisory: ChartAdvisory | null;
 }
 
+// Market-data freshness gate (Sprint H — Stale OHLCV repair).
+// Always present on a successful chart-structure response, plus on the
+// missing-data response.  The frontend uses these fields to refuse to
+// render a normal verdict over ancient / mock / seed / fixture data.
+export type ChartFreshnessStatus =
+  | 'FRESH'
+  | 'DELAYED'
+  | 'STALE'
+  | 'ANCIENT'
+  | 'MISSING'
+  | 'MOCK_OR_DEMO_BLOCKED';
+
+export type ChartFreshnessGate = 'PASS' | 'WARN' | 'BLOCK';
+
+export type ChartSourceKind =
+  | 'CANONICAL_SQLITE'
+  | 'READ_ONLY_PROVIDER'
+  | 'JSONL_AUDIT_ONLY'
+  | 'MOCK'
+  | 'DEMO'
+  | 'SEED'
+  | 'UNKNOWN';
+
+export interface ChartFreshness {
+  data_freshness_status: ChartFreshnessStatus;
+  freshness_gate: ChartFreshnessGate;
+  latest_candle_utc: string | null;
+  first_candle_utc: string | null;
+  data_age_hours: number | null;
+  data_age_days: number | null;
+  freshness_reason: string;
+  source_kind: ChartSourceKind | string;
+  candle_count: number;
+}
+
 export interface ChartStructureResponse {
   advisory_status: string;
   execution_gate: string;
@@ -814,6 +849,7 @@ export interface ChartStructureResponse {
   candle_count: number;
   chart_state?: string;
   advisory_summary?: string;
+  suggested_next_step?: string;
   run_ingestion?: string;
   discovery_command?: string;
   backfill_command?: string;
@@ -826,6 +862,15 @@ export interface ChartStructureResponse {
   reason?: 'NO_LOCAL_OHLCV' | string;
   can_bootstrap?: boolean;
   message?: string;
+  // Freshness gate — see ChartFreshness above.  Top-level mirror fields
+  // duplicate the most-used pieces so the UI does not need to optional-chain
+  // through `freshness` everywhere.
+  freshness?: ChartFreshness;
+  data_freshness_status?: ChartFreshnessStatus;
+  freshness_gate?: ChartFreshnessGate;
+  latest_candle_utc?: string | null;
+  data_age_days?: number | null;
+  source_kind?: ChartSourceKind | string;
 }
 
 export type ChartBootstrapStepStatus = 'OK' | 'SKIPPED' | 'ERROR';

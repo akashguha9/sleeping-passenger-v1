@@ -10,7 +10,7 @@ interface Props {
 }
 
 const SAFETY_BLURB =
-  'Cancel this manual log? This only removes/cancels the local record. It does not call a broker or cancel any broker order.';
+  'Cancel this manual log? This only cancels the local record. It does not call a broker and does not cancel any broker order.';
 
 /**
  * Destructive-secondary action attached to each unreconciled manual trade

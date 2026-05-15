@@ -10,6 +10,8 @@ import type {
   ChartVolatility,
   ChartSupportResistance,
   ChartBootstrapResponse,
+  ChartFreshness,
+  ChartFreshnessGate,
 } from '@/types';
 import { AdvisoryOnlyBadge } from '@/components/AdvisoryOnlyBadge';
 import { HumanOnlyBadge } from '@/components/HumanOnlyBadge';
@@ -202,8 +204,12 @@ function ReportView({ report }: { report: ChartStructureReport }) {
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <div>
               <div className="text-[10px] font-mono uppercase tracking-widest mb-1" style={{ color: 'var(--sp-mist)' }}>Latest Close</div>
-              <div className="text-lg font-bold font-mono" style={{ color: 'var(--sp-bone)' }}>
-                {report.summary.latest_close != null ? `$${fmt(report.summary.latest_close, 4)}` : '—'}
+              <div
+                className="text-lg font-bold font-mono"
+                style={{ color: 'var(--sp-bone)' }}
+                data-testid="chart-latest-close"
+              >
+                {report.summary.latest_close != null ? fmt(report.summary.latest_close, 4) : '—'}
               </div>
             </div>
             <div>
@@ -408,6 +414,120 @@ function statusColor(status: string): string {
   return 'var(--sp-mist)';
 }
 
+const FRESHNESS_GATE_COLOR: Record<ChartFreshnessGate, string> = {
+  PASS: 'var(--sp-cyan)',
+  WARN: 'var(--sp-gold)',
+  BLOCK: 'var(--sp-rust)',
+};
+
+function freshnessGateColor(gate: ChartFreshnessGate | undefined): string {
+  if (!gate) return 'var(--sp-mist)';
+  return FRESHNESS_GATE_COLOR[gate] ?? 'var(--sp-mist)';
+}
+
+function FreshnessPanel({
+  freshness,
+  symbol,
+}: {
+  freshness: ChartFreshness;
+  symbol: string;
+}) {
+  const gate = freshness.freshness_gate;
+  const color = freshnessGateColor(gate);
+  const status = freshness.data_freshness_status;
+  const isBlock = gate === 'BLOCK';
+  const isWarn = gate === 'WARN';
+  const ageStr =
+    freshness.data_age_days != null
+      ? `${freshness.data_age_days.toFixed(1)} days old`
+      : 'unknown age';
+  return (
+    <div
+      className="sp-card p-4 space-y-2"
+      data-testid="chart-freshness-panel"
+      data-freshness-gate={gate}
+      data-freshness-status={status}
+      style={{
+        borderColor: isBlock
+          ? 'rgba(160, 74, 58, 0.5)'
+          : isWarn
+          ? 'rgba(214, 168, 90, 0.45)'
+          : 'rgba(94, 174, 168, 0.35)',
+        background: isBlock
+          ? 'rgba(160, 74, 58, 0.06)'
+          : isWarn
+          ? 'rgba(214, 168, 90, 0.04)'
+          : 'transparent',
+      }}
+    >
+      <div className="flex items-center gap-3 flex-wrap">
+        <span
+          className="text-[10px] font-mono uppercase tracking-widest font-semibold px-2 py-0.5 rounded"
+          style={{
+            color,
+            border: `1px solid ${color}55`,
+            background: 'rgba(232,231,227,0.03)',
+          }}
+          data-testid="chart-freshness-gate"
+        >
+          Freshness · {gate ?? '—'}
+        </span>
+        <span
+          className="text-[10px] font-mono uppercase tracking-widest"
+          style={{ color: 'var(--sp-mist)' }}
+          data-testid="chart-freshness-status"
+        >
+          {status ?? '—'}
+        </span>
+        <span
+          className="text-[10px] font-mono uppercase tracking-widest"
+          style={{ color: 'var(--sp-mist)' }}
+          data-testid="chart-freshness-source"
+        >
+          source · {freshness.source_kind ?? 'UNKNOWN'}
+        </span>
+      </div>
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
+        <div>
+          <div className="text-[10px] font-mono uppercase tracking-widest mb-0.5" style={{ color: 'var(--sp-mist)' }}>
+            Latest candle (UTC)
+          </div>
+          <div className="font-mono" style={{ color: 'var(--sp-bone)' }} data-testid="chart-latest-candle-utc">
+            {freshness.latest_candle_utc ?? '—'}
+          </div>
+        </div>
+        <div>
+          <div className="text-[10px] font-mono uppercase tracking-widest mb-0.5" style={{ color: 'var(--sp-mist)' }}>
+            Data age
+          </div>
+          <div className="font-mono" style={{ color: 'var(--sp-bone)' }} data-testid="chart-data-age-days">
+            {ageStr}
+          </div>
+        </div>
+        <div>
+          <div className="text-[10px] font-mono uppercase tracking-widest mb-0.5" style={{ color: 'var(--sp-mist)' }}>
+            First candle (UTC)
+          </div>
+          <div className="font-mono" style={{ color: 'var(--sp-bone)' }}>
+            {freshness.first_candle_utc ?? '—'}
+          </div>
+        </div>
+      </div>
+      {(isBlock || isWarn) && (
+        <div
+          className="text-sm leading-relaxed"
+          style={{ color: isBlock ? '#d57b6a' : 'var(--sp-bone)' }}
+          data-testid="chart-freshness-warning"
+        >
+          {isBlock
+            ? `Market data for ${symbol} is ${(status ?? 'stale').toLowerCase()}. Chart structure analysis is blocked until fresh data is loaded. ${freshness.freshness_reason}`
+            : `Market data for ${symbol} is delayed (${freshness.freshness_reason}). Treat any advisory verdict with caution and refresh OHLCV before relying on it.`}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function ChartStructurePage() {
   const [symbolInput, setSymbolInput] = useState('');
   const [limitInput, setLimitInput] = useState('100');
@@ -512,7 +632,17 @@ export default function ChartStructurePage() {
 
   const chartState = result?.report?.context?.chart_state ?? result?.chart_state;
   const stateAccent = chartState ? (CHART_STATE_ACCENT[chartState] ?? 'var(--sp-mist)') : '';
-  const hasReport = !!(result && result.report);
+  const freshness = result?.freshness ?? null;
+  const freshnessGate: ChartFreshnessGate | undefined =
+    result?.freshness_gate ?? freshness?.freshness_gate ?? undefined;
+  const isFreshnessBlocked = freshnessGate === 'BLOCK';
+  // Render the engine's chart-structure report only when (a) we got one
+  // back AND (b) the freshness gate did not block.  This guarantees that
+  // the operator never sees a normal "TRENDING_UP" verdict over 2004
+  // fixture data even if a downstream component would otherwise render
+  // it.  Stale-blocked responses already null out `report` server-side;
+  // this is belt-and-braces.
+  const hasReport = !!(result && result.report) && !isFreshnessBlocked;
   const isMissingData = !!(
     result && !result.report && result.candle_count === 0 && result.can_bootstrap !== false
   );
@@ -668,6 +798,41 @@ export default function ChartStructurePage() {
               style={{ color: '#d57b6a', background: 'rgba(160, 74, 58, 0.06)', border: '1px solid rgba(160, 74, 58, 0.32)' }}
             >
               Error: {result.error}
+            </div>
+          )}
+
+          {freshness && (
+            <FreshnessPanel freshness={freshness} symbol={result.symbol} />
+          )}
+
+          {isFreshnessBlocked && (
+            <div
+              className="sp-card p-4 space-y-2"
+              data-testid="chart-stale-data-block"
+              style={{
+                borderColor: 'rgba(160, 74, 58, 0.5)',
+                background: 'rgba(160, 74, 58, 0.06)',
+              }}
+            >
+              <div className="sp-eyebrow" style={{ color: '#d57b6a' }}>
+                Stale data — analysis blocked
+              </div>
+              <p className="text-sm leading-relaxed" style={{ color: 'var(--sp-bone)' }}>
+                {result.advisory_summary ??
+                  `Market data for ${result.symbol} is stale. Chart structure analysis is blocked until fresh data is loaded.`}
+              </p>
+              <div className="flex items-center gap-2 pt-0.5 flex-wrap">
+                <span className="text-xs" style={{ color: 'var(--sp-mist)' }}>
+                  Suggested next step:
+                </span>
+                <span
+                  className="text-xs font-mono font-semibold"
+                  style={{ color: 'var(--sp-gold)' }}
+                  data-testid="chart-suggested-next-step"
+                >
+                  {result.suggested_next_step ?? 'DATA_REFRESH_REQUIRED'}
+                </span>
+              </div>
             </div>
           )}
 

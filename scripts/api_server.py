@@ -634,6 +634,25 @@ class ReconcileBody(BaseModel):
     process_error_notes: str = ""
     mistake_tags: str = ""
     lesson: str = ""
+    # Sprint H — Reconciliation tab productisation.  All optional so
+    # legacy clients that only send the four core fields still work.
+    # Each of these is record-keeping only — the backend never calls a
+    # broker, never places/cancels an order, never increments
+    # ai_execution_count.  See scripts/reconciliation_extras.py for the
+    # canonical enum values and the structured-outcome serializer.
+    post_trade_outcome: str = ""
+    reconciliation_status: str = ""
+    runner_quantity: float | None = None
+    runner_status: str = ""
+    partial_take_profit_price: float | None = None
+    partial_take_profit_quantity: float | None = None
+    take_profit_plan: str = ""
+    stop_loss_price: float | None = None
+    stop_loss_hit: bool = False
+    exit_reason: str = ""
+    invalidation_level: str = ""
+    lesson_takeaway: str = ""
+    notes: str = ""
 
 
 class CancelManualTradeLogBody(BaseModel):
@@ -869,6 +888,23 @@ def post_reconcile(
         process_error_notes=body.process_error_notes,
         mistake_tags=body.mistake_tags,
         lesson=body.lesson,
+        # Sprint H — Reconciliation productisation.  These are forwarded
+        # directly to reconcile_trade which uses reconciliation_extras
+        # to compute realized P/L, set runner_status, and serialise the
+        # structured outcome into outcome_notes for downstream learning.
+        post_trade_outcome=body.post_trade_outcome,
+        reconciliation_status=body.reconciliation_status,
+        runner_quantity=body.runner_quantity,
+        runner_status=body.runner_status,
+        partial_take_profit_price=body.partial_take_profit_price,
+        partial_take_profit_quantity=body.partial_take_profit_quantity,
+        take_profit_plan=body.take_profit_plan,
+        stop_loss_price=body.stop_loss_price,
+        stop_loss_hit=body.stop_loss_hit,
+        exit_reason=body.exit_reason,
+        invalidation_level=body.invalidation_level,
+        lesson_takeaway=body.lesson_takeaway,
+        operator_notes_extra=body.notes,
     )
 
 

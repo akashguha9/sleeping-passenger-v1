@@ -10,12 +10,17 @@ import {
 import { MOCK_MANUAL_TRADES, MOCK_RECONCILIATIONS } from '@/lib/mockData';
 import { ReconciliationCard } from '@/components/ReconciliationCard';
 import { CancelManualLogButton } from '@/components/CancelManualLogButton';
+import {
+  ReconciliationActionModal,
+  type ReconciliationActionMode,
+} from '@/components/ReconciliationActionModal';
 import { HumanOnlyBadge } from '@/components/HumanOnlyBadge';
 import { AdvisoryOnlyBadge } from '@/components/AdvisoryOnlyBadge';
 import { BacklogReadinessBadge } from '@/components/BacklogReadinessBadge';
 import { LearningCompletenessCard } from '@/components/LearningCompletenessCard';
 import type {
   ManualTradeListResponse,
+  ManualTradeLog,
   ReconciliationQueueResponse,
   LearningCompletenessResponse,
 } from '@/types';
@@ -45,6 +50,10 @@ export default function ReconciliationPage() {
     () => new Set(),
   );
   const [refreshTick, setRefreshTick] = useState(0);
+  const [activeAction, setActiveAction] = useState<{
+    trade: ManualTradeLog;
+    mode: ReconciliationActionMode;
+  } | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -131,6 +140,18 @@ export default function ReconciliationPage() {
     });
     // Re-fetch the queue + trades so the unreconciled counter, journal
     // gaps row, and learning completeness card all reflect the cancel.
+    setRefreshTick((n) => n + 1);
+  }
+
+  function openAction(trade: ManualTradeLog, mode: ReconciliationActionMode) {
+    setActiveAction({ trade, mode });
+  }
+  function closeAction() {
+    setActiveAction(null);
+  }
+  function handleReconciliationSubmitted() {
+    // Re-fetch queue + trades so partial/close/stop outcomes feed back into
+    // the awaiting list and learning-readiness card.
     setRefreshTick((n) => n + 1);
   }
 
@@ -317,6 +338,12 @@ export default function ReconciliationPage() {
                       mistakeTags={(t as { mistake_tags?: string }).mistake_tags}
                     />
                   )}
+                  {!usingMockReconciled && (
+                    <ReconciliationActionButtons
+                      trade={t}
+                      onAction={(mode) => openAction(t, mode)}
+                    />
+                  )}
                   {!usingMockReconciled &&
                     (t as { created_via?: string }).created_via ===
                       'manual_trade_log' && (
@@ -431,6 +458,77 @@ export default function ReconciliationPage() {
           </div>
         </div>
       </div>
+
+      <ReconciliationActionModal
+        open={activeAction !== null}
+        trade={activeAction?.trade ?? null}
+        mode={activeAction?.mode ?? 'UPDATE_OUTCOME'}
+        onClose={closeAction}
+        onSubmitted={handleReconciliationSubmitted}
+      />
+    </div>
+  );
+}
+
+interface ActionButtonsProps {
+  trade: ManualTradeLog;
+  onAction: (mode: ReconciliationActionMode) => void;
+}
+
+/**
+ * Action row rendered under each Awaiting Reconciliation card.  Opens
+ * the local-only ReconciliationActionModal — these buttons NEVER call a
+ * broker, NEVER place/cancel an order, NEVER increment ai_execution_count.
+ * The "Cancel Log" affordance lives in CancelManualLogButton (separate
+ * component) so its confirmation dialog can stay specialised.
+ */
+function ReconciliationActionButtons({ trade, onAction }: ActionButtonsProps) {
+  const baseCls =
+    'text-[11px] font-mono uppercase tracking-widest px-2.5 py-1 rounded border border-slate-700 hover:bg-slate-800/60 text-slate-300';
+  return (
+    <div
+      className="flex flex-wrap items-center gap-2"
+      data-testid="reconciliation-action-buttons"
+      data-trade-id={trade.trade_id}
+    >
+      <button
+        type="button"
+        className={baseCls}
+        onClick={() => onAction('UPDATE_OUTCOME')}
+        data-testid="action-reconcile"
+      >
+        Reconcile / Update Outcome
+      </button>
+      <button
+        type="button"
+        className={baseCls}
+        onClick={() => onAction('PARTIAL_TP')}
+        data-testid="action-partial-tp"
+      >
+        Log Partial TP
+      </button>
+      <button
+        type="button"
+        className={baseCls}
+        onClick={() => onAction('CLOSE_TRADE')}
+        data-testid="action-close-trade"
+      >
+        Close Trade
+      </button>
+      <button
+        type="button"
+        className={baseCls}
+        onClick={() => onAction('STOP_HIT')}
+        data-testid="action-stop-hit"
+      >
+        Stop Hit
+      </button>
+      <span
+        className="text-[10px] text-slate-500"
+        data-testid="recon-record-keeping-note"
+      >
+        Record-keeping only. No broker call.
+      </span>
     </div>
   );
 }

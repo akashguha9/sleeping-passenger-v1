@@ -263,6 +263,25 @@ export async function reconcileTrade(
     process_error_notes?: string;
     mistake_tags?: string;
     lesson?: string;
+    // Sprint H — Reconciliation productisation.  All optional; the
+    // backend (signal_inbox_api.reconcile_trade) feeds these into
+    // reconciliation_extras to compute realized P/L, set runner_status,
+    // and serialise a structured outcome into outcome_notes.  Record-
+    // keeping only — broker_api_called stays false, ai_execution_count
+    // stays 0.
+    post_trade_outcome?: string;
+    reconciliation_status?: string;
+    runner_quantity?: number | null;
+    runner_status?: string;
+    partial_take_profit_price?: number | null;
+    partial_take_profit_quantity?: number | null;
+    take_profit_plan?: string;
+    stop_loss_price?: number | null;
+    stop_loss_hit?: boolean;
+    exit_reason?: string;
+    invalidation_level?: string;
+    lesson_takeaway?: string;
+    notes?: string;
   },
 ): Promise<unknown> {
   return apiFetch(`/manual-trades/${encodeURIComponent(tradeId)}/reconcile`, {

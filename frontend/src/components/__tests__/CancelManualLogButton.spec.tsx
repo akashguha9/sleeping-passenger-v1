@@ -63,8 +63,9 @@ describe('CancelManualLogButton', () => {
     expect(dialog.getAttribute('data-advisory-only')).toBe('true');
     expect(dialog.getAttribute('data-execution-permission')).toBe('false');
     const blob = (dialog.textContent ?? '').toLowerCase();
-    expect(blob).toMatch(/only removes\/cancels the local record/);
+    expect(blob).toMatch(/only cancels the local record/);
     expect(blob).toMatch(/does not call a broker/);
+    expect(blob).toMatch(/does not cancel any broker order/);
     expect(blob).toMatch(/broker api: not called/);
     expect(screen.getByTestId('cancel-log-keep-btn').textContent).toMatch(
       /keep log/i,

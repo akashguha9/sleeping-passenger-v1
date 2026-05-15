@@ -891,11 +891,23 @@ class TestNoBackendFrontendChanges:
             )
 
     def test_frontend_unchanged(self):
+        # Originally gated Phase D.4 ("no chart frontend yet").  The chart
+        # frontend has since landed at frontend/src/app/chart-structure/
+        # page.tsx, so the original gate is obsolete.  We keep a narrower
+        # check that catches accidental chart components/files at the top
+        # level — but we intentionally allow test specs under __tests__/
+        # that mention the chart by name.
         frontend = _REPO / "frontend" / "src"
         if frontend.exists():
             for f in frontend.rglob("*.tsx"):
-                if "chart" in f.name.lower():
-                    pytest.fail(f"Unexpected chart frontend file found (Phase D.4 not yet): {f}")
+                if "chart" not in f.name.lower():
+                    continue
+                rel = str(f.relative_to(frontend)).replace("\\", "/")
+                if "__tests__" in rel:
+                    continue
+                pytest.fail(
+                    f"Unexpected chart frontend file outside __tests__/: {f}"
+                )
 
 
 # ===========================================================================

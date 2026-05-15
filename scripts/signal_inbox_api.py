@@ -1326,32 +1326,169 @@ def reconcile_trade(
     process_error_notes: str = "",
     mistake_tags: str = "",
     lesson: str = "",
+    # Sprint H — Reconciliation productisation.  All optional + tolerant
+    # of bad input so legacy clients still work.  Record-keeping only:
+    # broker_api_called stays False, ai_execution_count stays 0,
+    # execution_gate stays LOCKED.  See scripts/reconciliation_extras.py.
+    post_trade_outcome: str = "",
+    reconciliation_status: str = "",
+    runner_quantity: float | None = None,
+    runner_status: str = "",
+    partial_take_profit_price: float | None = None,
+    partial_take_profit_quantity: float | None = None,
+    take_profit_plan: str = "",
+    stop_loss_price: float | None = None,
+    stop_loss_hit: bool = False,
+    exit_reason: str = "",
+    invalidation_level: str = "",
+    lesson_takeaway: str = "",
+    operator_notes_extra: str = "",
 ) -> dict[str, Any]:
     """8. Reconcile a previously logged manual trade with its actual outcome.
 
     The keyword-only attribution fields (outcome_quality, process_error,
     process_error_notes, mistake_tags, lesson) let the operator separate
     market noise from process errors.  All optional, all record-only.
+
+    The Sprint H block (post_trade_outcome, runner_quantity, …) feeds
+    :func:`scripts.reconciliation_extras.build_outcome_payload` to compute
+    realized P/L and serialise a structured outcome into outcome_notes.
     """
     if not trade_id or not isinstance(trade_id, str):
         return _error_response("reconcile_trade", "trade_id must be a non-empty string")
 
+    try:
+        try:
+            from scripts.reconciliation_extras import (
+                OUTCOME_TO_LEGACY_STATUS,
+                build_outcome_payload,
+                serialize_outcome_for_notes,
+            )
+        except ModuleNotFoundError:
+            from reconciliation_extras import (  # type: ignore[no-redef]
+                OUTCOME_TO_LEGACY_STATUS,
+                build_outcome_payload,
+                serialize_outcome_for_notes,
+            )
+    except Exception:
+        OUTCOME_TO_LEGACY_STATUS = {}  # type: ignore[assignment]
+        build_outcome_payload = None  # type: ignore[assignment]
+        serialize_outcome_for_notes = None  # type: ignore[assignment]
+
     event_id = ""
+    entry_price: float | None = None
+    entry_quantity: float | None = None
+    leverage: float = 1.0
     if _DB_AVAILABLE and _persistence is not None:
         try:
             event_id = _persistence.get_event_id_for_trade(trade_id)
         except Exception:
             pass
-    if not event_id:
-        event_id = next(
-            (str(r.get("event_id", "")) for r in _load_jsonl(MANUAL_TRADE_LOG)
-             if r.get("trade_id") == trade_id),
-            "",
-        )
+        try:
+            row = _persistence.get_manual_trade(trade_id)
+            if row:
+                entry_price = float(row.get("price") or 0.0)
+                entry_quantity = float(row.get("quantity") or 0.0)
+                lev_raw = row.get("leverage")
+                if lev_raw is not None:
+                    try:
+                        leverage = float(lev_raw)
+                    except (TypeError, ValueError):
+                        leverage = 1.0
+        except Exception:
+            pass
+    if not event_id or entry_price is None:
+        for r in _load_jsonl(MANUAL_TRADE_LOG):
+            if r.get("trade_id") == trade_id:
+                if not event_id:
+                    event_id = str(r.get("event_id", ""))
+                if entry_price is None:
+                    try:
+                        entry_price = float(r.get("price") or 0.0)
+                    except (TypeError, ValueError):
+                        entry_price = 0.0
+                if entry_quantity is None:
+                    try:
+                        entry_quantity = float(r.get("quantity") or 0.0)
+                    except (TypeError, ValueError):
+                        entry_quantity = 0.0
+                lev_raw = r.get("leverage")
+                if lev_raw is not None:
+                    try:
+                        leverage = float(lev_raw)
+                    except (TypeError, ValueError):
+                        leverage = 1.0
+                break
+    if entry_price is None:
+        entry_price = 0.0
+    if entry_quantity is None:
+        entry_quantity = 0.0
 
-    normalized_status = str(outcome_status).upper().strip()
-    if normalized_status not in VALID_RECONCILIATION_STATUSES:
-        normalized_status = "UNKNOWN"
+    # If the caller supplied a richer post_trade_outcome, derive the legacy
+    # WIN/LOSS/BREAKEVEN/UNKNOWN status from it (so the existing schema +
+    # downstream learning aggregations keep working).  An *explicit* legacy
+    # status of WIN/LOSS/BREAKEVEN can still override the derived value
+    # (it lets the operator say "this was a STOPPED_OUT but the
+    # outcome_status I want recorded is BREAKEVEN, e.g. for a -0.1% nip").
+    legacy_status_input = str(outcome_status).upper().strip()
+    legacy_status = legacy_status_input
+    structured_outcome: dict[str, Any] | None = None
+    if post_trade_outcome and build_outcome_payload is not None:
+        structured_outcome = build_outcome_payload(
+            trade_id=trade_id,
+            post_trade_outcome=post_trade_outcome,
+            actual_exit_price=actual_fill_price,
+            exit_quantity=actual_quantity,
+            entry_price=entry_price,
+            entry_quantity=entry_quantity,
+            leverage=leverage,
+            reconciliation_status=reconciliation_status or None,
+            outcome_quality=outcome_quality,
+            mistake_tags=mistake_tags,
+            lesson_takeaway=lesson_takeaway or lesson,
+            notes=operator_notes_extra or outcome_notes,
+            invalidation_level=invalidation_level,
+            stop_loss_price=stop_loss_price,
+            stop_loss_hit=stop_loss_hit,
+            exit_reason=exit_reason,
+            partial_take_profit_price=partial_take_profit_price,
+            partial_take_profit_quantity=partial_take_profit_quantity,
+            runner_quantity=runner_quantity,
+            runner_status=runner_status or None,
+            take_profit_plan=take_profit_plan or "70% TP / 30% runner",
+        )
+        derived_legacy = OUTCOME_TO_LEGACY_STATUS.get(
+            structured_outcome["post_trade_outcome"], "UNKNOWN"
+        )
+        # Default-only outcome_status ('UNKNOWN' / '') means the caller
+        # didn't pick a legacy bucket; use the derived one.  An explicit
+        # WIN/LOSS/BREAKEVEN sticks.
+        operator_specified_legacy = (
+            legacy_status_input
+            in {"WIN", "LOSS", "BREAKEVEN"}
+        )
+        if not operator_specified_legacy:
+            legacy_status = derived_legacy
+    if legacy_status not in VALID_RECONCILIATION_STATUSES:
+        legacy_status = "UNKNOWN"
+
+    # Build the outcome_notes string.  When the structured payload is
+    # present we tag it onto the end so downstream tools can recover the
+    # full record without a schema migration.  When absent we fall back to
+    # the operator's free-text notes.
+    base_notes = str(operator_notes_extra or outcome_notes or "")
+    if structured_outcome is not None and serialize_outcome_for_notes is not None:
+        notes_to_persist = serialize_outcome_for_notes(structured_outcome, base_notes)
+    else:
+        notes_to_persist = base_notes
+
+    # Pick the final pnl_estimate.  When the structured outcome computed a
+    # realized P/L locally, prefer that — it is the canonical local value.
+    final_pnl = (
+        structured_outcome["realized_pnl"]
+        if structured_outcome is not None
+        else float(pnl_estimate)
+    )
 
     rec = TradeReconciliation(
         reconciliation_id=f"REC_{uuid.uuid4().hex[:12]}",
@@ -1360,14 +1497,14 @@ def reconcile_trade(
         reconciled_at=utc_timestamp(),
         actual_fill_price=float(actual_fill_price),
         actual_quantity=float(actual_quantity),
-        outcome_notes=str(outcome_notes),
-        pnl_estimate=float(pnl_estimate),
-        outcome_status=normalized_status,
+        outcome_notes=notes_to_persist,
+        pnl_estimate=float(final_pnl),
+        outcome_status=legacy_status,
         outcome_quality=_safe_journal_text(outcome_quality),
         process_error=_safe_journal_text(process_error),
         process_error_notes=_safe_journal_text(process_error_notes),
         mistake_tags=_safe_journal_text(mistake_tags),
-        lesson=_safe_journal_text(lesson),
+        lesson=_safe_journal_text(lesson_takeaway or lesson),
     )
     append_jsonl(RECONCILIATIONS_LOG, rec.to_dict(), stamp=False)
     if _DB_AVAILABLE and _persistence is not None:
@@ -1385,13 +1522,13 @@ def reconcile_trade(
         except Exception:
             pass
 
-    return {
+    response: dict[str, Any] = {
         "operation": "reconcile_trade",
         "reconciliation_id": rec.reconciliation_id,
         "trade_id": trade_id,
         "event_id": event_id,
-        "outcome_status": normalized_status,
-        "pnl_estimate": pnl_estimate,
+        "outcome_status": legacy_status,
+        "pnl_estimate": rec.pnl_estimate,
         "outcome_quality": rec.outcome_quality,
         "process_error": rec.process_error,
         "process_error_notes": rec.process_error_notes,
@@ -1408,6 +1545,34 @@ def reconcile_trade(
         "human_review_required": True,
         "generated_at": utc_timestamp(),
     }
+    if structured_outcome is not None:
+        # Surface the new fields directly on the response so the frontend
+        # can render realized_pnl / runner_quantity / post_trade_outcome
+        # without parsing outcome_notes.  The structured outcome already
+        # carries the safety stamps; we re-stamp the response below.
+        response["post_trade_outcome"] = structured_outcome["post_trade_outcome"]
+        response["reconciliation_status"] = structured_outcome["reconciliation_status"]
+        response["realized_pnl"] = structured_outcome["realized_pnl"]
+        response["actual_exit_price"] = structured_outcome["actual_exit_price"]
+        response["exit_quantity"] = structured_outcome["exit_quantity"]
+        response["remaining_quantity"] = structured_outcome["remaining_quantity"]
+        response["runner_quantity"] = structured_outcome["runner_quantity"]
+        response["runner_status"] = structured_outcome["runner_status"]
+        response["partial_take_profit_price"] = structured_outcome.get(
+            "partial_take_profit_price"
+        )
+        response["partial_take_profit_quantity"] = structured_outcome.get(
+            "partial_take_profit_quantity"
+        )
+        response["take_profit_plan"] = structured_outcome.get("take_profit_plan")
+        response["stop_loss_price"] = structured_outcome.get("stop_loss_price")
+        response["stop_loss_hit"] = structured_outcome.get("stop_loss_hit")
+        response["exit_reason"] = structured_outcome.get("exit_reason")
+        response["invalidation_level"] = structured_outcome.get("invalidation_level")
+        response["lesson_takeaway"] = structured_outcome.get("lesson_takeaway")
+        response["notes"] = structured_outcome.get("notes")
+        response["leverage"] = structured_outcome.get("leverage")
+    return response
 
 
 def cancel_manual_trade_log(
