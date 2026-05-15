@@ -58,10 +58,15 @@ export function LearningCompletenessCard({ data, compact = false }: Props) {
   }
 
   const incomplete =
-    data.incomplete_count ?? data.learning_incomplete_count ?? 0;
+    data.incomplete_count ??
+    data.reconciled_but_learning_incomplete_count ??
+    data.learning_incomplete_count ??
+    0;
   const complete =
     data.complete_count ?? data.learning_complete_count ?? 0;
   const reconciled = data.reconciled_count ?? 0;
+  const awaiting = data.awaiting_reconciliation_count ?? 0;
+  const excludedOrCancelled = data.excluded_or_cancelled_count ?? 0;
   const dbAvailable = data.db_available !== false;
   const paperCount = data.paper_trade_count;
   const realCount = data.real_manual_trade_count;
@@ -112,7 +117,13 @@ export function LearningCompletenessCard({ data, compact = false }: Props) {
         </h2>
         <div className="text-right space-y-0.5">
           <div className={`text-xs font-mono ${bandColour}`} data-testid="lc-counts">
-            {incomplete} incomplete · {complete} complete · {reconciled} reconciled
+            {incomplete} reconciled-but-journal-incomplete · {complete} learning-complete
+          </div>
+          <div
+            className="text-[10px] font-mono text-slate-500"
+            data-testid="lc-split-counts"
+          >
+            {awaiting} awaiting reconciliation · {reconciled} reconciled total
           </div>
           {(paperCount !== undefined || realCount !== undefined) && (
             <div
@@ -120,6 +131,15 @@ export function LearningCompletenessCard({ data, compact = false }: Props) {
               data-testid="lc-mode-counts"
             >
               {paperCount ?? 0} paper · {realCount ?? 0} real-manual
+            </div>
+          )}
+          {excludedOrCancelled > 0 && (
+            <div
+              className="text-[10px] font-mono text-slate-600"
+              data-testid="lc-excluded-count"
+              title="Seed/demo/system/cancelled rows hidden from this report."
+            >
+              {excludedOrCancelled} excluded/cancelled hidden
             </div>
           )}
         </div>

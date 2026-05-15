@@ -492,9 +492,15 @@ if _FASTAPI_AVAILABLE:
         """Stamp HTTPException responses with the advisory safety block.
 
         We never weaken safety on error paths.  HTTP status is preserved.
+        When the route raises ``HTTPException(detail={...})`` we surface
+        the structured detail under the ``detail`` key (FastAPI's own
+        convention) so the frontend can render the backend's specific
+        message/reason fields instead of a stringified Python repr — the
+        cancel-log "(HTTP 400)" regression the user reported was caused
+        by the previous str(exc.detail) coercion.
         """
+        detail = exc.detail
         payload: dict = {
-            "error": str(exc.detail) if exc.detail else "request failed",
             "status_code": exc.status_code,
             "advisory_status": _ADVISORY_STATUS,
             "execution_mode": _EXECUTION_MODE,
@@ -504,6 +510,14 @@ if _FASTAPI_AVAILABLE:
             "broker_order_id": "NONE",
             "human_review_required": True,
         }
+        if isinstance(detail, dict):
+            payload["detail"] = detail
+            msg = detail.get("message") if isinstance(detail.get("message"), str) else None
+            payload["error"] = msg or "request failed"
+        elif detail:
+            payload["error"] = str(detail)
+        else:
+            payload["error"] = "request failed"
         return JSONResponse(status_code=exc.status_code, content=payload)
 
     @app.exception_handler(Exception)
@@ -928,9 +942,38 @@ def post_cancel_manual_trade_log(
         status=payload.status,
     )
     if isinstance(result, dict) and result.get("status") == "not_found":
-        raise HTTPException(status_code=404, detail=result.get("error", "not found"))
+        # Structured 404 — the frontend surfaces ``detail.message`` so the
+        # operator sees "manual trade log MT_… not found" rather than a
+        # bare "HTTP 404".
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "message": str(result.get("error") or "manual trade log not found"),
+                "reason": str(result.get("reason") or "not_found"),
+                "trade_id": trade_id,
+                "broker_api_called": False,
+                "ai_execution_count": _AI_EXECUTION_COUNT,
+                "record_keeping_only": True,
+            },
+        )
     if isinstance(result, dict) and result.get("status") == "refused":
-        raise HTTPException(status_code=400, detail=result.get("error", "refused"))
+        # Structured 400 — includes ``reason`` so the frontend can show
+        # "trade has been reconciled" or "non-manual-log origin" instead
+        # of the bare "HTTP 400" the user complained about.  The shape
+        # mirrors the success payload's safety stamps.
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "message": str(result.get("error") or "cancel refused"),
+                "reason": str(result.get("reason") or "refused"),
+                "trade_id": trade_id,
+                "reconciled": bool(result.get("reconciled", False)),
+                "created_via": str(result.get("created_via") or ""),
+                "broker_api_called": bool(result.get("broker_api_called", False)),
+                "ai_execution_count": _AI_EXECUTION_COUNT,
+                "record_keeping_only": True,
+            },
+        )
     return result
 
 

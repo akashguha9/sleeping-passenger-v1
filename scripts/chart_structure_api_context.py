@@ -322,6 +322,38 @@ def _get_chart_structure(
         report = analyze_chart_structure(candles, symbol=symbol_upper, source="market_data")
         report_dict = report.to_dict()
 
+        # Generic price-truth enrichment.  Symbol-agnostic: every ticker
+        # the user queries goes through the same code path, so the UI
+        # can distinguish "latest daily close" from "latest Yahoo
+        # delayed quote" for any market.  Failure to fetch the quote is
+        # NOT an error — the response degrades to DAILY_ONLY /
+        # QUOTE_UNAVAILABLE and chart structure still renders.  Never
+        # calls a broker; never touches ai_execution_count.
+        summary_block = report_dict.get("summary") or {}
+        daily_close = summary_block.get("latest_close")
+        daily_candle_utc = summary_block.get("latest_timestamp")
+        try:
+            try:
+                from scripts.chart_structure_price_truth import compute_price_truth
+            except ModuleNotFoundError:  # pragma: no cover
+                from chart_structure_price_truth import compute_price_truth  # type: ignore[no-redef]
+            price_truth = compute_price_truth(
+                symbol=symbol_upper,
+                daily_close=daily_close,
+                daily_candle_utc=daily_candle_utc,
+                freshness_latest_utc=freshness.get("latest_candle_utc"),
+            )
+        except Exception as exc:  # pragma: no cover - defensive
+            price_truth = {
+                "price_truth_status": "QUOTE_UNAVAILABLE",
+                "price_truth_reason": (
+                    f"price-truth enrichment failed: {type(exc).__name__}"
+                ),
+                "suggested_next_step": "WATCH_ONLY",
+                "latest_daily_close": daily_close,
+                "latest_daily_candle_utc": daily_candle_utc,
+            }
+
         return {
             **_safe_base,
             "symbol": symbol_upper,
@@ -334,6 +366,26 @@ def _get_chart_structure(
             "latest_candle_utc": freshness.get("latest_candle_utc"),
             "data_age_days": freshness.get("data_age_days"),
             "source_kind": freshness.get("source_kind"),
+            # Sprint I — generic price-truth fields.  Optional on
+            # purpose so legacy frontend/test code still parses the
+            # response cleanly.
+            "price_truth": price_truth,
+            "latest_daily_close": price_truth.get("latest_daily_close"),
+            "latest_daily_candle_utc": price_truth.get("latest_daily_candle_utc"),
+            "latest_quote_price": price_truth.get("latest_quote_price"),
+            "latest_quote_currency": price_truth.get("latest_quote_currency"),
+            "latest_quote_timestamp_utc": price_truth.get(
+                "latest_quote_timestamp_utc"
+            ),
+            "latest_quote_source": price_truth.get("latest_quote_source"),
+            "quote_freshness_status": price_truth.get("quote_freshness_status"),
+            "quote_freshness_gate": price_truth.get("quote_freshness_gate"),
+            "quote_age_minutes": price_truth.get("quote_age_minutes"),
+            "quote_price_delta": price_truth.get("quote_price_delta"),
+            "quote_price_delta_pct": price_truth.get("quote_price_delta_pct"),
+            "price_truth_status": price_truth.get("price_truth_status"),
+            "price_truth_reason": price_truth.get("price_truth_reason"),
+            "suggested_next_step": price_truth.get("suggested_next_step"),
         }
 
     except Exception as exc:

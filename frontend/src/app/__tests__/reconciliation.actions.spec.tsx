@@ -131,7 +131,12 @@ function emptyLearning() {
 }
 
 function setupHappyPath(trade = humanTrade()) {
-  mockQueue.mockResolvedValue(emptyQueue(1));
+  // Sprint I: the page uses the queue's items as the source of truth
+  // for which trade_ids are awaiting.  Make the queue list the same
+  // trade_id the /manual-trades mock returns so the card renders.
+  const queue = emptyQueue(1);
+  queue.items = [{ trade_id: (trade as { trade_id: string }).trade_id }] as unknown as never[];
+  mockQueue.mockResolvedValue(queue);
   mockTrades.mockResolvedValue({
     advisory_status: 'ADVISORY_ONLY',
     execution_gate: 'LOCKED',

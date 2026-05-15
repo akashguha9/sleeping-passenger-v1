@@ -176,7 +176,136 @@ function Pair({ label, value, valueStyle }: { label: string; value: string; valu
   );
 }
 
-function ReportView({ report }: { report: ChartStructureReport }) {
+function formatQuoteValue(value: number | null | undefined, currency: string | null | undefined): string {
+  if (value == null) return '—';
+  // Backend-provided currency drives display so we never hardcode $ for
+  // an NSE symbol or INR for a US symbol.  When the source omits a
+  // currency we fall back to a plain number — never a symbol guess.
+  const formatted = value.toLocaleString(undefined, {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 4,
+  });
+  if (currency && currency.trim()) {
+    return `${formatted} ${currency.trim()}`;
+  }
+  return formatted;
+}
+
+function PriceTruthPanel({ response }: { response: ChartStructureResponse }) {
+  const status = response.price_truth_status ?? response.price_truth?.price_truth_status ?? null;
+  if (!status) return null;
+  const reason = response.price_truth_reason ?? response.price_truth?.price_truth_reason ?? '';
+  const dailyClose = response.latest_daily_close ?? response.price_truth?.latest_daily_close ?? null;
+  const dailyTs = response.latest_daily_candle_utc ?? response.price_truth?.latest_daily_candle_utc ?? null;
+  const quotePrice = response.latest_quote_price ?? response.price_truth?.latest_quote_price ?? null;
+  const quoteCurrency = response.latest_quote_currency ?? response.price_truth?.latest_quote_currency ?? null;
+  const quoteSource = response.latest_quote_source ?? response.price_truth?.latest_quote_source ?? null;
+  const quoteTs = response.latest_quote_timestamp_utc ?? response.price_truth?.latest_quote_timestamp_utc ?? null;
+  const ageMin = response.quote_age_minutes ?? response.price_truth?.quote_age_minutes ?? null;
+  const delta = response.quote_price_delta ?? response.price_truth?.quote_price_delta ?? null;
+  const deltaPct = response.quote_price_delta_pct ?? response.price_truth?.quote_price_delta_pct ?? null;
+  const nextStep = response.price_truth?.suggested_next_step ?? '';
+
+  const statusColor =
+    status === 'QUOTE_ALIGNED'
+      ? 'var(--sp-cyan)'
+      : status === 'QUOTE_DIVERGES_FROM_DAILY' || status === 'INTERNAL_TIMESTAMP_MISMATCH'
+        ? 'var(--sp-rust)'
+        : 'var(--sp-gold)';
+
+  const diverges =
+    status === 'QUOTE_DIVERGES_FROM_DAILY' || status === 'INTERNAL_TIMESTAMP_MISMATCH';
+
+  return (
+    <div
+      className="sp-card p-4 space-y-3"
+      data-testid="chart-price-truth-panel"
+      data-price-truth-status={status}
+    >
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <div className="sp-eyebrow">Price Truth</div>
+        <span
+          className="text-[10px] font-mono uppercase tracking-widest px-2 py-0.5 rounded border"
+          style={{ color: statusColor, borderColor: statusColor }}
+          data-testid="price-truth-status-chip"
+        >
+          {status.replace(/_/g, ' ')}
+        </span>
+      </div>
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-xs">
+        <div>
+          <div className="text-[10px] font-mono uppercase tracking-widest mb-1" style={{ color: 'var(--sp-mist)' }}>
+            Latest daily close
+          </div>
+          <div className="font-mono" style={{ color: 'var(--sp-bone)' }} data-testid="price-truth-daily-close">
+            {formatQuoteValue(dailyClose, quoteCurrency)}
+          </div>
+          <div className="text-[10px] font-mono" style={{ color: 'var(--sp-mist)' }}>
+            {dailyTs ?? '—'}
+          </div>
+        </div>
+        <div>
+          <div className="text-[10px] font-mono uppercase tracking-widest mb-1" style={{ color: 'var(--sp-mist)' }}>
+            Latest quote
+          </div>
+          <div className="font-mono" style={{ color: 'var(--sp-bone)' }} data-testid="price-truth-quote-price">
+            {formatQuoteValue(quotePrice, quoteCurrency)}
+          </div>
+          <div className="text-[10px] font-mono" style={{ color: 'var(--sp-mist)' }} data-testid="price-truth-quote-meta">
+            {quoteSource ?? '—'}
+            {quoteTs ? ` · ${quoteTs}` : ''}
+            {ageMin != null ? ` · ${ageMin.toFixed(0)} min old` : ''}
+          </div>
+        </div>
+        <div>
+          <div className="text-[10px] font-mono uppercase tracking-widest mb-1" style={{ color: 'var(--sp-mist)' }}>
+            Delta vs daily close
+          </div>
+          <div
+            className="font-mono"
+            style={{ color: diverges ? 'var(--sp-rust)' : 'var(--sp-bone)' }}
+            data-testid="price-truth-delta"
+          >
+            {delta == null ? '—' : `${delta >= 0 ? '+' : ''}${delta.toFixed(2)}`}
+            {deltaPct != null ? ` (${deltaPct >= 0 ? '+' : ''}${deltaPct.toFixed(2)}%)` : ''}
+          </div>
+        </div>
+        <div>
+          <div className="text-[10px] font-mono uppercase tracking-widest mb-1" style={{ color: 'var(--sp-mist)' }}>
+            Suggested next step
+          </div>
+          <div className="font-mono" style={{ color: statusColor }} data-testid="price-truth-next-step">
+            {nextStep || '—'}
+          </div>
+        </div>
+      </div>
+      {reason && (
+        <div
+          className="text-[11px] leading-relaxed border rounded px-3 py-2"
+          style={{
+            borderColor: diverges ? 'var(--sp-rust)' : 'rgba(232,231,227,0.12)',
+            color: diverges ? 'var(--sp-rust)' : 'var(--sp-mist)',
+            background: diverges ? 'rgba(199, 87, 73, 0.07)' : 'transparent',
+          }}
+          data-testid="price-truth-reason"
+        >
+          {reason}
+        </div>
+      )}
+      <div className="text-[10px] font-mono" style={{ color: 'var(--sp-mist)' }}>
+        Record-keeping only · No broker call · advisory_status=ADVISORY_ONLY
+      </div>
+    </div>
+  );
+}
+
+function ReportView({
+  report,
+  response,
+}: {
+  report: ChartStructureReport;
+  response: ChartStructureResponse;
+}) {
   const nextStepColor = report.advisory?.suggested_next_step
     ? (NEXT_STEP_COLORS[report.advisory.suggested_next_step] ?? 'var(--sp-bone)')
     : 'var(--sp-bone)';
@@ -198,18 +327,28 @@ function ReportView({ report }: { report: ChartStructureReport }) {
         </div>
       )}
 
+      <PriceTruthPanel response={response} />
+
       {report.summary && (
         <div className="sp-card p-4 space-y-3">
           <div className="sp-eyebrow">OHLCV Summary</div>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <div>
-              <div className="text-[10px] font-mono uppercase tracking-widest mb-1" style={{ color: 'var(--sp-mist)' }}>Latest Close</div>
+              <div
+                className="text-[10px] font-mono uppercase tracking-widest mb-1"
+                style={{ color: 'var(--sp-mist)' }}
+              >
+                Latest Daily Close
+              </div>
               <div
                 className="text-lg font-bold font-mono"
                 style={{ color: 'var(--sp-bone)' }}
                 data-testid="chart-latest-close"
+                title="Close of the latest daily OHLCV candle — not the current live quote."
               >
-                {report.summary.latest_close != null ? fmt(report.summary.latest_close, 4) : '—'}
+                {report.summary.latest_close != null
+                  ? fmt(report.summary.latest_close, 4)
+                  : '—'}
               </div>
             </div>
             <div>
@@ -856,7 +995,7 @@ export default function ChartStructurePage() {
             </div>
           )}
 
-          {hasReport && <ReportView report={result.report!} />}
+          {hasReport && <ReportView report={result.report!} response={result} />}
         </div>
       )}
 

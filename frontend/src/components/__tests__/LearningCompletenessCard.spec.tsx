@@ -113,7 +113,7 @@ describe('LearningCompletenessCard', () => {
     expect(card.getAttribute('data-state')).toBe('populated');
     expect(card.getAttribute('data-incomplete-count')).toBe('2');
     expect(screen.getByTestId('lc-counts').textContent).toMatch(
-      /2 incomplete/i,
+      /2 reconciled-but-journal-incomplete/i,
     );
     expect(screen.getByTestId('lc-mode-counts').textContent).toMatch(
       /2 paper/i,

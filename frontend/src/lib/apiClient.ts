@@ -127,6 +127,25 @@ export class ApiTokenRequiredError extends Error {
   }
 }
 
+// Backend FastAPI routes return structured error detail JSON for refused
+// or not-found writes (see /manual-trades/{id}/cancel).  Surfacing the
+// `reason` field lets the UI show "This trade has been reconciled"
+// instead of the generic "HTTP 400 — kept" the user was complaining
+// about.  All fields are optional and the class falls back to the bare
+// status when the backend (or a proxy) returns a plain string body.
+export class ApiHttpError extends Error {
+  status: number;
+  reason?: string;
+  detail?: unknown;
+  constructor(status: number, message: string, reason?: string, detail?: unknown) {
+    super(message || `HTTP ${status}`);
+    this.name = 'ApiHttpError';
+    this.status = status;
+    this.reason = reason;
+    this.detail = detail;
+  }
+}
+
 async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const headers = buildHeaders(init);
   const res = await fetch(`${API_BASE}${path}`, {
@@ -136,7 +155,39 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   if (res.status === 401 || res.status === 403) {
     throw new ApiTokenRequiredError(res.status);
   }
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  if (!res.ok) {
+    // FastAPI wraps HTTPException(detail=...) under a "detail" key.  The
+    // cancel/reconcile routes now ship a structured object with
+    // `message` and `reason` — extract them when present so callers can
+    // render the actual cause.  If parsing fails we fall back to the
+    // generic "HTTP <status>" string, preserving prior behaviour.
+    let message = `HTTP ${res.status}`;
+    let reason: string | undefined;
+    let detail: unknown;
+    try {
+      const body = await res.json();
+      detail = body;
+      const raw = (body && typeof body === 'object' && 'detail' in (body as Record<string, unknown>))
+        ? (body as { detail: unknown }).detail
+        : body;
+      if (raw && typeof raw === 'object') {
+        const obj = raw as { message?: unknown; reason?: unknown; error?: unknown };
+        if (typeof obj.message === 'string' && obj.message) {
+          message = obj.message;
+        } else if (typeof obj.error === 'string' && obj.error) {
+          message = obj.error;
+        }
+        if (typeof obj.reason === 'string' && obj.reason) {
+          reason = obj.reason;
+        }
+      } else if (typeof raw === 'string' && raw) {
+        message = raw;
+      }
+    } catch {
+      // Non-JSON body — keep the generic message.
+    }
+    throw new ApiHttpError(res.status, message, reason, detail);
+  }
   return res.json() as Promise<T>;
 }
 

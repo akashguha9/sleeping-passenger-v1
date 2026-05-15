@@ -265,7 +265,12 @@ def _log_trade(ticker: str, qty: float, price: float, leverage: float = 1.0):
         side="BUY",
         quantity=qty,
         price=price,
-        thesis="probe",
+        # Use a realistic thesis sentence rather than the placeholder
+        # "probe" — the user-manual classifier filters bare "probe" /
+        # "test" theses out of the reconciliation queue, so a test
+        # helper that wants its row to appear in the queue must look
+        # like a real user log.
+        thesis=f"reconciliation extras unit-test thesis for {ticker}",
         leverage=leverage,
     )
 

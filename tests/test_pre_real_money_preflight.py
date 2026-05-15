@@ -86,8 +86,14 @@ def _insert_unreconciled(db: Path, count: int) -> None:
                 "INSERT INTO manual_trades (trade_id, event_id, ticker, side, quantity,"
                 " price, executed_at, thesis, notes, created_via)"
                 " VALUES (?,?,?,?,?,?,?,?,?,?)",
+                # Use a real-looking thesis ("test" by itself is filtered
+                # out of the queue by the user-manual classifier as a
+                # synthetic probe placeholder; preflight needs the rows
+                # to count toward the backlog).
                 (f"T{i}", f"EV{i}", "QQQ", "BUY", 10, 100.0,
-                 "2026-05-10T00:00:00Z", "test", "", "manual_trade_log"),
+                 "2026-05-10T00:00:00Z",
+                 "preflight backlog fixture thesis",
+                 "", "manual_trade_log"),
             )
         conn.commit()
     finally:

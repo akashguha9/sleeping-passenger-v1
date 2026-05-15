@@ -67,13 +67,30 @@ ADVISORY_STATUS = "ADVISORY_ONLY"
 EXECUTION_GATE_LOCKED = "LOCKED"
 
 # Provenance contract for the Reconciliation queue.  ONLY rows whose
-# created_via column equals this exact value appear in the live queue.
-# Empty / unknown provenance (legacy rows, smoke seeds, demo fixtures,
-# JSONL imports) is excluded by design — Reconciliation is the human
-# operator's record-keeping surface, not a dump of every row in the
-# manual_trades table.  Mirrors MANUAL_TRADE_LOG_PROVENANCE in
-# scripts/signal_inbox_api.py.
+# created_via column equals this exact value AND that pass the user-
+# manual classifier appear in the live queue.  Empty / unknown
+# provenance, probe theses, test event_ids, and synthetic trade_modes
+# are excluded by design — Reconciliation is the human operator's
+# record-keeping surface, not a dump of every row in the manual_trades
+# table.  See scripts/manual_trade_origin.py for the full predicate.
 MANUAL_TRADE_LOG_PROVENANCE = "manual_trade_log"
+
+try:
+    from scripts.manual_trade_origin import (
+        PROBE_THESIS_VALUES,
+        PROBE_EVENT_ID_PREFIXES,
+        EXCLUDED_LOGGED_BY,
+        EXCLUDED_TRADE_MODES,
+        USER_TRADE_MODES,
+    )
+except ModuleNotFoundError:  # pragma: no cover - script-style fallback
+    from manual_trade_origin import (  # type: ignore[no-redef]
+        PROBE_THESIS_VALUES,
+        PROBE_EVENT_ID_PREFIXES,
+        EXCLUDED_LOGGED_BY,
+        EXCLUDED_TRADE_MODES,
+        USER_TRADE_MODES,
+    )
 
 ADVISORY_DISCLAIMER = (
     "Reconciliation queue is advisory-only. Listing a trade here does not "
@@ -295,12 +312,10 @@ def build_queue(
         # Provenance filter: only show rows the operator entered through
         # the Manual Trade Log UI/API.  Empty / unknown provenance is
         # excluded by default so smoke seeds, demo fixtures, JSONL
-        # imports, and historical sample rows (e.g. SPY 'Strong
-        # persistence…', QQQ 'Exit on kill rate…' rows from
-        # local_mvp_smoke_test.py and gsheet-export fixtures) never
-        # pollute the live queue.  When the column is missing on a very
-        # old DB we emit a warning and refuse to fall back to unfiltered
-        # listing — better to surface an empty queue than to leak seeds.
+        # imports, and historical sample rows never pollute the live
+        # queue.  When the column is missing on a very old DB we emit a
+        # warning and refuse to fall back to unfiltered listing — better
+        # to surface an empty queue than to leak seeds.
         if "created_via" in cols:
             provenance_clause = (
                 " AND COALESCE(mt.created_via, '') = ?"
@@ -322,6 +337,52 @@ def build_queue(
             " AND COALESCE(mt.ai_execution_count, 0) = 0"
             if "ai_execution_count" in cols else ""
         )
+        # Secondary, content-based filters that the SQL provenance gate
+        # cannot catch on its own: probe theses, test event_id prefixes,
+        # automation logged_by sources, and unsafe trade_modes.  These
+        # mirror the canonical predicate in scripts/manual_trade_origin
+        # so the queue, learning completeness, and the cancel guard all
+        # agree on what counts as a user-entered manual log.
+        thesis_placeholders = ",".join("?" for _ in PROBE_THESIS_VALUES)
+        probe_thesis_clause = (
+            f" AND LOWER(TRIM(COALESCE(mt.thesis, ''))) NOT IN ({thesis_placeholders})"
+            if "thesis" in cols and PROBE_THESIS_VALUES else ""
+        )
+        probe_thesis_params: tuple[Any, ...] = tuple(PROBE_THESIS_VALUES)
+        if "event_id" in cols and PROBE_EVENT_ID_PREFIXES:
+            # Escape underscores so SQL LIKE 'EV_%' matches the literal
+            # prefix 'EV_' rather than 'EV<single-char>'.  Without ESCAPE
+            # the underscore is a SQL wildcard and would exclude legit
+            # event_ids like 'EV1' / 'EV2'.
+            event_id_clauses = " AND ".join(
+                "COALESCE(mt.event_id, '') NOT LIKE ? ESCAPE '\\'"
+                for _ in PROBE_EVENT_ID_PREFIXES
+            )
+            probe_event_id_clause = f" AND ({event_id_clauses})"
+            probe_event_id_params: tuple[Any, ...] = tuple(
+                f"{p.replace('_', r'\_')}%" for p in PROBE_EVENT_ID_PREFIXES
+            )
+        else:
+            probe_event_id_clause = ""
+            probe_event_id_params = ()
+        if "logged_by" in cols and EXCLUDED_LOGGED_BY:
+            lb_placeholders = ",".join("?" for _ in EXCLUDED_LOGGED_BY)
+            excluded_logged_by_clause = (
+                f" AND LOWER(TRIM(COALESCE(mt.logged_by, ''))) NOT IN ({lb_placeholders})"
+            )
+            excluded_logged_by_params: tuple[Any, ...] = tuple(EXCLUDED_LOGGED_BY)
+        else:
+            excluded_logged_by_clause = ""
+            excluded_logged_by_params = ()
+        if "trade_mode" in cols and EXCLUDED_TRADE_MODES:
+            tm_placeholders = ",".join("?" for _ in EXCLUDED_TRADE_MODES)
+            excluded_trade_mode_clause = (
+                f" AND UPPER(TRIM(COALESCE(mt.trade_mode, ''))) NOT IN ({tm_placeholders})"
+            )
+            excluded_trade_mode_params: tuple[Any, ...] = tuple(EXCLUDED_TRADE_MODES)
+        else:
+            excluded_trade_mode_clause = ""
+            excluded_trade_mode_params = ()
         select_clause = ", ".join(select_cols)
         try:
             rows = conn.execute(
@@ -334,8 +395,16 @@ def build_queue(
                 + provenance_clause
                 + broker_clause
                 + ai_clause
+                + probe_thesis_clause
+                + probe_event_id_clause
+                + excluded_logged_by_clause
+                + excluded_trade_mode_clause
                 + " ORDER BY mt.executed_at ASC",
-                provenance_params,
+                provenance_params
+                + probe_thesis_params
+                + probe_event_id_params
+                + excluded_logged_by_params
+                + excluded_trade_mode_params,
             ).fetchall()
         except sqlite3.Error as exc:
             warnings.append(f"query_failed:{type(exc).__name__}")
@@ -356,9 +425,26 @@ def build_queue(
 
         base["db_available"] = True
 
-        items: list[dict[str, Any]] = []
+        try:
+            from scripts.manual_trade_origin import duplicate_group_key
+        except ModuleNotFoundError:  # pragma: no cover - script fallback
+            from manual_trade_origin import duplicate_group_key  # type: ignore[no-redef]
+
+        # Build duplicate-group counts up front so each item can carry a
+        # flag without an N^2 inner loop.  Same ticker+side+qty+price in
+        # the same UTC minute is treated as a duplicate of a manual log
+        # (e.g. operator double-clicked Log).  Real distinct trades that
+        # differ in size, price, or executed_at are unaffected.
+        dup_group_counts: dict[str, int] = {}
+        all_dicts: list[dict[str, Any]] = []
         for row in rows:
             row_dict = {k: row[k] for k in row.keys()}
+            all_dicts.append(row_dict)
+            key = duplicate_group_key(row_dict)
+            dup_group_counts[key] = dup_group_counts.get(key, 0) + 1
+
+        items: list[dict[str, Any]] = []
+        for row_dict in all_dicts:
             outcome = {"outcome_status": "", "outcome_notes": ""}
             entry = _build_journal_entry(row_dict, outcome)
             if score_journal_entry is not None:
@@ -373,6 +459,8 @@ def build_queue(
                 learning_ready = False
                 missing = list(_JOURNAL_FIELDS)
 
+            dup_key = duplicate_group_key(row_dict)
+            dup_count = dup_group_counts.get(dup_key, 1)
             item: dict[str, Any] = {
                 "trade_id": str(row_dict.get("trade_id") or ""),
                 "event_id": str(row_dict.get("event_id") or ""),
@@ -383,6 +471,10 @@ def build_queue(
                 "executed_at": str(row_dict.get("executed_at") or ""),
                 "age_days": _age_days(row_dict.get("executed_at"), now),
                 "thesis": str(row_dict.get("thesis") or ""),
+                "origin_label": "USER_MANUAL",
+                "duplicate_group_key": dup_key,
+                "duplicate_count": dup_count,
+                "possible_duplicate": dup_count > 1,
                 "invalidation_level": str(row_dict.get("invalidation_level") or ""),
                 "expected_horizon": str(row_dict.get("expected_horizon") or ""),
                 "risk_reason": str(row_dict.get("risk_reason") or ""),

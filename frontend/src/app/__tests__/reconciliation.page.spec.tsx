@@ -46,12 +46,12 @@ const mockQueue = getReconciliationQueue as unknown as ReturnType<typeof vi.fn>;
 const mockTrades = getManualTrades as unknown as ReturnType<typeof vi.fn>;
 const mockLearning = getLearningCompleteness as unknown as ReturnType<typeof vi.fn>;
 
-function emptyQueue(unreconciled = 0) {
+function emptyQueue(unreconciled = 0, items: Array<{ trade_id: string }> = []) {
   return {
     report: 'reconciliation_queue',
     db_path: '',
     db_available: true,
-    items: [],
+    items,
     summary: {
       unreconciled_count: unreconciled,
       oldest_unreconciled_age_days: null,
@@ -74,6 +74,14 @@ function emptyQueue(unreconciled = 0) {
     execution_permission: false,
     can_execute: false,
   };
+}
+
+// Helper: build a queue payload that exposes the same trade_ids as the
+// /manual-trades response so the Awaiting list filters do not collapse
+// to zero.  Sprint I: the page treats the queue as the source of truth
+// for which trade_ids are "awaiting" — see page.tsx queueAwaitingIds.
+function queueFor(ids: string[]) {
+  return emptyQueue(ids.length, ids.map((trade_id) => ({ trade_id })));
 }
 
 function humanTrade(overrides: Record<string, unknown> = {}) {
@@ -156,11 +164,12 @@ describe('ReconciliationPage — provenance contract', () => {
     render(<ReconciliationPage />);
     const empty = await screen.findByTestId('awaiting-reconciliation-empty');
     expect((empty.textContent ?? '').toLowerCase()).toMatch(
-      /no human manual logs awaiting reconciliation/,
+      /no user-created manual logs awaiting reconciliation/,
     );
   });
 
   it('renders the three human manual logs (ICICIBANK / BHARTIARTL / SAP.DE)', async () => {
+    mockQueue.mockResolvedValue(queueFor(['MT_icici', 'MT_bharti', 'MT_sap']));
     mockTrades.mockResolvedValue({
       operation: 'list_manual_trades',
       trade_count: 3,
@@ -182,6 +191,10 @@ describe('ReconciliationPage — provenance contract', () => {
   it('renders Cancel Log only for rows whose created_via is manual_trade_log', async () => {
     // If the backend ever lets a non-human row slip through, the UI must
     // still refuse to show the destructive cancel affordance for it.
+    // The queue endpoint already filters seeds out, but defence-in-depth:
+    // even if /manual-trades returns a seed row, Cancel Log must not
+    // appear for it because the queue does not list its trade_id.
+    mockQueue.mockResolvedValue(queueFor(['MT_human']));
     mockTrades.mockResolvedValue({
       operation: 'list_manual_trades',
       trade_count: 2,

@@ -149,6 +149,21 @@ export interface ManualTradeLog {
   // fixtures, JSONL imports) are excluded from the live Reconciliation
   // queue.  Storing this NEVER grants execution permission.
   created_via?: string;
+  // Sprint I — Reconciliation origin classifier output.  One of
+  // USER_MANUAL / EXCLUDED_PROVENANCE / EXCLUDED_TRADE_MODE /
+  // EXCLUDED_LOGGED_BY / EXCLUDED_PROBE_THESIS / EXCLUDED_EVENT_ID /
+  // EXCLUDED_BROKER_FLAG / EXCLUDED_AI_COUNT.  Only USER_MANUAL rows
+  // are eligible for the live Reconciliation queue.  Display-only —
+  // never grants execution permission.
+  origin_label?: string;
+  // Duplicate-group metadata: rows with the same ticker/side/qty/price
+  // logged in the same UTC minute share a duplicate_group_key.  The UI
+  // surfaces possible_duplicate so the operator can Cancel Log the
+  // accidental second click.  Real distinct trades that differ in size
+  // or price are unaffected.
+  duplicate_group_key?: string;
+  duplicate_count?: number;
+  possible_duplicate?: boolean;
 }
 
 export interface TradeReconciliation {
@@ -579,6 +594,13 @@ export interface LearningCompletenessResponse {
   // Convenience aliases for the frontend.
   complete_count?: number;
   incomplete_count?: number;
+  // Sprint I split — separate the live awaiting queue from the
+  // reconciled-but-journal-incomplete bucket so the landing page can
+  // distinguish "trades that need an outcome" from "trades that need
+  // journal fields".
+  reconciled_but_learning_incomplete_count?: number;
+  awaiting_reconciliation_count?: number;
+  excluded_or_cancelled_count?: number;
   missing_field_distribution: Record<string, number>;
   trade_mode_distribution?: Record<string, number>;
   paper_trade_count?: number;
@@ -871,6 +893,57 @@ export interface ChartStructureResponse {
   latest_candle_utc?: string | null;
   data_age_days?: number | null;
   source_kind?: ChartSourceKind | string;
+  // Sprint I — generic price-truth fields produced by the backend
+  // chart_structure_price_truth layer.  Symbol-agnostic: every ticker
+  // gets the same set of optional fields so the UI can render "Latest
+  // daily close" + "Latest quote" + divergence panel uniformly.
+  price_truth?: ChartPriceTruth;
+  latest_daily_close?: number | null;
+  latest_daily_candle_utc?: string | null;
+  latest_quote_price?: number | null;
+  latest_quote_currency?: string | null;
+  latest_quote_timestamp_utc?: string | null;
+  latest_quote_source?: string | null;
+  quote_freshness_status?: string | null;
+  quote_freshness_gate?: string | null;
+  quote_age_minutes?: number | null;
+  quote_price_delta?: number | null;
+  quote_price_delta_pct?: number | null;
+  price_truth_status?: ChartPriceTruthStatus | string | null;
+  price_truth_reason?: string | null;
+}
+
+export type ChartPriceTruthStatus =
+  | 'DAILY_ONLY'
+  | 'QUOTE_ALIGNED'
+  | 'QUOTE_DIVERGES_FROM_DAILY'
+  | 'QUOTE_UNAVAILABLE'
+  | 'INTERNAL_TIMESTAMP_MISMATCH'
+  | 'SYMBOL_UNSUPPORTED_BY_QUOTE_SOURCE';
+
+export interface ChartPriceTruth {
+  symbol: string;
+  latest_daily_close: number | null;
+  latest_daily_candle_utc: string | null;
+  latest_quote_price: number | null;
+  latest_quote_currency: string | null;
+  latest_quote_timestamp_utc: string | null;
+  latest_quote_source: string | null;
+  quote_freshness_status: string | null;
+  quote_freshness_gate: string | null;
+  quote_age_minutes: number | null;
+  quote_price_delta: number | null;
+  quote_price_delta_pct: number | null;
+  price_truth_status: ChartPriceTruthStatus | string;
+  price_truth_reason: string;
+  suggested_next_step: string;
+  advisory_status: string;
+  execution_gate: string;
+  broker_api_called: boolean;
+  ai_execution_count: number;
+  execution_permission: boolean;
+  can_execute: boolean;
+  record_keeping_only: boolean;
 }
 
 export type ChartBootstrapStepStatus = 'OK' | 'SKIPPED' | 'ERROR';

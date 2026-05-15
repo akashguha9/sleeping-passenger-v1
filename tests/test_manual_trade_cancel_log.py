@@ -349,3 +349,67 @@ def test_cancel_does_not_affect_learning_completeness(tmp_db: Path) -> None:
     assert after["learning_incomplete_count"] == before["learning_incomplete_count"]
     assert after["broker_api_called"] is False
     assert after["ai_execution_count"] == 0
+
+
+# ---------------------------------------------------------------------------
+# Sprint I — structured cancel-error contract.  When refused, the response
+# must include a ``reason`` field the frontend renders instead of bare
+# "HTTP 400".  This pins the contract so the user-visible error never
+# regresses to "Could not cancel log (HTTP 400). The card has been kept."
+# ---------------------------------------------------------------------------
+
+
+def test_cancel_refused_response_carries_reason_field(tmp_db: Path) -> None:
+    a = signal_inbox_api.log_manual_trade(
+        event_id="EV_REASON",
+        ticker="ICICIBANK.NS",
+        side="BUY",
+        quantity=5.0,
+        price=950.0,
+        thesis="reason-field test thesis",
+    )
+    signal_inbox_api.reconcile_trade(
+        a["trade_id"],
+        actual_fill_price=950.0,
+        actual_quantity=5.0,
+        outcome_notes="closed",
+        pnl_estimate=0.0,
+        outcome_status="WIN",
+    )
+    resp = signal_inbox_api.cancel_manual_trade_log(a["trade_id"])
+    assert resp["status"] == "refused"
+    assert resp.get("reason") == "already_reconciled"
+    assert "reconciled" in resp.get("error", "").lower()
+    assert resp["broker_api_called"] is False
+    assert resp["ai_execution_count"] == 0
+
+
+def test_cancel_not_found_response_carries_reason_field(tmp_db: Path) -> None:
+    resp = signal_inbox_api.cancel_manual_trade_log("MT_NONEXISTENT")
+    assert resp["status"] == "not_found"
+    assert resp.get("reason") == "not_found"
+    assert resp["ai_execution_count"] == 0
+
+
+def test_cancel_refused_for_non_manual_log_origin_has_reason(tmp_db: Path) -> None:
+    # A row with empty created_via (seed-style) cannot be cancelled from
+    # the Reconciliation tab.  The refused response must carry a reason
+    # the frontend can render.
+    persistence.insert_manual_trade(
+        "MT_SEED_REASON",
+        "EV_SEED_REASON",
+        "ZZZ",
+        "BUY",
+        1.0,
+        1.0,
+        "2026-05-01T00:00:00Z",
+        "seed row",
+        "",
+        "human",
+        db_path=tmp_db,
+        created_via="",
+    )
+    resp = signal_inbox_api.cancel_manual_trade_log("MT_SEED_REASON")
+    assert resp["status"] == "refused"
+    assert resp.get("reason") == "non_manual_trade_log_origin"
+    assert resp["broker_api_called"] is False

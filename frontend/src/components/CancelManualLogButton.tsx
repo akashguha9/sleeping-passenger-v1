@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { cancelManualTradeLog } from '@/lib/apiClient';
+import { cancelManualTradeLog, ApiHttpError } from '@/lib/apiClient';
 
 interface Props {
   tradeId: string;
@@ -35,11 +35,18 @@ export function CancelManualLogButton({ tradeId, ticker, onCancelled }: Props) {
       setConfirmOpen(false);
       onCancelled?.(tradeId);
     } catch (e) {
-      setError(
-        e instanceof Error && e.message
-          ? `Could not cancel log (${e.message}). The card has been kept.`
-          : 'Could not cancel log. The card has been kept.',
-      );
+      // Prefer the backend's structured `message` (and `reason`) so the
+      // operator sees "This trade has been reconciled" rather than a
+      // bare "HTTP 400".  Falls back to the generic string when the
+      // backend (or a proxy) returns a non-JSON body.
+      if (e instanceof ApiHttpError) {
+        const tail = e.reason ? ` [${e.reason}]` : '';
+        setError(`Could not cancel log: ${e.message}${tail}. The card has been kept.`);
+      } else if (e instanceof Error && e.message) {
+        setError(`Could not cancel log (${e.message}). The card has been kept.`);
+      } else {
+        setError('Could not cancel log. The card has been kept.');
+      }
     } finally {
       setSubmitting(false);
     }

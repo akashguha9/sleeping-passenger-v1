@@ -68,11 +68,25 @@ EXECUTION_GATE_LOCKED = "LOCKED"
 # Provenance contract — mirrors MANUAL_TRADE_LOG_PROVENANCE in
 # scripts/signal_inbox_api.py.  Learning completeness counts only rows
 # the operator entered through the Manual Trade Log UI/API.  Smoke seeds,
-# demo fixtures, JSONL imports, and historical sample rows (e.g. SPY/QQQ
-# "Strong persistence…" / "Exit on kill rate…" rows from
-# local_mvp_smoke_test.py) carry an empty / unknown provenance and are
-# excluded — they are not part of the operator's decision journal.
+# demo fixtures, JSONL imports, probe theses, and test event_id prefixes
+# are excluded — they are not part of the operator's decision journal.
+# The full predicate lives in scripts/manual_trade_origin.
 MANUAL_TRADE_LOG_PROVENANCE = "manual_trade_log"
+
+try:
+    from scripts.manual_trade_origin import (
+        PROBE_THESIS_VALUES,
+        PROBE_EVENT_ID_PREFIXES,
+        EXCLUDED_LOGGED_BY,
+        EXCLUDED_TRADE_MODES,
+    )
+except ModuleNotFoundError:  # pragma: no cover - script-style fallback
+    from manual_trade_origin import (  # type: ignore[no-redef]
+        PROBE_THESIS_VALUES,
+        PROBE_EVENT_ID_PREFIXES,
+        EXCLUDED_LOGGED_BY,
+        EXCLUDED_TRADE_MODES,
+    )
 
 ADVISORY_DISCLAIMER = (
     "Learning-completeness report is advisory-only.  Marking a trade "
@@ -315,6 +329,49 @@ def build_report(
             " AND COALESCE(mt.ai_execution_count, 0) = 0"
             if "ai_execution_count" in mt_cols else ""
         )
+        # Mirror the queue's content-based exclusions so awaiting and
+        # learning-completeness agree about which rows are user-manual.
+        if "thesis" in mt_cols and PROBE_THESIS_VALUES:
+            thesis_ph = ",".join("?" for _ in PROBE_THESIS_VALUES)
+            probe_thesis_clause = (
+                f" AND LOWER(TRIM(COALESCE(mt.thesis, ''))) NOT IN ({thesis_ph})"
+            )
+            probe_thesis_params: tuple[Any, ...] = tuple(PROBE_THESIS_VALUES)
+        else:
+            probe_thesis_clause = ""
+            probe_thesis_params = ()
+        if "event_id" in mt_cols and PROBE_EVENT_ID_PREFIXES:
+            # Escape '_' so 'EV_' is treated as literal text rather than
+            # a single-char SQL wildcard (would otherwise eat 'EV1').
+            ev_clauses = " AND ".join(
+                "COALESCE(mt.event_id, '') NOT LIKE ? ESCAPE '\\'"
+                for _ in PROBE_EVENT_ID_PREFIXES
+            )
+            probe_event_id_clause = f" AND ({ev_clauses})"
+            probe_event_id_params: tuple[Any, ...] = tuple(
+                f"{p.replace('_', r'\_')}%" for p in PROBE_EVENT_ID_PREFIXES
+            )
+        else:
+            probe_event_id_clause = ""
+            probe_event_id_params = ()
+        if "logged_by" in mt_cols and EXCLUDED_LOGGED_BY:
+            lb_ph = ",".join("?" for _ in EXCLUDED_LOGGED_BY)
+            excluded_logged_by_clause = (
+                f" AND LOWER(TRIM(COALESCE(mt.logged_by, ''))) NOT IN ({lb_ph})"
+            )
+            excluded_logged_by_params: tuple[Any, ...] = tuple(EXCLUDED_LOGGED_BY)
+        else:
+            excluded_logged_by_clause = ""
+            excluded_logged_by_params = ()
+        if "trade_mode" in mt_cols and EXCLUDED_TRADE_MODES:
+            tm_ph = ",".join("?" for _ in EXCLUDED_TRADE_MODES)
+            excluded_trade_mode_clause = (
+                f" AND UPPER(TRIM(COALESCE(mt.trade_mode, ''))) NOT IN ({tm_ph})"
+            )
+            excluded_trade_mode_params: tuple[Any, ...] = tuple(EXCLUDED_TRADE_MODES)
+        else:
+            excluded_trade_mode_clause = ""
+            excluded_trade_mode_params = ()
         select_clause = ", ".join(select_mt + select_rr)
         try:
             rows = conn.execute(
@@ -325,8 +382,16 @@ def build_report(
                 + provenance_clause
                 + broker_clause
                 + ai_clause
+                + probe_thesis_clause
+                + probe_event_id_clause
+                + excluded_logged_by_clause
+                + excluded_trade_mode_clause
                 + " ORDER BY mt.executed_at ASC",
-                provenance_params,
+                provenance_params
+                + probe_thesis_params
+                + probe_event_id_params
+                + excluded_logged_by_params
+                + excluded_trade_mode_params,
             ).fetchall()
         except sqlite3.Error as exc:
             warnings.append(f"query_failed:{type(exc).__name__}")
@@ -374,8 +439,75 @@ def build_report(
         total = complete + incomplete
         out["reconciled_count"] = total
         out["learning_complete_count"] = complete
+        # Alias: "learning_incomplete_count" is the count of reconciled
+        # trades whose journal is still missing fields.  The frontend
+        # also exposes this as reconciled_but_learning_incomplete_count
+        # so the landing page can distinguish "needs reconciliation"
+        # from "needs journal fields".
         out["learning_incomplete_count"] = incomplete
+        out["reconciled_but_learning_incomplete_count"] = incomplete
         out["missing_field_distribution"] = missing_dist
+        # Separate "awaiting reconciliation" count — rows that pass the
+        # user-manual predicate but have no reconciliation_results row
+        # yet AND are not cancelled.  This is what the live queue badge
+        # should show; the historical "incomplete" count above is the
+        # learning-loop indicator.  We compute it as a separate query so
+        # the two surfaces cannot drift.
+        try:
+            # Reuse the same provenance + safety + probe filters.
+            awaiting_select = (
+                f"SELECT COUNT(*) FROM manual_trades mt"  # noqa: S608
+                " WHERE NOT EXISTS ("
+                "   SELECT 1 FROM reconciliation_results rr"
+                "   WHERE rr.trade_id = mt.trade_id"
+                " )"
+            )
+            cancelled_sql_clause = ""
+            if "reconciliation_status" in mt_cols:
+                cancelled_sql_clause = (
+                    " AND COALESCE(mt.reconciliation_status, '') NOT IN "
+                    "('CANCELLED_LOG', 'CANCELLED_DUPLICATE')"
+                )
+            awaiting_row = conn.execute(
+                awaiting_select
+                + cancelled_sql_clause
+                + provenance_clause
+                + broker_clause
+                + ai_clause
+                + probe_thesis_clause
+                + probe_event_id_clause
+                + excluded_logged_by_clause
+                + excluded_trade_mode_clause,
+                provenance_params
+                + probe_thesis_params
+                + probe_event_id_params
+                + excluded_logged_by_params
+                + excluded_trade_mode_params,
+            ).fetchone()
+            awaiting_count = int(awaiting_row[0] if awaiting_row else 0)
+        except sqlite3.Error:
+            awaiting_count = 0
+        out["awaiting_reconciliation_count"] = awaiting_count
+
+        # Diagnostic count of rows we excluded from this report on
+        # purpose (probe theses, test event_ids, paper-ledger imports,
+        # cancelled logs).  The frontend can show this small number so
+        # the operator understands why their DB row count is bigger than
+        # the queue.
+        try:
+            total_rows_row = conn.execute(
+                "SELECT COUNT(*) FROM manual_trades"
+            ).fetchone()
+            total_rows = int(total_rows_row[0] if total_rows_row else 0)
+        except sqlite3.Error:
+            total_rows = 0
+        # excluded == everything in manual_trades that is NOT counted
+        # above plus reconciled rows already counted.  Best-effort
+        # estimate; only used as a diagnostic chip.
+        excluded_or_cancelled = max(
+            0, total_rows - total - awaiting_count
+        )
+        out["excluded_or_cancelled_count"] = excluded_or_cancelled
         # Only learning-incomplete items are surfaced; the operator's job
         # is to close them, not to scroll past completed work.
         incomplete_items = [it for it in items if not it["learning_complete"]]

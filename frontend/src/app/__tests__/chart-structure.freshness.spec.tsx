@@ -227,3 +227,175 @@ describe('Chart Structure freshness gate', () => {
     expect(text.replace(/,/g, '')).toMatch(/\d/);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Sprint I — generic price-truth panel.  The page must show "Latest daily
+// close" (not "Latest close"), surface latest quote + delta when the
+// backend ships the new fields, and render a divergence warning for
+// QUOTE_DIVERGES_FROM_DAILY regardless of symbol / market.
+// ---------------------------------------------------------------------------
+
+function priceTruthExtras(extras: Record<string, unknown>) {
+  return {
+    price_truth: {
+      symbol: 'X',
+      latest_daily_close: null,
+      latest_daily_candle_utc: null,
+      latest_quote_price: null,
+      latest_quote_currency: null,
+      latest_quote_timestamp_utc: null,
+      latest_quote_source: null,
+      quote_freshness_status: null,
+      quote_freshness_gate: null,
+      quote_age_minutes: null,
+      quote_price_delta: null,
+      quote_price_delta_pct: null,
+      price_truth_status: 'DAILY_ONLY',
+      price_truth_reason: '',
+      suggested_next_step: 'WATCH_ONLY',
+      advisory_status: 'ADVISORY_ONLY',
+      execution_gate: 'LOCKED',
+      broker_api_called: false,
+      ai_execution_count: 0,
+      execution_permission: false,
+      can_execute: false,
+      record_keeping_only: true,
+      ...extras,
+    },
+    ...extras,
+  };
+}
+
+describe('Chart Structure price-truth panel', () => {
+  it('BHARTIARTL.NS divergence shows QUOTE_DIVERGES_FROM_DAILY + HUMAN_REVIEW_PRICE_MISMATCH', async () => {
+    mockGet.mockResolvedValue({
+      ...SAFETY_STAMPS,
+      symbol: 'BHARTIARTL.NS',
+      source_event_id: null,
+      candle_count: 100,
+      report: freshReport(),
+      freshness: freshFreshness('2026-05-14T16:00:00Z'),
+      data_freshness_status: 'FRESH',
+      freshness_gate: 'PASS',
+      latest_candle_utc: '2026-05-14T16:00:00Z',
+      data_age_days: 1.1,
+      source_kind: 'CANONICAL_SQLITE',
+      ...priceTruthExtras({
+        latest_daily_close: 1789.20,
+        latest_daily_candle_utc: '2026-05-14T16:00:00Z',
+        latest_quote_price: 1905.40,
+        latest_quote_currency: 'INR',
+        latest_quote_timestamp_utc: '2026-05-15T15:55:00Z',
+        latest_quote_source: 'yahoo_finance',
+        quote_price_delta: 116.20,
+        quote_price_delta_pct: 6.49,
+        price_truth_status: 'QUOTE_DIVERGES_FROM_DAILY',
+        price_truth_reason:
+          'Latest quote differs strongly from latest daily candle close (+6.49%). Treat chart features as daily-candle technicals, not live price.',
+        suggested_next_step: 'HUMAN_REVIEW_PRICE_MISMATCH',
+      }),
+    });
+
+    await fetchSymbol('BHARTIARTL.NS');
+    await waitFor(() => expect(screen.getByTestId('chart-price-truth-panel')).toBeTruthy());
+
+    const panel = screen.getByTestId('chart-price-truth-panel');
+    expect(panel.getAttribute('data-price-truth-status')).toBe('QUOTE_DIVERGES_FROM_DAILY');
+    expect(screen.getByTestId('price-truth-status-chip').textContent).toMatch(
+      /QUOTE DIVERGES FROM DAILY/,
+    );
+    expect(screen.getByTestId('price-truth-quote-price').textContent).toMatch(/1,?905\.40 INR/);
+    expect(screen.getByTestId('price-truth-daily-close').textContent).toMatch(/1,?789\.20 INR/);
+    expect(screen.getByTestId('price-truth-delta').textContent).toMatch(/\+116\.20.*\+6\.49%/);
+    expect(screen.getByTestId('price-truth-next-step').textContent).toMatch(
+      /HUMAN_REVIEW_PRICE_MISMATCH/,
+    );
+    expect(screen.getByTestId('chart-latest-close').textContent).toMatch(/1,?085\.5/);
+  });
+
+  it('AAPL aligned shows QUOTE_ALIGNED — generic, not symbol-special', async () => {
+    mockGet.mockResolvedValue({
+      ...SAFETY_STAMPS,
+      symbol: 'AAPL',
+      source_event_id: null,
+      candle_count: 100,
+      report: freshReport(),
+      freshness: freshFreshness(),
+      data_freshness_status: 'FRESH',
+      freshness_gate: 'PASS',
+      latest_candle_utc: '2026-05-15T16:00:00Z',
+      data_age_days: 0.04,
+      source_kind: 'CANONICAL_SQLITE',
+      ...priceTruthExtras({
+        latest_daily_close: 180.00,
+        latest_daily_candle_utc: '2026-05-15T16:00:00Z',
+        latest_quote_price: 180.50,
+        latest_quote_currency: 'USD',
+        latest_quote_timestamp_utc: '2026-05-15T15:55:00Z',
+        latest_quote_source: 'yahoo_finance',
+        quote_price_delta: 0.50,
+        quote_price_delta_pct: 0.28,
+        price_truth_status: 'QUOTE_ALIGNED',
+        price_truth_reason: 'Latest quote within 2.0% of latest daily close.',
+        suggested_next_step: 'WATCH_ONLY',
+      }),
+    });
+
+    await fetchSymbol('AAPL');
+    await waitFor(() => expect(screen.getByTestId('chart-price-truth-panel')).toBeTruthy());
+    expect(screen.getByTestId('chart-price-truth-panel').getAttribute('data-price-truth-status')).toBe(
+      'QUOTE_ALIGNED',
+    );
+    expect(screen.getByTestId('price-truth-quote-price').textContent).toMatch(/180\.50 USD/);
+    expect(screen.getByTestId('price-truth-next-step').textContent).toMatch(/WATCH_ONLY/);
+  });
+
+  it('Quote unavailable degrades to daily-only without faking a quote', async () => {
+    mockGet.mockResolvedValue({
+      ...SAFETY_STAMPS,
+      symbol: 'UNKNOWN_XYZ',
+      source_event_id: null,
+      candle_count: 100,
+      report: freshReport(),
+      freshness: freshFreshness(),
+      data_freshness_status: 'FRESH',
+      freshness_gate: 'PASS',
+      latest_candle_utc: '2026-05-15T16:00:00Z',
+      data_age_days: 0.04,
+      source_kind: 'CANONICAL_SQLITE',
+      ...priceTruthExtras({
+        latest_daily_close: 42.0,
+        latest_daily_candle_utc: '2026-05-15T16:00:00Z',
+        price_truth_status: 'QUOTE_UNAVAILABLE',
+        price_truth_reason:
+          'Latest quote unavailable; showing latest daily candle close only.',
+        suggested_next_step: 'WATCH_ONLY',
+      }),
+    });
+    await fetchSymbol('UNKNOWN_XYZ');
+    await waitFor(() => expect(screen.getByTestId('chart-price-truth-panel')).toBeTruthy());
+    const reason = screen.getByTestId('price-truth-reason').textContent ?? '';
+    expect(reason).toMatch(/Latest quote unavailable/);
+    expect(screen.getByTestId('price-truth-quote-price').textContent).toMatch(/—/);
+  });
+
+  it('Renders "Latest daily close" label rather than "Latest close"', async () => {
+    mockGet.mockResolvedValue({
+      ...SAFETY_STAMPS,
+      symbol: 'AAPL',
+      source_event_id: null,
+      candle_count: 100,
+      report: freshReport(),
+      freshness: freshFreshness(),
+      data_freshness_status: 'FRESH',
+      freshness_gate: 'PASS',
+      latest_candle_utc: '2026-05-15T16:00:00Z',
+      data_age_days: 0.04,
+      source_kind: 'CANONICAL_SQLITE',
+    });
+    await fetchSymbol('AAPL');
+    await waitFor(() => expect(screen.getByTestId('chart-latest-close')).toBeTruthy());
+    const labelNode = screen.getByTestId('chart-latest-close').previousSibling as HTMLElement | null;
+    expect(labelNode?.textContent ?? '').toMatch(/Latest Daily Close/i);
+  });
+});

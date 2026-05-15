@@ -1643,6 +1643,7 @@ def cancel_manual_trade_log(
             f"manual trade log {trade_id!r} not found",
         )
         resp["status"] = "not_found"
+        resp["reason"] = "not_found"
         return resp
 
     # Provenance guard: Cancel Log is a Reconciliation-tab affordance for
@@ -1688,15 +1689,20 @@ def cancel_manual_trade_log(
             "refusing to cancel a log marked broker_api_called=True",
         )
         resp["status"] = "refused"
+        resp["reason"] = "broker_api_called_true"
         resp["broker_api_called"] = True
         return resp
 
     if already_reconciled:
         resp = _error_response(
             "cancel_manual_trade_log",
-            "trade has been reconciled; cancel the reconciliation row first",
+            (
+                "This trade has been reconciled. Edit or void the "
+                "reconciliation row before cancelling the manual log."
+            ),
         )
         resp["status"] = "refused"
+        resp["reason"] = "already_reconciled"
         resp["reconciled"] = True
         resp["broker_api_called"] = False
         return resp
@@ -1893,16 +1899,64 @@ def list_manual_trades(
     fallback_used = not canonical
 
     # Optional provenance filter for the Reconciliation tab.  When the
-    # caller asks for origin="manual_trade_log" we drop every row whose
-    # created_via marker is anything else (empty / unknown legacy rows,
-    # smoke seeds, demo fixtures).  Unknown provenance is excluded — the
-    # contract is opt-in, not opt-out.  No-op when origin is None.
+    # caller asks for origin="manual_trade_log" we apply the canonical
+    # user-manual predicate (see scripts/manual_trade_origin) so probe
+    # theses, test event_ids, automation logged_by values, and rows with
+    # broker/AI flags set are excluded as well as bare-provenance rows.
+    # Other origin values fall back to the simple created_via match for
+    # legacy callers.
     if origin is not None:
         wanted = str(origin or "").strip()
-        trades = [
-            t for t in trades
-            if str(t.get("created_via") or "").strip() == wanted
-        ]
+        if wanted == MANUAL_TRADE_LOG_PROVENANCE:
+            try:
+                try:
+                    from scripts.manual_trade_origin import is_user_manual_trade
+                except ModuleNotFoundError:
+                    from manual_trade_origin import (  # type: ignore[no-redef]
+                        is_user_manual_trade,
+                    )
+                trades = [t for t in trades if is_user_manual_trade(t)]
+            except Exception:
+                trades = [
+                    t for t in trades
+                    if str(t.get("created_via") or "").strip() == wanted
+                ]
+        else:
+            trades = [
+                t for t in trades
+                if str(t.get("created_via") or "").strip() == wanted
+            ]
+
+    # Annotate every returned row with its origin label and duplicate
+    # group metadata so the UI can show "USER_MANUAL" / "EXCLUDED_PROBE_*"
+    # chips and surface duplicate-group counts without re-deriving them.
+    try:
+        try:
+            from scripts.manual_trade_origin import (
+                classify_manual_trade_origin,
+                duplicate_group_key,
+            )
+        except ModuleNotFoundError:
+            from manual_trade_origin import (  # type: ignore[no-redef]
+                classify_manual_trade_origin,
+                duplicate_group_key,
+            )
+    except Exception:
+        classify_manual_trade_origin = None  # type: ignore[assignment]
+        duplicate_group_key = None  # type: ignore[assignment]
+    if trades and classify_manual_trade_origin is not None:
+        dup_counts: dict[str, int] = {}
+        if duplicate_group_key is not None:
+            for t in trades:
+                k = duplicate_group_key(t)
+                dup_counts[k] = dup_counts.get(k, 0) + 1
+        for t in trades:
+            t["origin_label"] = classify_manual_trade_origin(t)
+            if duplicate_group_key is not None:
+                k = duplicate_group_key(t)
+                t["duplicate_group_key"] = k
+                t["duplicate_count"] = dup_counts.get(k, 1)
+                t["possible_duplicate"] = dup_counts.get(k, 1) > 1
 
     annotated_trades = trades
     aggregate_quality: dict[str, Any] | None = None

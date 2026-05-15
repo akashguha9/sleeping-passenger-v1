@@ -29,6 +29,35 @@ declare const beforeEach: any;
 
 vi.mock('@/lib/apiClient', () => ({
   cancelManualTradeLog: vi.fn(),
+  // Re-export an ApiHttpError-shaped class so the component's
+  // `instanceof ApiHttpError` check can distinguish structured failures
+  // from generic ones.  Tests that throw `new ApiHttpError(...)` from
+  // the mocked cancel function will hit the structured branch.
+  ApiHttpError: class ApiHttpError extends Error {
+    status: number;
+    reason?: string;
+    detail?: unknown;
+    constructor(
+      status: number,
+      message: string,
+      reason?: string,
+      detail?: unknown,
+    ) {
+      super(message || `HTTP ${status}`);
+      this.name = 'ApiHttpError';
+      this.status = status;
+      this.reason = reason;
+      this.detail = detail;
+    }
+  },
+  ApiTokenRequiredError: class ApiTokenRequiredError extends Error {
+    status: number;
+    constructor(status = 401) {
+      super('token required');
+      this.name = 'ApiTokenRequiredError';
+      this.status = status;
+    }
+  },
 }));
 
 import { cancelManualTradeLog } from '@/lib/apiClient';

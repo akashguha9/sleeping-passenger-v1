@@ -330,7 +330,8 @@ def test_preflight_reactor_does_not_override_backlog_block(tmp_path):
                 " price, executed_at, thesis, notes, created_via)"
                 " VALUES (?,?,?,?,?,?,?,?,?,?)",
                 (f"T{i}", f"EV{i}", "QQQ", "BUY", 10, 100.0,
-                 "2026-05-10T00:00:00Z", "test", "", "manual_trade_log"),
+                 "2026-05-10T00:00:00Z",
+                 "preflight backlog fixture thesis", "", "manual_trade_log"),
             )
         conn.commit()
     finally:

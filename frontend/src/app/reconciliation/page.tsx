@@ -121,15 +121,47 @@ export default function ReconciliationPage() {
       locallyCancelled.has(t.trade_id)
     );
   };
+  // The queue endpoint already filters to user-manual rows that have no
+  // reconciliation_results row yet (the truly-awaiting set).  Use it as
+  // the source of truth for which trade_ids belong on the Awaiting
+  // Reconciliation list so the page does not include
+  // reconciled-but-journal-incomplete rows here — those belong in
+  // Learning Completeness, not the action queue.  Falling back to a
+  // /manual-trades filter when the queue is unavailable keeps offline
+  // mode rendering something rather than nothing.
+  const queueAwaitingIds = new Set<string>(
+    (queue?.items ?? []).map((it) => it.trade_id).filter(Boolean),
+  );
   const unreconciledTrades = usingMockReconciled
     ? MOCK_MANUAL_TRADES.filter(
         (t) => !reconciledMockIds.has(t.trade_id) && !isCancelledLog(t),
       )
-    : (manualTrades?.trades ?? []).filter(
-        (t) => !(t.learning_ready ?? false) && !isCancelledLog(t),
-      );
+    : (manualTrades?.trades ?? []).filter((t) => {
+        if (isCancelledLog(t)) return false;
+        // If we have a queue, trust it: only show cards the backend
+        // queue considers awaiting reconciliation.  This is the same
+        // predicate the Cancel Log guard uses on the server, so the UI
+        // can never offer Cancel Log on a reconciled row and trigger
+        // the 400 the user complained about.
+        if (queue !== null) {
+          return queueAwaitingIds.has(t.trade_id);
+        }
+        // Queue unavailable — degrade gracefully to "no reconciliation
+        // result yet" using the learning_ready flag as a proxy.
+        return !(t.learning_ready ?? false);
+      });
   const realReconciledTrades = (manualTrades?.trades ?? []).filter(
     (t) => t.learning_ready === true,
+  );
+  // Reconciled-but-journal-incomplete: counted by Learning Completeness,
+  // not by the live queue.  Surfaced as a separate count so the landing
+  // panel never claims "backlog clear" while also implying unresolved
+  // action cards.
+  const reconciledButLearningIncomplete = (manualTrades?.trades ?? []).filter(
+    (t) =>
+      !isCancelledLog(t) &&
+      !queueAwaitingIds.has(t.trade_id) &&
+      t.learning_ready !== true,
   );
 
   function handleLogCancelled(tradeId: string) {
@@ -317,13 +349,35 @@ export default function ReconciliationPage() {
               className="text-sm text-slate-500 text-center py-8 bg-slate-800/40 rounded-lg border border-slate-700/40"
               data-testid="awaiting-reconciliation-empty"
             >
-              No human manual logs awaiting reconciliation.
+              No user-created manual logs awaiting reconciliation.
+              {reconciledButLearningIncomplete.length > 0 && (
+                <div
+                  className="text-[11px] text-slate-500 mt-2"
+                  data-testid="awaiting-empty-journal-hint"
+                >
+                  {reconciledButLearningIncomplete.length} reconciled trade(s) still need journal fields — see Learning Completeness.
+                </div>
+              )}
             </div>
           ) : (
             <div className="space-y-3 mb-5" data-testid="awaiting-reconciliation-list">
               {unreconciledTrades.map((t) => (
                 <div key={t.trade_id} className="space-y-1">
                   <ReconciliationCard trade={t} />
+                  {!usingMockReconciled && (
+                    <OriginAndDuplicateChips
+                      originLabel={
+                        (t as { origin_label?: string }).origin_label ?? 'USER_MANUAL'
+                      }
+                      tradeId={t.trade_id}
+                      possibleDuplicate={Boolean(
+                        (t as { possible_duplicate?: boolean }).possible_duplicate,
+                      )}
+                      duplicateCount={
+                        (t as { duplicate_count?: number }).duplicate_count ?? 1
+                      }
+                    />
+                  )}
                   {!usingMockReconciled && (
                     <JournalGapsRow
                       tradeId={t.trade_id}
@@ -346,7 +400,8 @@ export default function ReconciliationPage() {
                   )}
                   {!usingMockReconciled &&
                     (t as { created_via?: string }).created_via ===
-                      'manual_trade_log' && (
+                      'manual_trade_log' &&
+                    queueAwaitingIds.has(t.trade_id) && (
                       <CancelManualLogButton
                         tradeId={t.trade_id}
                         ticker={t.ticker}
@@ -466,6 +521,58 @@ export default function ReconciliationPage() {
         onClose={closeAction}
         onSubmitted={handleReconciliationSubmitted}
       />
+    </div>
+  );
+}
+
+interface OriginAndDuplicateChipsProps {
+  originLabel: string;
+  tradeId: string;
+  possibleDuplicate: boolean;
+  duplicateCount: number;
+}
+
+/**
+ * Small chip row showing the row's origin classification and any
+ * duplicate-group warning.  USER_MANUAL is the only label that should
+ * ever render on a card in the Awaiting list — the page filters
+ * everything else out — but we display the label anyway so the QA
+ * snapshot in tests can prove no EXCLUDED_* leaked through.  Possible
+ * duplicate chip points the operator at Cancel Log when the same
+ * ticker/side/qty/price was logged within the same UTC minute.
+ */
+function OriginAndDuplicateChips({
+  originLabel,
+  tradeId,
+  possibleDuplicate,
+  duplicateCount,
+}: OriginAndDuplicateChipsProps) {
+  return (
+    <div
+      className="flex flex-wrap items-center gap-2 text-[10px] font-mono"
+      data-testid="origin-duplicate-chips"
+      data-trade-id={tradeId}
+      data-origin-label={originLabel}
+    >
+      <span
+        className={
+          originLabel === 'USER_MANUAL'
+            ? 'px-1.5 py-0.5 rounded border border-emerald-900/60 bg-emerald-950/30 text-emerald-300 uppercase tracking-widest'
+            : 'px-1.5 py-0.5 rounded border border-amber-900/60 bg-amber-950/30 text-amber-300 uppercase tracking-widest'
+        }
+        data-testid="origin-label-chip"
+      >
+        origin: {originLabel.toLowerCase().replace(/_/g, ' ')}
+      </span>
+      {possibleDuplicate && duplicateCount > 1 && (
+        <span
+          className="px-1.5 py-0.5 rounded border border-amber-900/60 bg-amber-950/30 text-amber-300 uppercase tracking-widest"
+          data-testid="possible-duplicate-chip"
+          title="Same ticker/side/qty/price logged in the same UTC minute. Cancel the extra copy with Cancel Log; broker API not called."
+        >
+          possible duplicate · {duplicateCount}
+        </span>
+      )}
     </div>
   );
 }

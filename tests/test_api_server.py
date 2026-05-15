@@ -623,6 +623,62 @@ def test_post_cancel_log_returns_400_when_refused(client):
     assert r.status_code == 400
 
 
+# Sprint I — the refused 400 response must carry a structured ``detail``
+# object with ``reason`` and ``message`` fields so the frontend can show
+# "This trade has been reconciled" instead of the user-visible
+# "Could not cancel log (HTTP 400)" the screenshot complained about.
+def test_post_cancel_log_400_detail_carries_structured_reason(client):
+    refused_resp = {
+        "operation": "cancel_manual_trade_log",
+        "error": "This trade has been reconciled.",
+        "status": "refused",
+        "reason": "already_reconciled",
+        "reconciled": True,
+        "broker_api_called": False,
+        "advisory_status": "ADVISORY_ONLY",
+        "human_review_required": True,
+        "execution_mode": "HUMAN_ONLY",
+        "ai_execution_count": 0,
+        "generated_at": "2026-01-01T00:00:00Z",
+    }
+    with patch(
+        "scripts.api_server.cancel_manual_trade_log",
+        return_value=refused_resp,
+    ):
+        r = client.post("/manual-trades/TRADE_001/cancel", json={})
+    assert r.status_code == 400
+    body = r.json()
+    assert isinstance(body.get("detail"), dict)
+    assert body["detail"].get("reason") == "already_reconciled"
+    assert body["detail"].get("reconciled") is True
+    assert body["detail"].get("broker_api_called") is False
+    assert "reconcile" in body["detail"].get("message", "").lower()
+
+
+def test_post_cancel_log_404_detail_carries_structured_reason(client):
+    not_found_resp = {
+        "operation": "cancel_manual_trade_log",
+        "error": "manual trade log 'NOPE' not found",
+        "status": "not_found",
+        "reason": "not_found",
+        "advisory_status": "ADVISORY_ONLY",
+        "human_review_required": True,
+        "execution_mode": "HUMAN_ONLY",
+        "ai_execution_count": 0,
+        "generated_at": "2026-01-01T00:00:00Z",
+    }
+    with patch(
+        "scripts.api_server.cancel_manual_trade_log",
+        return_value=not_found_resp,
+    ):
+        r = client.post("/manual-trades/NOPE/cancel", json={})
+    assert r.status_code == 404
+    body = r.json()
+    assert isinstance(body.get("detail"), dict)
+    assert body["detail"].get("reason") == "not_found"
+    assert body["detail"].get("trade_id") == "NOPE"
+
+
 # ---------------------------------------------------------------------------
 # 10. GET /moltbook
 # ---------------------------------------------------------------------------
