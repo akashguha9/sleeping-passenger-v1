@@ -36,6 +36,18 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+# Force UTF-8 across the wrapper so PowerShell does not double-encode python
+# stdout into UTF-16LE (which produced "S l e e p i n g" / "?" artefacts in
+# the rotated log file before Sprint 10B).
+try {
+    [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+} catch {
+    # Older console hosts can refuse this; fall back silently. The log will
+    # still be appended via Out-File -Encoding utf8 below.
+}
+$OutputEncoding = [System.Text.Encoding]::UTF8
+$env:PYTHONIOENCODING = "utf-8"
+
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $RepoRoot = Resolve-Path (Join-Path $ScriptDir "..\..")
 
@@ -62,9 +74,17 @@ if (-not [string]::IsNullOrWhiteSpace($Sources)) {
     $pyArgs += $Sources
 }
 
+$rc = 0
 try {
-    & python @pyArgs 2>&1 | Tee-Object -FilePath $LogPath -Append
+    # Capture python stdout/stderr as strings, then append in a single UTF-8
+    # write. Tee-Object on Windows PowerShell 5.1 has no -Encoding parameter
+    # and defaults to UTF-16LE for file output, which corrupted prior logs.
+    $pyOut = & python @pyArgs 2>&1
     $rc = $LASTEXITCODE
+    if ($null -ne $pyOut) {
+        $pyOut | Out-File -FilePath $LogPath -Append -Encoding utf8
+        $pyOut | ForEach-Object { Write-Output $_ }
+    }
 } catch {
     $err = $_.Exception.Message
     "[$Timestamp] orchestrator threw: $err" |

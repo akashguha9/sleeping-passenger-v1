@@ -202,14 +202,27 @@ try {
     }
 
     # ----------------------------------------------------------------
-    # 6. Scheduled task status (best-effort, Windows only)
+    # 6. Scheduled task status (best-effort, Windows only). We surface
+    #    state, last/next run time, and the last task result so the
+    #    operator can confirm the 6h cadence is alive without leaving
+    #    the audit.  All read-only.
     # ----------------------------------------------------------------
     Invoke-Section -Name 'scheduled_task' -Block {
         try {
             $task = Get-ScheduledTask -TaskName 'SleepingPassengerLiveSignalRefresh' -ErrorAction Stop
             $state = $task.State
-            Add-Section 'scheduled_task' 'PASS' "state=$state"
-            Write-Host "  state=$state"
+            $info = $null
+            try {
+                $info = Get-ScheduledTaskInfo -TaskName 'SleepingPassengerLiveSignalRefresh' -ErrorAction Stop
+            } catch {
+                $info = $null
+            }
+            $lastRun = if ($info -and $info.LastRunTime) { $info.LastRunTime.ToString('s') } else { 'never' }
+            $nextRun = if ($info -and $info.NextRunTime) { $info.NextRunTime.ToString('s') } else { 'unscheduled' }
+            $lastResult = if ($info) { $info.LastTaskResult } else { 'unknown' }
+            $detail = "state=$state last_run=$lastRun next_run=$nextRun last_result=$lastResult"
+            Add-Section 'scheduled_task' 'PASS' $detail 'Get-ScheduledTask + Get-ScheduledTaskInfo'
+            Write-Host "  $detail"
         } catch {
             Add-Section 'scheduled_task' 'INFO' 'not registered (use register_live_signal_refresh_task.ps1)'
             Write-Host "  not registered"

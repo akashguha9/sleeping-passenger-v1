@@ -577,7 +577,7 @@ def run_refresh(
 def _format_summary_lines(summary: dict[str, Any], *, quiet: bool) -> list[str]:
     lines: list[str] = []
     lines.append("=" * 72)
-    lines.append("Sleeping Passenger — Live Signal Refresh")
+    lines.append("Sleeping Passenger - Live Signal Refresh")
     lines.append("=" * 72)
     lines.append(f"Mode: {summary['mode']}  cadence_hours={summary['cadence_hours']}")
     lines.append(

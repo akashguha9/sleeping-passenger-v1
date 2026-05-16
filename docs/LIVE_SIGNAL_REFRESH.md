@@ -164,6 +164,20 @@ The summary JSON includes the full per-source breakdown and the safety
 stamps. It is overwritten on every run — to retain history, query the
 `live_source_refresh_runs` table.
 
+Sprint 10B note on encoding: `run_live_signal_refresh_once.ps1` forces
+`PYTHONIOENCODING=utf-8`, sets `[Console]::OutputEncoding` to UTF-8, and
+writes the log file via `Out-File -Encoding utf8`. Older log lines written
+before this fix may show wide-byte artefacts ("S l e e p i n g") or
+question marks where em-dashes appeared; new entries are plain UTF-8.
+
+To inspect scheduled-task health without re-registering anything:
+
+```powershell
+Get-ScheduledTask -TaskName SleepingPassengerLiveSignalRefresh
+Get-ScheduledTaskInfo -TaskName SleepingPassengerLiveSignalRefresh
+.\scripts\windows\run_local_mvp_audit.ps1   # surfaces state + last_run + next_run + last_result
+```
+
 ---
 
 ## 7. Required environment variables (presence only)

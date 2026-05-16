@@ -4,8 +4,19 @@
 runtime/
 logs/
 backup/
+backups/
 audit_bundle/
 audit_bundle.zip
+# Sprint 10C private operator backups (manifest + DB + paper ledger copies).
+# Local-only state; never push.
+backup_local_state/
+private_backups/
+
+# =========================
+# NODE / FRONTEND DEPENDENCIES (top-level and nested)
+# =========================
+node_modules/
+**/node_modules/
 
 # =========================
 # ENV / SECRETS (CRITICAL)

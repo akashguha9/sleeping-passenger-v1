@@ -108,23 +108,64 @@ $settings = New-ScheduledTaskSettingsSet `
 
 $principal = New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\$env:USERNAME" -LogonType S4U
 
-if ($PSCmdlet.ShouldProcess($TaskName, "Register scheduled task")) {
-    Register-ScheduledTask `
+if (-not $PSCmdlet.ShouldProcess($TaskName, "Register scheduled task")) {
+    exit 0
+}
+
+$registered = $null
+try {
+    $registered = Register-ScheduledTask `
         -TaskName $TaskName `
         -Action $action `
         -Trigger $trigger `
         -Settings $settings `
         -Principal $principal `
-        -Description "Sleeping Passenger advisory-only live signal refresh (every 6 hours). No broker. No execution." | Out-Null
-    Write-Host "Registered scheduled task '$TaskName'."
-    Write-Host "Mode:         $(if ($DryRunOnly) { '--dry-run' } else { '--write' })"
-    Write-Host "Cadence:      every 6 hours starting $StartTime"
-    Write-Host "Wrapper:      $OnceScript"
-    Write-Host "Logs append:  $(Join-Path $RepoRoot 'logs\live_signal_refresh.log')"
+        -Description "Sleeping Passenger advisory-only live signal refresh (every 6 hours). No broker. No execution." `
+        -ErrorAction Stop
+} catch {
+    $msg = $_.Exception.Message
+    $accessDenied = $msg -match '(?i)access\s*is\s*denied|unauthorized|denied|permission|0x80070005'
     Write-Host ""
-    Write-Host "Inspect:      Get-ScheduledTask -TaskName $TaskName"
-    Write-Host "Run now:      Start-ScheduledTask -TaskName $TaskName"
-    Write-Host "Unregister:   Unregister-ScheduledTask -TaskName $TaskName -Confirm:`$false"
-    Write-Host ""
-    Write-Host "Safety: orchestrator is ADVISORY_ONLY, execution_gate=LOCKED, broker_api_called=false."
+    Write-Host "[FAIL] Register-ScheduledTask failed: $msg" -ForegroundColor Red
+    if ($accessDenied) {
+        Write-Host ""
+        Write-Host "Access denied. Windows requires an elevated PowerShell to register" -ForegroundColor Yellow
+        Write-Host "scheduled tasks under this principal." -ForegroundColor Yellow
+        Write-Host ""
+        Write-Host "  Re-run this script in an Administrator PowerShell:" -ForegroundColor Yellow
+        Write-Host "    Start-Process powershell -Verb RunAs" -ForegroundColor Yellow
+        Write-Host "    cd `"$RepoRoot`"" -ForegroundColor Yellow
+        Write-Host "    .\scripts\windows\register_live_signal_refresh_task.ps1 -Force" -ForegroundColor Yellow
+    }
+    exit 1
 }
+
+# Verify the task actually exists before declaring success. Register-ScheduledTask
+# can succeed superficially but the task may not be reachable via the task store
+# under certain principals/profiles; we re-query to confirm.
+$verified = $null
+try {
+    $verified = Get-ScheduledTask -TaskName $TaskName -ErrorAction Stop
+} catch {
+    Write-Host "[FAIL] Task '$TaskName' could not be verified after registration." -ForegroundColor Red
+    Write-Host "       $($_.Exception.Message)" -ForegroundColor Red
+    exit 1
+}
+
+if (-not $verified) {
+    Write-Host "[FAIL] Task '$TaskName' missing after registration; aborting." -ForegroundColor Red
+    exit 1
+}
+
+Write-Host "Registered scheduled task '$TaskName' (state=$($verified.State))."
+Write-Host "Mode:         $(if ($DryRunOnly) { '--dry-run' } else { '--write' })"
+Write-Host "Cadence:      every 6 hours starting $StartTime"
+Write-Host "Wrapper:      $OnceScript"
+Write-Host "Logs append:  $(Join-Path $RepoRoot 'logs\live_signal_refresh.log')"
+Write-Host ""
+Write-Host "Inspect:      Get-ScheduledTask -TaskName $TaskName"
+Write-Host "Run now:      Start-ScheduledTask -TaskName $TaskName"
+Write-Host "Unregister:   Unregister-ScheduledTask -TaskName $TaskName -Confirm:`$false"
+Write-Host ""
+Write-Host "Safety: orchestrator is ADVISORY_ONLY, execution_gate=LOCKED, broker_api_called=false."
+exit 0

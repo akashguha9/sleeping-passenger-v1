@@ -218,3 +218,39 @@ def test_register_ps1_has_six_hour_trigger_and_log_path():
     assert "New-TimeSpan -Hours 6" in text
     # Working directory is set to repo root so paths resolve correctly.
     assert "WorkingDirectory" in text
+
+
+def test_register_ps1_no_unconditional_success_print():
+    """Sprint 10B: the registration script must not print 'Registered'
+    before verifying the task exists. Specifically, the success Write-Host
+    must not appear inside the try block that calls Register-ScheduledTask,
+    and the Register-ScheduledTask call must be guarded by try/catch with
+    -ErrorAction Stop so a failure does not fall through to success."""
+    ps1 = _REPO / "scripts" / "windows" / "register_live_signal_refresh_task.ps1"
+    text = ps1.read_text(encoding="utf-8", errors="ignore")
+
+    # try/catch present around Register-ScheduledTask
+    assert "Register-ScheduledTask" in text
+    assert "-ErrorAction Stop" in text
+    assert "try {" in text and "} catch {" in text
+
+    # Verification step after registration
+    assert "Get-ScheduledTask -TaskName $TaskName -ErrorAction Stop" in text
+
+    # Access-denied / Administrator guidance must exist and exit non-zero
+    assert "Access denied" in text or "access\\s*is\\s*denied" in text
+    assert "Administrator" in text or "RunAs" in text
+    assert "exit 1" in text
+
+
+def test_run_once_ps1_uses_utf8_encoding_for_logs():
+    """Sprint 10B: the run-once wrapper must force UTF-8 so PowerShell
+    does not emit UTF-16LE log lines (the prior bug)."""
+    ps1 = _REPO / "scripts" / "windows" / "run_live_signal_refresh_once.ps1"
+    text = ps1.read_text(encoding="utf-8", errors="ignore")
+    # Both interpreter-side and PowerShell-side encoding forced.
+    assert "PYTHONIOENCODING" in text
+    assert "[System.Text.Encoding]::UTF8" in text
+    # File writes go through Out-File -Encoding utf8 (Tee-Object on PS 5.1
+    # cannot set encoding, so its presence here would be a regression).
+    assert "Out-File -FilePath $LogPath -Append -Encoding utf8" in text
