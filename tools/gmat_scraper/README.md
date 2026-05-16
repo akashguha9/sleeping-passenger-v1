@@ -61,25 +61,32 @@ emits two artifacts:
 ## Layout
 
 ```
-scripts/gmat_scraper/
+tools/gmat_scraper/
   __init__.py
   sections.py           # PS/CR/DS/GT/MSR/TPA page counts
   http.py               # polite session, retries, cookie jar
   parser.py             # listing + thread parsers (TWEAK SELECTORS HERE)
   store.py              # resumable JSONL writer
   reasoning_bridge.py   # Problem JSONL → DecisionFrame JSONL
-  cli.py                # python -m scripts.gmat_scraper.cli ...
+  cli.py                # python -m tools.gmat_scraper.cli ...
   README.md
 ```
+
+> **Quarantine note.** This module is intentionally located under
+> `tools/`, not `scripts/`, because it is *outside* the Sleeping Passenger
+> private-operator MVP runtime surface (see
+> `scripts/private_scope_guard.py`). It must never be imported by code
+> under `scripts/` or `src/`. Adding any such import is a scope
+> violation and will trip the private-scope-guard tests.
 
 ## Usage
 
 ```bash
 # 1. Smoke test — fetch the first PS listing page, print topic URLs.
-python -m scripts.gmat_scraper.cli discover --section PS --pages 1
+python -m tools.gmat_scraper.cli discover --section PS --pages 1
 
 # 2. Small crawl — 3 CR pages, with a cookie jar.
-python -m scripts.gmat_scraper.cli crawl \
+python -m tools.gmat_scraper.cli crawl \
     --section CR --from-page 1 --to-page 3 \
     --delay 4 --cookies ~/gmatclub_cookies.txt
 
@@ -87,7 +94,7 @@ python -m scripts.gmat_scraper.cli crawl \
 #    (URLs already in CR.jsonl are skipped).
 
 # 4. Build decision frames for the trading engine.
-python -m scripts.gmat_scraper.cli bridge \
+python -m tools.gmat_scraper.cli bridge \
     --in  data/raw/gmat/CR.jsonl \
     --out data/processed/gmat_frames_CR.jsonl
 ```

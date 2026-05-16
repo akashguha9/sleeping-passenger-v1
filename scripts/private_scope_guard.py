@@ -10,8 +10,11 @@ does.
 This module is a *discipline tool*, not a deletion tool.  It scans the
 ``scripts/`` tree, classifies each top-level entry as either in-scope
 (an approved private-operator domain) or out-of-scope (a candidate for
-``REVIEW_REQUIRED``), and produces a structured report.  The report is
-consumed by:
+``REVIEW_REQUIRED``), and tracks any *quarantined tool directories*
+that have been moved out of ``scripts/`` into ``tools/`` so they no
+longer pollute the MVP runtime surface.
+
+The report is consumed by:
 
 * ``tests/test_private_scope_guard.py`` — locks the inventory so adding
   a new out-of-scope module trips a clearly-named test.
@@ -20,9 +23,10 @@ consumed by:
 
 Out-of-scope is NOT an instruction to delete anything.  Existing modules
 that have already shipped (e.g. an experimental scraper) remain in
-place.  The guard simply prevents *silent* expansion: every new module
-either lands in an approved domain or shows up here for an explicit
-operator decision.
+place — either grandfathered in ``PREEXISTING_BASELINE`` or quarantined
+under ``tools/``.  The guard simply prevents *silent* expansion: every
+new module either lands in an approved domain or shows up here for an
+explicit operator decision.
 """
 from __future__ import annotations
 
@@ -37,6 +41,7 @@ EXECUTION_GATE_LOCKED = "LOCKED"
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _SCRIPTS_DIR = _REPO_ROOT / "scripts"
+_TOOLS_DIR = _REPO_ROOT / "tools"
 
 # Approved private-operator domains.  A module is considered in-scope if
 # any of these substrings appears in its filename or package directory
@@ -69,6 +74,8 @@ APPROVED_DOMAINS: tuple[str, ...] = (
     "moltbook",
     "operator",
     "scope_guard",
+    "performance_baseline",
+    "restore_drill",
     "config",
     "supported_currencies",
     "execution_governance",
@@ -88,12 +95,31 @@ EXPLICIT_IN_SCOPE: frozenset[str] = frozenset({
     "__pycache__",
 })
 
-# Modules deliberately marked OUT_OF_SCOPE.  This list exists so the
-# guard report distinguishes "we know this is out of scope and have
-# accepted it" from "this is new and needs an operator decision".
-KNOWN_OUT_OF_SCOPE: frozenset[str] = frozenset({
-    "gmat_scraper",
-})
+# Modules deliberately marked OUT_OF_SCOPE inside ``scripts/``.  This
+# list exists so the guard report distinguishes "we know this is out of
+# scope and have accepted it" from "this is new and needs an operator
+# decision".  Empty after the GMAT scraper was relocated to
+# ``tools/gmat_scraper/`` (see ``QUARANTINED_TOOL_DIRS`` below) — leave
+# it as a frozenset so future operators have an obvious slot to use
+# when they accept a *new* in-scripts/ out-of-scope module.
+KNOWN_OUT_OF_SCOPE: frozenset[str] = frozenset()
+
+# Quarantined non-MVP tool directories.  These live under ``tools/`` so
+# they are physically off the MVP runtime surface — no module under
+# ``scripts/`` or ``src/`` is allowed to import them.  Each entry maps
+# the directory name (relative to ``tools/``) to a short rationale that
+# is surfaced in the operator-facing report.
+#
+# Quarantine is *reversible*: removing an entry from this map does not
+# delete anything; it simply tells the guard to stop expecting the
+# directory to exist under ``tools/``.
+QUARANTINED_TOOL_DIRS: dict[str, str] = {
+    "gmat_scraper": (
+        "GMAT Club scraper + advisory reasoning bridge — not part of "
+        "the private-operator MVP runtime; relocated from scripts/ to "
+        "tools/ to remove it from the MVP surface."
+    ),
+}
 
 # Pre-existing baseline of scripts/ entries that do not match an approved
 # domain substring but were already in the tree at the moment this
@@ -104,6 +130,12 @@ KNOWN_OUT_OF_SCOPE: frozenset[str] = frozenset({
 # files inside an approved domain or expanding ``APPROVED_DOMAINS``.
 PREEXISTING_BASELINE: frozenset[str] = frozenset({
     "_quarantine",
+    "gmat_scraper",  # historical baseline reference; the directory itself
+    # is now relocated to ``tools/gmat_scraper`` and tracked through
+    # ``QUARANTINED_TOOL_DIRS``.  Keeping the name here means a future
+    # operator who accidentally re-creates ``scripts/gmat_scraper`` will
+    # see it land in ``out_of_scope`` but not ``review_required`` — the
+    # quarantine-leak check below is what fails loudly.
     "action_engine.py",
     "activation_trigger_tracker.py",
     "ai_output_schema.py",
@@ -275,21 +307,73 @@ def _iter_scripts_entries() -> Iterable[Path]:
     )
 
 
-def build_report(scripts_dir: Path = _SCRIPTS_DIR) -> dict[str, Any]:
-    """Walk the scripts/ tree once and classify every top-level entry."""
+def _inspect_quarantined_tools(
+    *,
+    scripts_dir: Path,
+    tools_dir: Path,
+) -> tuple[list[dict[str, Any]], list[str]]:
+    """Return (quarantined_summary, quarantine_leaks).
+
+    A *leak* is a quarantined directory that has reappeared inside the
+    MVP surface — i.e. ``scripts/<name>`` exists.  Leaks are a hard
+    discipline-failure signal: the whole point of relocating the
+    directory was to keep it out of the MVP runtime.
+    """
+    summary: list[dict[str, Any]] = []
+    leaks: list[str] = []
+    for name, rationale in sorted(QUARANTINED_TOOL_DIRS.items()):
+        tools_path = tools_dir / name
+        scripts_path = scripts_dir / name
+        tools_present = tools_path.exists()
+        leaked_to_scripts = scripts_path.exists()
+        summary.append(
+            {
+                "name": name,
+                "expected_relative_path": f"tools/{name}",
+                "tools_path_exists": tools_present,
+                "leaked_back_to_scripts": leaked_to_scripts,
+                "rationale": rationale,
+            }
+        )
+        if leaked_to_scripts:
+            leaks.append(f"scripts/{name}")
+    return summary, leaks
+
+
+def build_report(
+    scripts_dir: Path = _SCRIPTS_DIR,
+    *,
+    tools_dir: Path | None = None,
+) -> dict[str, Any]:
+    """Walk the scripts/ tree once and classify every top-level entry.
+
+    Also inspects ``tools/`` (or the explicit ``tools_dir`` override) to
+    confirm quarantined tool directories remain physically outside the
+    MVP runtime surface.
+    """
     in_scope: list[str] = []
     out_of_scope: list[str] = []
     review_required: list[str] = []
+    resolved_tools_dir = (
+        tools_dir if tools_dir is not None else scripts_dir.parent / "tools"
+    )
+    quarantined_tools, quarantine_leaks = _inspect_quarantined_tools(
+        scripts_dir=scripts_dir, tools_dir=resolved_tools_dir
+    )
 
     if not scripts_dir.exists():
         return {
             "report": "private_scope_guard",
             "scripts_dir": str(scripts_dir),
             "scripts_dir_exists": False,
+            "tools_dir": str(resolved_tools_dir),
+            "tools_dir_exists": resolved_tools_dir.exists(),
             "in_scope": [],
             "out_of_scope": [],
             "review_required": [],
             "known_out_of_scope": sorted(KNOWN_OUT_OF_SCOPE),
+            "quarantined_tools": quarantined_tools,
+            "quarantine_leaks": quarantine_leaks,
             "advisory_status": ADVISORY_STATUS,
             "execution_gate": EXECUTION_GATE_LOCKED,
             "broker_api_called": False,
@@ -310,9 +394,9 @@ def build_report(scripts_dir: Path = _SCRIPTS_DIR) -> dict[str, Any]:
             out_of_scope.append(name)
             # Review-required = newly-introduced out-of-scope files that
             # are neither in the pre-existing baseline nor in the
-            # explicitly-acknowledged out-of-scope list (e.g. the GMAT
-            # scraper).  This is the discipline surface: the only thing
-            # that should ever trip is something a new commit added.
+            # explicitly-acknowledged out-of-scope list.  This is the
+            # discipline surface: the only thing that should ever trip
+            # is something a new commit added.
             if (
                 name not in KNOWN_OUT_OF_SCOPE
                 and name not in PREEXISTING_BASELINE
@@ -323,6 +407,8 @@ def build_report(scripts_dir: Path = _SCRIPTS_DIR) -> dict[str, Any]:
         "report": "private_scope_guard",
         "scripts_dir": str(scripts_dir),
         "scripts_dir_exists": True,
+        "tools_dir": str(resolved_tools_dir),
+        "tools_dir_exists": resolved_tools_dir.exists(),
         "in_scope_count": len(in_scope),
         "out_of_scope_count": len(out_of_scope),
         "review_required_count": len(review_required),
@@ -330,8 +416,12 @@ def build_report(scripts_dir: Path = _SCRIPTS_DIR) -> dict[str, Any]:
         "out_of_scope": out_of_scope,
         "review_required": review_required,
         "known_out_of_scope": sorted(KNOWN_OUT_OF_SCOPE),
+        "quarantined_tools": quarantined_tools,
+        "quarantine_leaks": quarantine_leaks,
         "approved_domains": list(APPROVED_DOMAINS),
-        "operator_message": _operator_message(out_of_scope, review_required),
+        "operator_message": _operator_message(
+            out_of_scope, review_required, quarantine_leaks
+        ),
         "advisory_status": ADVISORY_STATUS,
         "execution_gate": EXECUTION_GATE_LOCKED,
         "broker_api_called": False,
@@ -341,19 +431,30 @@ def build_report(scripts_dir: Path = _SCRIPTS_DIR) -> dict[str, Any]:
     }
 
 
-def _operator_message(out_of_scope: list[str], review_required: list[str]) -> str:
+def _operator_message(
+    out_of_scope: list[str],
+    review_required: list[str],
+    quarantine_leaks: list[str] | None = None,
+) -> str:
+    leaks = list(quarantine_leaks or [])
+    if leaks:
+        return (
+            f"REVIEW_REQUIRED: quarantined tool directory leaked back into "
+            f"the MVP surface — {', '.join(leaks)} — move it back under "
+            "tools/ or update QUARANTINED_TOOL_DIRS."
+        )
     if review_required:
         return (
             f"REVIEW_REQUIRED: {len(review_required)} new out-of-scope "
             f"module(s) detected — {', '.join(review_required)} — "
-            "either move into an approved private-operator domain or add "
-            "to KNOWN_OUT_OF_SCOPE with justification."
+            "either move into an approved private-operator domain, "
+            "quarantine under tools/, or add to KNOWN_OUT_OF_SCOPE with "
+            "justification."
         )
     if out_of_scope:
         return (
             f"OK: {len(out_of_scope)} out-of-scope module(s) present but "
-            "all are pre-accepted in KNOWN_OUT_OF_SCOPE — do not extend "
-            "them as part of MVP work."
+            "all are pre-accepted — do not extend them as part of MVP work."
         )
     return "OK: all scripts/ entries are within approved private-operator domains."
 
@@ -390,6 +491,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"in_scope            : {report.get('in_scope_count', 0)}")
         print(f"out_of_scope        : {report.get('out_of_scope_count', 0)}")
         print(f"review_required     : {report.get('review_required_count', 0)}")
+        print(f"quarantined_tools   : {len(report.get('quarantined_tools') or [])}")
+        print(f"quarantine_leaks    : {len(report.get('quarantine_leaks') or [])}")
         print("")
         print(report.get("operator_message", ""))
         if report.get("review_required"):
@@ -397,7 +500,16 @@ def main(argv: list[str] | None = None) -> int:
             print("REVIEW_REQUIRED entries:")
             for name in report["review_required"]:
                 print(f"  - {name}")
-    if args.strict and report.get("review_required_count", 0) > 0:
+        if report.get("quarantine_leaks"):
+            print("")
+            print("Quarantine leaks (move back under tools/):")
+            for name in report["quarantine_leaks"]:
+                print(f"  - {name}")
+    strict_failed = (
+        report.get("review_required_count", 0) > 0
+        or bool(report.get("quarantine_leaks"))
+    )
+    if args.strict and strict_failed:
         return 1
     return 0
 
@@ -407,6 +519,7 @@ __all__ = [
     "EXPLICIT_IN_SCOPE",
     "KNOWN_OUT_OF_SCOPE",
     "PREEXISTING_BASELINE",
+    "QUARANTINED_TOOL_DIRS",
     "ADVISORY_STATUS",
     "EXECUTION_GATE_LOCKED",
     "build_report",

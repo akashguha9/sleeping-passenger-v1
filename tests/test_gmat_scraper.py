@@ -1,10 +1,18 @@
 """Tests for the GMAT scraper module.
 
-NOTE: parser tests use synthetic fixture HTML modeled on phpBB v3 default
-markup. Passing these tests does NOT guarantee the parser works against
-the real GMAT Club site — it only verifies the parser's internal
-contract. Real-site selectors live in `scripts.gmat_scraper.parser.SELECTORS`
-and may need adjustment when you have a saved real-page HTML.
+The scraper is intentionally *out of MVP scope* and lives under
+``tools/gmat_scraper/`` (see ``scripts/private_scope_guard.py``). The
+tests here exist purely to keep the quarantined module honest —
+parser invariants, advisory-only / no-broker guarantees — and to lock
+in that the package cannot be re-imported under ``scripts/`` without
+also tripping the scope-guard tests.
+
+NOTE: parser tests use synthetic fixture HTML modeled on phpBB v3
+default markup. Passing these tests does NOT guarantee the parser
+works against the real GMAT Club site — it only verifies the parser's
+internal contract. Real-site selectors live in
+``tools.gmat_scraper.parser.SELECTORS`` and may need adjustment when
+you have a saved real-page HTML.
 
 All tests are offline; no test issues a network request.
 """
@@ -19,9 +27,9 @@ import pytest
 
 bs4 = pytest.importorskip("bs4")
 
-from scripts.gmat_scraper import parser, reasoning_bridge, sections, store
-from scripts.gmat_scraper import cli as scraper_cli
-from scripts.gmat_scraper import http as scraper_http
+from tools.gmat_scraper import parser, reasoning_bridge, sections, store
+from tools.gmat_scraper import cli as scraper_cli
+from tools.gmat_scraper import http as scraper_http
 
 FIXTURE_DIR = Path(__file__).parent / "fixtures"
 

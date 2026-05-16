@@ -52,6 +52,83 @@ _TIER_WEIGHT: dict[str, float] = {
     "planned": 0.0,
 }
 
+# Per-source *configuration gate* hints.  These are env vars that, when
+# unset, cause a source to skip cleanly without raising — e.g. the SEC
+# loader needs either a CIK or the watchlist; the Etherscan public-tx
+# loader needs an address (the key alone is not enough); GDELT honours
+# an optional timeout override.
+#
+# Surfacing these names verbatim in the actionable_next_step lets the
+# operator copy-paste straight into ``.env`` instead of grepping
+# ``.env.example``.  These entries never *flip* an unhealthy source to
+# healthy — they only enrich the action string.
+_CONFIG_GATE_HINTS: dict[str, tuple[str, ...]] = {
+    # SEC EDGAR — either a single CIK or the built-in watchlist toggle.
+    "sec_edgar": (
+        "SEC_USER_AGENT",
+        "SEC_DEFAULT_CIK",
+        "SEC_DEFAULT_WATCHLIST",
+        "SEC_USE_DEFAULT_WATCHLIST",
+    ),
+    "sec": (
+        "SEC_USER_AGENT",
+        "SEC_DEFAULT_CIK",
+        "SEC_DEFAULT_WATCHLIST",
+        "SEC_USE_DEFAULT_WATCHLIST",
+    ),
+    "global_filings_sec": (
+        "SEC_USER_AGENT",
+        "SEC_DEFAULT_CIK",
+        "SEC_DEFAULT_WATCHLIST",
+        "SEC_USE_DEFAULT_WATCHLIST",
+    ),
+    # Etherscan — address is required for the public-tx pull; API key
+    # alone is not enough.  Loader accepts any of the three fallbacks.
+    "etherscan": (
+        "ETHERSCAN_API_KEY",
+        "ETHERSCAN_ADDRESS",
+        "ETHEREUM_ADDRESS",
+        "PUBLIC_ETH_ADDRESS",
+    ),
+    # GDELT — optional timeout override for slow upstream responses.
+    "gdelt": (
+        "GDELT_TIMEOUT_SECONDS",
+    ),
+    "gdelt_loader": (
+        "GDELT_TIMEOUT_SECONDS",
+    ),
+}
+
+
+def _config_gate_keys_for(source_key: str) -> tuple[str, ...]:
+    """Return the env-var hints for a source_key, case-insensitively."""
+    if not source_key:
+        return ()
+    return _CONFIG_GATE_HINTS.get(source_key.lower(), ())
+
+
+def _merge_env_keys(
+    primary: list[str] | tuple[str, ...],
+    hint: tuple[str, ...],
+) -> list[str]:
+    """Merge two env-key sequences preserving order and dropping dupes.
+
+    ``primary`` entries (typically ``missing_env_keys`` from the freshness
+    probe) come first because they reflect what the loader actually
+    asked for in this run; the config-gate hint augments with anything
+    the operator might also need to set.
+    """
+    seen: set[str] = set()
+    out: list[str] = []
+    for key in list(primary) + list(hint):
+        if not key:
+            continue
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(key)
+    return out
+
 # Per-freshness-state base subtraction (before tier weighting).
 _FRESHNESS_PENALTY: dict[str, float] = {
     "fresh": 0.0,
@@ -144,9 +221,13 @@ def score_source(entry: dict[str, Any]) -> dict[str, Any]:
 
     # ---- Terminal: optional + credential missing ---------------------
     if tier == "optional" and not credential_configured:
+        # Merge explicit missing_env_keys with any config-gate hints for
+        # this source so the operator sees every env var that matters,
+        # not just the one the freshness probe happened to flag.
+        merged_keys = _merge_env_keys(missing_env_keys, _config_gate_keys_for(source_key))
         env_hint = (
-            f"set env var(s): {', '.join(missing_env_keys)}"
-            if missing_env_keys
+            f"set env var(s): {', '.join(merged_keys)}"
+            if merged_keys
             else "configure the source credentials in .env"
         )
         return _terminal(
@@ -163,6 +244,7 @@ def score_source(entry: dict[str, Any]) -> dict[str, Any]:
                 f"optional_config_missing: to activate '{source_key}', {env_hint}"
             ),
             entry=entry,
+            extra_missing_env_keys=merged_keys,
         )
 
     # ---- Scored path -------------------------------------------------
@@ -283,7 +365,13 @@ def _terminal(
     operator_message: str,
     entry: dict[str, Any],
     actionable_next_step: str = "",
+    extra_missing_env_keys: list[str] | None = None,
 ) -> dict[str, Any]:
+    missing_env_keys = (
+        list(extra_missing_env_keys)
+        if extra_missing_env_keys is not None
+        else list(entry.get("missing_env_keys") or [])
+    )
     return {
         "health_score": score,
         "health_label": label,
@@ -294,7 +382,7 @@ def _terminal(
         "last_success_age_hours": entry.get("hours_since_last_success"),
         "operator_message": operator_message,
         "actionable_next_step": actionable_next_step,
-        "missing_env_keys": list(entry.get("missing_env_keys") or []),
+        "missing_env_keys": missing_env_keys,
         "source_key": str(entry.get("source_key") or ""),
         "advisory_status": ADVISORY_STATUS,
         "execution_gate": EXECUTION_GATE_LOCKED,
@@ -320,10 +408,15 @@ def _build_actionable_next_step(
 
     Pure string assembly — surfaces env-var names verbatim so the
     operator does not have to grep ``.env.example``.  Never claims a
-    fix; never implies execution permission.
+    fix; never implies execution permission.  Config-gated sources
+    (SEC, Etherscan public-tx, GDELT timeout) get their full env-key
+    list appended even when only one key was probed.
     """
+    gate_keys = _config_gate_keys_for(source_key)
+
     if config_state == "required_missing":
-        keys = ", ".join(missing_env_keys) if missing_env_keys else "credentials"
+        merged = _merge_env_keys(missing_env_keys, gate_keys)
+        keys = ", ".join(merged) if merged else "credentials"
         return (
             f"core_or_secondary_config_missing: set env var(s) {keys} "
             f"for '{source_key}' and re-run the refresh"
@@ -344,6 +437,12 @@ def _build_actionable_next_step(
             "check upstream availability"
         )
     if freshness_state == "skipped" and skip_reason:
+        if gate_keys:
+            keys_hint = ", ".join(gate_keys)
+            return (
+                f"skipped: '{source_key}' skipped — {skip_reason[:120]} "
+                f"(config gate env vars: {keys_hint})"
+            )
         return f"skipped: '{source_key}' skipped — {skip_reason[:120]}"
     if label == LABEL_HEALTHY:
         return f"healthy: no action needed for '{source_key}'"

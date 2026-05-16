@@ -5,15 +5,15 @@ Examples
 
     # Smoke run — fetch just the first listing page of Problem Solving
     # and dump the topic summaries to stdout. Does NOT visit threads.
-    python -m scripts.gmat_scraper.cli discover --section PS --pages 1
+    python -m tools.gmat_scraper.cli discover --section PS --pages 1
 
     # Crawl a small page range, saving full problems to JSONL.
-    python -m scripts.gmat_scraper.cli crawl \\
+    python -m tools.gmat_scraper.cli crawl \\
         --section CR --from-page 1 --to-page 3 \\
         --delay 4 --cookies ~/gmatclub_cookies.txt
 
     # Build decision frames from a scraped JSONL.
-    python -m scripts.gmat_scraper.cli bridge \\
+    python -m tools.gmat_scraper.cli bridge \\
         --in data/raw/gmat/CR.jsonl \\
         --out data/processed/gmat_frames_CR.jsonl
 """
