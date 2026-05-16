@@ -148,6 +148,49 @@ def test_powershell_wrapper_exists_with_safety_doctrine() -> None:
                 )
 
 
+def test_run_audit_surfaces_timing_and_threshold(tmp_db: Path) -> None:
+    """The audit payload now exposes per-section timings plus a
+    severity bucket for the source-health probe (which on Windows is
+    dominated by a subprocess scheduler call).  This guarantees the
+    probe cost is observable instead of silently drifting upward."""
+    payload = local_mvp_audit.run_audit(tmp_db)
+    timings = payload["timing_ms"]
+    assert "source_health" in timings
+    assert "total_ms" in timings
+    val = timings["source_health"]
+    assert isinstance(val, (int, float))
+    assert val >= 0.0
+    assert payload["source_health_timing_ms"] == val
+    severity = payload["source_health_timing_severity"]
+    assert severity in {"ok", "warn", "severe_warn", "unknown"}
+    assert isinstance(payload["source_health_warn_ms"], int)
+    assert isinstance(payload["source_health_severe_ms"], int)
+    assert payload["source_health_severe_ms"] >= payload["source_health_warn_ms"]
+
+
+def test_render_text_includes_actionable_next_steps(tmp_db: Path) -> None:
+    """When the source-health section emits operator-actionable next
+    steps, the text rendering must surface them so a human reading the
+    text output (no --json) gets the action list, not just a label."""
+    payload = local_mvp_audit.run_audit(tmp_db)
+    # Inject a synthetic actionable list so the test is independent of
+    # the live source registry.
+    payload["sections"]["source_health"]["actionable_next_steps"] = [
+        "core_stale: run `python scripts/refresh_live_signals.py --sources gdelt --write`",
+        "optional_config_missing: to activate 'etherscan', set env var(s): ETHERSCAN_API_KEY",
+        "healthy: no action needed for 'polymarket'",
+    ]
+    payload["sections"]["source_health"]["issue_classification"] = {
+        "core_stale": 1, "optional_config_missing": 1
+    }
+    text = local_mvp_audit._render_text(payload)
+    assert "actionable_next_steps" in text
+    assert "core_stale:" in text
+    assert "ETHERSCAN_API_KEY" in text
+    # "healthy:" no-action steps are noise; they must be filtered.
+    assert "healthy: no action needed for 'polymarket'" not in text
+
+
 def test_powershell_wrapper_no_secrets_committed() -> None:
     ps1 = REPO_ROOT / "scripts" / "windows" / "run_local_mvp_audit.ps1"
     text = ps1.read_text(encoding="utf-8")

@@ -201,6 +201,50 @@ def test_module_has_no_broker_or_execution_language() -> None:
         assert re.search(pat, src, flags=re.IGNORECASE) is None, pat
 
 
+def test_timing_thresholds_surfaced(tmp_path):
+    db = _make_db(tmp_path)
+    rep = pb.build_report(db)
+    thr = rep["timing_thresholds"]
+    assert thr["audit_source_health_warn_ms"] == pb._AUDIT_SOURCE_HEALTH_WARN_MS
+    assert thr["audit_source_health_severe_ms"] == pb._AUDIT_SOURCE_HEALTH_SEVERE_MS
+    assert thr["audit_source_health_severity"] in {
+        "ok", "warn", "severe_warn", "unknown",
+    }
+
+
+def test_slow_source_health_probe_emits_warning(tmp_path, monkeypatch):
+    """When the audit_source_health timing crosses the WARN threshold
+    the baseline must emit a warning AND tag the severity, without
+    changing the underlying measurement.  We force the situation by
+    monkey-patching the source_health_section probe to sleep just past
+    the threshold."""
+    db = _make_db(tmp_path)
+    import time
+    from scripts import local_mvp_audit
+
+    real_section = local_mvp_audit.source_health_section
+    original_warn = pb._AUDIT_SOURCE_HEALTH_WARN_MS
+    monkeypatch.setattr(pb, "_AUDIT_SOURCE_HEALTH_WARN_MS", 50)
+    monkeypatch.setattr(pb, "_AUDIT_SOURCE_HEALTH_SEVERE_MS", 10_000)
+
+    def _slow_section():
+        time.sleep(0.08)  # 80 ms > 50 ms threshold
+        return real_section()
+
+    monkeypatch.setattr(
+        local_mvp_audit, "source_health_section", _slow_section
+    )
+    rep = pb.build_report(db)
+    assert rep["timing_thresholds"]["audit_source_health_severity"] in {
+        "warn", "severe_warn",
+    }
+    assert any(
+        w.startswith("audit_source_health_slow") for w in rep["warnings"]
+    ), rep["warnings"]
+    # The original threshold value isn't accidentally rewritten.
+    assert original_warn == 5000
+
+
 def test_module_does_not_open_env_or_make_network_calls() -> None:
     """Lightweight static check: the baseline must not import network
     libraries or read .env.  We look for actual *code-level* uses, not

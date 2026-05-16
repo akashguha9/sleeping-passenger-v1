@@ -81,6 +81,7 @@ APPROVED_DOMAINS: tuple[str, ...] = (
     "execution_governance",
     "execution_integrity_audit",
     "no_execution",
+    "hygiene",
 )
 
 # Explicit allowlist for individual files / directories whose name does

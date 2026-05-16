@@ -60,6 +60,12 @@ _NO_CLAIMS = (
     "Timings depend on the operator's local hardware and current load.",
 )
 
+# Audit-probe timing thresholds.  audit_source_health is dominated by an
+# out-of-process scheduler probe on Windows, so a slow run is expected;
+# we still want to flag a regression instead of letting it drift.
+_AUDIT_SOURCE_HEALTH_WARN_MS = 5000
+_AUDIT_SOURCE_HEALTH_SEVERE_MS = 10000
+
 
 def _utc_iso() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
@@ -358,6 +364,30 @@ def build_report(
     for chunk in (db, cg, audit, refresh, backups, logs):
         warnings.extend(chunk.get("warnings", []))
 
+    # Threshold check — surfaces a regression without claiming
+    # optimisation.  Failures here are observability only.
+    audit_sh_ms = timing_ms.get("audit_source_health")
+    if isinstance(audit_sh_ms, (int, float)):
+        if audit_sh_ms >= _AUDIT_SOURCE_HEALTH_SEVERE_MS:
+            audit_sh_severity = "severe_warn"
+        elif audit_sh_ms >= _AUDIT_SOURCE_HEALTH_WARN_MS:
+            audit_sh_severity = "warn"
+        else:
+            audit_sh_severity = "ok"
+    else:
+        audit_sh_severity = "unknown"
+    timing_thresholds = {
+        "audit_source_health_warn_ms": _AUDIT_SOURCE_HEALTH_WARN_MS,
+        "audit_source_health_severe_ms": _AUDIT_SOURCE_HEALTH_SEVERE_MS,
+        "audit_source_health_severity": audit_sh_severity,
+    }
+    if audit_sh_severity in {"warn", "severe_warn"}:
+        warnings.append(
+            f"audit_source_health_slow: {audit_sh_ms} ms "
+            f">= {_AUDIT_SOURCE_HEALTH_WARN_MS} ms threshold "
+            "(probe is scheduler subprocess on Windows; observability only)"
+        )
+
     return {
         "report": "performance_baseline",
         "generated_at": _utc_iso(),
@@ -378,6 +408,7 @@ def build_report(
         "backups": backups,
         "logs": logs,
         "timing_ms": timing_ms,
+        "timing_thresholds": timing_thresholds,
         "warnings": warnings,
         "no_claims": list(_NO_CLAIMS),
         **_ADVISORY_STAMPS,

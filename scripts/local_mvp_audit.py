@@ -19,6 +19,7 @@ import json
 import os
 import sqlite3
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
@@ -28,6 +29,28 @@ EXECUTION_GATE_LOCKED = "LOCKED"
 REPO_ROOT = Path(__file__).resolve().parents[1]
 RUNTIME_DIR = REPO_ROOT / "runtime"
 DEFAULT_DB = RUNTIME_DIR / "mvp_local.db"
+
+# Threshold (ms) above which the source-health probe is flagged as slow.
+# The probe shells out to PowerShell on Windows to query Task Scheduler,
+# which is inherently the dominant cost.  We surface a WARN at 5s and a
+# SEVERE_WARN at 10s so the operator can spot regressions without the
+# audit silently degrading.
+SOURCE_HEALTH_WARN_MS = 5000
+SOURCE_HEALTH_SEVERE_MS = 10000
+
+
+def _ms_since(t0: float) -> float:
+    return round((time.perf_counter() - t0) * 1000.0, 3)
+
+
+def _timing_severity(timing_ms: float | None, warn: int, severe: int) -> str:
+    if timing_ms is None:
+        return "unknown"
+    if timing_ms >= severe:
+        return "severe_warn"
+    if timing_ms >= warn:
+        return "warn"
+    return "ok"
 
 
 def _safety_stamps() -> dict[str, Any]:
@@ -296,22 +319,51 @@ def scope_guard_section() -> dict[str, Any]:
 
 def run_audit(db_path: Path = DEFAULT_DB) -> dict[str, Any]:
     """Build the full audit payload (read-only)."""
+    timings: dict[str, float] = {}
+
+    def _timed(label: str, fn, *args):  # noqa: ANN001 - tiny helper
+        t0 = time.perf_counter()
+        try:
+            return fn(*args)
+        finally:
+            timings[label] = _ms_since(t0)
+
+    total_t0 = time.perf_counter()
+    sections = {
+        "safety_invariants": _safety_invariants(),
+        "token_status": _timed("token_status", token_status_section),
+        "paper_ledger": _timed("paper_ledger", paper_ledger_section, db_path),
+        "calibration": _timed("calibration", calibration_section, db_path),
+        "calibration_gate": _timed(
+            "calibration_gate", calibration_gate_section, db_path
+        ),
+        "learning_completeness": _timed(
+            "learning_completeness", learning_completeness_section, db_path
+        ),
+        "source_health": _timed("source_health", source_health_section),
+        "scope_guard": _timed("scope_guard", scope_guard_section),
+    }
+    timings["total_ms"] = _ms_since(total_t0)
+
+    source_health_timing_ms = timings.get("source_health")
+    source_health_timing_severity = _timing_severity(
+        source_health_timing_ms,
+        SOURCE_HEALTH_WARN_MS,
+        SOURCE_HEALTH_SEVERE_MS,
+    )
+
     payload: dict[str, Any] = {
         "report": "local_mvp_audit",
         "repo_root": str(REPO_ROOT),
         "runtime_dir": str(RUNTIME_DIR),
         "db_path": str(db_path),
         "db_exists": db_path.exists(),
-        "sections": {
-            "safety_invariants": _safety_invariants(),
-            "token_status": token_status_section(),
-            "paper_ledger": paper_ledger_section(db_path),
-            "calibration": calibration_section(db_path),
-            "calibration_gate": calibration_gate_section(db_path),
-            "learning_completeness": learning_completeness_section(db_path),
-            "source_health": source_health_section(),
-            "scope_guard": scope_guard_section(),
-        },
+        "sections": sections,
+        "timing_ms": timings,
+        "source_health_timing_ms": source_health_timing_ms,
+        "source_health_timing_severity": source_health_timing_severity,
+        "source_health_warn_ms": SOURCE_HEALTH_WARN_MS,
+        "source_health_severe_ms": SOURCE_HEALTH_SEVERE_MS,
         **_safety_stamps(),
     }
     # Compute a final advisory pass/warn/fail per section.
@@ -417,7 +469,32 @@ def _render_text(payload: dict[str, Any]) -> str:
     lines.append("Source health:")
     lines.append(f"  core_health_label    : {sh.get('core_health_label')}")
     lines.append(f"  average_score        : {sh.get('average_scored_health')}")
-    lines.append(f"  stale_sources        : {len(sh.get('stale_sources') or [])}")
+    stale = sh.get("stale_sources") or []
+    lines.append(f"  stale_sources        : {len(stale)} {stale}")
+    classification = sh.get("issue_classification") or {}
+    if classification:
+        nonzero = {k: v for k, v in classification.items() if v}
+        if nonzero:
+            lines.append(f"  issue_classification : {nonzero}")
+    steps = sh.get("actionable_next_steps") or []
+    # Show only operator-facing steps (config_missing / stale / refresh_error /
+    # skipped).  "healthy" no-action lines are noise here.
+    operator_steps = [s for s in steps if not s.startswith("healthy:")]
+    if operator_steps:
+        lines.append("  actionable_next_steps:")
+        for step in operator_steps[:6]:
+            lines.append(f"    - {step}")
+        if len(operator_steps) > 6:
+            lines.append(f"    (+{len(operator_steps) - 6} more — see --json)")
+    # Timing diagnostic line (additive — does not change overall status).
+    sh_ms = payload.get("source_health_timing_ms")
+    sh_sev = payload.get("source_health_timing_severity")
+    if sh_ms is not None:
+        lines.append(
+            f"  probe_timing_ms      : {sh_ms} ({sh_sev}, "
+            f"warn>={payload.get('source_health_warn_ms')}, "
+            f"severe>={payload.get('source_health_severe_ms')})"
+        )
     ts = sections["token_status"]
     lines.append("")
     lines.append("Token status:")
