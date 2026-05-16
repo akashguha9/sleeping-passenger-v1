@@ -1,9 +1,16 @@
 'use client';
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { postManualTrade } from '@/lib/apiClient';
 import { HumanOnlyBadge } from './HumanOnlyBadge';
 import { AdvisoryOnlyBadge } from './AdvisoryOnlyBadge';
+import {
+  SUPPORTED_CURRENCIES,
+  SUPPORTED_CURRENCY_CODES,
+  UNKNOWN_CURRENCY,
+  formatCurrencyLabel,
+  suggestCurrencyForSymbol,
+} from '@/lib/supportedCurrencies';
 
 interface FormState {
   event_id: string;
@@ -14,6 +21,12 @@ interface FormState {
   leverage: string;
   thesis: string;
   notes: string;
+  // Sprint I — operator-selected native currency for the trade.
+  // Stored as a supported ISO code (USD/INR/EUR/JPY/...) or UNKNOWN
+  // when the operator has not yet selected.  Submitting without
+  // selecting is allowed (degrades to UNKNOWN backend-side) but the
+  // form warns about it so the operator notices.
+  currency: string;
   // Operator-discipline / journal-quality fields. Strings on the form;
   // confidence_before is parsed to a number on submit.
   invalidation_level: string;
@@ -65,6 +78,7 @@ export function ManualTradeLogForm({ defaultEventId = '', defaultTicker = '', on
     leverage: '1.0',
     thesis: '',
     notes: '',
+    currency: suggestCurrencyForSymbol(defaultTicker) ?? '',
     invalidation_level: '',
     expected_horizon: '',
     risk_reason: '',
@@ -81,9 +95,27 @@ export function ManualTradeLogForm({ defaultEventId = '', defaultTicker = '', on
   const [softWarnings, setSoftWarnings] = useState<string[]>([]);
 
   function set(field: keyof FormState, value: string) {
-    setForm((prev) => ({ ...prev, [field]: value }));
+    setForm((prev) => {
+      const next = { ...prev, [field]: value };
+      // When the operator types/edits the ticker and has NOT explicitly
+      // chosen a currency yet, propose one from the symbol suffix.  We
+      // never silently overwrite a currency the operator has already
+      // chosen — the suggestion is a convenience, not a hidden default.
+      if (field === 'ticker' && !prev.currency) {
+        const guess = suggestCurrencyForSymbol(value);
+        if (guess) next.currency = guess;
+      }
+      return next;
+    });
     setError('');
   }
+
+  // Suggested currency from the current ticker — surfaced as helper
+  // text so the operator can see why a default was preselected.
+  const tickerSuggestion = useMemo(
+    () => suggestCurrencyForSymbol(form.ticker),
+    [form.ticker],
+  );
 
   function collectSoftWarnings(state: FormState): string[] {
     const w: string[] = [];
@@ -126,6 +158,16 @@ export function ManualTradeLogForm({ defaultEventId = '', defaultTicker = '', on
       confidence = c;
     }
 
+    // Currency: normalise to a supported code (or '' = UNKNOWN).
+    // We do NOT block submit on missing currency — the operator may
+    // log a trade and revisit currency later — but a soft warning is
+    // added below so the operator notices an UNKNOWN choice.
+    const currencyChoice = form.currency.trim().toUpperCase();
+    const currencyPayload =
+      currencyChoice && SUPPORTED_CURRENCY_CODES.has(currencyChoice)
+        ? currencyChoice
+        : '';
+
     setSubmitting(true);
     try {
       await postManualTrade({
@@ -137,6 +179,7 @@ export function ManualTradeLogForm({ defaultEventId = '', defaultTicker = '', on
         leverage,
         thesis: form.thesis.trim(),
         notes: form.notes.trim(),
+        currency: currencyPayload,
         invalidation_level: form.invalidation_level.trim(),
         expected_horizon: form.expected_horizon.trim(),
         risk_reason: form.risk_reason.trim(),
@@ -301,6 +344,31 @@ export function ManualTradeLogForm({ defaultEventId = '', defaultTicker = '', on
             </div>
           </Field>
         </div>
+
+        <Field
+          label="Currency"
+          hint={
+            tickerSuggestion && tickerSuggestion === form.currency
+              ? `Suggested from symbol · ${tickerSuggestion}`
+              : tickerSuggestion
+              ? `Symbol suggests · ${tickerSuggestion}`
+              : 'select native currency for this trade'
+          }
+        >
+          <select
+            className="sp-input"
+            data-testid="manual-trade-currency-select"
+            value={form.currency}
+            onChange={(e) => set('currency', e.target.value)}
+          >
+            <option value="">{`(select — defaults to ${UNKNOWN_CURRENCY})`}</option>
+            {SUPPORTED_CURRENCIES.map((c) => (
+              <option key={c.code} value={c.code}>
+                {formatCurrencyLabel(c)}
+              </option>
+            ))}
+          </select>
+        </Field>
 
         <Field label="Thesis">
           <textarea

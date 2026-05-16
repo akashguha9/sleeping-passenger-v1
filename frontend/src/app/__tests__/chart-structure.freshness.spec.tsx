@@ -379,6 +379,151 @@ describe('Chart Structure price-truth panel', () => {
     expect(screen.getByTestId('price-truth-quote-price').textContent).toMatch(/—/);
   });
 
+  it('Sprint I patch — quote without timestamp still renders price + INR', async () => {
+    mockGet.mockResolvedValue({
+      ...SAFETY_STAMPS,
+      symbol: 'BHARTIARTL.NS',
+      source_event_id: null,
+      candle_count: 100,
+      report: freshReport(),
+      freshness: freshFreshness('2026-05-14T16:00:00Z'),
+      data_freshness_status: 'FRESH',
+      freshness_gate: 'PASS',
+      latest_candle_utc: '2026-05-14T16:00:00Z',
+      data_age_days: 1.1,
+      source_kind: 'CANONICAL_SQLITE',
+      display_currency: 'INR',
+      latest_daily_close_currency: 'INR',
+      currency_source: 'PROVIDER',
+      ...priceTruthExtras({
+        latest_daily_close: 1789.20,
+        latest_daily_candle_utc: '2026-05-14T16:00:00Z',
+        latest_quote_price: 1905.40,
+        latest_quote_currency: 'INR',
+        latest_quote_timestamp_utc: null,
+        latest_quote_source: 'yahoo_finance',
+        quote_freshness_status: 'QUOTE_TIMESTAMP_UNAVAILABLE',
+        quote_freshness_gate: 'WARN',
+        quote_price_delta: 116.20,
+        quote_price_delta_pct: 6.49,
+        price_truth_status: 'QUOTE_DIVERGES_FROM_DAILY',
+        price_truth_reason:
+          'Latest quote differs strongly from latest daily candle close (+6.49%). Treat chart features as daily-candle technicals, not live price.',
+        suggested_next_step: 'HUMAN_REVIEW_PRICE_MISMATCH',
+      }),
+    });
+
+    await fetchSymbol('BHARTIARTL.NS');
+    await waitFor(() => expect(screen.getByTestId('chart-price-truth-panel')).toBeTruthy());
+
+    // Price is still shown — never silently dropped.
+    expect(screen.getByTestId('price-truth-quote-price').textContent).toMatch(/1,?905\.40 INR/);
+    // The meta line explicitly tells the operator the timestamp was
+    // unavailable from the provider so they know why no age shows.
+    const meta = screen.getByTestId('price-truth-quote-meta').textContent ?? '';
+    expect(meta).toMatch(/timestamp unavailable from provider/);
+  });
+
+  it('Sprint I patch — internal data consistency error blocks the report', async () => {
+    mockGet.mockResolvedValue({
+      ...SAFETY_STAMPS,
+      symbol: 'BHARTIARTL.NS',
+      source_event_id: null,
+      candle_count: 100,
+      chart_state: 'INTERNAL_DATA_CONSISTENCY_ERROR',
+      advisory_summary:
+        'Internal latest_candle_utc mismatch: freshness reports 2026-05-14T16:00:00Z but OHLCV summary reports 2026-05-13T16:00:00Z.',
+      suggested_next_step: 'HUMAN_REVIEW_PRICE_MISMATCH',
+      report: null,
+      freshness: freshFreshness('2026-05-14T16:00:00Z'),
+      data_freshness_status: 'FRESH',
+      freshness_gate: 'BLOCK',
+      latest_candle_utc: '2026-05-14T16:00:00Z',
+      data_age_days: 1.1,
+      source_kind: 'CANONICAL_SQLITE',
+      price_truth_status: 'INTERNAL_DATA_CONSISTENCY_ERROR',
+      price_truth_reason:
+        'Internal latest_candle_utc mismatch: freshness reports 2026-05-14T16:00:00Z but OHLCV summary reports 2026-05-13T16:00:00Z. Refusing to render a normal verdict over internally inconsistent fields.',
+    });
+
+    await fetchSymbol('BHARTIARTL.NS');
+    await waitFor(() => expect(screen.getByTestId('chart-internal-mismatch-block')).toBeTruthy());
+    expect(screen.queryByTestId('chart-latest-close')).toBeNull();
+    expect(screen.getByTestId('chart-internal-mismatch-next-step').textContent).toMatch(
+      /HUMAN_REVIEW_PRICE_MISMATCH/,
+    );
+  });
+
+  it('Sprint I patch — display_currency drives daily-close label', async () => {
+    mockGet.mockResolvedValue({
+      ...SAFETY_STAMPS,
+      symbol: 'SAP.DE',
+      source_event_id: null,
+      candle_count: 100,
+      report: freshReport(),
+      freshness: freshFreshness(),
+      data_freshness_status: 'FRESH',
+      freshness_gate: 'PASS',
+      latest_candle_utc: '2026-05-15T16:00:00Z',
+      data_age_days: 0.04,
+      source_kind: 'CANONICAL_SQLITE',
+      display_currency: 'EUR',
+      latest_daily_close_currency: 'EUR',
+      currency_source: 'SYMBOL_SUFFIX_FALLBACK',
+      ...priceTruthExtras({
+        latest_daily_close: 165.0,
+        latest_daily_candle_utc: '2026-05-15T16:00:00Z',
+        latest_quote_price: 170.0,
+        latest_quote_currency: 'EUR',
+        latest_quote_timestamp_utc: '2026-05-15T15:55:00Z',
+        latest_quote_source: 'yahoo_finance',
+        quote_price_delta: 5.0,
+        quote_price_delta_pct: 3.03,
+        price_truth_status: 'QUOTE_DIVERGES_FROM_DAILY',
+        price_truth_reason: 'Latest quote differs materially from latest daily candle close (+3.03%).',
+        suggested_next_step: 'HUMAN_REVIEW_PRICE_MISMATCH',
+      }),
+    });
+    await fetchSymbol('SAP.DE');
+    await waitFor(() => expect(screen.getByTestId('chart-price-truth-panel')).toBeTruthy());
+    expect(screen.getByTestId('price-truth-daily-close').textContent).toMatch(/165\.00 EUR/);
+    expect(screen.getByTestId('price-truth-quote-price').textContent).toMatch(/170\.00 EUR/);
+    expect(screen.getByTestId('price-truth-currency-source').textContent).toMatch(
+      /SYMBOL_SUFFIX_FALLBACK/,
+    );
+  });
+
+  it('Sprint I patch — no hardcoded $ when currency is UNKNOWN', async () => {
+    mockGet.mockResolvedValue({
+      ...SAFETY_STAMPS,
+      symbol: 'UNKNOWN.XYZ',
+      source_event_id: null,
+      candle_count: 100,
+      report: freshReport(),
+      freshness: freshFreshness(),
+      data_freshness_status: 'FRESH',
+      freshness_gate: 'PASS',
+      latest_candle_utc: '2026-05-15T16:00:00Z',
+      data_age_days: 0.04,
+      source_kind: 'CANONICAL_SQLITE',
+      display_currency: null,
+      currency_source: 'UNKNOWN',
+      ...priceTruthExtras({
+        latest_daily_close: 42.0,
+        latest_daily_candle_utc: '2026-05-15T16:00:00Z',
+        latest_quote_price: null,
+        price_truth_status: 'QUOTE_UNAVAILABLE',
+        price_truth_reason: 'Latest quote unavailable; showing latest daily candle close only.',
+        suggested_next_step: 'WATCH_ONLY',
+      }),
+    });
+    await fetchSymbol('UNKNOWN.XYZ');
+    await waitFor(() => expect(screen.getByTestId('chart-price-truth-panel')).toBeTruthy());
+    const dailyText = screen.getByTestId('price-truth-daily-close').textContent ?? '';
+    expect(dailyText.includes('$')).toBe(false);
+    expect(dailyText).toMatch(/42\.00/);
+  });
+
   it('Renders "Latest daily close" label rather than "Latest close"', async () => {
     mockGet.mockResolvedValue({
       ...SAFETY_STAMPS,

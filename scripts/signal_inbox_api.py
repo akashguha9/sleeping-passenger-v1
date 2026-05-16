@@ -223,6 +223,10 @@ class ManualTradeLog:
     # leaves it empty and is excluded from the live Reconciliation queue.
     # Storing this NEVER grants execution permission.
     created_via: str = ""
+    # Sprint I — Native currency for the trade.  The dropdown writes
+    # ISO codes (USD/INR/EUR/JPY/…); legacy rows default to '' which
+    # reads back as UNKNOWN.  Storing the currency NEVER grants execution.
+    currency: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -1115,6 +1119,25 @@ def _safe_trade_mode(value: Any) -> str:
     return "REAL_MANUAL"
 
 
+def _safe_currency(value: Any) -> str:
+    """Normalise currency at the API boundary.
+
+    Returns one of the codes in supported_currencies.SUPPORTED_CURRENCY_CODES
+    (USD/INR/EUR/JPY/...) or '' for the empty/unknown case.  Anything
+    unsupported degrades to '' so legacy rows and hostile inputs share
+    one safe representation rather than a hardcoded USD default.
+    """
+    try:
+        try:
+            from scripts.supported_currencies import normalise_currency
+        except ModuleNotFoundError:  # pragma: no cover - script-style fallback
+            from supported_currencies import normalise_currency  # type: ignore[no-redef]
+    except Exception:  # pragma: no cover - defensive
+        return ""
+    code = normalise_currency(value)
+    return "" if code == "UNKNOWN" else code
+
+
 def log_manual_trade(
     *,
     event_id: str,
@@ -1145,6 +1168,7 @@ def log_manual_trade(
     gallardo_block_at_decision: bool | None = None,
     preflight_state_at_decision: str = "",
     trade_mode: str = "REAL_MANUAL",
+    currency: str = "",
 ) -> dict[str, Any]:
     """7. Log a manual trade execution (HUMAN_ONLY; no broker API called).
 
@@ -1230,6 +1254,7 @@ def log_manual_trade(
         # directly do NOT receive this stamp — they remain '' (unknown
         # provenance) and are excluded from the live queue.
         created_via=MANUAL_TRADE_LOG_PROVENANCE,
+        currency=_safe_currency(currency),
     )
     append_jsonl(MANUAL_TRADE_LOG, trade.to_dict(), stamp=False)
     if _DB_AVAILABLE and _persistence is not None:
@@ -1259,6 +1284,7 @@ def log_manual_trade(
                 preflight_state_at_decision=trade.preflight_state_at_decision,
                 trade_mode=trade.trade_mode,
                 created_via=trade.created_via,
+                currency=trade.currency,
             )
         except Exception:
             pass

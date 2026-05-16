@@ -27,9 +27,22 @@ Freshness contract (Sprint H — Stale OHLCV repair):
     with a stale-data summary and suggested_next_step ∈
     {DATA_REFRESH_REQUIRED, HUMAN_REVIEW_DATA_STALE}.  Existing safety
     stamps are preserved.
+
+Single-source-of-truth contract (Sprint I patch — Price truth root-cause fix):
+  - ``selected_candles`` is built ONCE — raw events → OHLCV parse →
+    strict engine validation → per-date dedupe → tail-slice to ``limit``.
+  - Both the freshness gate AND the chart-structure engine receive the
+    same ``selected_candles`` list.  Their ``latest_candle_utc`` /
+    ``summary.latest_timestamp`` are therefore identical by construction;
+    the response's defensive integrity check catches any future drift.
+  - When freshness latest != summary latest the response is suppressed
+    with ``price_truth_status = INTERNAL_DATA_CONSISTENCY_ERROR`` so the
+    frontend never renders a normal verdict over internally inconsistent
+    fields.
 """
 from __future__ import annotations
 
+import datetime as _dt
 import json
 from typing import Any
 
@@ -110,6 +123,135 @@ def _resolve_source_kind(events: list[dict], candles: list[dict]) -> str:
     return _freshness.UNKNOWN
 
 
+def _normalise_ts(value: Any) -> str | None:
+    """Normalise an ISO-8601 timestamp to a single comparable form (UTC, Z).
+
+    Used by the defensive freshness-vs-summary integrity check so that
+    "2026-05-14T16:00:00Z" and "2026-05-14T16:00:00+00:00" compare equal.
+    """
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        dt = _dt.datetime.fromisoformat(text)
+    except ValueError:
+        try:
+            dt = _dt.datetime.strptime(text[:10], "%Y-%m-%d")
+        except ValueError:
+            return text  # fall back to raw string compare
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=_dt.timezone.utc)
+    return dt.astimezone(_dt.timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _validate_and_dedupe_candles(
+    raw_candles: list[dict],
+    limit: int,
+) -> list[dict]:
+    """Build the single canonical candle list both freshness and engine consume.
+
+    Steps:
+      1. Run each candle through the chart-structure engine's strict
+         OHLCV validation (rejects negative prices, high < low, etc.).
+         This is the SAME validator the engine runs internally — so the
+         engine cannot later drop a row the freshness gate already saw.
+      2. Deduplicate per-date.  For multiple rows on the same calendar
+         day (e.g., a backfill row plus an intraday refresh), keep the
+         one with the highest timestamp string.  Daily-candle datasets
+         must have exactly one row per date.
+      3. Sort ascending and tail-slice to ``limit``.
+
+    Returning an empty list is a valid outcome — callers handle it via
+    the existing NO_LOCAL_OHLCV / freshness-MISSING branches.
+    """
+    try:
+        try:
+            from scripts.chart_structure_engine import _parse_candle as _engine_parse
+        except ModuleNotFoundError:  # pragma: no cover - script-style fallback
+            from chart_structure_engine import _parse_candle as _engine_parse  # type: ignore[no-redef]
+    except Exception:  # pragma: no cover - defensive
+        # If we cannot import the validator, fall back to the raw list
+        # rather than crash.  The engine will validate again downstream
+        # and the integrity check will catch divergence.
+        return sorted(raw_candles, key=lambda c: str(c.get("timestamp", "")))[-limit:]
+
+    validated: list[dict] = []
+    for c in raw_candles:
+        parsed = _engine_parse(c)
+        if parsed is None:
+            continue
+        validated.append({
+            "timestamp": parsed.timestamp,
+            "open": parsed.open,
+            "high": parsed.high,
+            "low": parsed.low,
+            "close": parsed.close,
+            "volume": parsed.volume,
+        })
+
+    # Per-date dedupe: keep the lexicographically-latest timestamp for
+    # each calendar day.  ISO-8601 timestamps sort correctly as strings.
+    by_date: dict[str, dict] = {}
+    for c in validated:
+        date_key = str(c["timestamp"])[:10]
+        existing = by_date.get(date_key)
+        if existing is None or str(c["timestamp"]) > str(existing["timestamp"]):
+            by_date[date_key] = c
+
+    deduped = sorted(by_date.values(), key=lambda c: str(c["timestamp"]))
+    if limit > 0 and len(deduped) > limit:
+        deduped = deduped[-limit:]
+    return deduped
+
+
+def _internal_consistency_error_response(
+    *,
+    base: dict[str, Any],
+    symbol: str,
+    candle_count: int,
+    freshness: dict[str, Any],
+    linked_event_id: str | None,
+    summary_latest_utc: str | None,
+    freshness_latest_utc: str | None,
+) -> dict[str, Any]:
+    """Build a blocking response for internal candle-timestamp mismatch.
+
+    Triggered when the freshness gate and the engine's OHLCV summary
+    disagree on which candle is "latest".  We refuse to ship a normal
+    verdict over inconsistent fields — the operator gets a clear
+    HUMAN_REVIEW_PRICE_MISMATCH directive instead.
+    """
+    reason = (
+        f"Internal latest_candle_utc mismatch: freshness reports "
+        f"{freshness_latest_utc} but OHLCV summary reports {summary_latest_utc}. "
+        "Refusing to render a normal verdict over internally inconsistent fields."
+    )
+    return {
+        **base,
+        "ok": False,
+        "symbol": symbol,
+        "input_symbol": symbol,
+        "source_event_id": linked_event_id,
+        "candle_count": candle_count,
+        "chart_state": "INTERNAL_DATA_CONSISTENCY_ERROR",
+        "advisory_summary": reason,
+        "suggested_next_step": "HUMAN_REVIEW_PRICE_MISMATCH",
+        "freshness": freshness,
+        "data_freshness_status": freshness.get("data_freshness_status"),
+        "freshness_gate": "BLOCK",
+        "latest_candle_utc": freshness.get("latest_candle_utc"),
+        "data_age_days": freshness.get("data_age_days"),
+        "source_kind": freshness.get("source_kind"),
+        "report": None,
+        "price_truth_status": "INTERNAL_DATA_CONSISTENCY_ERROR",
+        "price_truth_reason": reason,
+    }
+
+
 def _stale_safe_response(
     *,
     base: dict[str, Any],
@@ -152,6 +294,73 @@ def _stale_safe_response(
     return payload
 
 
+_CURRENCY_SUFFIX_MAP: dict[str, str] = {
+    # India
+    ".NS": "INR", ".BO": "INR",
+    # Europe
+    ".DE": "EUR", ".PA": "EUR", ".AS": "EUR", ".MI": "EUR", ".MC": "EUR",
+    ".BR": "EUR", ".LS": "EUR", ".HE": "EUR", ".VI": "EUR", ".IR": "EUR",
+    ".F": "EUR", ".BE": "EUR", ".HM": "EUR", ".MU": "EUR", ".SG": "EUR",
+    # United Kingdom
+    ".L": "GBP", ".IL": "GBP",
+    # Other developed markets
+    ".TO": "CAD", ".V": "CAD", ".AX": "AUD", ".NZ": "NZD",
+    ".HK": "HKD", ".T": "JPY", ".KS": "KRW", ".KQ": "KRW",
+    ".SW": "CHF", ".ST": "SEK", ".OL": "NOK", ".CO": "DKK",
+    ".SS": "CNY", ".SZ": "CNY", ".TW": "TWD", ".SI": "SGD",
+    ".BK": "THB", ".JK": "IDR", ".KL": "MYR",
+    # Latin America
+    ".MX": "MXN", ".SA": "BRL", ".SN": "CLP", ".BA": "ARS",
+    # Africa / Middle East
+    ".JO": "ZAR", ".TA": "ILS",
+}
+
+
+def _resolve_display_currency(
+    symbol: str,
+    quote_currency: str | None,
+    security_meta: dict | None,
+) -> tuple[str | None, str]:
+    """Return (display_currency, currency_source).
+
+    Resolution order — first hit wins:
+      1. ``PROVIDER``                — currency the quote source returned
+      2. ``MARKET_METADATA``         — currency stamped in global_securities
+      3. ``SYMBOL_SUFFIX_FALLBACK``  — best-effort suffix guess
+      4. ``UNKNOWN``                 — give up and label the value plain
+
+    Never hardcodes $ or INR.  ``SYMBOL_SUFFIX_FALLBACK`` is only used
+    when neither provider nor market metadata is available.
+    """
+    if quote_currency and str(quote_currency).strip():
+        return str(quote_currency).strip().upper(), "PROVIDER"
+
+    if isinstance(security_meta, dict):
+        cur = security_meta.get("currency") or security_meta.get("currency_code")
+        if cur and str(cur).strip():
+            return str(cur).strip().upper(), "MARKET_METADATA"
+
+    sym = str(symbol or "").strip().upper()
+    if not sym:
+        return None, "UNKNOWN"
+
+    for suffix, cur in _CURRENCY_SUFFIX_MAP.items():
+        if sym.endswith(suffix):
+            return cur, "SYMBOL_SUFFIX_FALLBACK"
+
+    # Crypto / FX pair convention: SOMETHING-FIAT3 → fiat3.
+    if "-" in sym:
+        parts = sym.split("-")
+        if len(parts) == 2 and len(parts[1]) == 3 and parts[1].isalpha():
+            return parts[1], "SYMBOL_SUFFIX_FALLBACK"
+
+    # Bare ticker with no suffix is almost always a US listing on yfinance.
+    if "." not in sym and "-" not in sym:
+        return "USD", "SYMBOL_SUFFIX_FALLBACK"
+
+    return None, "UNKNOWN"
+
+
 def _get_chart_structure(
     symbol: str,
     source_event_id: str | None = None,
@@ -184,6 +393,23 @@ def _get_chart_structure(
             from chart_structure_engine import analyze_chart_structure  # type: ignore
 
         symbol_upper = symbol.strip().upper()
+
+        # Try to resolve market-metadata currency early so the response
+        # always carries `latest_daily_close_currency` / `display_currency`
+        # even when the engine never runs.
+        security_meta: dict | None = None
+        try:
+            try:
+                from scripts.symbol_normalizer import normalize_symbol
+            except ModuleNotFoundError:  # pragma: no cover - script-style fallback
+                from symbol_normalizer import normalize_symbol  # type: ignore[no-redef]
+            norm_kwargs: dict = {}
+            if db_path is not None:
+                norm_kwargs["db_path"] = db_path
+            norm = normalize_symbol(symbol_upper, **norm_kwargs)
+            security_meta = norm.get("security")
+        except Exception:
+            security_meta = None
 
         # Pull a generous window of events ordered by candle timestamp DESC
         # (see persistence.get_signal_events_for_symbol — the sort key is
@@ -231,37 +457,34 @@ def _get_chart_structure(
                 c for c in _candles_from_market_events(seed_evts)
                 if c["timestamp"][:10] not in real_dates
             ]
-            merged = sorted(real_candles + extra_seed, key=lambda c: c["timestamp"])
+            merged_raw = real_candles + extra_seed
             # Source-kind reflects that we've got at least one real backfill row.
             source_kind = _freshness.CANONICAL_SQLITE
         else:
-            merged = sorted(
-                _candles_from_market_events(seed_evts or events),
-                key=lambda c: c["timestamp"],
-            )
+            merged_raw = _candles_from_market_events(seed_evts or events)
             # No real backfill rows → either pure seed/demo or an unknown
             # provenance bucket.  classify accordingly so the freshness gate
             # can refuse to render a normal verdict over fixture data.
-            source_kind = _resolve_source_kind(seed_evts or events, merged)
+            source_kind = _resolve_source_kind(seed_evts or events, merged_raw)
 
-        # Select the LATEST `limit` candles (not the oldest).  Already sorted
-        # ascending above, so tail-slice is safe.
-        candles = merged[-limit:] if len(merged) > limit else merged
+        # Single source of truth: validate, dedupe by date, sort, and
+        # tail-slice ONCE.  Both the freshness gate and the engine
+        # receive the same `selected_candles` list — their notions of
+        # "latest candle" must agree by construction.
+        selected_candles = _validate_and_dedupe_candles(merged_raw, limit=limit)
 
-        if not candles:
-            # Try symbol normalization to provide canonical info and exact commands
+        if not selected_candles:
             canonical_symbol = symbol_upper
-            security_meta: dict | None = None
             try:
-                try:
-                    from scripts.symbol_normalizer import normalize_symbol
-                except ModuleNotFoundError:
-                    from symbol_normalizer import normalize_symbol  # type: ignore[no-redef]
-                norm = normalize_symbol(symbol_upper, db_path=db_path)
-                canonical_symbol = norm.get("canonical_symbol", symbol_upper)
-                security_meta = norm.get("security")
+                norm_for_empty = normalize_symbol(  # type: ignore[name-defined]
+                    symbol_upper,
+                    **({"db_path": db_path} if db_path is not None else {}),
+                )
+                canonical_symbol = norm_for_empty.get("canonical_symbol", symbol_upper)
+                if security_meta is None:
+                    security_meta = norm_for_empty.get("security")
             except Exception:
-                norm = {}
+                pass
 
             discovery_cmd = (
                 f"python scripts/global_security_master_discovery.py --symbols {canonical_symbol} --write"
@@ -271,6 +494,9 @@ def _get_chart_structure(
             )
 
             freshness = _freshness.evaluate(candles=[], source_kind=source_kind)
+            display_cur, cur_source = _resolve_display_currency(
+                canonical_symbol, None, security_meta,
+            )
             return {
                 **_safe_base,
                 "ok": False,
@@ -300,6 +526,9 @@ def _get_chart_structure(
                 "discovery_command": discovery_cmd,
                 "backfill_command": backfill_cmd,
                 "security": security_meta,
+                "display_currency": display_cur,
+                "currency_source": cur_source,
+                "latest_daily_close_currency": display_cur,
                 "report": None,
             }
 
@@ -308,30 +537,52 @@ def _get_chart_structure(
         # frontend from ever seeing a normal "TRENDING_UP" verdict over
         # 2004 candles.
         freshness = _freshness.evaluate(
-            candles=candles, source_kind=source_kind,
+            candles=selected_candles, source_kind=source_kind,
         )
         if freshness.get("freshness_gate") == _freshness.BLOCK:
             return _stale_safe_response(
                 base=_safe_base,
                 symbol=symbol_upper,
-                candle_count=len(candles),
+                candle_count=len(selected_candles),
                 freshness=freshness,
                 linked_event_id=linked_event_id,
             )
 
-        report = analyze_chart_structure(candles, symbol=symbol_upper, source="market_data")
+        report = analyze_chart_structure(
+            selected_candles, symbol=symbol_upper, source="market_data",
+        )
         report_dict = report.to_dict()
 
-        # Generic price-truth enrichment.  Symbol-agnostic: every ticker
-        # the user queries goes through the same code path, so the UI
-        # can distinguish "latest daily close" from "latest Yahoo
-        # delayed quote" for any market.  Failure to fetch the quote is
-        # NOT an error — the response degrades to DAILY_ONLY /
-        # QUOTE_UNAVAILABLE and chart structure still renders.  Never
-        # calls a broker; never touches ai_execution_count.
         summary_block = report_dict.get("summary") or {}
+        summary_latest_utc = summary_block.get("latest_timestamp")
+        freshness_latest_utc = freshness.get("latest_candle_utc")
+
+        # Defensive integrity check: by construction `selected_candles`
+        # is the single source of truth so these two timestamps MUST be
+        # equal.  If they ever drift (e.g., the engine adds new
+        # filtering downstream), block the response loudly rather than
+        # ship inconsistent fields.
+        if (
+            summary_latest_utc
+            and freshness_latest_utc
+            and _normalise_ts(summary_latest_utc) != _normalise_ts(freshness_latest_utc)
+        ):
+            return _internal_consistency_error_response(
+                base=_safe_base,
+                symbol=symbol_upper,
+                candle_count=len(selected_candles),
+                freshness=freshness,
+                linked_event_id=linked_event_id,
+                summary_latest_utc=summary_latest_utc,
+                freshness_latest_utc=freshness_latest_utc,
+            )
+
         daily_close = summary_block.get("latest_close")
-        daily_candle_utc = summary_block.get("latest_timestamp")
+        # The freshness gate and the engine summary now agree — both
+        # report the same timestamp.  Pass that one canonical value to
+        # the price-truth layer so it can fold in the Yahoo quote.
+        canonical_latest_utc = summary_latest_utc or freshness_latest_utc
+
         try:
             try:
                 from scripts.chart_structure_price_truth import compute_price_truth
@@ -340,8 +591,8 @@ def _get_chart_structure(
             price_truth = compute_price_truth(
                 symbol=symbol_upper,
                 daily_close=daily_close,
-                daily_candle_utc=daily_candle_utc,
-                freshness_latest_utc=freshness.get("latest_candle_utc"),
+                daily_candle_utc=canonical_latest_utc,
+                freshness_latest_utc=freshness_latest_utc,
             )
         except Exception as exc:  # pragma: no cover - defensive
             price_truth = {
@@ -351,14 +602,19 @@ def _get_chart_structure(
                 ),
                 "suggested_next_step": "WATCH_ONLY",
                 "latest_daily_close": daily_close,
-                "latest_daily_candle_utc": daily_candle_utc,
+                "latest_daily_candle_utc": canonical_latest_utc,
             }
+
+        quote_currency = price_truth.get("latest_quote_currency")
+        display_cur, cur_source = _resolve_display_currency(
+            symbol_upper, quote_currency, security_meta,
+        )
 
         return {
             **_safe_base,
             "symbol": symbol_upper,
             "source_event_id": linked_event_id,
-            "candle_count": len(candles),
+            "candle_count": len(selected_candles),
             "report": report_dict,
             "freshness": freshness,
             "data_freshness_status": freshness.get("data_freshness_status"),
@@ -386,6 +642,13 @@ def _get_chart_structure(
             "price_truth_status": price_truth.get("price_truth_status"),
             "price_truth_reason": price_truth.get("price_truth_reason"),
             "suggested_next_step": price_truth.get("suggested_next_step"),
+            # Currency resolution — symbol-agnostic, never hardcodes
+            # $ or INR.  `currency_source` lets the UI label inferred
+            # currencies differently if it wants to.
+            "display_currency": display_cur,
+            "currency_source": cur_source,
+            "latest_daily_close_currency": display_cur,
+            "security": security_meta,
         }
 
     except Exception as exc:

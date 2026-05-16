@@ -511,6 +511,8 @@ export default function LiveSignalsPage() {
 
       <SourceHealthOverviewStrip status={refreshStatus} />
 
+      <AutoRefreshPanel status={refreshStatus} />
+
       <StaleRefreshBanner status={refreshStatus} />
 
       <div
@@ -744,6 +746,139 @@ function SourceHealthOverviewStrip({
 }
 
 
+// ---------------------------------------------------------------------------
+// Auto-refresh truth panel (Sprint I addendum).  Honest reporting of
+// whether the Windows scheduled task is installed/enabled/failing —
+// the UI must NEVER pretend auto-refresh is happening when it is not.
+// We never register the scheduled task from the browser; we just
+// surface the exact PowerShell command the operator needs to run.
+// ---------------------------------------------------------------------------
+
+function AutoRefreshPanel({ status }: { status: LiveSourcesStatusResponse | null }) {
+  if (!status) return null;
+  const ar = status.auto_refresh_status;
+  if (!ar) return null;
+
+  const code = ar.status;
+  const cadenceHours = ar.cadence_hours ?? status.stale_threshold_hours ?? 6;
+  const lastSuccess =
+    ar.last_successful_refresh_utc ?? status.last_refresh_success ?? null;
+  const lastAttempt =
+    ar.last_attempted_refresh_utc ?? status.last_refresh_attempt ?? null;
+  const nextRun = ar.next_run_time ?? null;
+  const reason = ar.status_reason ?? '';
+  const suggested = ar.suggested_command ?? null;
+  const manualCmd =
+    ar.manual_refresh_command ?? status.manual_refresh_command ?? 'python scripts/refresh_live_signals.py --write';
+
+  const palette: Record<string, { color: string; chip: string; label: string }> = {
+    PASS: {
+      color: 'var(--sp-cyan)',
+      chip: 'sp-chip sp-chip-cyan',
+      label: 'ENABLED',
+    },
+    NOT_INSTALLED: {
+      color: 'var(--sp-gold)',
+      chip: 'sp-chip sp-chip-warn',
+      label: 'NOT INSTALLED',
+    },
+    DISABLED: {
+      color: 'var(--sp-gold)',
+      chip: 'sp-chip sp-chip-warn',
+      label: 'DISABLED',
+    },
+    FAILING: {
+      color: 'var(--sp-rust)',
+      chip: 'sp-chip sp-chip-rust',
+      label: 'FAILING',
+    },
+    STALE: {
+      color: 'var(--sp-gold)',
+      chip: 'sp-chip sp-chip-warn',
+      label: 'STALE',
+    },
+    UNSUPPORTED_PLATFORM: {
+      color: 'var(--sp-mist)',
+      chip: 'sp-chip',
+      label: 'UNSUPPORTED PLATFORM',
+    },
+    UNKNOWN: {
+      color: 'var(--sp-mist)',
+      chip: 'sp-chip',
+      label: 'UNKNOWN',
+    },
+  };
+  const p = palette[code] ?? palette.UNKNOWN;
+
+  return (
+    <div
+      className="rounded-lg px-4 py-3 space-y-2"
+      data-testid="auto-refresh-panel"
+      data-auto-refresh-status={code}
+      style={{
+        background: 'rgba(13, 16, 21, 0.45)',
+        border: '1px solid var(--sp-line)',
+      }}
+    >
+      <div className="flex items-center gap-2 flex-wrap">
+        <span className={p.chip} data-testid="auto-refresh-chip">
+          Auto-refresh · {p.label}
+        </span>
+        <span className="text-[10px] font-mono uppercase tracking-widest" style={{ color: 'var(--sp-mist)' }}>
+          Cadence · every {cadenceHours} hour{cadenceHours === 1 ? '' : 's'}
+        </span>
+      </div>
+      {reason && (
+        <p className="text-xs" style={{ color: p.color }} data-testid="auto-refresh-reason">
+          {reason}
+        </p>
+      )}
+      <div className="grid gap-1 md:grid-cols-3 text-xs" style={{ color: 'var(--sp-mist)' }}>
+        <div>
+          Last success:{' '}
+          <span className="font-mono" style={{ color: 'var(--sp-bone)' }}>
+            {lastSuccess ?? '—'}
+          </span>
+        </div>
+        <div>
+          Last attempt:{' '}
+          <span className="font-mono" style={{ color: 'var(--sp-bone)' }}>
+            {lastAttempt ?? '—'}
+          </span>
+        </div>
+        <div>
+          Next run:{' '}
+          <span className="font-mono" style={{ color: 'var(--sp-bone)' }}>
+            {nextRun ?? '—'}
+          </span>
+        </div>
+      </div>
+      {suggested && (
+        <pre
+          className="text-[11px] font-mono px-3 py-2 rounded"
+          data-testid="auto-refresh-suggested-command"
+          style={{
+            color: 'var(--sp-bone)',
+            background: 'rgba(13, 16, 21, 0.7)',
+            border: '1px solid var(--sp-line)',
+            whiteSpace: 'pre-wrap',
+          }}
+        >
+          {suggested}
+        </pre>
+      )}
+      <p className="text-[10px]" style={{ color: 'var(--sp-mist)' }}>
+        Manual refresh:{' '}
+        <span className="font-mono" style={{ color: 'var(--sp-bone)' }}>
+          {manualCmd}
+        </span>
+        {' · '}Advisory only — refreshing source data does not authorize trades.
+      </p>
+    </div>
+  );
+}
+
+
 function StaleRefreshBanner({ status }: { status: LiveSourcesStatusResponse | null }) {
   if (!status) return null;
   const stale = status.stale_sources ?? [];
@@ -761,7 +896,7 @@ function StaleRefreshBanner({ status }: { status: LiveSourcesStatusResponse | nu
 
   const headline = !refreshConfigured
     ? 'Source data may be stale — no local 6-hour refresh attempt recorded yet.'
-    : `Source data may be stale (${stale.length} source${stale.length === 1 ? '' : 's'} older than ${threshold}h).`;
+    : `Source data may be stale (${stale.length} source${stale.length === 1 ? '' : 's'} older than ${threshold} hour${threshold === 1 ? '' : 's'}).`;
 
   return (
     <div

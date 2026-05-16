@@ -74,6 +74,10 @@ STATUS_QUOTE_UNAVAILABLE = "QUOTE_UNAVAILABLE"
 STATUS_INTERNAL_TIMESTAMP_MISMATCH = "INTERNAL_TIMESTAMP_MISMATCH"
 STATUS_SYMBOL_UNSUPPORTED = "SYMBOL_UNSUPPORTED_BY_QUOTE_SOURCE"
 
+# Quote-freshness sub-status: the quote *price* came through but the
+# provider did not supply a timestamp.  We still surface the price.
+QUOTE_FRESHNESS_TIMESTAMP_UNAVAILABLE = "QUOTE_TIMESTAMP_UNAVAILABLE"
+
 ALL_PRICE_TRUTH_STATUSES: frozenset[str] = frozenset(
     {
         STATUS_DAILY_ONLY,
@@ -137,33 +141,42 @@ def _default_yahoo_quote_fetcher(symbol: str) -> dict[str, Any] | None:
     or ``None`` if the adapter is unavailable / yfinance is not installed
     in this environment.  Never raises — the caller treats absence as
     ``QUOTE_UNAVAILABLE`` and keeps rendering daily-candle features.
+
+    The implementation deliberately bypasses ``fetch_yahoo_mark_row``'s
+    ``stamp_payload``/``runtime_state`` machinery — that path requires
+    a fully-initialised pipeline state and silently drops the quote when
+    ``load_current_pipeline_state`` is unavailable in a chart-structure
+    request context.  Calling ``_fetch_symbol_with_yfinance`` directly
+    gets us the raw price + currency + timestamp without those
+    couplings, which is exactly what the price-truth panel needs.
     """
     try:
         try:
-            from scripts.yahoo_market_data_adapter import fetch_yahoo_mark_row
+            from scripts.yahoo_market_data_adapter import _fetch_symbol_with_yfinance
         except ModuleNotFoundError:  # pragma: no cover - script-style fallback
-            from yahoo_market_data_adapter import fetch_yahoo_mark_row  # type: ignore[no-redef]
-        from scripts.runtime_common import load_current_pipeline_state
+            from yahoo_market_data_adapter import _fetch_symbol_with_yfinance  # type: ignore[no-redef]
     except Exception:
         return None
     try:
-        runtime_state = load_current_pipeline_state()
-    except Exception:
-        runtime_state = {}
-    try:
-        row = fetch_yahoo_mark_row(symbol, runtime_state=runtime_state)
+        raw = _fetch_symbol_with_yfinance(symbol)
     except Exception:
         return None
-    if not isinstance(row, dict) or not row.get("ok"):
+    if not isinstance(raw, dict):
         return None
-    price = _coerce_float(row.get("last_price"))
+    price = _coerce_float(raw.get("last_price"))
+    # If the primary price is unavailable, fall back to previous_close so
+    # the operator at least sees something rather than a blank panel.
+    # The compute_price_truth caller still labels the result correctly
+    # (SYMBOL_UNSUPPORTED / DAILY_ONLY) when no price comes through.
+    if price is None:
+        price = _coerce_float(raw.get("previous_close"))
     if price is None:
         return None
     return {
         "price": price,
-        "currency": str(row.get("currency") or "") or None,
-        "timestamp": row.get("regular_market_time") or row.get("observed_at"),
-        "source": str(row.get("source_name") or "yahoo_finance"),
+        "currency": str(raw.get("currency") or "") or None,
+        "timestamp": raw.get("regular_market_time"),
+        "source": "yahoo_finance",
     }
 
 
@@ -266,7 +279,12 @@ def compute_price_truth(
     out["quote_age_minutes"] = _quote_age_minutes(quote_ts_iso, now)
     age_min = out["quote_age_minutes"]
     if age_min is None:
-        out["quote_freshness_status"] = "UNKNOWN"
+        # Provider returned a price but no timestamp.  Do NOT drop the
+        # quote — the price is still useful to the operator.  Surface
+        # the missing timestamp explicitly so the UI can render
+        # "timestamp unavailable from provider" instead of pretending
+        # everything is fine.
+        out["quote_freshness_status"] = QUOTE_FRESHNESS_TIMESTAMP_UNAVAILABLE
         out["quote_freshness_gate"] = "WARN"
     elif age_min <= 15.0:
         out["quote_freshness_status"] = "FRESH"
@@ -334,6 +352,7 @@ def compute_price_truth(
 __all__ = [
     "QUOTE_DIVERGENCE_WARN_PCT",
     "QUOTE_DIVERGENCE_STRONG_PCT",
+    "QUOTE_FRESHNESS_TIMESTAMP_UNAVAILABLE",
     "STATUS_DAILY_ONLY",
     "STATUS_QUOTE_ALIGNED",
     "STATUS_QUOTE_DIVERGES",

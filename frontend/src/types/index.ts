@@ -149,6 +149,11 @@ export interface ManualTradeLog {
   // fixtures, JSONL imports) are excluded from the live Reconciliation
   // queue.  Storing this NEVER grants execution permission.
   created_via?: string;
+  // Sprint I — Native currency the operator selected on log.  Either a
+  // supported ISO code (USD/INR/EUR/JPY/...) or 'UNKNOWN' for legacy
+  // rows that pre-date the dropdown.  Storing this NEVER grants
+  // execution permission.
+  currency?: string;
   // Sprint I — Reconciliation origin classifier output.  One of
   // USER_MANUAL / EXCLUDED_PROVENANCE / EXCLUDED_TRADE_MODE /
   // EXCLUDED_LOGGED_BY / EXCLUDED_PROBE_THESIS / EXCLUDED_EVENT_ID /
@@ -538,6 +543,37 @@ export interface SourceHealthSummary {
   can_execute?: boolean;
 }
 
+export type AutoRefreshStatusCode =
+  | 'PASS'
+  | 'NOT_INSTALLED'
+  | 'DISABLED'
+  | 'FAILING'
+  | 'STALE'
+  | 'UNKNOWN'
+  | 'UNSUPPORTED_PLATFORM';
+
+export interface AutoRefreshStatus {
+  task_name?: string;
+  installed?: boolean;
+  enabled?: boolean;
+  cadence_hours?: number;
+  last_run_time?: string | null;
+  next_run_time?: string | null;
+  last_task_result?: number | null;
+  last_successful_refresh_utc?: string | null;
+  last_attempted_refresh_utc?: string | null;
+  stale_sources?: string[];
+  stale_threshold_hours?: number;
+  status: AutoRefreshStatusCode | string;
+  status_reason?: string;
+  suggested_command?: string | null;
+  manual_refresh_command?: string;
+  advisory_only?: boolean;
+  broker_api_called?: boolean;
+  ai_execution_count?: number;
+  execution_gate?: string;
+}
+
 export interface LiveSourcesStatusResponse {
   operation: string;
   sources: Record<string, LiveSourceStatusEntry>;
@@ -551,6 +587,7 @@ export interface LiveSourcesStatusResponse {
   last_refresh_success?: string | null;
   scheduler_hint?: string;
   manual_refresh_command?: string;
+  auto_refresh_status?: AutoRefreshStatus;
   health_summary?: SourceHealthSummary;
   advisory_status: string;
   execution_mode?: string;
@@ -911,6 +948,13 @@ export interface ChartStructureResponse {
   quote_price_delta_pct?: number | null;
   price_truth_status?: ChartPriceTruthStatus | string | null;
   price_truth_reason?: string | null;
+  // Sprint I patch — backend-resolved currency.  `display_currency` is
+  // the currency the UI should label prices with; `currency_source`
+  // tells the UI whether it came from the provider, market metadata,
+  // a symbol-suffix fallback, or could not be resolved at all.
+  display_currency?: string | null;
+  latest_daily_close_currency?: string | null;
+  currency_source?: ChartCurrencySource | string | null;
 }
 
 export type ChartPriceTruthStatus =
@@ -919,7 +963,14 @@ export type ChartPriceTruthStatus =
   | 'QUOTE_DIVERGES_FROM_DAILY'
   | 'QUOTE_UNAVAILABLE'
   | 'INTERNAL_TIMESTAMP_MISMATCH'
+  | 'INTERNAL_DATA_CONSISTENCY_ERROR'
   | 'SYMBOL_UNSUPPORTED_BY_QUOTE_SOURCE';
+
+export type ChartCurrencySource =
+  | 'PROVIDER'
+  | 'MARKET_METADATA'
+  | 'SYMBOL_SUFFIX_FALLBACK'
+  | 'UNKNOWN';
 
 export interface ChartPriceTruth {
   symbol: string;

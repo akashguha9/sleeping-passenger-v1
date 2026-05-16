@@ -380,6 +380,13 @@ def _additive_migrations(conn: sqlite3.Connection) -> None:
         # excluded from the queue by design.  Storing this NEVER grants
         # execution permission; the safety stamps are unchanged.
         ("manual_trades", "created_via", "TEXT NOT NULL DEFAULT ''"),
+        # Sprint I — Native-currency support for operator-entered trades.
+        # ``currency`` is the ISO code the operator selected at log time
+        # (USD, INR, EUR, JPY, …).  Legacy rows default to '' (treated as
+        # UNKNOWN on read).  Storing this NEVER grants execution
+        # permission; reconciliation P/L still respects the existing
+        # advisory stamps.
+        ("manual_trades", "currency", "TEXT NOT NULL DEFAULT ''"),
         # Reconciliation outcome-quality / process-error fields.
         ("reconciliation_results", "outcome_quality", "TEXT NOT NULL DEFAULT ''"),
         ("reconciliation_results", "process_error", "TEXT NOT NULL DEFAULT ''"),
@@ -445,6 +452,13 @@ def _to_dict(row: sqlite3.Row) -> dict[str, Any]:
         except (TypeError, ValueError):
             lev = 1.0
         d["leverage"] = lev if lev >= 1.0 else 1.0
+    # Currency: legacy rows wrote '' or NULL; both should read back as
+    # the explicit UNKNOWN sentinel so the frontend can render it
+    # without a hardcoded $ fallback.
+    if "currency" in d:
+        raw_cur = d.get("currency") or ""
+        text = str(raw_cur).strip().upper()
+        d["currency"] = text if text else "UNKNOWN"
     return d
 
 
@@ -721,9 +735,15 @@ def insert_manual_trade(
     preflight_state_at_decision: str = "",
     trade_mode: str = "REAL_MANUAL",
     created_via: str = "",
+    currency: str = "",
 ) -> None:
     """Insert a manual trade record. ``leverage`` is record-only (record-keeping
     of human leverage choice — no broker margin/execution implications).
+
+    ``currency`` is the operator-selected native currency for the trade
+    (e.g. INR for BHARTIARTL.NS, USD for AAPL, EUR for SAP.DE).  Legacy
+    rows default to '' and read back as UNKNOWN.  Storing the currency
+    NEVER grants execution permission and never calls a broker.
 
     The operator-discipline keyword args (invalidation_level, expected_horizon,
     risk_reason, entry_reason, exit_plan, confidence_before, emotional_state,
@@ -762,6 +782,23 @@ def insert_manual_trade(
     # cannot pollute the provenance contract.  Empty string is the safe
     # legacy default ("unknown provenance" — excluded from Reconciliation).
     created_via_norm = str(created_via or "").strip()
+
+    # Normalise currency at the persistence boundary.  Unsupported /
+    # hostile / typo currencies fall through to '' (which reads back as
+    # UNKNOWN), never to a hardcoded USD.
+    try:
+        try:
+            from scripts.supported_currencies import normalise_currency
+        except ModuleNotFoundError:  # pragma: no cover - script-style fallback
+            from supported_currencies import normalise_currency  # type: ignore[no-redef]
+        currency_norm = normalise_currency(currency)
+        # Persist '' for UNKNOWN so legacy rows and explicit-unknown rows
+        # share the same on-disk representation; the read path maps
+        # both back to UNKNOWN consistently.
+        if currency_norm == "UNKNOWN":
+            currency_norm = ""
+    except Exception:  # pragma: no cover - defensive
+        currency_norm = ""
 
     conn = _get_conn(db_path)
     try:
@@ -820,6 +857,10 @@ def insert_manual_trade(
         if has_created_via:
             cols_sql = cols_sql + ", created_via"
             vals = vals + (created_via_norm,)
+        has_currency = "currency" in cols
+        if has_currency:
+            cols_sql = cols_sql + ", currency"
+            vals = vals + (currency_norm,)
         placeholders = ", ".join(["?"] * len(vals))
         conn.execute(
             f"INSERT OR IGNORE INTO manual_trades ({cols_sql}) VALUES ({placeholders})",

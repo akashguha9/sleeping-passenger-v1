@@ -634,6 +634,11 @@ class ManualTradeBody(BaseModel):
     # and execution_gate stays LOCKED.  Hostile / typo values normalise
     # to REAL_MANUAL server-side.
     trade_mode: str = "REAL_MANUAL"
+    # Sprint I — Native currency for the manual trade.  Optional on the
+    # wire so legacy callers stay compatible; the server normalises
+    # anything outside the supported set down to '' (UNKNOWN) rather
+    # than silently defaulting to USD.
+    currency: str = ""
 
 
 class ReconcileBody(BaseModel):
@@ -847,6 +852,34 @@ def post_decision(
 # ---------------------------------------------------------------------------
 
 
+@app.get("/config/supported-currencies")
+def get_supported_currencies() -> dict:
+    """Return the dropdown catalogue the Manual Trade Log uses.
+
+    Read-only.  No broker call, no execution side-effects.  The
+    payload is symbol-agnostic and shared between every operator-entry
+    surface so the frontend never has to hardcode currency lists.
+    """
+    try:
+        from scripts.supported_currencies import (
+            UNKNOWN_CURRENCY,
+            supported_currencies,
+        )
+    except ModuleNotFoundError:  # pragma: no cover - script-style fallback
+        from supported_currencies import (  # type: ignore[no-redef]
+            UNKNOWN_CURRENCY,
+            supported_currencies,
+        )
+    return {
+        "advisory_status": "ADVISORY_ONLY",
+        "execution_gate": "LOCKED",
+        "broker_api_called": False,
+        "ai_execution_count": 0,
+        "currencies": supported_currencies(),
+        "unknown_code": UNKNOWN_CURRENCY,
+    }
+
+
 @app.post("/manual-trades")
 def post_manual_trade(
     body: ManualTradeBody,
@@ -881,6 +914,7 @@ def post_manual_trade(
         gallardo_block_at_decision=body.gallardo_block_at_decision,
         preflight_state_at_decision=body.preflight_state_at_decision,
         trade_mode=body.trade_mode,
+        currency=body.currency,
     )
 
 
@@ -1331,6 +1365,40 @@ def _build_live_sources_status(
             "optional_missing_config_count": 0,
         }
 
+    # Sprint I addendum — probe the Windows scheduled task so the
+    # frontend can render an honest Auto-refresh panel.  Failure here
+    # must NEVER crash the live-sources endpoint; on any error we
+    # surface ``status=UNKNOWN`` with a clear reason.
+    try:
+        try:
+            from scripts.check_live_signal_refresh_task import (
+                check_live_signal_refresh_task,
+            )
+        except ModuleNotFoundError:  # pragma: no cover - script-style fallback
+            from check_live_signal_refresh_task import (  # type: ignore[no-redef]
+                check_live_signal_refresh_task,
+            )
+        auto_refresh_status = check_live_signal_refresh_task()
+        # Promote a couple of useful timestamps from the live-sources
+        # truth so the UI does not have to cross-reference.
+        auto_refresh_status["last_successful_refresh_utc"] = latest_success_iso
+        auto_refresh_status["last_attempted_refresh_utc"] = (
+            auto_refresh_status.get("last_attempted_refresh_utc") or latest_attempt_iso
+        )
+        auto_refresh_status["stale_sources"] = list(stale_sources)
+        auto_refresh_status["stale_threshold_hours"] = int(stale_threshold_hours)
+    except Exception as exc:  # pragma: no cover - defensive
+        auto_refresh_status = {
+            "status": "UNKNOWN",
+            "status_reason": f"scheduler probe failed: {type(exc).__name__}",
+            "installed": False,
+            "enabled": False,
+            "advisory_only": True,
+            "broker_api_called": False,
+            "ai_execution_count": 0,
+            "execution_gate": "LOCKED",
+        }
+
     return {
         "operation": "get_live_sources_status",
         "sources": freshness,
@@ -1344,6 +1412,7 @@ def _build_live_sources_status(
         "last_refresh_success": latest_success_iso,
         "scheduler_hint": _SCHEDULER_HINT_PS,
         "manual_refresh_command": _SCHEDULER_HINT_MANUAL,
+        "auto_refresh_status": auto_refresh_status,
         "health_summary": health_summary,
         "advisory_status": _ADVISORY_STATUS,
         "execution_mode": _EXECUTION_MODE,

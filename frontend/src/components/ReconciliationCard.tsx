@@ -1,5 +1,6 @@
 import type { TradeReconciliation, ManualTradeLog } from '@/types';
 import { HumanOnlyBadge } from './HumanOnlyBadge';
+import { UNKNOWN_CURRENCY } from '@/lib/supportedCurrencies';
 
 const OUTCOME_STYLE: Record<string, string> = {
   WIN:       'text-emerald-400 bg-emerald-950/40 border-emerald-800/50',
@@ -11,6 +12,21 @@ const OUTCOME_STYLE: Record<string, string> = {
 interface Props {
   trade: ManualTradeLog;
   reconciliation?: TradeReconciliation;
+}
+
+// Format a numeric price/P&L value with its native currency tag.  We
+// deliberately avoid the "$" symbol because operator-entered trades
+// can be in any of the supported currencies — see
+// frontend/src/lib/supportedCurrencies.ts.  Legacy rows whose currency
+// reads back as UNKNOWN render without a tag rather than guessing.
+function formatMoney(value: number, currency: string | null | undefined): string {
+  const num = value.toLocaleString(undefined, {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 4,
+  });
+  const cur = (currency ?? '').trim();
+  if (!cur || cur === UNKNOWN_CURRENCY) return num;
+  return `${num} ${cur}`;
 }
 
 export function ReconciliationCard({ trade, reconciliation }: Props) {
@@ -40,18 +56,31 @@ export function ReconciliationCard({ trade, reconciliation }: Props) {
 
       <div className="grid grid-cols-3 gap-3 mb-4 text-sm">
         <Stat label="Qty" value={trade.quantity.toString()} />
-        <Stat label="Log Price" value={`$${trade.price.toFixed(2)}`} />
+        <Stat
+          label="Log Price"
+          value={formatMoney(trade.price, trade.currency)}
+          testid="reconciliation-log-price"
+        />
         <Stat
           label="Fill Price"
-          value={reconciliation ? `$${reconciliation.actual_fill_price.toFixed(2)}` : '—'}
+          value={
+            reconciliation
+              ? formatMoney(reconciliation.actual_fill_price, trade.currency)
+              : '—'
+          }
+          testid="reconciliation-fill-price"
         />
       </div>
 
       {reconciliation && reconciliation.pnl_estimate !== 0 && (
         <div className="mb-3">
-          <span className="text-xs text-slate-500">Est. P&amp;L</span>
-          <p className={`text-lg font-bold font-mono mt-0.5 ${reconciliation.pnl_estimate > 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-            {reconciliation.pnl_estimate > 0 ? '+' : ''}{reconciliation.pnl_estimate.toFixed(2)}
+          <span className="text-xs text-slate-500">Realized P&amp;L</span>
+          <p
+            className={`text-lg font-bold font-mono mt-0.5 ${reconciliation.pnl_estimate > 0 ? 'text-emerald-400' : 'text-red-400'}`}
+            data-testid="reconciliation-pnl"
+          >
+            {reconciliation.pnl_estimate > 0 ? '+' : ''}
+            {formatMoney(reconciliation.pnl_estimate, trade.currency)}
           </p>
         </div>
       )}
@@ -80,11 +109,11 @@ export function ReconciliationCard({ trade, reconciliation }: Props) {
   );
 }
 
-function Stat({ label, value }: { label: string; value: string }) {
+function Stat({ label, value, testid }: { label: string; value: string; testid?: string }) {
   return (
     <div className="bg-slate-900/40 rounded p-2">
       <span className="text-xs text-slate-500 block mb-0.5">{label}</span>
-      <span className="text-sm font-mono text-slate-200">{value}</span>
+      <span className="text-sm font-mono text-slate-200" data-testid={testid}>{value}</span>
     </div>
   );
 }

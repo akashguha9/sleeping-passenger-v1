@@ -198,23 +198,37 @@ function PriceTruthPanel({ response }: { response: ChartStructureResponse }) {
   const dailyClose = response.latest_daily_close ?? response.price_truth?.latest_daily_close ?? null;
   const dailyTs = response.latest_daily_candle_utc ?? response.price_truth?.latest_daily_candle_utc ?? null;
   const quotePrice = response.latest_quote_price ?? response.price_truth?.latest_quote_price ?? null;
+  // Display currency: backend `display_currency` is the canonical
+  // answer (PROVIDER → MARKET_METADATA → SUFFIX_FALLBACK → UNKNOWN).
+  // We fall back to the quote currency only when display_currency is
+  // not yet populated by an older backend response.
   const quoteCurrency = response.latest_quote_currency ?? response.price_truth?.latest_quote_currency ?? null;
+  const dailyCloseCurrency =
+    response.display_currency ??
+    response.latest_daily_close_currency ??
+    quoteCurrency ??
+    null;
+  const currencySource = response.currency_source ?? null;
   const quoteSource = response.latest_quote_source ?? response.price_truth?.latest_quote_source ?? null;
   const quoteTs = response.latest_quote_timestamp_utc ?? response.price_truth?.latest_quote_timestamp_utc ?? null;
   const ageMin = response.quote_age_minutes ?? response.price_truth?.quote_age_minutes ?? null;
+  const quoteFreshnessStatus =
+    response.quote_freshness_status ?? response.price_truth?.quote_freshness_status ?? null;
   const delta = response.quote_price_delta ?? response.price_truth?.quote_price_delta ?? null;
   const deltaPct = response.quote_price_delta_pct ?? response.price_truth?.quote_price_delta_pct ?? null;
-  const nextStep = response.price_truth?.suggested_next_step ?? '';
+  const nextStep = response.price_truth?.suggested_next_step ?? response.suggested_next_step ?? '';
 
+  const isMismatch =
+    status === 'INTERNAL_TIMESTAMP_MISMATCH' ||
+    status === 'INTERNAL_DATA_CONSISTENCY_ERROR';
   const statusColor =
     status === 'QUOTE_ALIGNED'
       ? 'var(--sp-cyan)'
-      : status === 'QUOTE_DIVERGES_FROM_DAILY' || status === 'INTERNAL_TIMESTAMP_MISMATCH'
+      : status === 'QUOTE_DIVERGES_FROM_DAILY' || isMismatch
         ? 'var(--sp-rust)'
         : 'var(--sp-gold)';
 
-  const diverges =
-    status === 'QUOTE_DIVERGES_FROM_DAILY' || status === 'INTERNAL_TIMESTAMP_MISMATCH';
+  const diverges = status === 'QUOTE_DIVERGES_FROM_DAILY' || isMismatch;
 
   return (
     <div
@@ -238,7 +252,7 @@ function PriceTruthPanel({ response }: { response: ChartStructureResponse }) {
             Latest daily close
           </div>
           <div className="font-mono" style={{ color: 'var(--sp-bone)' }} data-testid="price-truth-daily-close">
-            {formatQuoteValue(dailyClose, quoteCurrency)}
+            {formatQuoteValue(dailyClose, dailyCloseCurrency)}
           </div>
           <div className="text-[10px] font-mono" style={{ color: 'var(--sp-mist)' }}>
             {dailyTs ?? '—'}
@@ -249,12 +263,19 @@ function PriceTruthPanel({ response }: { response: ChartStructureResponse }) {
             Latest quote
           </div>
           <div className="font-mono" style={{ color: 'var(--sp-bone)' }} data-testid="price-truth-quote-price">
-            {formatQuoteValue(quotePrice, quoteCurrency)}
+            {formatQuoteValue(quotePrice, quoteCurrency ?? dailyCloseCurrency)}
           </div>
           <div className="text-[10px] font-mono" style={{ color: 'var(--sp-mist)' }} data-testid="price-truth-quote-meta">
             {quoteSource ?? '—'}
             {quoteTs ? ` · ${quoteTs}` : ''}
             {ageMin != null ? ` · ${ageMin.toFixed(0)} min old` : ''}
+            {/* If the provider shipped a price but no timestamp we still
+                show the price (Sprint I patch).  Surfacing the
+                QUOTE_TIMESTAMP_UNAVAILABLE label makes it explicit
+                instead of pretending everything is fine. */}
+            {quotePrice != null && !quoteTs && quoteFreshnessStatus === 'QUOTE_TIMESTAMP_UNAVAILABLE'
+              ? ' · timestamp unavailable from provider'
+              : ''}
           </div>
         </div>
         <div>
@@ -292,8 +313,17 @@ function PriceTruthPanel({ response }: { response: ChartStructureResponse }) {
           {reason}
         </div>
       )}
-      <div className="text-[10px] font-mono" style={{ color: 'var(--sp-mist)' }}>
-        Record-keeping only · No broker call · advisory_status=ADVISORY_ONLY
+      <div className="text-[10px] font-mono flex flex-wrap items-center gap-2" style={{ color: 'var(--sp-mist)' }}>
+        <span>Record-keeping only · No broker call · advisory_status=ADVISORY_ONLY</span>
+        {currencySource && (
+          <span
+            className="px-1.5 py-0.5 rounded"
+            style={{ border: '1px solid rgba(232,231,227,0.12)' }}
+            data-testid="price-truth-currency-source"
+          >
+            currency · {currencySource}
+          </span>
+        )}
       </div>
     </div>
   );
@@ -775,13 +805,22 @@ export default function ChartStructurePage() {
   const freshnessGate: ChartFreshnessGate | undefined =
     result?.freshness_gate ?? freshness?.freshness_gate ?? undefined;
   const isFreshnessBlocked = freshnessGate === 'BLOCK';
+  // Sprint I patch — backend may also surface an internal-consistency
+  // block when the freshness gate and OHLCV summary disagree on
+  // latest_candle_utc.  Treat it as a render-blocker so the operator
+  // never sees a normal verdict over internally inconsistent fields.
+  const priceTruthStatus = result?.price_truth_status ?? null;
+  const isInternalMismatch =
+    chartState === 'INTERNAL_DATA_CONSISTENCY_ERROR' ||
+    priceTruthStatus === 'INTERNAL_DATA_CONSISTENCY_ERROR' ||
+    priceTruthStatus === 'INTERNAL_TIMESTAMP_MISMATCH';
   // Render the engine's chart-structure report only when (a) we got one
   // back AND (b) the freshness gate did not block.  This guarantees that
   // the operator never sees a normal "TRENDING_UP" verdict over 2004
   // fixture data even if a downstream component would otherwise render
   // it.  Stale-blocked responses already null out `report` server-side;
   // this is belt-and-braces.
-  const hasReport = !!(result && result.report) && !isFreshnessBlocked;
+  const hasReport = !!(result && result.report) && !isFreshnessBlocked && !isInternalMismatch;
   const isMissingData = !!(
     result && !result.report && result.candle_count === 0 && result.can_bootstrap !== false
   );
@@ -942,6 +981,38 @@ export default function ChartStructurePage() {
 
           {freshness && (
             <FreshnessPanel freshness={freshness} symbol={result.symbol} />
+          )}
+
+          {isInternalMismatch && (
+            <div
+              className="sp-card p-4 space-y-2"
+              data-testid="chart-internal-mismatch-block"
+              style={{
+                borderColor: 'rgba(160, 74, 58, 0.5)',
+                background: 'rgba(160, 74, 58, 0.06)',
+              }}
+            >
+              <div className="sp-eyebrow" style={{ color: '#d57b6a' }}>
+                Internal data consistency error — analysis blocked
+              </div>
+              <p className="text-sm leading-relaxed" style={{ color: 'var(--sp-bone)' }}>
+                {result?.price_truth_reason ??
+                  result?.advisory_summary ??
+                  `Freshness and OHLCV summary disagree on the latest candle for ${result?.symbol}. Refusing to render a normal verdict over internally inconsistent fields.`}
+              </p>
+              <div className="flex items-center gap-2 pt-0.5 flex-wrap">
+                <span className="text-xs" style={{ color: 'var(--sp-mist)' }}>
+                  Suggested next step:
+                </span>
+                <span
+                  className="text-xs font-mono font-semibold"
+                  style={{ color: 'var(--sp-rust)' }}
+                  data-testid="chart-internal-mismatch-next-step"
+                >
+                  {result?.suggested_next_step ?? 'HUMAN_REVIEW_PRICE_MISMATCH'}
+                </span>
+              </div>
+            </div>
           )}
 
           {isFreshnessBlocked && (

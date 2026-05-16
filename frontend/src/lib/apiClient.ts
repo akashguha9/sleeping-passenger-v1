@@ -294,6 +294,10 @@ export async function postManualTrade(body: {
   emotional_state?: string;
   mistake_tags?: string;
   lesson?: string;
+  // Sprint I — Native currency the operator selected.  Optional on
+  // the wire so older callers stay valid; the backend normalises
+  // unsupported codes to '' (UNKNOWN) rather than silently defaulting.
+  currency?: string;
 }): Promise<unknown> {
   return apiFetch('/manual-trades', {
     method: 'POST',

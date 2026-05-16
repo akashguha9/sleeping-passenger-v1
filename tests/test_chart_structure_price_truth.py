@@ -255,3 +255,133 @@ def test_currency_never_hardcoded():
             now=_FROZEN_NOW,
         )
         assert result["latest_quote_currency"] == cur
+
+
+# ---------------------------------------------------------------------------
+# Sprint I patch — quote without a timestamp still surfaces a price.
+# ---------------------------------------------------------------------------
+
+
+def test_quote_without_timestamp_still_shows_price():
+    """If the provider ships a price but no timestamp we MUST keep the
+    price and just label the quote freshness as
+    QUOTE_TIMESTAMP_UNAVAILABLE.  Dropping the quote silently was the
+    original Sprint I bug — "Latest quote: —" while Yahoo had a price."""
+    from scripts.chart_structure_price_truth import (
+        QUOTE_FRESHNESS_TIMESTAMP_UNAVAILABLE,
+    )
+    result = compute_price_truth(
+        symbol="BHARTIARTL.NS",
+        daily_close=1789.20,
+        daily_candle_utc="2026-05-14T16:00:00Z",
+        quote_fetcher=lambda s: {
+            "price": 1905.40,
+            "currency": "INR",
+            "timestamp": None,
+            "source": "yahoo_finance",
+        },
+        now=_FROZEN_NOW,
+    )
+    assert result["latest_quote_price"] == 1905.40
+    assert result["latest_quote_currency"] == "INR"
+    assert result["latest_quote_timestamp_utc"] is None
+    assert result["quote_freshness_status"] == QUOTE_FRESHNESS_TIMESTAMP_UNAVAILABLE
+    assert result["quote_freshness_gate"] == "WARN"
+    # Divergence is still computed from the price even though the
+    # timestamp was missing.
+    assert result["price_truth_status"] == STATUS_QUOTE_DIVERGES
+    assert result["quote_price_delta"] == pytest.approx(116.20, abs=1e-4)
+
+
+def test_quote_without_timestamp_aligned_still_aligns():
+    """The price→delta math runs even with no timestamp.  An aligned
+    delta yields QUOTE_ALIGNED, not QUOTE_UNAVAILABLE."""
+    result = compute_price_truth(
+        symbol="AAPL",
+        daily_close=180.0,
+        daily_candle_utc="2026-05-14T16:00:00Z",
+        quote_fetcher=lambda s: {
+            "price": 180.5,
+            "currency": "USD",
+            "timestamp": None,
+            "source": "yahoo_finance",
+        },
+        now=_FROZEN_NOW,
+    )
+    assert result["price_truth_status"] == STATUS_QUOTE_ALIGNED
+    assert result["latest_quote_price"] == 180.5
+
+
+# ---------------------------------------------------------------------------
+# Default fetcher integration — re-exports _fetch_symbol_with_yfinance.
+# We do NOT call live yfinance here; we only assert the fetcher path is
+# wired to the *existing* adapter, not a duplicated implementation.
+# ---------------------------------------------------------------------------
+
+
+def test_default_fetcher_returns_quote_dict_from_adapter(monkeypatch):
+    """Default fetcher must call ``_fetch_symbol_with_yfinance`` (the
+    existing Yahoo adapter helper) and map its fields into the quote
+    dict shape ``compute_price_truth`` expects."""
+    from scripts import yahoo_market_data_adapter as adapter_mod
+    from scripts.chart_structure_price_truth import _default_yahoo_quote_fetcher
+
+    captured: dict[str, str] = {}
+
+    def fake_fetcher(symbol):
+        captured["symbol"] = symbol
+        return {
+            "last_price": 1905.40,
+            "currency": "INR",
+            "regular_market_time": "2026-05-15T10:00:00+00:00",
+            "previous_close": 1789.20,
+        }
+
+    monkeypatch.setattr(
+        adapter_mod, "_fetch_symbol_with_yfinance", fake_fetcher, raising=True
+    )
+
+    quote = _default_yahoo_quote_fetcher("BHARTIARTL.NS")
+    assert captured["symbol"] == "BHARTIARTL.NS"
+    assert quote is not None
+    assert quote["price"] == 1905.40
+    assert quote["currency"] == "INR"
+    assert quote["source"] == "yahoo_finance"
+    assert quote["timestamp"] == "2026-05-15T10:00:00+00:00"
+
+
+def test_default_fetcher_returns_none_when_adapter_explodes(monkeypatch):
+    from scripts import yahoo_market_data_adapter as adapter_mod
+    from scripts.chart_structure_price_truth import _default_yahoo_quote_fetcher
+
+    def bad_fetcher(symbol):
+        raise RuntimeError("yfinance offline")
+
+    monkeypatch.setattr(
+        adapter_mod, "_fetch_symbol_with_yfinance", bad_fetcher, raising=True
+    )
+    assert _default_yahoo_quote_fetcher("AAPL") is None
+
+
+def test_default_fetcher_falls_back_to_previous_close(monkeypatch):
+    """When last_price is missing but previous_close is available the
+    fetcher MUST still return a quote so the operator sees a price.
+    The compute_price_truth caller still labels divergence correctly."""
+    from scripts import yahoo_market_data_adapter as adapter_mod
+    from scripts.chart_structure_price_truth import _default_yahoo_quote_fetcher
+
+    def fetcher(symbol):
+        return {
+            "last_price": None,
+            "previous_close": 1789.20,
+            "currency": "INR",
+            "regular_market_time": None,
+        }
+
+    monkeypatch.setattr(
+        adapter_mod, "_fetch_symbol_with_yfinance", fetcher, raising=True
+    )
+    quote = _default_yahoo_quote_fetcher("BHARTIARTL.NS")
+    assert quote is not None
+    assert quote["price"] == 1789.20
+    assert quote["currency"] == "INR"
