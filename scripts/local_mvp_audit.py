@@ -206,6 +206,40 @@ def source_health_section() -> dict[str, Any]:
     return out
 
 
+def calibration_gate_section(db_path: Path = DEFAULT_DB) -> dict[str, Any]:
+    """Surface the Sprint 10F calibration readiness gate inside the audit.
+
+    Returns a compact summary (status + rows-needed) so the operator can
+    see at a glance whether paper / real-manual outcomes should be
+    interpreted yet.  Read-only.
+    """
+    out: dict[str, Any] = {
+        "section": "calibration_gate",
+        "db_path": str(db_path),
+        "available": False,
+        **_safety_stamps(),
+    }
+    try:
+        try:
+            from scripts.calibration_gate import build_report
+        except ModuleNotFoundError:
+            from calibration_gate import build_report  # type: ignore[no-redef]
+        rep = build_report(db_path)
+    except Exception as exc:
+        out["error"] = f"{type(exc).__name__}"
+        return out
+    out["available"] = bool(rep.get("db_available"))
+    out["paper_calibration_ready"] = rep["paper"]["status"]
+    out["paper_rows_needed_next"] = rep["paper"]["rows_needed_next"]
+    out["paper_with_snapshot_and_outcome"] = rep["paper"]["rows"]["with_snapshot_and_outcome"]
+    out["paper_fully_qualifying"] = rep["paper"]["rows"]["fully_qualifying"]
+    out["real_calibration_ready"] = rep["real"]["status"]
+    out["real_rows_needed_next"] = rep["real"]["rows_needed_next"]
+    out["real_with_snapshot_and_outcome"] = rep["real"]["rows"]["with_snapshot_and_outcome"]
+    out["no_claims"] = list(rep["paper"].get("no_claims", []))
+    return out
+
+
 def token_status_section() -> dict[str, Any]:
     """Whether MVP_API_TOKEN is set on this process (no value leaked)."""
     set_locally = bool(os.environ.get("MVP_API_TOKEN", "").strip())
@@ -234,6 +268,7 @@ def run_audit(db_path: Path = DEFAULT_DB) -> dict[str, Any]:
             "token_status": token_status_section(),
             "paper_ledger": paper_ledger_section(db_path),
             "calibration": calibration_section(db_path),
+            "calibration_gate": calibration_gate_section(db_path),
             "learning_completeness": learning_completeness_section(db_path),
             "source_health": source_health_section(),
         },
@@ -253,6 +288,15 @@ def run_audit(db_path: Path = DEFAULT_DB) -> dict[str, Any]:
         "PASS" if cal.get("available") and cal.get("manual_trade_count", 0) > 0
         else "WARN"
     )
+    cg = payload["sections"]["calibration_gate"]
+    # Gate is informational, not pass/fail — NOT_READY is the expected
+    # default before evidence exists.  We surface it as INFO/WARN only.
+    if not cg.get("available"):
+        statuses["calibration_gate"] = "WARN"
+    elif cg.get("paper_calibration_ready") in {"REVIEWABLE", "LOW_CONFIDENCE"}:
+        statuses["calibration_gate"] = "PASS"
+    else:
+        statuses["calibration_gate"] = "INFO"
     lc = payload["sections"]["learning_completeness"]
     statuses["learning_completeness"] = "PASS" if lc.get("available") else "WARN"
     sh = payload["sections"]["source_health"]
@@ -296,6 +340,13 @@ def _render_text(payload: dict[str, Any]) -> str:
     lines.append(f"  confidence_band       : {cal.get('confidence_band')}")
     lines.append(f"  calibration_confidence: {cal.get('calibration_confidence_band')}")
     lines.append(f"  reactor_snapshot_count: {cal.get('reactor_snapshot_count')}")
+    cg = sections.get("calibration_gate", {})
+    lines.append("")
+    lines.append("Calibration gate (Sprint 10F):")
+    lines.append(f"  paper_calibration_ready : {cg.get('paper_calibration_ready')}")
+    lines.append(f"  paper rows needed next  : {cg.get('paper_rows_needed_next')}")
+    lines.append(f"  real_calibration_ready  : {cg.get('real_calibration_ready')}")
+    lines.append(f"  real rows needed next   : {cg.get('real_rows_needed_next')}")
     lc = sections["learning_completeness"]
     lines.append("")
     lines.append("Learning completeness:")
@@ -339,6 +390,7 @@ def _build_parser() -> argparse.ArgumentParser:
             "token",
             "paper",
             "calibration",
+            "calibration_gate",
             "learning",
             "source_health",
             "all",
@@ -365,6 +417,7 @@ def main(argv: list[str] | None = None) -> int:
         "token": token_status_section,
         "paper": lambda: paper_ledger_section(db),
         "calibration": lambda: calibration_section(db),
+        "calibration_gate": lambda: calibration_gate_section(db),
         "learning": lambda: learning_completeness_section(db),
         "source_health": source_health_section,
     }
@@ -379,6 +432,7 @@ __all__ = [
     "run_audit",
     "paper_ledger_section",
     "calibration_section",
+    "calibration_gate_section",
     "learning_completeness_section",
     "source_health_section",
     "token_status_section",
