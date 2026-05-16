@@ -314,10 +314,9 @@ def test_orchestrator_persists_summary_json(tmp_path, monkeypatch):
     monkeypatch.setattr(orch, "_invoke_phase2_single", lambda key, dry_run: {"status": "ok"})
 
     target = tmp_path / "live_signal_refresh_summary.json"
-    monkeypatch.setattr(orch, "_LOG_DIR", tmp_path)
-    monkeypatch.setattr(orch, "_SUMMARY_PATH", target)
-
-    summary = orch.run_refresh(write_mode=False)
+    # Pass the path explicitly — the new contract honours
+    # explicit_path > MVP_LIVE_REFRESH_SUMMARY_PATH > module default.
+    summary = orch.run_refresh(write_mode=False, summary_path=target)
     assert target.exists()
     payload = json.loads(target.read_text(encoding="utf-8"))
     assert payload["advisory_status"] == "ADVISORY_ONLY"

@@ -118,6 +118,8 @@ def score_source(entry: dict[str, Any]) -> dict[str, Any]:
     last_refresh_skipped = bool(entry.get("last_refresh_skipped", False))
     skip_reason = str(entry.get("last_refresh_skipped_reason") or "")
     last_refresh_success = bool(entry.get("last_refresh_success", False))
+    missing_env_keys = list(entry.get("missing_env_keys") or [])
+    source_key = str(entry.get("source_key") or "").lower()
 
     reasons: list[str] = []
 
@@ -133,11 +135,20 @@ def score_source(entry: dict[str, Any]) -> dict[str, Any]:
                 "Planned source adapter — not counted as a failure. "
                 "No action required."
             ),
+            actionable_next_step=(
+                f"planned_not_scored: adapter for '{source_key}' not yet "
+                "implemented — no operator action required"
+            ),
             entry=entry,
         )
 
     # ---- Terminal: optional + credential missing ---------------------
     if tier == "optional" and not credential_configured:
+        env_hint = (
+            f"set env var(s): {', '.join(missing_env_keys)}"
+            if missing_env_keys
+            else "configure the source credentials in .env"
+        )
         return _terminal(
             label=LABEL_OPTIONAL_MISSING_CONFIG,
             score=None,
@@ -147,6 +158,9 @@ def score_source(entry: dict[str, Any]) -> dict[str, Any]:
             operator_message=(
                 "Optional source not configured. This is not a core-source "
                 "failure; configure the API key to activate."
+            ),
+            actionable_next_step=(
+                f"optional_config_missing: to activate '{source_key}', {env_hint}"
             ),
             entry=entry,
         )
@@ -223,6 +237,17 @@ def score_source(entry: dict[str, Any]) -> dict[str, Any]:
         has_error=bool(last_refresh_error),
     )
 
+    actionable_next_step = _build_actionable_next_step(
+        label=label,
+        tier=tier,
+        source_key=source_key,
+        config_state=config_state,
+        missing_env_keys=missing_env_keys,
+        freshness_state=freshness_state,
+        last_refresh_error=last_refresh_error,
+        skip_reason=skip_reason,
+    )
+
     return {
         "health_score": round(score, 4),
         "health_label": label,
@@ -236,6 +261,9 @@ def score_source(entry: dict[str, Any]) -> dict[str, Any]:
             else None
         ),
         "operator_message": operator_message,
+        "actionable_next_step": actionable_next_step,
+        "missing_env_keys": list(missing_env_keys),
+        "source_key": source_key,
         "advisory_status": ADVISORY_STATUS,
         "execution_gate": EXECUTION_GATE_LOCKED,
         "broker_api_called": False,
@@ -254,6 +282,7 @@ def _terminal(
     config_state: str,
     operator_message: str,
     entry: dict[str, Any],
+    actionable_next_step: str = "",
 ) -> dict[str, Any]:
     return {
         "health_score": score,
@@ -264,6 +293,9 @@ def _terminal(
         "config_state": config_state,
         "last_success_age_hours": entry.get("hours_since_last_success"),
         "operator_message": operator_message,
+        "actionable_next_step": actionable_next_step,
+        "missing_env_keys": list(entry.get("missing_env_keys") or []),
+        "source_key": str(entry.get("source_key") or ""),
         "advisory_status": ADVISORY_STATUS,
         "execution_gate": EXECUTION_GATE_LOCKED,
         "broker_api_called": False,
@@ -271,6 +303,51 @@ def _terminal(
         "execution_permission": False,
         "can_execute": False,
     }
+
+
+def _build_actionable_next_step(
+    *,
+    label: str,
+    tier: str,
+    source_key: str,
+    config_state: str,
+    missing_env_keys: list[str],
+    freshness_state: str,
+    last_refresh_error: str,
+    skip_reason: str,
+) -> str:
+    """Return one short, action-oriented sentence the operator can run.
+
+    Pure string assembly — surfaces env-var names verbatim so the
+    operator does not have to grep ``.env.example``.  Never claims a
+    fix; never implies execution permission.
+    """
+    if config_state == "required_missing":
+        keys = ", ".join(missing_env_keys) if missing_env_keys else "credentials"
+        return (
+            f"core_or_secondary_config_missing: set env var(s) {keys} "
+            f"for '{source_key}' and re-run the refresh"
+        )
+    if last_refresh_error:
+        first_line = last_refresh_error.split("\n", 1)[0][:120]
+        return (
+            f"refresh_error: investigate '{source_key}' — {first_line}"
+        )
+    if freshness_state in {"stale", "overdue", "never_run", "failed"}:
+        if tier == "core":
+            return (
+                f"core_stale: run `python scripts/refresh_live_signals.py "
+                f"--sources {source_key} --write`"
+            )
+        return (
+            f"secondary_stale: schedule refresh for '{source_key}' or "
+            "check upstream availability"
+        )
+    if freshness_state == "skipped" and skip_reason:
+        return f"skipped: '{source_key}' skipped — {skip_reason[:120]}"
+    if label == LABEL_HEALTHY:
+        return f"healthy: no action needed for '{source_key}'"
+    return f"watch: monitor '{source_key}' — freshness {freshness_state}"
 
 
 def _build_operator_message(
@@ -321,21 +398,79 @@ def aggregate_health(per_source: dict[str, dict[str, Any]]) -> dict[str, Any]:
       - core_health_label: worst label among core sources, else 'healthy'
       - average_scored_health: mean of numeric health_scores
       - scored_count, planned_count, optional_missing_config_count
+      - actionable_next_steps: deduplicated list of next-step strings,
+        sorted so core actions appear before optional/planned ones.
+      - issue_classification: counts of {core_stale, core_config_missing,
+        secondary_stale, optional_config_missing, planned_not_scored,
+        refresh_error} so callers can render a one-line health header
+        without re-parsing per-source dicts.
     """
     label_dist: dict[str, int] = {}
     scored: list[float] = []
     core_scores: list[float] = []
     core_labels: list[str] = []
+    actionable: list[tuple[int, str]] = []
+    classification = {
+        "core_stale": 0,
+        "core_config_missing": 0,
+        "secondary_stale": 0,
+        "secondary_config_missing": 0,
+        "optional_config_missing": 0,
+        "planned_not_scored": 0,
+        "refresh_error": 0,
+    }
+
+    # Priority ranks: lower number = higher priority (sorted first).
+    _ACTION_PRIORITY = {
+        "core_or_secondary_config_missing": 0,
+        "refresh_error": 1,
+        "core_stale": 2,
+        "secondary_stale": 3,
+        "skipped": 4,
+        "optional_config_missing": 5,
+        "planned_not_scored": 6,
+        "watch": 7,
+        "healthy": 8,
+    }
 
     for entry in per_source.values():
         label = entry.get("health_label", LABEL_WATCH)
         label_dist[label] = label_dist.get(label, 0) + 1
         score = entry.get("health_score")
+        tier = str(entry.get("tier") or "").lower()
+        config_state = str(entry.get("config_state") or "").lower()
         if isinstance(score, (int, float)):
             scored.append(float(score))
-            if entry.get("tier") == "core":
+            if tier == "core":
                 core_scores.append(float(score))
                 core_labels.append(label)
+
+        # Classify this source's issue type (for the operator's at-a-glance
+        # header).  A single source can hit more than one bucket — e.g.
+        # core_stale AND refresh_error — and we count each independently.
+        if label == LABEL_PLANNED_NOT_SCORED:
+            classification["planned_not_scored"] += 1
+        if label == LABEL_OPTIONAL_MISSING_CONFIG:
+            classification["optional_config_missing"] += 1
+        if config_state == "required_missing":
+            if tier == "core":
+                classification["core_config_missing"] += 1
+            elif tier == "secondary":
+                classification["secondary_config_missing"] += 1
+        stale_sev = str(entry.get("stale_severity") or "").lower()
+        if stale_sev == "loud":
+            classification["core_stale"] += 1
+        elif stale_sev == "moderate":
+            classification["secondary_stale"] += 1
+        for reason in entry.get("health_reasons") or []:
+            if "recent error" in str(reason).lower():
+                classification["refresh_error"] += 1
+                break
+
+        step = str(entry.get("actionable_next_step") or "").strip()
+        if step:
+            prefix = step.split(":", 1)[0].strip()
+            actionable.append((_ACTION_PRIORITY.get(prefix, 9), step))
 
     average = sum(scored) / len(scored) if scored else None
 
@@ -354,6 +489,15 @@ def aggregate_health(per_source: dict[str, dict[str, Any]]) -> dict[str, Any]:
     else:
         worst_core_label = LABEL_HEALTHY
 
+    # Deduplicate by step text while preserving priority order.
+    seen: set[str] = set()
+    ordered_steps: list[str] = []
+    for _, step in sorted(actionable, key=lambda kv: kv[0]):
+        if step in seen:
+            continue
+        seen.add(step)
+        ordered_steps.append(step)
+
     return {
         "health_label_distribution": label_dist,
         "core_health_label": worst_core_label,
@@ -365,6 +509,8 @@ def aggregate_health(per_source: dict[str, dict[str, Any]]) -> dict[str, Any]:
         "optional_missing_config_count": label_dist.get(
             LABEL_OPTIONAL_MISSING_CONFIG, 0
         ),
+        "actionable_next_steps": ordered_steps,
+        "issue_classification": classification,
         "advisory_status": ADVISORY_STATUS,
         "execution_gate": EXECUTION_GATE_LOCKED,
         "broker_api_called": False,

@@ -551,6 +551,67 @@ def import_paper_trades(
                             notes_parts.append(f"notes={norm['notes']}")
                         combined_notes = " | ".join(notes_parts)
 
+                        # Auto-attach reactor snapshot for paper rows that
+                        # carry source_signal_id but no explicit reactor
+                        # fields.  Lookup uses source_signal_id; helper
+                        # never fabricates or overwrites explicit values.
+                        _csv_had_gallardo = bool(
+                            _normalise_text(raw_row.get("gallardo_block_at_decision"))
+                        )
+                        _paper_explicit = {
+                            "reactor_state_at_decision": norm.get(
+                                "reactor_state_at_decision", ""
+                            ),
+                            "decision_grade_energy_at_decision": norm.get(
+                                "decision_grade_energy_at_decision"
+                            ),
+                            "echo_risk_score_at_decision": norm.get(
+                                "echo_risk_score_at_decision"
+                            ),
+                            "meltdown_risk_at_decision": norm.get(
+                                "meltdown_risk_at_decision"
+                            ),
+                            "fusion_validity_at_decision": norm.get(
+                                "fusion_validity_at_decision", ""
+                            ),
+                            "fission_branch_clarity_at_decision": norm.get(
+                                "fission_branch_clarity_at_decision"
+                            ),
+                            "operator_heat_at_decision": norm.get(
+                                "operator_heat_at_decision"
+                            ),
+                            "gallardo_block_at_decision": (
+                                norm.get("gallardo_block_at_decision", False)
+                                if _csv_had_gallardo
+                                else None
+                            ),
+                            "preflight_state_at_decision": norm.get(
+                                "preflight_state_at_decision", ""
+                            ),
+                        }
+                        paper_attach_source = "unavailable"
+                        try:
+                            try:
+                                from scripts.reactor_snapshot_attach import (
+                                    maybe_attach_reactor_snapshot,
+                                )
+                            except ModuleNotFoundError:  # pragma: no cover
+                                from reactor_snapshot_attach import (  # type: ignore[no-redef]
+                                    maybe_attach_reactor_snapshot,
+                                )
+                            paper_attach_source, _attached = (
+                                maybe_attach_reactor_snapshot(
+                                    _paper_explicit,
+                                    source_signal_id=norm.get(
+                                        "source_signal_id", ""
+                                    ),
+                                )
+                            )
+                            if paper_attach_source == "attached_from_signal":
+                                _paper_explicit.update(_attached)
+                        except Exception:
+                            paper_attach_source = "unavailable"
+
                         result = fn(
                             event_id=_generate_event_id(pid, norm.get("symbol", "")),
                             ticker=norm.get("symbol", "PAPER"),
@@ -569,19 +630,47 @@ def import_paper_trades(
                             emotional_state="",
                             mistake_tags=norm.get("mistake_tags", ""),
                             lesson=norm.get("lesson", ""),
-                            reactor_state_at_decision=norm.get("reactor_state_at_decision", ""),
-                            decision_grade_energy_at_decision=norm.get("decision_grade_energy_at_decision"),
-                            echo_risk_score_at_decision=norm.get("echo_risk_score_at_decision"),
-                            meltdown_risk_at_decision=norm.get("meltdown_risk_at_decision"),
-                            fusion_validity_at_decision=norm.get("fusion_validity_at_decision", ""),
-                            fission_branch_clarity_at_decision=norm.get("fission_branch_clarity_at_decision"),
-                            operator_heat_at_decision=norm.get("operator_heat_at_decision"),
-                            gallardo_block_at_decision=norm.get("gallardo_block_at_decision", False),
-                            preflight_state_at_decision=norm.get("preflight_state_at_decision", ""),
+                            reactor_state_at_decision=_paper_explicit[
+                                "reactor_state_at_decision"
+                            ],
+                            decision_grade_energy_at_decision=_paper_explicit[
+                                "decision_grade_energy_at_decision"
+                            ],
+                            echo_risk_score_at_decision=_paper_explicit[
+                                "echo_risk_score_at_decision"
+                            ],
+                            meltdown_risk_at_decision=_paper_explicit[
+                                "meltdown_risk_at_decision"
+                            ],
+                            fusion_validity_at_decision=_paper_explicit[
+                                "fusion_validity_at_decision"
+                            ],
+                            fission_branch_clarity_at_decision=_paper_explicit[
+                                "fission_branch_clarity_at_decision"
+                            ],
+                            operator_heat_at_decision=_paper_explicit[
+                                "operator_heat_at_decision"
+                            ],
+                            gallardo_block_at_decision=_paper_explicit[
+                                "gallardo_block_at_decision"
+                            ],
+                            preflight_state_at_decision=_paper_explicit[
+                                "preflight_state_at_decision"
+                            ],
                             trade_mode="PAPER",
                         )
                         if isinstance(result, dict) and result.get("status") == "logged":
                             imported = True
+                            if paper_attach_source == "unavailable" and not (
+                                norm.get("reactor_state_at_decision") or ""
+                            ).strip():
+                                row_warnings.append(
+                                    "reactor_snapshot_unavailable_no_source_signal_id"
+                                )
+                            elif paper_attach_source == "attached_from_signal":
+                                row_warnings.append(
+                                    "reactor_snapshot_attached_from_signal"
+                                )
                         else:
                             reasons.append("log_manual_trade_rejected")
                     except Exception as exc:

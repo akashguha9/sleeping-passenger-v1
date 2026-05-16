@@ -132,8 +132,22 @@ def test_post_manual_trades_with_full_reactor_payload(client) -> None:
     assert body["preflight_state_at_decision"] == "OK"
 
 
-def test_post_manual_trades_legacy_payload_still_works(client) -> None:
-    """Legacy frontend that omits reactor fields entirely must keep working."""
+def test_post_manual_trades_legacy_payload_still_works(client, monkeypatch) -> None:
+    """Legacy frontend that omits reactor fields entirely must keep working.
+
+    After the auto-attach helper was added, a legacy payload may now have
+    reactor fields populated automatically from the live inbox.  The
+    legacy contract is preserved when no inbox verdict is available:
+    fields stay empty and the response reports
+    ``reactor_snapshot_source == "unavailable"``.
+    """
+    # Force the auto-attach lookup to return nothing so we test the
+    # legacy-empty branch explicitly.
+    monkeypatch.setattr(
+        "scripts.signal_inbox_api.get_signal_detail",
+        lambda event_id: {"operation": "get_signal_detail", "signal": {}},
+        raising=True,
+    )
     legacy = {
         "event_id": "EV_LEGACY",
         "ticker": "BTC",
@@ -147,6 +161,7 @@ def test_post_manual_trades_legacy_payload_still_works(client) -> None:
     body = r.json()
     _safety_stamps_ok(body)
     assert body["status"] == "logged"
+    assert body["reactor_snapshot_source"] == "unavailable"
     # Reactor fields default to empty / None.  The gallardo boolean
     # defaults to False (no block recorded) so legacy rows are safe to
     # render in the UI without optional-chaining everywhere.

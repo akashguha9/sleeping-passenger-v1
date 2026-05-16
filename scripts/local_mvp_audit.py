@@ -203,6 +203,13 @@ def source_health_section() -> dict[str, Any]:
         "optional_missing_config_count"
     )
     out["health_label_distribution"] = summary.get("health_label_distribution") or {}
+    # Operator-actionable surfaces.  ``issue_classification`` lets the
+    # audit pass/warn/fail decision distinguish "core source is broken"
+    # (real failure) from "optional source has no API key" (operator
+    # action — not a failure).  ``actionable_next_steps`` is the short
+    # punch-list a human reads to know what to do next.
+    out["issue_classification"] = dict(summary.get("issue_classification") or {})
+    out["actionable_next_steps"] = list(summary.get("actionable_next_steps") or [])
     return out
 
 
@@ -255,6 +262,38 @@ def token_status_section() -> dict[str, Any]:
     }
 
 
+def scope_guard_section() -> dict[str, Any]:
+    """Surface the private-operator scope guard inside the audit.
+
+    Informational/WARN-level only — the guard never destroys files and
+    never fails the audit just because pre-existing out-of-scope modules
+    are present.  Newly-introduced out-of-scope modules trigger
+    REVIEW_REQUIRED so they cannot dilute the MVP unnoticed.
+    """
+    out: dict[str, Any] = {
+        "section": "scope_guard",
+        "available": False,
+        **_safety_stamps(),
+    }
+    try:
+        try:
+            from scripts.private_scope_guard import build_report
+        except ModuleNotFoundError:  # pragma: no cover - script-style fallback
+            from private_scope_guard import build_report  # type: ignore[no-redef]
+        rep = build_report()
+    except Exception as exc:
+        out["error"] = f"{type(exc).__name__}"
+        return out
+    out["available"] = True
+    out["in_scope_count"] = rep.get("in_scope_count", 0)
+    out["out_of_scope_count"] = rep.get("out_of_scope_count", 0)
+    out["review_required_count"] = rep.get("review_required_count", 0)
+    out["review_required"] = list(rep.get("review_required") or [])
+    out["known_out_of_scope"] = list(rep.get("known_out_of_scope") or [])
+    out["operator_message"] = rep.get("operator_message", "")
+    return out
+
+
 def run_audit(db_path: Path = DEFAULT_DB) -> dict[str, Any]:
     """Build the full audit payload (read-only)."""
     payload: dict[str, Any] = {
@@ -271,6 +310,7 @@ def run_audit(db_path: Path = DEFAULT_DB) -> dict[str, Any]:
             "calibration_gate": calibration_gate_section(db_path),
             "learning_completeness": learning_completeness_section(db_path),
             "source_health": source_health_section(),
+            "scope_guard": scope_guard_section(),
         },
         **_safety_stamps(),
     }
@@ -302,12 +342,31 @@ def run_audit(db_path: Path = DEFAULT_DB) -> dict[str, Any]:
     sh = payload["sections"]["source_health"]
     if not sh.get("available"):
         statuses["source_health"] = "WARN"
-    elif sh.get("core_health_label") in {"unhealthy"}:
-        statuses["source_health"] = "FAIL"
-    elif sh.get("core_health_label") in {"degraded", "watch"}:
-        statuses["source_health"] = "WARN"
     else:
-        statuses["source_health"] = "PASS"
+        # Action-oriented classification: a stale core source is a real
+        # failure, but optional sources without an API key are an operator
+        # config gap (WARN, not FAIL).  This stops the audit from masking
+        # genuine refresh errors behind "missing optional config" noise.
+        classification = sh.get("issue_classification") or {}
+        core_stale = int(classification.get("core_stale", 0))
+        core_config_missing = int(classification.get("core_config_missing", 0))
+        refresh_error = int(classification.get("refresh_error", 0))
+        core_label = sh.get("core_health_label")
+        if core_stale > 0 or core_config_missing > 0 or refresh_error > 0:
+            statuses["source_health"] = "FAIL"
+        elif core_label in {"unhealthy"}:
+            statuses["source_health"] = "FAIL"
+        elif core_label in {"degraded", "watch"}:
+            statuses["source_health"] = "WARN"
+        else:
+            statuses["source_health"] = "PASS"
+    sg = payload["sections"].get("scope_guard") or {}
+    if not sg.get("available"):
+        statuses["scope_guard"] = "WARN"
+    elif sg.get("review_required_count", 0) > 0:
+        statuses["scope_guard"] = "WARN"
+    else:
+        statuses["scope_guard"] = "PASS"
     payload["statuses"] = statuses
     payload["overall"] = (
         "FAIL" if "FAIL" in statuses.values()

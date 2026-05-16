@@ -1212,6 +1212,70 @@ def log_manual_trade(
             f"leverage must be between {_LEVERAGE_MIN} and {_LEVERAGE_MAX}",
         )
 
+    # Auto-attach reactor-at-decision snapshot when the caller did not
+    # supply one.  This is the fix for reactor_snapshot_count=0 in the
+    # calibration gate — without it the multiplicative Empirical_Validity
+    # term stays at zero forever.  The helper NEVER overwrites explicit
+    # operator values, NEVER fabricates data, and NEVER grants execution
+    # permission.  See scripts/reactor_snapshot_attach.py for invariants.
+    _explicit_reactor_kwargs = {
+        "reactor_state_at_decision": reactor_state_at_decision,
+        "decision_grade_energy_at_decision": decision_grade_energy_at_decision,
+        "echo_risk_score_at_decision": echo_risk_score_at_decision,
+        "meltdown_risk_at_decision": meltdown_risk_at_decision,
+        "fusion_validity_at_decision": fusion_validity_at_decision,
+        "fission_branch_clarity_at_decision": fission_branch_clarity_at_decision,
+        "operator_heat_at_decision": operator_heat_at_decision,
+        "gallardo_block_at_decision": gallardo_block_at_decision,
+        "preflight_state_at_decision": preflight_state_at_decision,
+    }
+    try:
+        try:
+            from scripts.reactor_snapshot_attach import (
+                ATTACH_FROM_SIGNAL,
+                ATTACH_PROVIDED,
+                ATTACH_UNAVAILABLE,
+                maybe_attach_reactor_snapshot,
+            )
+        except ModuleNotFoundError:  # pragma: no cover - script-style fallback
+            from reactor_snapshot_attach import (  # type: ignore[no-redef]
+                ATTACH_FROM_SIGNAL,
+                ATTACH_PROVIDED,
+                ATTACH_UNAVAILABLE,
+                maybe_attach_reactor_snapshot,
+            )
+        attach_source, _attached = maybe_attach_reactor_snapshot(
+            _explicit_reactor_kwargs, event_id=str(event_id)
+        )
+    except Exception:
+        attach_source = "unavailable"
+        _attached = {}
+
+    if attach_source == ATTACH_FROM_SIGNAL:
+        reactor_state_at_decision = _attached.get(
+            "reactor_state_at_decision", reactor_state_at_decision
+        )
+        decision_grade_energy_at_decision = _attached.get(
+            "decision_grade_energy_at_decision", decision_grade_energy_at_decision
+        )
+        echo_risk_score_at_decision = _attached.get(
+            "echo_risk_score_at_decision", echo_risk_score_at_decision
+        )
+        meltdown_risk_at_decision = _attached.get(
+            "meltdown_risk_at_decision", meltdown_risk_at_decision
+        )
+        fusion_validity_at_decision = _attached.get(
+            "fusion_validity_at_decision", fusion_validity_at_decision
+        )
+        fission_branch_clarity_at_decision = _attached.get(
+            "fission_branch_clarity_at_decision", fission_branch_clarity_at_decision
+        )
+        operator_heat_at_decision = _attached.get(
+            "operator_heat_at_decision", operator_heat_at_decision
+        )
+        if "gallardo_block_at_decision" in _attached:
+            gallardo_block_at_decision = _attached["gallardo_block_at_decision"]
+
     trade = ManualTradeLog(
         trade_id=f"MT_{uuid.uuid4().hex[:12]}",
         event_id=str(event_id),
@@ -1316,6 +1380,10 @@ def log_manual_trade(
         "operator_heat_at_decision": trade.operator_heat_at_decision,
         "gallardo_block_at_decision": trade.gallardo_block_at_decision,
         "preflight_state_at_decision": trade.preflight_state_at_decision,
+        # Where the reactor-at-decision snapshot came from on this row:
+        # provided_explicitly | attached_from_signal | unavailable.
+        # Advisory-only — never affects execution permission.
+        "reactor_snapshot_source": attach_source,
         "trade_mode": trade.trade_mode,
         # Paper-trade safety stamps. For PAPER rows: paper_trade_only=True,
         # real_capital_at_risk=False. For REAL_MANUAL rows: paper_trade_only=

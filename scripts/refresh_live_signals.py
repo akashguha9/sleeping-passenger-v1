@@ -77,6 +77,31 @@ from scripts.live_source_registry import (
 _LOG_DIR = _REPO_ROOT / "logs"
 _SUMMARY_PATH = _LOG_DIR / "live_signal_refresh_summary.json"
 
+# Env-var override for tests/operators who want the summary written to a
+# different path without monkeypatching module-level constants.  Empty /
+# unset means "use the default ``logs/live_signal_refresh_summary.json``".
+# Defensive-isolation purpose only: tests must never accidentally clobber
+# the real operator summary file when they exercise ``run_refresh``.
+_SUMMARY_PATH_ENV_VAR = "MVP_LIVE_REFRESH_SUMMARY_PATH"
+
+
+def _resolve_summary_path(explicit: Path | str | None = None) -> Path:
+    """Return the path ``run_refresh`` should write its summary JSON to.
+
+    Precedence: explicit kwarg > ``MVP_LIVE_REFRESH_SUMMARY_PATH`` env
+    var > module-level ``_SUMMARY_PATH``.  Returning a Path means the
+    caller can always ``.parent.mkdir(parents=True, exist_ok=True)`` it
+    without branching on the value.
+    """
+    if explicit:
+        return Path(explicit)
+    import os as _os
+
+    env_val = (_os.environ.get(_SUMMARY_PATH_ENV_VAR, "") or "").strip()
+    if env_val:
+        return Path(env_val)
+    return _SUMMARY_PATH
+
 _PHASE1_KEYS = ("polymarket", "gdelt", "sec_edgar")
 _PHASE2_KEYS = (
     "newsapi",
@@ -513,8 +538,17 @@ def run_refresh(
     write_mode: bool = False,
     cadence_hours: int = DEFAULT_REFRESH_HOURS,
     summary_only: bool = False,
+    summary_path: Path | str | None = None,
 ) -> dict[str, Any]:
-    """Execute a refresh cycle and return the structured summary."""
+    """Execute a refresh cycle and return the structured summary.
+
+    ``summary_path`` (optional) — explicit JSON destination for this run.
+    When omitted, falls back to the ``MVP_LIVE_REFRESH_SUMMARY_PATH``
+    env var, then to the default ``logs/live_signal_refresh_summary.json``.
+    Tests should pass an explicit path (typically ``tmp_path / ...``) or
+    set the env var so test runs do not clobber the operator's real
+    summary file.
+    """
     keys = source_keys if source_keys is not None else list(ALL_SOURCE_KEYS)
 
     if summary_only:
@@ -562,9 +596,10 @@ def run_refresh(
         **_SAFETY_STAMPS,
     }
 
+    target_path = _resolve_summary_path(summary_path)
     try:
-        _LOG_DIR.mkdir(parents=True, exist_ok=True)
-        _SUMMARY_PATH.write_text(
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        target_path.write_text(
             json.dumps(summary, indent=2, ensure_ascii=False),
             encoding="utf-8",
         )
