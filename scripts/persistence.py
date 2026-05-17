@@ -1482,15 +1482,20 @@ def get_source_run_log(limit: int = 50, db_path: Path = DB_PATH) -> list[dict[st
 
 
 def get_latest_source_run_per_source(
-    db_path: Path = DB_PATH,
+    db_path: Path | None = None,
 ) -> list[dict[str, Any]]:
     """Return the most recent source_run_log entry for each distinct source.
 
     One row per source_name, ordered newest-first.  Used by the
     /source-health/summary endpoint to drive the frontend warnings banner
     and per-source empty-state messages.
+
+    Resolves ``DB_PATH`` lazily so tests that monkeypatch
+    ``persistence.DB_PATH`` see the override — mirrors the sibling
+    ``get_latest_refresh_run_per_source`` helper.
     """
-    conn = _get_conn(db_path)
+    target = db_path if db_path is not None else DB_PATH
+    conn = _get_conn(target)
     try:
         rows = conn.execute(
             "SELECT srl.*"
@@ -1622,6 +1627,53 @@ def count_signal_events_by_source(
     finally:
         conn.close()
     return {str(r["source_name"]): int(r["n"]) for r in rows}
+
+
+def get_persisted_row_stats_per_source(
+    db_path: Path | None = None,
+) -> dict[str, dict[str, Any]]:
+    """Return per-source persisted-row statistics for the live-signals tabs.
+
+    For each source_name present in ``signal_events`` this returns::
+
+        {
+          "row_count": int,
+          "latest_fetched_at": str | None,
+        }
+
+    ``latest_fetched_at`` is the MAX(fetched_at) across all persisted rows
+    for that source — the value the UI used to call "Latest fetched".  It
+    is now exposed separately so the UI can render it as "Latest archived
+    row" / "Latest persisted row" when the source is no longer current
+    live (optional + missing config, planned, or otherwise non-live).
+
+    DB_PATH is resolved lazily so tests that monkeypatch
+    ``persistence.DB_PATH`` see the override.  Missing table -> empty dict.
+    """
+    target = db_path if db_path is not None else DB_PATH
+    conn = _get_conn(target)
+    try:
+        try:
+            rows = conn.execute(
+                "SELECT source_name,"
+                "       COUNT(*) AS n,"
+                "       MAX(fetched_at) AS latest_fetched_at"
+                "  FROM signal_events"
+                " GROUP BY source_name"
+            ).fetchall()
+        except sqlite3.OperationalError:
+            return {}
+    finally:
+        conn.close()
+    out: dict[str, dict[str, Any]] = {}
+    for r in rows:
+        out[str(r["source_name"])] = {
+            "row_count": int(r["n"] or 0),
+            "latest_fetched_at": (
+                str(r["latest_fetched_at"]) if r["latest_fetched_at"] else None
+            ),
+        }
+    return out
 
 
 # ---------------------------------------------------------------------------

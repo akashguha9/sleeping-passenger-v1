@@ -29,6 +29,70 @@ except ModuleNotFoundError:
 _DEFAULT_MAX_ITEMS = 50
 _DEFAULT_TIMEOUT = 15
 
+# Canonical Asia Disclosure country list — the source of truth for the
+# "Asia Disclosure" tab/section inside Live Signals.
+#
+# India is intentionally **excluded** here because India is tracked
+# separately via ``scripts.ingestion.india_loader`` /
+# ``india_nse_bse_loader`` / ``rbi_sebi_loader`` and surfaces under the
+# dedicated "India" source family.  Listing India twice would double-
+# count its disclosure flow.
+#
+# Status semantics:
+#   "Active" = country is in scope for the Asia Disclosure tab.  The
+#              underlying adapter remains ``adapter_status=planned`` in
+#              ``scripts.live_source_registry`` until a real integration
+#              exists, which is correct and honest.  Status here is
+#              tab/country-list configuration, not source-health.
+#
+# ``disclosure_source`` and ``source_url`` are intentionally left blank
+# for countries without a verified, key-free disclosure endpoint we can
+# actually call.  No fake URLs are introduced.  When a real integration
+# is added (e.g. SGX for Singapore, DART for Korea), update the row in
+# place — do not maintain duplicate copies elsewhere.
+ASIA_DISCLOSURE_COUNTRIES: tuple[str, ...] = (
+    "China",
+    "Japan",
+    "Russia",
+    "South Korea",
+    "Turkey",
+    "Indonesia",
+    "Saudi Arabia",
+    "Taiwan",
+    "Israel",
+    "Singapore",
+    "United Arab Emirates",
+)
+
+_ASIA_DISCLOSURE_COUNTRY_ROWS: tuple[dict[str, str], ...] = (
+    {"country": "China", "disclosure_source": "", "source_url": "", "status": "Active", "notes": ""},
+    {"country": "Japan", "disclosure_source": "", "source_url": "", "status": "Active", "notes": ""},
+    {"country": "Russia", "disclosure_source": "", "source_url": "", "status": "Active", "notes": ""},
+    {"country": "South Korea", "disclosure_source": "", "source_url": "", "status": "Active", "notes": ""},
+    {"country": "Turkey", "disclosure_source": "", "source_url": "", "status": "Active", "notes": ""},
+    {"country": "Indonesia", "disclosure_source": "", "source_url": "", "status": "Active", "notes": ""},
+    {"country": "Saudi Arabia", "disclosure_source": "", "source_url": "", "status": "Active", "notes": ""},
+    {"country": "Taiwan", "disclosure_source": "", "source_url": "", "status": "Active", "notes": ""},
+    {"country": "Israel", "disclosure_source": "", "source_url": "", "status": "Active", "notes": ""},
+    {"country": "Singapore", "disclosure_source": "", "source_url": "", "status": "Active", "notes": ""},
+    {"country": "United Arab Emirates", "disclosure_source": "", "source_url": "", "status": "Active", "notes": ""},
+)
+
+
+def get_asia_disclosure_countries() -> list[str]:
+    """Return the canonical Asia Disclosure country list (India excluded)."""
+    return list(ASIA_DISCLOSURE_COUNTRIES)
+
+
+def get_asia_disclosure_country_rows() -> list[dict[str, str]]:
+    """Return tabular rows for the Asia Disclosure tab.
+
+    Columns: country, disclosure_source, source_url, status, notes.
+    Each row is a fresh dict so callers may mutate without affecting the
+    canonical tuple.  India is intentionally absent — see module docstring.
+    """
+    return [dict(row) for row in _ASIA_DISCLOSURE_COUNTRY_ROWS]
+
 _PROVIDER_CONFIGS: dict[str, dict[str, Any]] = {
     "sse": {
         "jurisdiction": "CN",

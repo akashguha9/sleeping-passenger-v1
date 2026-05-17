@@ -232,13 +232,30 @@ function formatTs(ts: string): string {
   }
 }
 
-function SignalEventCard({ ev }: { ev: LiveSignalEvent }) {
+function SignalEventCard({
+  ev,
+  displayState,
+}: {
+  ev: LiveSignalEvent;
+  displayState?: string;
+}) {
   const [expanded, setExpanded] = useState(false);
   const accent = SOURCE_ACCENT[ev.source_name] ?? 'rgba(154, 155, 151, 0.7)';
   const sourceLabel = SOURCE_LABELS[ev.source_name] ?? ev.source_name;
+  const isArchived =
+    displayState === 'optional_unconfigured_with_archive' ||
+    displayState === 'planned_coverage';
+  const isStaleRow = displayState === 'stale_active';
 
   return (
-    <div className="sp-card p-4 space-y-2.5">
+    <div
+      className="sp-card p-4 space-y-2.5"
+      data-testid="signal-event-card"
+      data-display-state={displayState ?? 'unknown'}
+      data-row-classification={
+        isArchived ? 'archived' : isStaleRow ? 'stale' : 'current_live'
+      }
+    >
       {/* Header row */}
       <div className="flex items-start justify-between gap-3">
         <div className="flex items-center gap-2 flex-wrap">
@@ -253,6 +270,34 @@ function SignalEventCard({ ev }: { ev: LiveSignalEvent }) {
             {sourceLabel}
           </span>
           <span className="text-[10px] font-mono" style={{ color: 'var(--sp-mist)' }}>{ev.event_id}</span>
+          {isArchived && (
+            <span
+              className="text-[10px] font-mono uppercase tracking-widest px-1.5 py-0.5 rounded"
+              data-testid="archived-row-chip"
+              style={{
+                color: 'var(--sp-gold)',
+                border: '1px solid rgba(214, 168, 90, 0.35)',
+                background: 'rgba(214, 168, 90, 0.06)',
+              }}
+              title="Archived/persisted record — source is not configured or not scored"
+            >
+              ARCHIVED · NOT_CURRENT_LIVE
+            </span>
+          )}
+          {isStaleRow && (
+            <span
+              className="text-[10px] font-mono uppercase tracking-widest px-1.5 py-0.5 rounded"
+              data-testid="stale-row-chip"
+              style={{
+                color: 'var(--sp-gold)',
+                border: '1px solid rgba(214, 168, 90, 0.35)',
+                background: 'rgba(214, 168, 90, 0.06)',
+              }}
+              title="Stale active source — refresh failed or rate-limited"
+            >
+              STALE_ACTIVE
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-2 shrink-0">
           <span className="sp-chip sp-chip-rust">Execution · Locked</span>
@@ -328,6 +373,28 @@ function PerSourceEmptyState({
     phase1.has(src)
       ? `python scripts/run_live_sources_phase1.py --source ${src} --dry-run`
       : `python scripts/run_live_sources_phase2.py --source ${src} --dry-run`;
+
+  // Special-case Asia Disclosure: when no live runs exist we *still* show
+  // the coverage table separately, so the empty-state here must not say
+  // "run ingestion" — it must say "showing configured coverage list".
+  if (sourceFilter === 'asia_disclosure') {
+    return (
+      <div
+        className="sp-card-soft p-8 space-y-2 text-center"
+        data-testid="asia-disclosure-empty-coverage-banner"
+      >
+        <div className="sp-eyebrow">Source Status · Planned / Not Scored</div>
+        <div className="text-sm" style={{ color: 'var(--sp-bone)' }}>
+          No live Asia Disclosure signals recorded yet. Showing configured coverage list.
+        </div>
+        <p className="text-xs" style={{ color: 'var(--sp-mist)' }}>
+          Asia Disclosure remains <span className="font-mono">PLANNED_NOT_SCORED</span>.
+          The 11-country coverage table below is configuration only — no live data
+          has been ingested.
+        </p>
+      </div>
+    );
+  }
 
   // 1. Specific source filter chosen → use source-health to give an honest reason.
   if (sourceFilter) {
@@ -549,24 +616,24 @@ export default function LiveSignalsPage() {
       )}
 
       {!loading && data && (
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          <StatTile label="Total Signals" value={String(data.count)} />
-          {Object.entries(sourceCounts).map(([src, cnt]) => {
-            const entry = refreshStatus?.sources?.[src];
-            const isStale = Boolean(entry?.is_stale);
-            const ageHours = entry?.refresh_age_hours;
-            return (
-              <StatTile
-                key={src}
-                label={SOURCE_LABELS[src] ?? src}
-                value={String(cnt)}
-                stale={isStale}
-                ageHours={typeof ageHours === 'number' ? ageHours : null}
-              />
-            );
-          })}
-          {latestTs && <StatTile label="Latest Fetched" value={formatTs(latestTs)} small />}
-        </div>
+        <SignalStatTiles
+          sourceFilter={sourceFilter}
+          data={data}
+          status={refreshStatus}
+          sourceCounts={sourceCounts}
+          latestTs={latestTs}
+        />
+      )}
+
+      {!loading && sourceFilter && (
+        <SelectedSourceDisplayBanner
+          sourceKey={sourceFilter}
+          status={refreshStatus}
+        />
+      )}
+
+      {!loading && sourceFilter === 'asia_disclosure' && (
+        <AsiaDisclosureCoverageTable status={refreshStatus} />
       )}
 
       {/* Filters */}
@@ -617,12 +684,315 @@ export default function LiveSignalsPage() {
             {filtered.length} of {data?.count ?? 0} signal{filtered.length !== 1 ? 's' : ''}
           </div>
           <div className="space-y-3">
-            {filtered.map((ev) => (
-              <SignalEventCard key={ev.event_id} ev={ev} />
-            ))}
+            {filtered.map((ev) => {
+              const sourceEntry = refreshStatus?.sources?.[ev.source_name];
+              return (
+                <SignalEventCard
+                  key={ev.event_id}
+                  ev={ev}
+                  displayState={sourceEntry?.display_state}
+                />
+              );
+            })}
           </div>
         </>
       )}
+    </div>
+  );
+}
+
+/**
+ * Source-aware summary tiles for the Live Signals header.
+ *
+ * The "All Sources" view keeps the historical "Total Signals + per-source
+ * counts + Latest Fetched" layout — it is a true cross-source roll-up.
+ *
+ * A specific source filter switches to the honest, source-aware layout
+ * driven by /live-sources/status.sources[<key>].display_state:
+ *
+ *   current_live                       → "Current live signals" + "Latest fetched"
+ *   optional_unconfigured_with_archive → "Current live signals: 0",
+ *                                        "Archived/persisted rows: N",
+ *                                        "Latest archived row: <ts>"
+ *   optional_unconfigured_empty        → "Current live signals: 0",
+ *                                        "Optional source not configured"
+ *   planned_coverage                   → "Current live signals: 0",
+ *                                        "Coverage rows: N",
+ *                                        "Source status: planned/not scored"
+ *   stale_active                       → "Stale persisted rows: N" + stale chip
+ *   never_run                          → "Current live signals: 0",
+ *                                        "No live runs"
+ */
+function SignalStatTiles({
+  sourceFilter,
+  data,
+  status,
+  sourceCounts,
+  latestTs,
+}: {
+  sourceFilter: '' | LiveSignalSource;
+  data: LiveSignalsResponse;
+  status: LiveSourcesStatusResponse | null;
+  sourceCounts: Record<string, number>;
+  latestTs: string | null;
+}) {
+  if (!sourceFilter) {
+    return (
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <StatTile label="Total Signals" value={String(data.count)} />
+        {Object.entries(sourceCounts).map(([src, cnt]) => {
+          const entry = status?.sources?.[src];
+          const isStale = Boolean(entry?.is_stale);
+          const ageHours = entry?.refresh_age_hours;
+          return (
+            <StatTile
+              key={src}
+              label={SOURCE_LABELS[src] ?? src}
+              value={String(cnt)}
+              stale={isStale}
+              ageHours={typeof ageHours === 'number' ? ageHours : null}
+            />
+          );
+        })}
+        {latestTs && <StatTile label="Latest Fetched" value={formatTs(latestTs)} small />}
+      </div>
+    );
+  }
+
+  const entry = status?.sources?.[sourceFilter];
+  const displayState = entry?.display_state ?? 'unknown';
+  const sourceLabel = SOURCE_LABELS[sourceFilter] ?? sourceFilter;
+  const currentLive = entry?.current_live_count ?? 0;
+  const archived = entry?.archived_row_count ?? 0;
+  const coverage = entry?.coverage_row_count ?? 0;
+  const latestPersisted = entry?.latest_persisted_row_at_utc ?? null;
+  const latestRefresh = entry?.last_refresh_attempt ?? null;
+
+  const tiles: { label: string; value: string; small?: boolean; stale?: boolean; testId?: string }[] = [];
+
+  // Always show "Current live signals: N" as the leading honest number.
+  tiles.push({
+    label: 'Current live signals',
+    value: String(currentLive),
+    testId: 'tile-current-live',
+  });
+
+  if (displayState === 'optional_unconfigured_with_archive') {
+    tiles.push({
+      label: 'Archived/persisted rows',
+      value: String(archived),
+      testId: 'tile-archived',
+    });
+    if (latestPersisted) {
+      tiles.push({
+        label: 'Latest archived row',
+        value: formatTs(latestPersisted),
+        small: true,
+        testId: 'tile-latest-archived',
+      });
+    }
+  } else if (displayState === 'planned_coverage') {
+    tiles.push({
+      label: 'Coverage rows',
+      value: String(coverage),
+      testId: 'tile-coverage',
+    });
+    tiles.push({
+      label: 'Source status',
+      value: 'planned / not scored',
+      small: true,
+      testId: 'tile-status-planned',
+    });
+  } else if (displayState === 'stale_active') {
+    tiles.push({
+      label: 'Stale persisted rows',
+      value: String(archived),
+      stale: true,
+      testId: 'tile-stale',
+    });
+    if (latestPersisted) {
+      tiles.push({
+        label: 'Latest stale row',
+        value: formatTs(latestPersisted),
+        small: true,
+        testId: 'tile-latest-stale',
+      });
+    } else if (latestRefresh) {
+      tiles.push({
+        label: 'Latest attempted refresh',
+        value: formatTs(latestRefresh),
+        small: true,
+        testId: 'tile-latest-attempt',
+      });
+    }
+  } else if (displayState === 'optional_unconfigured_empty') {
+    tiles.push({
+      label: 'Source status',
+      value: 'optional — not configured',
+      small: true,
+      testId: 'tile-status-optional-empty',
+    });
+  } else if (displayState === 'current_live') {
+    if (latestPersisted) {
+      tiles.push({
+        label: 'Latest fetched',
+        value: formatTs(latestPersisted),
+        small: true,
+        testId: 'tile-latest-fetched',
+      });
+    }
+  } else {
+    // never_run / unknown / safety fallback.
+    if (latestRefresh) {
+      tiles.push({
+        label: 'Latest attempted refresh',
+        value: formatTs(latestRefresh),
+        small: true,
+        testId: 'tile-latest-attempt',
+      });
+    } else {
+      tiles.push({
+        label: 'Source status',
+        value: 'no live runs',
+        small: true,
+        testId: 'tile-status-never-run',
+      });
+    }
+  }
+
+  return (
+    <div
+      className="grid grid-cols-2 md:grid-cols-4 gap-3"
+      data-testid="signal-stat-tiles"
+      data-source={sourceFilter}
+      data-display-state={displayState}
+    >
+      <StatTile label={sourceLabel} value="" small testId="tile-source-label" />
+      {tiles.map((t, i) => (
+        <StatTile
+          key={i}
+          label={t.label}
+          value={t.value}
+          small={t.small}
+          stale={t.stale}
+          testId={t.testId}
+        />
+      ))}
+    </div>
+  );
+}
+
+function SelectedSourceDisplayBanner({
+  sourceKey,
+  status,
+}: {
+  sourceKey: '' | LiveSignalSource;
+  status: LiveSourcesStatusResponse | null;
+}) {
+  if (!sourceKey) return null;
+  const entry = status?.sources?.[sourceKey];
+  if (!entry) return null;
+  const warning = entry.source_display_warning;
+  if (!warning) return null;
+  const displayState = entry.display_state ?? 'unknown';
+
+  // Colour the banner by severity: archive/coverage = gold-ish; stale = rust.
+  const isStale = displayState === 'stale_active';
+  return (
+    <div
+      className="rounded-lg px-4 py-3"
+      data-testid="selected-source-display-banner"
+      data-source={sourceKey}
+      data-display-state={displayState}
+      style={{
+        background: isStale ? 'rgba(160, 74, 58, 0.04)' : 'rgba(214, 168, 90, 0.05)',
+        border: isStale
+          ? '1px solid rgba(160, 74, 58, 0.22)'
+          : '1px solid rgba(214, 168, 90, 0.28)',
+      }}
+    >
+      <p className="text-sm" style={{ color: 'var(--sp-bone)' }}>
+        <span className="font-semibold">
+          {SOURCE_LABELS[sourceKey] ?? sourceKey}:
+        </span>{' '}
+        <span style={{ color: 'var(--sp-mist)' }}>{warning}</span>
+      </p>
+    </div>
+  );
+}
+
+function AsiaDisclosureCoverageTable({
+  status,
+}: {
+  status: LiveSourcesStatusResponse | null;
+}) {
+  const rows =
+    status?.asia_disclosure_coverage_rows ??
+    status?.source_coverage_rows?.asia_disclosure ??
+    [];
+  if (!rows || rows.length === 0) return null;
+
+  return (
+    <div
+      className="rounded-lg overflow-hidden"
+      data-testid="asia-disclosure-coverage-table"
+      style={{
+        background: 'rgba(13, 16, 21, 0.45)',
+        border: '1px solid var(--sp-line)',
+      }}
+    >
+      <div className="px-4 py-3" style={{ borderBottom: '1px solid var(--sp-line)' }}>
+        <div className="sp-eyebrow">Configured Coverage · Asia Disclosure</div>
+        <p className="text-xs mt-1" style={{ color: 'var(--sp-mist)' }}>
+          {rows.length} country coverage rows · advisory only · no live signals ingested.
+          India is intentionally excluded — India has its own dedicated source family.
+        </p>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-xs" data-testid="asia-disclosure-coverage-grid">
+          <thead>
+            <tr style={{ color: 'var(--sp-mist)' }}>
+              <th className="text-left px-4 py-2 font-mono uppercase tracking-widest">Country</th>
+              <th className="text-left px-4 py-2 font-mono uppercase tracking-widest">Disclosure Source</th>
+              <th className="text-left px-4 py-2 font-mono uppercase tracking-widest">Source URL</th>
+              <th className="text-left px-4 py-2 font-mono uppercase tracking-widest">Status</th>
+              <th className="text-left px-4 py-2 font-mono uppercase tracking-widest">Notes</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row) => (
+              <tr
+                key={row.country}
+                data-testid="asia-disclosure-coverage-row"
+                data-country={row.country}
+                style={{ borderTop: '1px solid var(--sp-line)' }}
+              >
+                <td className="px-4 py-2" style={{ color: 'var(--sp-bone)' }}>
+                  {row.country}
+                </td>
+                <td className="px-4 py-2 font-mono" style={{ color: 'var(--sp-mist)' }}>
+                  {row.disclosure_source || '—'}
+                </td>
+                <td className="px-4 py-2 font-mono" style={{ color: 'var(--sp-mist)' }}>
+                  {row.source_url ? (
+                    <a href={row.source_url} target="_blank" rel="noreferrer">
+                      {row.source_url}
+                    </a>
+                  ) : (
+                    '—'
+                  )}
+                </td>
+                <td className="px-4 py-2 font-mono" style={{ color: 'var(--sp-cyan)' }}>
+                  {row.status}
+                </td>
+                <td className="px-4 py-2" style={{ color: 'var(--sp-mist)' }}>
+                  {row.notes || '—'}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
@@ -633,15 +1003,17 @@ function StatTile({
   small,
   stale,
   ageHours,
+  testId,
 }: {
   label: string;
   value: string;
   small?: boolean;
   stale?: boolean;
   ageHours?: number | null;
+  testId?: string;
 }) {
   return (
-    <div className="sp-card px-4 py-3">
+    <div className="sp-card px-4 py-3" data-testid={testId}>
       <div className="flex items-center justify-between mb-1 gap-2">
         <div className="sp-eyebrow">{label}</div>
         {stale && (
@@ -882,6 +1254,7 @@ function AutoRefreshPanel({ status }: { status: LiveSourcesStatusResponse | null
 function StaleRefreshBanner({ status }: { status: LiveSourcesStatusResponse | null }) {
   if (!status) return null;
   const stale = status.stale_sources ?? [];
+  const excluded = status.excluded_from_stale ?? [];
   const refreshConfigured = status.refresh_configured ?? false;
   const threshold = status.stale_threshold_hours ?? 6;
   const manualCmd =
@@ -890,36 +1263,61 @@ function StaleRefreshBanner({ status }: { status: LiveSourcesStatusResponse | nu
     status.scheduler_hint ??
     '.\\scripts\\windows\\register_live_signal_refresh_task.ps1 (every 6h Scheduled Task)';
 
-  if (refreshConfigured && stale.length === 0) {
+  if (refreshConfigured && stale.length === 0 && excluded.length === 0) {
     return null;
   }
 
   const headline = !refreshConfigured
-    ? 'Source data may be stale — no local 6-hour refresh attempt recorded yet.'
-    : `Source data may be stale (${stale.length} source${stale.length === 1 ? '' : 's'} older than ${threshold} hour${threshold === 1 ? '' : 's'}).`;
+    ? 'Scheduled task is registered but no source-refresh records exist yet.'
+    : stale.length === 0
+    ? `All active sources are within the ${threshold}h refresh window.`
+    : `Stale active sources (${stale.length} older than ${threshold} hour${threshold === 1 ? '' : 's'}).`;
+
+  const excludedReasonLabel = (reason: string): string => {
+    if (reason === 'planned_not_scored') return 'planned/not scored';
+    if (reason === 'optional_config_missing') return 'optional — not configured';
+    return reason;
+  };
 
   return (
     <div
       className="rounded-lg px-4 py-3 space-y-2"
+      data-testid="stale-refresh-banner"
       style={{
         background: 'rgba(214, 168, 90, 0.05)',
         border: '1px solid rgba(214, 168, 90, 0.28)',
       }}
     >
       <div className="flex items-start gap-2 flex-wrap">
-        <span className="sp-chip sp-chip-warn shrink-0">STALE</span>
+        <span
+          className={`sp-chip ${stale.length > 0 ? 'sp-chip-warn' : ''} shrink-0`}
+        >
+          {stale.length > 0 ? 'STALE' : 'REFRESH STATUS'}
+        </span>
         <p className="text-sm" style={{ color: 'var(--sp-bone)' }}>{headline}</p>
       </div>
       {stale.length > 0 && (
-        <p className="text-xs" style={{ color: 'var(--sp-mist)' }}>
-          Stale sources:{' '}
+        <p className="text-xs" data-testid="stale-active-sources" style={{ color: 'var(--sp-mist)' }}>
+          Stale active sources:{' '}
           <span className="font-mono" style={{ color: 'var(--sp-bone)' }}>
             {stale.map((s) => SOURCE_LABELS[s] ?? s).join(', ')}
           </span>
         </p>
       )}
+      {excluded.length > 0 && (
+        <p className="text-xs" data-testid="excluded-from-stale" style={{ color: 'var(--sp-mist)' }}>
+          Excluded from stale count:{' '}
+          <span className="font-mono" style={{ color: 'var(--sp-bone)' }}>
+            {excluded
+              .map((e) => `${SOURCE_LABELS[e.source] ?? e.source} — ${excludedReasonLabel(e.reason)}`)
+              .join('; ')}
+          </span>
+        </p>
+      )}
       <p className="text-xs" style={{ color: 'var(--sp-mist)' }}>
-        Run the local refresh script or enable the 6-hour scheduled task. Advisory only —
+        A scheduled task running cleanly does not guarantee every source produced fresh data —
+        some sources may still be stale because the upstream refresh failed or returned empty.
+        Run the local refresh script or check the 6-hour scheduled task. Advisory only —
         refreshing data does not authorize trades.
       </p>
       <div className="grid gap-2 md:grid-cols-2">

@@ -517,6 +517,8 @@ export interface LiveSourceStatusEntry {
   refresh_age_hours?: number | null;
   stale_threshold_hours?: number;
   is_stale?: boolean;
+  stale_reason?: string;
+  stale_excluded_reason?: 'planned_not_scored' | 'optional_config_missing' | string;
   // Sprint 7D.1 — reliability scoring
   health_score?: number | null;
   health_label?: SourceHealthLabel;
@@ -526,6 +528,47 @@ export interface LiveSourceStatusEntry {
   last_success_age_hours?: number | null;
   operator_message?: string;
   tier?: 'core' | 'secondary' | 'optional' | 'planned' | string;
+  // Source display state — the read-only contract the UI uses to render
+  // each tab honestly (live vs archived vs coverage vs stale).
+  display_state?:
+    | 'current_live'
+    | 'optional_unconfigured_with_archive'
+    | 'optional_unconfigured_empty'
+    | 'planned_coverage'
+    | 'stale_active'
+    | 'never_run'
+    | string;
+  is_current_live?: boolean;
+  is_configured?: boolean;
+  is_optional?: boolean;
+  is_planned?: boolean;
+  is_active?: boolean;
+  is_scored?: boolean;
+  rows_are_current_live?: boolean;
+  rows_are_archived?: boolean;
+  rows_are_stale?: boolean;
+  current_live_count?: number;
+  archived_row_count?: number;
+  coverage_row_count?: number;
+  total_persisted_count?: number;
+  latest_persisted_row_at_utc?: string | null;
+  latest_current_refresh_at_utc?: string | null;
+  latest_source_event_at_utc?: string | null;
+  display_count_label?: string;
+  display_timestamp_label?: string;
+  display_timestamp_value?: string | null;
+  source_display_warning?: string;
+  rows_display_reason?: string;
+  excluded_from_stale?: boolean;
+  advisory_only?: boolean;
+}
+
+export interface SourceCoverageRow {
+  country: string;
+  disclosure_source: string;
+  source_url: string;
+  status: string;
+  notes: string;
 }
 
 export interface SourceHealthSummary {
@@ -580,6 +623,7 @@ export interface LiveSourcesStatusResponse {
   source_count: number;
   freshness_distribution: Record<string, number>;
   stale_sources?: string[];
+  excluded_from_stale?: { source: string; reason: string }[];
   source_errors?: Record<string, string>;
   refresh_configured?: boolean;
   stale_threshold_hours?: number;
@@ -589,6 +633,8 @@ export interface LiveSourcesStatusResponse {
   manual_refresh_command?: string;
   auto_refresh_status?: AutoRefreshStatus;
   health_summary?: SourceHealthSummary;
+  source_coverage_rows?: Record<string, SourceCoverageRow[]>;
+  asia_disclosure_coverage_rows?: SourceCoverageRow[];
   advisory_status: string;
   execution_mode?: string;
   execution_gate: string;

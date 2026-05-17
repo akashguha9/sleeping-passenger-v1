@@ -1,0 +1,372 @@
+"""Tests for honest source display state on /live-sources/status.
+
+Pins the contract documented in the Live Signals truthfulness fix:
+
+  * Etherscan with OPTIONAL_CONFIG_MISSING and 25 archived rows shows
+    display_state=optional_unconfigured_with_archive, current_live=0,
+    archived=25, latest_archived row equals MAX(fetched_at).
+  * Asia Disclosure (PLANNED_NOT_SCORED) shows display_state=
+    planned_coverage with exactly 11 coverage rows, current_live=0, and
+    India is NOT in the coverage rows.
+  * A genuinely stale active core source (GDELT-like) shows
+    display_state=stale_active.
+  * Old persisted rows are NOT deleted by these display changes.
+  * Advisory invariants remain intact end-to-end.
+  * No execution endpoints are introduced by the display fix.
+"""
+from __future__ import annotations
+
+import json
+import sys
+from pathlib import Path
+
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
+
+def _isolated_db(tmp_path: Path, monkeypatch) -> Path:
+    import scripts.persistence as p
+
+    db = tmp_path / "display_state.db"
+    monkeypatch.setattr(p, "DB_PATH", db)
+    p.init_schema(db)
+    return db
+
+
+def _strip_live_keys(monkeypatch) -> None:
+    for key in (
+        "NEWS_API_KEY",
+        "NEWSAPI_KEY",
+        "EVENT_REGISTRY_API_KEY",
+        "ETHERSCAN_API_KEY",
+        "ETHERSCAN_ADDRESS",
+        "ETHEREUM_ADDRESS",
+        "PUBLIC_ETH_ADDRESS",
+        "XAI_API_KEY",
+        "GROK_API_KEY",
+        "SEC_USER_AGENT",
+        "SEC_DEFAULT_CIK",
+        "SEC_DEFAULT_WATCHLIST",
+        "SEC_USE_DEFAULT_WATCHLIST",
+    ):
+        monkeypatch.delenv(key, raising=False)
+
+
+def _seed_signal_events(db_path: Path, source_name: str, count: int, fetched_at: str) -> None:
+    """Insert ``count`` signal_events rows for ``source_name`` all dated
+    ``fetched_at``.  Used to simulate an old Etherscan archive."""
+    import scripts.persistence as p
+
+    for i in range(count):
+        p.insert_signal_event(
+            event_id=f"{source_name}-row-{i}",
+            source_name=source_name,
+            raw_payload={"i": i, "title": f"old {source_name} row {i}"},
+            fetched_at=fetched_at,
+            db_path=db_path,
+        )
+
+
+# ---------------------------------------------------------------------------
+# Etherscan — OPTIONAL_CONFIG_MISSING with archived rows
+# ---------------------------------------------------------------------------
+
+
+def test_etherscan_optional_unconfigured_with_archive_shape(tmp_path, monkeypatch):
+    db = _isolated_db(tmp_path, monkeypatch)
+    _strip_live_keys(monkeypatch)
+
+    _seed_signal_events(db, "etherscan", count=25, fetched_at="2026-05-12T12:00:00+00:00")
+
+    from scripts.api_server import _build_live_sources_status
+
+    payload = _build_live_sources_status(now_iso="2026-05-17T17:00:00+00:00")
+    entry = payload["sources"]["etherscan"]
+
+    # Stale-attribution layer must still exclude it.
+    assert entry["is_stale"] is False
+    assert entry.get("stale_excluded_reason") == "optional_config_missing"
+    assert "etherscan" not in payload["stale_sources"]
+
+    # Display-state layer must surface archived rows truthfully.
+    assert entry["display_state"] == "optional_unconfigured_with_archive"
+    assert entry["is_current_live"] is False
+    assert entry["current_live_count"] == 0
+    assert entry["archived_row_count"] == 25
+    assert entry["total_persisted_count"] == 25
+    assert entry["rows_are_current_live"] is False
+    assert entry["rows_are_archived"] is True
+    assert entry["rows_are_stale"] is False
+    assert entry["display_count_label"] == "Archived/persisted rows"
+    assert entry["display_timestamp_label"] == "Latest archived row"
+    assert entry["latest_persisted_row_at_utc"] == "2026-05-12T12:00:00+00:00"
+    assert entry["latest_current_refresh_at_utc"] is None
+    assert "optional" in entry["source_display_warning"].lower()
+    assert "not configured" in entry["source_display_warning"].lower()
+
+
+def test_etherscan_archived_rows_are_not_deleted(tmp_path, monkeypatch):
+    """The honest display fix MUST NOT delete old persisted rows."""
+    db = _isolated_db(tmp_path, monkeypatch)
+    _strip_live_keys(monkeypatch)
+
+    _seed_signal_events(db, "etherscan", count=25, fetched_at="2026-05-12T12:00:00+00:00")
+
+    from scripts.api_server import _build_live_sources_status
+
+    _build_live_sources_status(now_iso="2026-05-17T17:00:00+00:00")
+
+    import scripts.persistence as p
+
+    events = p.get_signal_events(source_name="etherscan", limit=100, db_path=db)
+    assert len(events) == 25
+
+
+def test_etherscan_archived_timestamp_routes_to_persisted_not_refresh_field(
+    tmp_path, monkeypatch
+):
+    """When the source is not configured, the May-12 row timestamp must be
+    exposed as ``latest_persisted_row_at_utc`` — NOT as a refresh-success
+    timestamp.  Confusing the two is exactly the bug we are fixing."""
+    db = _isolated_db(tmp_path, monkeypatch)
+    _strip_live_keys(monkeypatch)
+    _seed_signal_events(db, "etherscan", count=25, fetched_at="2026-05-12T12:00:00+00:00")
+
+    from scripts.api_server import _build_live_sources_status
+
+    payload = _build_live_sources_status(now_iso="2026-05-17T17:00:00+00:00")
+    entry = payload["sources"]["etherscan"]
+    assert entry["latest_persisted_row_at_utc"] == "2026-05-12T12:00:00+00:00"
+    assert entry.get("last_refresh_success_at") in (None, "")
+    assert entry.get("latest_current_refresh_at_utc") is None
+
+
+def test_etherscan_with_no_rows_renders_optional_empty(tmp_path, monkeypatch):
+    _isolated_db(tmp_path, monkeypatch)
+    _strip_live_keys(monkeypatch)
+
+    from scripts.api_server import _build_live_sources_status
+
+    payload = _build_live_sources_status(now_iso="2026-05-17T17:00:00+00:00")
+    entry = payload["sources"]["etherscan"]
+    assert entry["display_state"] == "optional_unconfigured_empty"
+    assert entry["current_live_count"] == 0
+    assert entry["archived_row_count"] == 0
+    assert entry["rows_are_archived"] is False
+
+
+# ---------------------------------------------------------------------------
+# Asia Disclosure — PLANNED_NOT_SCORED with coverage rows
+# ---------------------------------------------------------------------------
+
+
+def test_asia_disclosure_planned_coverage_shape(tmp_path, monkeypatch):
+    _isolated_db(tmp_path, monkeypatch)
+    _strip_live_keys(monkeypatch)
+
+    from scripts.api_server import _build_live_sources_status
+
+    payload = _build_live_sources_status(now_iso="2026-05-17T17:00:00+00:00")
+    entry = payload["sources"]["asia_disclosure"]
+
+    assert entry["display_state"] == "planned_coverage"
+    assert entry["is_current_live"] is False
+    assert entry["current_live_count"] == 0
+    assert entry["coverage_row_count"] == 11
+    assert entry["display_count_label"] == "Coverage rows"
+    assert "planned" in entry["source_display_warning"].lower()
+
+
+def test_asia_disclosure_coverage_rows_exposed_at_top_level(tmp_path, monkeypatch):
+    _isolated_db(tmp_path, monkeypatch)
+    _strip_live_keys(monkeypatch)
+
+    from scripts.api_server import _build_live_sources_status
+
+    payload = _build_live_sources_status(now_iso="2026-05-17T17:00:00+00:00")
+    rows = payload.get("asia_disclosure_coverage_rows") or []
+    assert len(rows) == 11
+    countries = [r["country"] for r in rows]
+    assert countries == [
+        "China",
+        "Japan",
+        "Russia",
+        "South Korea",
+        "Turkey",
+        "Indonesia",
+        "Saudi Arabia",
+        "Taiwan",
+        "Israel",
+        "Singapore",
+        "United Arab Emirates",
+    ]
+    assert "India" not in countries
+    # Each row must carry the documented columns.
+    for r in rows:
+        assert set(r.keys()) >= {"country", "disclosure_source", "source_url", "status", "notes"}
+        assert r["status"] == "Active"
+
+
+def test_asia_disclosure_coverage_keyed_by_source(tmp_path, monkeypatch):
+    _isolated_db(tmp_path, monkeypatch)
+    _strip_live_keys(monkeypatch)
+
+    from scripts.api_server import _build_live_sources_status
+
+    payload = _build_live_sources_status(now_iso="2026-05-17T17:00:00+00:00")
+    coverage_by_source = payload.get("source_coverage_rows") or {}
+    assert "asia_disclosure" in coverage_by_source
+    assert len(coverage_by_source["asia_disclosure"]) == 11
+
+
+def test_asia_disclosure_does_not_fake_live_signals(tmp_path, monkeypatch):
+    """Coverage rows are configuration only — they must NEVER appear as
+    rows in /live-signals or be counted as current_live."""
+    _isolated_db(tmp_path, monkeypatch)
+    _strip_live_keys(monkeypatch)
+
+    from scripts.api_server import _build_live_sources_status, _get_live_signals
+
+    payload = _build_live_sources_status(now_iso="2026-05-17T17:00:00+00:00")
+    entry = payload["sources"]["asia_disclosure"]
+    assert entry["current_live_count"] == 0
+    assert entry["rows_are_current_live"] is False
+
+    signals = _get_live_signals(source_name="asia_disclosure", limit=200)
+    assert signals["count"] == 0
+    assert signals["live_signal_events"] == []
+
+
+# ---------------------------------------------------------------------------
+# GDELT — stale active truthfulness
+# ---------------------------------------------------------------------------
+
+
+def test_gdelt_stale_active_remains_truthful(tmp_path, monkeypatch):
+    """A core source whose latest log entry is FAIL/rate-limited and whose
+    last OK refresh is older than the threshold remains stale_active."""
+    import scripts.persistence as p
+
+    db = _isolated_db(tmp_path, monkeypatch)
+    _strip_live_keys(monkeypatch)
+    # Last log row is a failure; last successful OK is days old.
+    p.log_source_run(
+        source_name="gdelt",
+        status="ok",
+        fetched_count=10,
+        skipped_reason="",
+        error_message="",
+        timestamp_utc="2026-05-10T12:00:00+00:00",
+        duration_ms=5,
+        db_path=db,
+    )
+    p.log_source_run(
+        source_name="gdelt",
+        status="fail",
+        fetched_count=0,
+        skipped_reason="",
+        error_message="HTTP 429 rate_limited",
+        timestamp_utc="2026-05-17T16:00:00+00:00",
+        duration_ms=2,
+        db_path=db,
+    )
+    p.record_live_source_refresh_run(
+        run_id="gdelt-1",
+        source_name="gdelt",
+        attempted=True,
+        success=False,
+        skipped=False,
+        started_at="2026-05-17T16:00:00+00:00",
+        finished_at="2026-05-17T16:00:01+00:00",
+        duration_seconds=1.0,
+        rows_before=10,
+        rows_after=10,
+        rows_added=0,
+        error_message="HTTP 429 rate_limited",
+        db_path=db,
+    )
+    _seed_signal_events(db, "gdelt", count=5, fetched_at="2026-05-10T12:00:00+00:00")
+
+    from scripts.api_server import _build_live_sources_status
+
+    payload = _build_live_sources_status(now_iso="2026-05-17T17:00:00+00:00")
+    assert "gdelt" in payload["stale_sources"]
+    entry = payload["sources"]["gdelt"]
+    assert entry["is_stale"] is True
+    assert entry["display_state"] == "stale_active"
+    assert entry["is_current_live"] is False
+    # Reason chain must explain the rate-limit honestly.
+    text = json.dumps(entry).lower()
+    assert "rate_limited" in text or "429" in text or "refresh error" in text
+
+
+# ---------------------------------------------------------------------------
+# Cross-source roll-up + safety invariants
+# ---------------------------------------------------------------------------
+
+
+def test_optional_and_planned_excluded_from_stale_count(tmp_path, monkeypatch):
+    _isolated_db(tmp_path, monkeypatch)
+    _strip_live_keys(monkeypatch)
+
+    from scripts.api_server import _build_live_sources_status
+
+    payload = _build_live_sources_status(now_iso="2026-05-17T17:00:00+00:00")
+    excluded = {(e["source"], e["reason"]) for e in payload.get("excluded_from_stale", [])}
+    assert ("etherscan", "optional_config_missing") in excluded
+    assert ("grok_xai", "optional_config_missing") in excluded
+    assert ("asia_disclosure", "planned_not_scored") in excluded
+
+
+def test_advisory_invariants_intact_under_display_state(tmp_path, monkeypatch):
+    db = _isolated_db(tmp_path, monkeypatch)
+    _strip_live_keys(monkeypatch)
+    _seed_signal_events(db, "etherscan", count=3, fetched_at="2026-05-12T12:00:00+00:00")
+
+    from scripts.api_server import _build_live_sources_status
+
+    payload = _build_live_sources_status(now_iso="2026-05-17T17:00:00+00:00")
+    assert payload["advisory_status"] == "ADVISORY_ONLY"
+    assert payload["execution_gate"] == "LOCKED"
+    assert payload["broker_api_called"] is False
+    assert payload["ai_execution_count"] == 0
+    assert payload["execution_permission"] is False
+    assert payload["can_execute"] is False
+    assert payload["human_review_required"] is True
+
+    for key, entry in payload["sources"].items():
+        assert entry["advisory_status"] == "ADVISORY_ONLY", key
+        assert entry["execution_gate"] == "LOCKED", key
+        assert entry["broker_api_called"] is False, key
+        assert entry["can_execute"] is False, key
+        assert entry["advisory_only"] is True, key
+
+
+def test_no_execution_routes_introduced_by_display_fix():
+    """Display-state fix must not have added execution endpoints/methods."""
+    from scripts import api_server
+
+    forbidden_substrings = (
+        "place_order",
+        "submit_order",
+        "broker_execute",
+        "send_to_broker",
+        "trade_execute",
+        "live_trade_execute",
+        "broker.connect",
+        "broker.place",
+    )
+    src = Path(api_server.__file__).read_text(encoding="utf-8")
+    for token in forbidden_substrings:
+        assert token not in src, f"forbidden execution token introduced: {token}"
+
+
+def test_india_remains_its_own_source_family():
+    """India must remain a distinct, implemented source family — the
+    Asia Disclosure coverage fix must not move/rename it."""
+    from scripts.live_source_registry import get_source_family, ALL_SOURCE_KEYS
+
+    assert "india" in ALL_SOURCE_KEYS
+    india = get_source_family("india")
+    assert india["adapter_status"] == "implemented"
