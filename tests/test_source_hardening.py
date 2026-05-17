@@ -312,12 +312,28 @@ class TestStatusSemantics:
         gf = next(s for s in report.sources if s.source_name == "global_filings")
         assert gf.status == "placeholder"
 
-    def test_asia_disclosure_placeholder_status(self):
-        """All providers inactive → placeholder status."""
+    def test_asia_disclosure_skipped_without_keys(self):
+        """Asia Disclosure is now PARTIAL.  Without EDINET / OpenDART keys
+        the parent loader skips cleanly via optional_config_missing and
+        the runner classifies the attempt as skipped (not faux-OK)."""
+        import os as _os
         from scripts.live_source_runner_phase2 import run_phase2
-        report = run_phase2(dry_run=True, sources=["asia_disclosure"])
+
+        stripped = {
+            k: v
+            for k, v in _os.environ.items()
+            if k
+            not in {
+                "EDINET_API_KEY",
+                "JAPAN_EDINET_API_KEY",
+                "OPENDART_API_KEY",
+                "KOREA_DART_API_KEY",
+            }
+        }
+        with patch.dict("os.environ", stripped, clear=True):
+            report = run_phase2(dry_run=True, sources=["asia_disclosure"])
         asia = next(s for s in report.sources if s.source_name == "asia_disclosure")
-        assert asia.status == "placeholder"
+        assert asia.status in {"skipped", "placeholder"}
 
 
 # ============================================================================
@@ -684,23 +700,53 @@ class TestGlobalFilingsPlaceholder:
 
 
 class TestAsiaDisclosurePlaceholder:
-    def test_all_providers_inactive(self):
-        from scripts.ingestion.asia_disclosure_loader import AsiaDisclosureLoader, _PROVIDER_CONFIGS
-        for name, conf in _PROVIDER_CONFIGS.items():
-            assert conf["active"] is False, f"Asia provider {name!r} should be inactive"
+    """Asia Disclosure is now PARTIAL: EDINET / OpenDART are live official
+    APIs; the legacy SSE/SZSE/HKEX/TDnet/SGX/dart entries remain inactive
+    placeholders.  These tests pin the new honest contract."""
 
-    def test_loader_skips_with_placeholder_reason(self):
+    _SUB_KEYS = (
+        "EDINET_API_KEY",
+        "JAPAN_EDINET_API_KEY",
+        "OPENDART_API_KEY",
+        "KOREA_DART_API_KEY",
+    )
+
+    def _hermetic(self):
+        import os as _os
+        stripped = {
+            k: v for k, v in _os.environ.items() if k not in self._SUB_KEYS
+        }
+        return patch.dict("os.environ", stripped, clear=True)
+
+    def test_legacy_providers_remain_inactive(self):
+        from scripts.ingestion.asia_disclosure_loader import _PROVIDER_CONFIGS
+        for name in ("sse", "szse", "hkex", "tdnet", "sgx", "dart"):
+            assert _PROVIDER_CONFIGS[name]["active"] is False, (
+                f"Legacy Asia provider {name!r} should remain a placeholder"
+            )
+
+    def test_edinet_and_opendart_are_active(self):
+        from scripts.ingestion.asia_disclosure_loader import _PROVIDER_CONFIGS
+        for name in ("edinet", "opendart"):
+            assert _PROVIDER_CONFIGS[name]["active"] is True
+            assert _PROVIDER_CONFIGS[name]["requires_key"] is True
+
+    def test_loader_skips_with_optional_config_missing_reason(self):
         from scripts.ingestion.asia_disclosure_loader import AsiaDisclosureLoader
-        loader = AsiaDisclosureLoader()
-        result = loader.safe_fetch()
-        assert result.skipped is True
-        assert "placeholder" in result.skip_reason.lower()
 
-    def test_runner_reports_placeholder_status(self):
+        with self._hermetic():
+            loader = AsiaDisclosureLoader()
+            result = loader.safe_fetch()
+        assert result.skipped is True
+        assert "optional_config_missing" in result.skip_reason.lower()
+
+    def test_runner_reports_skipped_status_when_no_keys(self):
         from scripts.live_source_runner_phase2 import run_phase2
-        report = run_phase2(dry_run=True, sources=["asia_disclosure"])
+
+        with self._hermetic():
+            report = run_phase2(dry_run=True, sources=["asia_disclosure"])
         asia = next(s for s in report.sources if s.source_name == "asia_disclosure")
-        assert asia.status == "placeholder"
+        assert asia.status in {"skipped", "placeholder"}
 
 
 # ============================================================================

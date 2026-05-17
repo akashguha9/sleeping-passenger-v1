@@ -53,12 +53,19 @@ def _strip_live_keys(monkeypatch) -> None:
         "SEC_DEFAULT_CIK",
         "SEC_DEFAULT_WATCHLIST",
         "SEC_USE_DEFAULT_WATCHLIST",
+        "EDINET_API_KEY",
+        "JAPAN_EDINET_API_KEY",
+        "OPENDART_API_KEY",
+        "KOREA_DART_API_KEY",
     ):
         monkeypatch.delenv(key, raising=False)
 
 
-def test_planned_asia_disclosure_is_not_counted_as_stale(tmp_path, monkeypatch):
-    """asia_disclosure is adapter_status=planned — never stale, even when never_run."""
+def test_asia_disclosure_without_keys_is_not_counted_as_stale(tmp_path, monkeypatch):
+    """asia_disclosure is adapter_status=partial with optional EDINET/OpenDART
+    keys.  When neither EDINET_API_KEY nor OPENDART_API_KEY is configured,
+    it is excluded from stale via optional_config_missing, not flagged as
+    a failure."""
     _isolated_db(tmp_path, monkeypatch)
     _strip_live_keys(monkeypatch)
 
@@ -68,14 +75,15 @@ def test_planned_asia_disclosure_is_not_counted_as_stale(tmp_path, monkeypatch):
     assert "asia_disclosure" not in payload["stale_sources"]
 
     entry = payload["sources"]["asia_disclosure"]
-    assert entry["adapter_status"] == "planned"
+    assert entry["adapter_status"] in {"partial", "implemented"}
     assert entry["is_stale"] is False
-    assert entry.get("stale_excluded_reason") == "planned_not_scored"
-    assert "planned" in (entry.get("stale_reason") or "").lower()
+    assert entry.get("stale_excluded_reason") == "optional_config_missing"
+    assert "optional" in (entry.get("stale_reason") or "").lower()
 
     excluded = payload.get("excluded_from_stale") or []
     assert any(
-        e.get("source") == "asia_disclosure" and e.get("reason") == "planned_not_scored"
+        e.get("source") == "asia_disclosure"
+        and e.get("reason") == "optional_config_missing"
         for e in excluded
     ), f"asia_disclosure missing from excluded_from_stale: {excluded!r}"
 

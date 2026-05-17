@@ -39,10 +39,12 @@ def test_compute_source_freshness_marks_missing_credential_skipped() -> None:
     assert freshness["newsapi"]["freshness_state"] == FRESHNESS_SKIPPED
 
 
-def test_compute_source_freshness_planned_adapter_not_implemented() -> None:
+def test_compute_source_freshness_asia_disclosure_is_partial() -> None:
+    """asia_disclosure is now partial — EDINET / OpenDART are wired official
+    APIs while the legacy SSE/SZSE/HKEX/TDnet/SGX/dart entries remain
+    placeholders.  adapter_status must reflect partial, not planned."""
     freshness = compute_source_freshness(latest_runs=None, env={})
-    # asia_disclosure is a planned adapter — its adapter_status must say so
-    assert freshness["asia_disclosure"]["adapter_status"] == "planned"
+    assert freshness["asia_disclosure"]["adapter_status"] == "partial"
 
 
 def test_compute_source_freshness_fresh_window() -> None:

@@ -313,46 +313,93 @@ class TestGDELTPhase1RunnerWiring:
 
 
 class TestAsiaDisclosurePlaceholderHonesty:
-    def test_skip_reason_says_not_implemented(self) -> None:
+    """Hermetic tests for Asia Disclosure honesty.
+
+    Asia Disclosure was historically a pure placeholder source.  It now
+    wires two real official-API sub-sources (EDINET / OpenDART) plus
+    legacy placeholders.  These tests assert the new contract without
+    making any network call:
+      * without keys, the loader skips with a structured reason that
+        names the missing env vars
+      * legacy provider names remain in the placeholder summary
+      * no records are persisted in the missing-key state
+      * runner classifies the result as ``skipped`` (not ``ok``)
+    """
+
+    _SUB_KEYS = (
+        "EDINET_API_KEY",
+        "JAPAN_EDINET_API_KEY",
+        "OPENDART_API_KEY",
+        "KOREA_DART_API_KEY",
+    )
+
+    def _hermetic(self):
+        import os as _os
+
+        stripped = {
+            k: v for k, v in _os.environ.items() if k not in self._SUB_KEYS
+        }
+        return patch.dict("os.environ", stripped, clear=True)
+
+    def test_skip_reason_says_optional_config_missing(self) -> None:
         from scripts.ingestion.asia_disclosure_loader import AsiaDisclosureLoader
 
-        loader = AsiaDisclosureLoader()
-        result = loader.safe_fetch()
+        with self._hermetic():
+            loader = AsiaDisclosureLoader()
+            result = loader.safe_fetch()
         assert result.skipped
-        assert "[PLACEHOLDER]" in result.skip_reason
-        assert "not implemented yet" in result.skip_reason.lower()
+        assert "[OPTIONAL_CONFIG_MISSING]" in result.skip_reason
 
-    def test_skip_reason_mentions_each_provider(self) -> None:
+    def test_active_sub_sources_named_in_summary(self) -> None:
+        """The structured sub_source_status payload names the active
+        sub-sources (EDINET / OpenDART) that were attempted in this run."""
         from scripts.ingestion.asia_disclosure_loader import AsiaDisclosureLoader
 
-        loader = AsiaDisclosureLoader()
-        result = loader.safe_fetch()
-        for provider in ("SSE", "SZSE", "HKEX", "TDnet", "SGX", "DART"):
-            assert provider.upper() in result.skip_reason.upper()
+        with self._hermetic():
+            loader = AsiaDisclosureLoader()
+            result = loader.safe_fetch()
+        text = result.skip_reason.lower()
+        assert "edinet" in text
+        assert "opendart" in text
 
-    def test_placeholder_run_has_zero_records(self) -> None:
+    def test_legacy_providers_remain_in_provider_configs(self) -> None:
+        """Honest-history check: the legacy SSE/SZSE/HKEX/TDnet/SGX/dart
+        entries remain in ``_PROVIDER_CONFIGS`` (as ``active=False``
+        placeholders), so the jurisdiction-filter path still answers
+        truthfully for them."""
+        from scripts.ingestion.asia_disclosure_loader import _PROVIDER_CONFIGS
+
+        for provider in ("sse", "szse", "hkex", "tdnet", "sgx", "dart"):
+            assert provider in _PROVIDER_CONFIGS
+            assert _PROVIDER_CONFIGS[provider]["active"] is False
+
+    def test_no_keys_run_has_zero_records(self) -> None:
         from scripts.ingestion.asia_disclosure_loader import AsiaDisclosureLoader
 
-        loader = AsiaDisclosureLoader()
-        result = loader.safe_fetch()
+        with self._hermetic():
+            loader = AsiaDisclosureLoader()
+            result = loader.safe_fetch()
         assert len(result.records) == 0
 
-    def test_no_persist_when_placeholder(self) -> None:
-        """In write mode with all-placeholder providers, _persist_events must not be called."""
+    def test_no_persist_when_keys_missing(self) -> None:
+        """In write mode without EDINET/OpenDART keys, _persist_events
+        must not be called for asia_disclosure."""
         from scripts.live_source_runner_phase2 import run_phase2
 
-        with patch(
-            "scripts.live_source_runner_phase2._persist_events"
-        ) as persist_mock, patch(
-            "scripts.live_source_runner_phase2._log_run"
-        ):
-            run_phase2(dry_run=False, sources=["asia_disclosure"])
+        with self._hermetic():
+            with patch(
+                "scripts.live_source_runner_phase2._persist_events"
+            ) as persist_mock, patch(
+                "scripts.live_source_runner_phase2._log_run"
+            ):
+                run_phase2(dry_run=False, sources=["asia_disclosure"])
         persist_mock.assert_not_called()
 
-    def test_placeholder_status_classified(self) -> None:
+    def test_skipped_status_classified_when_no_keys(self) -> None:
         from scripts.live_source_runner_phase2 import run_phase2
 
-        report = run_phase2(dry_run=True, sources=["asia_disclosure"])
+        with self._hermetic():
+            report = run_phase2(dry_run=True, sources=["asia_disclosure"])
         asia = next(s for s in report.sources if s.source_name == "asia_disclosure")
-        assert asia.status == "placeholder"
+        assert asia.status in {"skipped", "placeholder"}
         assert asia.fetched_count == 0

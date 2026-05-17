@@ -386,6 +386,23 @@ class TestAsiaDisclosureProviderSkips(unittest.TestCase):
         from scripts.ingestion.asia_disclosure_loader import AsiaDisclosureLoader
         return AsiaDisclosureLoader(**kw)
 
+    _NO_KEY_ENV: dict[str, str] = {}
+
+    def _env_without_subsource_keys(self):
+        import os as _os
+        stripped = {
+            k: v
+            for k, v in _os.environ.items()
+            if k
+            not in {
+                "EDINET_API_KEY",
+                "JAPAN_EDINET_API_KEY",
+                "OPENDART_API_KEY",
+                "KOREA_DART_API_KEY",
+            }
+        }
+        return patch.dict("os.environ", stripped, clear=True)
+
     def test_hkex_placeholder_skips(self):
         loader = self._loader(providers=["hkex"])
         result = loader.safe_fetch()
@@ -442,9 +459,12 @@ class TestAsiaDisclosureProviderSkips(unittest.TestCase):
         result = loader.safe_fetch()
         self.assertTrue(result.skipped)
 
-    def test_jp_jurisdiction_skips_all_placeholder(self):
+    def test_jp_jurisdiction_skips_without_keys(self):
+        """Japan now has EDINET active; without EDINET_API_KEY/alias it must
+        still skip cleanly with optional_config_missing."""
         loader = self._loader(jurisdiction="JP")
-        result = loader.safe_fetch()
+        with self._env_without_subsource_keys():
+            result = loader.safe_fetch()
         self.assertTrue(result.skipped)
 
     def test_sg_jurisdiction_skips_all_placeholder(self):
@@ -452,15 +472,20 @@ class TestAsiaDisclosureProviderSkips(unittest.TestCase):
         result = loader.safe_fetch()
         self.assertTrue(result.skipped)
 
-    def test_kr_jurisdiction_skips_all_placeholder(self):
+    def test_kr_jurisdiction_skips_without_keys(self):
+        """Korea now has OpenDART active; without OPENDART_API_KEY/alias it
+        must still skip cleanly with optional_config_missing."""
         loader = self._loader(jurisdiction="KR")
-        result = loader.safe_fetch()
+        with self._env_without_subsource_keys():
+            result = loader.safe_fetch()
         self.assertTrue(result.skipped)
 
-    def test_all_providers_default_skip(self):
-        # With no filter, all providers are selected but all are inactive
+    def test_all_providers_default_skip_without_keys(self):
+        """With no filter, all providers selected; EDINET/OpenDART need
+        keys, rest are placeholders.  Without keys the loader must skip."""
         loader = self._loader()
-        result = loader.safe_fetch()
+        with self._env_without_subsource_keys():
+            result = loader.safe_fetch()
         self.assertTrue(result.skipped)
 
 
@@ -723,13 +748,31 @@ class TestPhase2RunnerAsiaDisclosure(unittest.TestCase):
         d = self._run_with_mocked_loader().to_dict()
         json.dumps(d)
 
-    def test_skipped_when_no_active_providers(self):
-        # Without patching, the loader skips because all providers are placeholder
-        report = run_phase2(dry_run=True, sources=["asia_disclosure"])
+    def test_skipped_when_no_keys_configured(self):
+        """Without EDINET / OpenDART keys the parent loader skips cleanly
+        with optional_config_missing — never crashes, never fakes rows."""
+        import os as _os
+        stripped = {
+            k: v
+            for k, v in _os.environ.items()
+            if k
+            not in {
+                "EDINET_API_KEY",
+                "JAPAN_EDINET_API_KEY",
+                "OPENDART_API_KEY",
+                "KOREA_DART_API_KEY",
+            }
+        }
+        with patch.dict("os.environ", stripped, clear=True):
+            report = run_phase2(dry_run=True, sources=["asia_disclosure"])
         asia = next(s for s in report.sources if s.source_name == "asia_disclosure")
-        # Status is "placeholder" because reason contains "[PLACEHOLDER]"
-        self.assertIn(asia.status, ("skipped", "placeholder"))
-        self.assertIn("placeholder", asia.skipped_reason.lower())
+        self.assertIn(asia.status, ("skipped", "placeholder", "http_error"))
+        reason = asia.skipped_reason.lower()
+        self.assertTrue(
+            "optional_config_missing" in reason
+            or "placeholder" in reason,
+            f"unexpected skip reason: {asia.skipped_reason!r}",
+        )
 
     def test_unknown_source_ignored(self):
         report = self._run_with_mocked_loader()
@@ -827,9 +870,23 @@ class TestAsiaDisclosureWriteMode(unittest.TestCase):
         mock_l.assert_not_called()
 
     def test_write_mode_skipped_source_still_logged(self):
-        # No patching — loader skips (all placeholders); log_run still called in write mode
-        with patch("scripts.live_source_runner_phase2._log_run") as mock_l:
-            run_phase2(dry_run=False, sources=["asia_disclosure"])
+        # No patching of loader — without EDINET/OpenDART keys it skips
+        # cleanly; log_run still called in write mode.
+        import os as _os
+        stripped = {
+            k: v
+            for k, v in _os.environ.items()
+            if k
+            not in {
+                "EDINET_API_KEY",
+                "JAPAN_EDINET_API_KEY",
+                "OPENDART_API_KEY",
+                "KOREA_DART_API_KEY",
+            }
+        }
+        with patch.dict("os.environ", stripped, clear=True):
+            with patch("scripts.live_source_runner_phase2._log_run") as mock_l:
+                run_phase2(dry_run=False, sources=["asia_disclosure"])
         mock_l.assert_called_once()
 
     def test_source_run_log_entry_fields(self):
@@ -899,24 +956,56 @@ class TestAsiaDisclosureSafetyInvariants(unittest.TestCase):
         for r in self._records():
             self.assertEqual(set(r.keys()) & forbidden, set())
 
+    def _hermetic_env(self):
+        import os as _os
+        stripped = {
+            k: v
+            for k, v in _os.environ.items()
+            if k
+            not in {
+                "EDINET_API_KEY",
+                "JAPAN_EDINET_API_KEY",
+                "OPENDART_API_KEY",
+                "KOREA_DART_API_KEY",
+            }
+        }
+        return patch.dict("os.environ", stripped, clear=True)
+
     def test_phase2_report_advisory_only(self):
-        report = run_phase2(dry_run=True, sources=["asia_disclosure"])
+        with self._hermetic_env():
+            report = run_phase2(dry_run=True, sources=["asia_disclosure"])
         self.assertEqual(report.advisory_status, "ADVISORY_ONLY")
 
     def test_phase2_report_broker_false(self):
-        report = run_phase2(dry_run=True, sources=["asia_disclosure"])
+        with self._hermetic_env():
+            report = run_phase2(dry_run=True, sources=["asia_disclosure"])
         self.assertFalse(report.broker_api_called)
 
     def test_phase2_report_ai_zero(self):
-        report = run_phase2(dry_run=True, sources=["asia_disclosure"])
+        with self._hermetic_env():
+            report = run_phase2(dry_run=True, sources=["asia_disclosure"])
         self.assertEqual(report.ai_execution_count, 0)
 
     def test_no_execution_path_in_normalized_record(self):
         r = _normalize_asia_disclosure_record(_asia_rec())
-        # ai_execution_count and execution_gate are safety fields, not execution paths
-        safe_keys = {"execution_gate", "ai_execution_count"}
+        # ai_execution_count, execution_gate, execution_permission, and
+        # can_execute are *safety* fields (LOCKED / False) not execution
+        # paths.  Their presence on every row is part of the advisory
+        # contract.  Any other key containing "execut" or "trade" would
+        # indicate an unsafe execution path.
+        safe_keys = {
+            "execution_gate",
+            "ai_execution_count",
+            "execution_permission",
+            "can_execute",
+        }
         execution_keys = {k for k in r if "execut" in k.lower()} - safe_keys
         self.assertEqual(execution_keys, set())
+        # All safety fields must carry their safe defaults.
+        self.assertEqual(r["execution_gate"], "LOCKED")
+        self.assertEqual(r["ai_execution_count"], 0)
+        self.assertFalse(r["execution_permission"])
+        self.assertFalse(r["can_execute"])
 
 
 # ---------------------------------------------------------------------------
@@ -1022,24 +1111,43 @@ class TestAsiaDisclosureCLIStructure(unittest.TestCase):
         self.assertIn(asia.status, {"ok", "skipped", "placeholder"})
 
     def test_report_to_dict_has_required_keys(self):
-        report = run_phase2(dry_run=True, sources=["asia_disclosure"])
+        import os as _os
+        stripped = {
+            k: v
+            for k, v in _os.environ.items()
+            if k
+            not in {
+                "EDINET_API_KEY",
+                "JAPAN_EDINET_API_KEY",
+                "OPENDART_API_KEY",
+                "KOREA_DART_API_KEY",
+            }
+        }
+        with patch.dict("os.environ", stripped, clear=True):
+            report = run_phase2(dry_run=True, sources=["asia_disclosure"])
         d = report.to_dict()
         self.assertIn("sources", d)
         self.assertIn("advisory_status", d)
         self.assertIn("broker_api_called", d)
         self.assertIn("ai_execution_count", d)
 
-    def test_provider_configs_has_all_asia_providers(self):
+    def test_provider_configs_has_all_legacy_asia_providers(self):
         from scripts.ingestion.asia_disclosure_loader import _PROVIDER_CONFIGS
         for name in ["sse", "szse", "hkex", "tdnet", "sgx", "dart"]:
             self.assertIn(name, _PROVIDER_CONFIGS, f"{name} missing from _PROVIDER_CONFIGS")
 
-    def test_provider_configs_all_inactive(self):
+    def test_provider_configs_has_edinet_and_opendart(self):
         from scripts.ingestion.asia_disclosure_loader import _PROVIDER_CONFIGS
-        for name, conf in _PROVIDER_CONFIGS.items():
+        for name in ["edinet", "opendart"]:
+            self.assertIn(name, _PROVIDER_CONFIGS)
+            self.assertTrue(_PROVIDER_CONFIGS[name]["active"])
+
+    def test_legacy_provider_configs_inactive(self):
+        from scripts.ingestion.asia_disclosure_loader import _PROVIDER_CONFIGS
+        for name in ("sse", "szse", "hkex", "tdnet", "sgx", "dart"):
             self.assertFalse(
-                conf["active"],
-                f"{name} should be inactive (placeholder)",
+                _PROVIDER_CONFIGS[name]["active"],
+                f"{name} should remain a placeholder (inactive)",
             )
 
     def test_provider_configs_jurisdictions_correct(self):
@@ -1047,6 +1155,7 @@ class TestAsiaDisclosureCLIStructure(unittest.TestCase):
         expected = {
             "sse": "CN", "szse": "CN", "hkex": "HK",
             "tdnet": "JP", "sgx": "SG", "dart": "KR",
+            "edinet": "JP", "opendart": "KR",
         }
         for name, jur in expected.items():
             self.assertEqual(_PROVIDER_CONFIGS[name]["jurisdiction"], jur)
@@ -1056,10 +1165,31 @@ class TestAsiaDisclosureCLIStructure(unittest.TestCase):
         self.assertTrue(_PROVIDER_CONFIGS["sgx"]["requires_key"])
         self.assertEqual(_PROVIDER_CONFIGS["sgx"]["key_env"], "SGX_API_KEY")
 
-    def test_dart_requires_key(self):
+    def test_legacy_dart_remains_placeholder(self):
+        """Legacy ``dart`` placeholder retained for backward compat; the
+        live Korean integration is the new ``opendart`` provider."""
         from scripts.ingestion.asia_disclosure_loader import _PROVIDER_CONFIGS
         self.assertTrue(_PROVIDER_CONFIGS["dart"]["requires_key"])
+        self.assertFalse(_PROVIDER_CONFIGS["dart"]["active"])
         self.assertEqual(_PROVIDER_CONFIGS["dart"]["key_env"], "DART_API_KEY")
+
+    def test_opendart_uses_correct_env(self):
+        from scripts.ingestion.asia_disclosure_loader import _PROVIDER_CONFIGS
+        self.assertTrue(_PROVIDER_CONFIGS["opendart"]["requires_key"])
+        self.assertEqual(_PROVIDER_CONFIGS["opendart"]["key_env"], "OPENDART_API_KEY")
+        self.assertIn(
+            "KOREA_DART_API_KEY",
+            _PROVIDER_CONFIGS["opendart"]["alt_key_envs"],
+        )
+
+    def test_edinet_uses_correct_env(self):
+        from scripts.ingestion.asia_disclosure_loader import _PROVIDER_CONFIGS
+        self.assertTrue(_PROVIDER_CONFIGS["edinet"]["requires_key"])
+        self.assertEqual(_PROVIDER_CONFIGS["edinet"]["key_env"], "EDINET_API_KEY")
+        self.assertIn(
+            "JAPAN_EDINET_API_KEY",
+            _PROVIDER_CONFIGS["edinet"]["alt_key_envs"],
+        )
 
 
 if __name__ == "__main__":

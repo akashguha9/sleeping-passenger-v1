@@ -59,8 +59,9 @@ _SOURCE_TIERS: dict[str, str] = {
     # Optional: domain-specific, often credential-gated.
     "etherscan": SOURCE_TIER_OPTIONAL,
     "grok_xai": SOURCE_TIER_OPTIONAL,
-    # Planned: adapter not implemented yet — missing is not a failure.
-    "asia_disclosure": SOURCE_TIER_PLANNED,
+    # Optional: official APIs are wired (EDINET / OpenDART) but keys are
+    # optional — missing-key state is informational, not a failure.
+    "asia_disclosure": SOURCE_TIER_OPTIONAL,
 }
 
 
@@ -267,18 +268,30 @@ _SOURCE_REGISTRY: tuple[dict[str, Any], ...] = (
     },
     {
         "source_key": "asia_disclosure",
-        "display_name": "Asia Disclosure (SSE/SZSE/HKEX/TDNet/SGX/DART)",
+        "display_name": "Asia Disclosure (EDINET live; OpenDART live; rest planned)",
         "category": "regional_filings",
-        "adapter_status": ADAPTER_PLANNED,
+        "adapter_status": ADAPTER_PARTIAL,
+        # Keys are optional — at least one of EDINET_API_KEY /
+        # OPENDART_API_KEY (or their aliases) enables real fetches.
+        # ``requires_api_key`` stays False so the parent loader runs even
+        # without any key (it then surfaces optional_config_missing per
+        # sub-source).  ``env_keys`` is informational and surfaces in the
+        # health / status APIs.
         "requires_api_key": False,
-        "env_keys": (),
+        "env_keys": (
+            "EDINET_API_KEY",
+            "JAPAN_EDINET_API_KEY",
+            "OPENDART_API_KEY",
+            "KOREA_DART_API_KEY",
+        ),
         "default_refresh_hours": DEFAULT_REFRESH_HOURS,
         "advisory_only": True,
         "can_execute": False,
         "expected_output": "signal_events",
         "notes": (
-            "All providers are placeholders; the adapter skips cleanly. "
-            "SGX and DART will require API keys when implemented."
+            "Japan EDINET and Korea OpenDART are wired as official-API "
+            "sub-sources.  SSE/SZSE/HKEX/TDnet/SGX/legacy-DART remain "
+            "placeholders until a stable public endpoint exists."
         ),
         "tos_warning": "All targets are exchange-disclosure sites with attribution rules.",
         "implementation_file": "scripts/ingestion/asia_disclosure_loader.py",
@@ -332,6 +345,57 @@ def get_source_family(source_key: str) -> dict[str, Any]:
     entry["env_keys"] = list(entry["env_keys"])
     entry["tier"] = get_source_tier(key)
     return entry
+
+
+# ---------------------------------------------------------------------------
+# Sub-source credential helpers (Asia Disclosure)
+# ---------------------------------------------------------------------------
+
+# Asia Disclosure has two real sub-sources (EDINET / OpenDART) each with a
+# primary env var and an alias.  The parent source's registry record only
+# lists keys (it is satisfied by any of them), so we expose a tiny helper
+# the API/UI uses to render honest per-sub-source state.
+_ASIA_DISCLOSURE_SUB_KEY_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("japan_edinet", ("EDINET_API_KEY", "JAPAN_EDINET_API_KEY")),
+    ("korea_opendart", ("OPENDART_API_KEY", "KOREA_DART_API_KEY")),
+)
+
+
+def asia_disclosure_subsource_state(
+    env: Mapping[str, str] | None = None,
+) -> dict[str, Any]:
+    """Return sub-source level credential presence for Asia Disclosure.
+
+    Returns::
+
+        {
+          "any_configured": bool,
+          "all_configured": bool,
+          "sub_sources": {
+              "japan_edinet": {"configured": bool, "env_keys": [...]},
+              "korea_opendart": {"configured": bool, "env_keys": [...]},
+          },
+        }
+
+    Env values are never read or returned — only presence.
+    """
+    env_map = env if env is not None else os.environ
+    subs: dict[str, dict[str, Any]] = {}
+    any_configured = False
+    all_configured = True
+    for sub_name, keys in _ASIA_DISCLOSURE_SUB_KEY_GROUPS:
+        configured = any(str(env_map.get(k, "") or "").strip() for k in keys)
+        any_configured = any_configured or configured
+        all_configured = all_configured and configured
+        subs[sub_name] = {
+            "configured": bool(configured),
+            "env_keys": list(keys),
+        }
+    return {
+        "any_configured": bool(any_configured),
+        "all_configured": bool(all_configured),
+        "sub_sources": subs,
+    }
 
 
 def detect_source_credential_state(
@@ -664,6 +728,7 @@ __all__ = [
     "SOURCE_TIER_SECONDARY",
     "SOURCE_TIER_OPTIONAL",
     "SOURCE_TIER_PLANNED",
+    "asia_disclosure_subsource_state",
     "build_refresh_plan",
     "compute_source_freshness",
     "detect_source_credential_state",

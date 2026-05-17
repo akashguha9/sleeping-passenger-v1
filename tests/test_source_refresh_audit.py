@@ -78,15 +78,21 @@ def test_planned_partial_implemented_counts_add_up(tmp_path):
     assert total == payload["source_count"]
 
 
-def test_planned_sources_not_counted_implemented(tmp_path):
+def test_asia_disclosure_counted_partial_not_implemented(tmp_path):
+    """Asia Disclosure must be reported as PARTIAL — EDINET / OpenDART are
+    real, but the legacy SSE/SZSE/HKEX/TDnet/SGX/dart entries remain
+    placeholders.  It must NOT be counted as fully implemented and must
+    NOT be counted as planned."""
     payload = sra.run_audit(tmp_path / "absent.db")
-    # Registry contains an "asia_disclosure" entry that is planned.
-    planned_keys = [
+    by_key = {s["source_key"]: s for s in payload["source_statuses"]}
+    assert "asia_disclosure" in by_key
+    assert by_key["asia_disclosure"]["adapter_status"] == "partial"
+    implemented_keys = [
         s["source_key"]
         for s in payload["source_statuses"]
-        if s["adapter_status"] == "planned"
+        if s["adapter_status"] == "implemented"
     ]
-    assert "asia_disclosure" in planned_keys
+    assert "asia_disclosure" not in implemented_keys
 
 
 # ---------------------------------------------------------------------------

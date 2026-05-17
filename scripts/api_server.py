@@ -1317,6 +1317,30 @@ def _build_live_sources_status(
         elif source_tier == "optional" and not credential_configured:
             stale_excluded_reason = "optional_config_missing"
 
+        # Asia Disclosure is a partial adapter whose two real sub-sources
+        # (EDINET + OpenDART) each have their own env key (with aliases).
+        # ``requires_api_key`` on the parent registry record is False, so
+        # the generic ``credential_configured`` is always True for it.  Mark
+        # the parent ``optional_config_missing`` when neither sub-source has
+        # a key configured, so the UI can render the same not-configured
+        # banner it shows for Etherscan/Grok without keys.
+        if source_key == "asia_disclosure" and stale_excluded_reason is None:
+            try:
+                try:
+                    from scripts.live_source_registry import (
+                        asia_disclosure_subsource_state,
+                    )
+                except ModuleNotFoundError:  # pragma: no cover
+                    from live_source_registry import (  # type: ignore[no-redef]
+                        asia_disclosure_subsource_state,
+                    )
+                _asia_sub_state = asia_disclosure_subsource_state()
+            except Exception:
+                _asia_sub_state = {"any_configured": False, "sub_sources": {}}
+            if not bool(_asia_sub_state.get("any_configured")):
+                stale_excluded_reason = "optional_config_missing"
+            entry["asia_disclosure_subsource_state"] = _asia_sub_state
+
         is_stale = False
         if stale_excluded_reason is None:
             if freshness_state in {"stale", "overdue", "never_run", "failed"}:
@@ -1429,11 +1453,13 @@ def _build_live_sources_status(
         )
 
         # Coverage rows are an additional, source-level concept: a
-        # configured list rendered when the source is planned but the
-        # operator still wants to see "what would be covered if this were
-        # implemented."  Only Asia Disclosure exposes this today.
+        # configured list rendered when the source has a curated coverage
+        # set independent of any live runs.  Only Asia Disclosure exposes
+        # this today.  Always render the 11-row coverage list for it so
+        # the operator can see the country scope regardless of whether
+        # EDINET/OpenDART are configured or fresh.
         coverage_row_count = 0
-        if is_planned and source_key == "asia_disclosure":
+        if source_key == "asia_disclosure":
             try:
                 try:
                     from scripts.ingestion.asia_disclosure_loader import (
@@ -1458,6 +1484,28 @@ def _build_live_sources_status(
             rows_display_reason = "current_live"
             rows_are_current_live = True
             rows_are_archived = False
+            rows_are_stale = False
+        elif is_optional_missing and source_key == "asia_disclosure":
+            # Asia Disclosure always renders its country coverage list so
+            # the operator can see the 11-country scope even when neither
+            # EDINET nor OpenDART keys are configured.  Rows are NOT
+            # treated as current live — coverage only.
+            display_state = "optional_unconfigured_with_coverage"
+            current_live_count = 0
+            archived_row_count = persisted_row_count
+            display_count_label = (
+                "Coverage rows" if coverage_row_count > 0 else "Current live signals"
+            )
+            display_timestamp_label = "No live runs"
+            display_timestamp_value = None
+            source_display_warning = (
+                "Asia Disclosure is optional and not configured. Set "
+                "EDINET_API_KEY and/or OPENDART_API_KEY to enable live "
+                "fetches; coverage list below is configuration only."
+            )
+            rows_display_reason = "optional_config_missing_coverage"
+            rows_are_current_live = False
+            rows_are_archived = persisted_row_count > 0
             rows_are_stale = False
         elif is_optional_missing and persisted_row_count > 0:
             display_state = "optional_unconfigured_with_archive"

@@ -387,6 +387,11 @@ def _normalize_asia_disclosure_record(rec: dict[str, Any]) -> dict[str, Any]:
     ticker = str(rec.get("ticker_or_identifier") or "")
     exchange = str(rec.get("exchange_or_regulator") or "")
     jurisdiction = str(rec.get("jurisdiction") or "")
+    country = str(rec.get("country") or "")
+    disclosure_system = str(rec.get("disclosure_system") or "")
+    source_class = str(rec.get("source_class") or "")
+    doc_id = str(rec.get("doc_id") or "")
+    receipt_no = str(rec.get("receipt_no") or "")
     _raw_disclosure_type = rec.get("disclosure_type") or ""
     disclosure_type = _raw_disclosure_type or "asia_regulatory_disclosure"
     published_at = str(rec.get("published_at") or "")
@@ -409,7 +414,11 @@ def _normalize_asia_disclosure_record(rec: dict[str, Any]) -> dict[str, Any]:
 
     return {
         "event_id": _stable_event_id(
-            "asia_disclosure", provider, ticker or issuer_name, published_at, url
+            "asia_disclosure",
+            provider,
+            ticker or issuer_name or doc_id or receipt_no,
+            published_at,
+            url,
         ),
         "source_name": "asia_disclosure",
         "signal_type": "asia_regulatory_disclosure",
@@ -418,6 +427,11 @@ def _normalize_asia_disclosure_record(rec: dict[str, Any]) -> dict[str, Any]:
         "ticker_or_identifier": ticker,
         "exchange_or_regulator": exchange,
         "jurisdiction": jurisdiction,
+        "country": country,
+        "disclosure_system": disclosure_system,
+        "source_class": source_class,
+        "doc_id": doc_id,
+        "receipt_no": receipt_no,
         "disclosure_type": disclosure_type,
         "published_at": published_at,
         "url": url,
@@ -431,6 +445,8 @@ def _normalize_asia_disclosure_record(rec: dict[str, Any]) -> dict[str, Any]:
         "ai_execution_count": _AI_EXECUTION_COUNT,
         "broker_api_called": _BROKER_API_CALLED,
         "broker_order_id": "NONE",
+        "execution_permission": False,
+        "can_execute": False,
     }
 
 

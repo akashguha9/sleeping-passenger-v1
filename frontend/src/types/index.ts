@@ -534,6 +534,7 @@ export interface LiveSourceStatusEntry {
     | 'current_live'
     | 'optional_unconfigured_with_archive'
     | 'optional_unconfigured_empty'
+    | 'optional_unconfigured_with_coverage'
     | 'planned_coverage'
     | 'stale_active'
     | 'never_run'

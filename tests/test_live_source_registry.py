@@ -78,10 +78,13 @@ def test_partial_status_is_documented_when_used() -> None:
     assert families["global_filings"]["adapter_status"] == ADAPTER_PARTIAL
 
 
-def test_planned_status_is_documented_when_used() -> None:
+def test_asia_disclosure_status_is_partial() -> None:
+    """Asia Disclosure is now partial: EDINET (Japan) + OpenDART (Korea) are
+    wired as live official-API sub-sources, while the legacy SSE/SZSE/HKEX/
+    TDnet/SGX/dart entries remain placeholders.  ADAPTER_PLANNED must NOT
+    be used for asia_disclosure any more."""
     families = {f["source_key"]: f for f in list_live_source_families()}
-    # asia_disclosure is intentionally planned — all placeholders today.
-    assert families["asia_disclosure"]["adapter_status"] == ADAPTER_PLANNED
+    assert families["asia_disclosure"]["adapter_status"] == ADAPTER_PARTIAL
 
 
 # ---------------------------------------------------------------------------
@@ -170,10 +173,12 @@ def test_refresh_plan_default_includes_all_sources_in_canonical_order() -> None:
     plan = build_refresh_plan(env={})
     assert plan["cadence_hours"] == 6
     assert plan["requested_source_keys"] == list(EXPECTED_SOURCE_KEYS)
-    # All implemented (8) + 1 partial + 1 planned + 1 implemented = matches 11.
     assert set(plan["implemented"]).issubset(set(EXPECTED_SOURCE_KEYS))
-    assert "asia_disclosure" in plan["planned"]
+    # asia_disclosure is now PARTIAL (EDINET + OpenDART live; rest
+    # placeholder).  global_filings is also partial.
+    assert "asia_disclosure" in plan["partial"]
     assert "global_filings" in plan["partial"]
+    assert "asia_disclosure" not in plan["planned"]
 
 
 def test_refresh_plan_advisory_safety_stamps_present_per_entry() -> None:
@@ -215,11 +220,15 @@ def test_refresh_plan_unknown_source_raises() -> None:
         build_refresh_plan(["polymarket", "not_real"], env={})
 
 
-def test_refresh_plan_planned_source_not_claimed_implemented() -> None:
+def test_refresh_plan_partial_source_not_claimed_implemented() -> None:
+    """Asia Disclosure must be reported as PARTIAL (real sub-sources for
+    Japan/Korea, placeholders elsewhere), never as fully implemented and
+    never as fully planned."""
     plan = build_refresh_plan(["asia_disclosure"], env={})
-    assert plan["planned"] == ["asia_disclosure"]
+    assert plan["partial"] == ["asia_disclosure"]
     assert plan["implemented"] == []
-    assert plan["entries"][0]["adapter_status"] == ADAPTER_PLANNED
+    assert plan["planned"] == []
+    assert plan["entries"][0]["adapter_status"] == ADAPTER_PARTIAL
 
 
 def test_refresh_plan_dedupes_and_preserves_canonical_order() -> None:

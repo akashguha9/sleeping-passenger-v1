@@ -159,8 +159,11 @@ def test_tier_core_for_polymarket_and_gdelt():
     assert lsr.get_source_tier("gdelt") == lsr.SOURCE_TIER_CORE
 
 
-def test_tier_planned_for_asia_disclosure():
-    assert lsr.get_source_tier("asia_disclosure") == lsr.SOURCE_TIER_PLANNED
+def test_tier_optional_for_asia_disclosure():
+    """asia_disclosure has moved from PLANNED to OPTIONAL — its real
+    sub-sources (EDINET / OpenDART) take optional API keys; without them
+    the source is excluded from stale via optional_config_missing."""
+    assert lsr.get_source_tier("asia_disclosure") == lsr.SOURCE_TIER_OPTIONAL
 
 
 def test_tier_secondary_for_sec_edgar():
@@ -193,8 +196,8 @@ def test_list_live_source_families_includes_tier_on_every_entry():
 
 def test_compute_source_freshness_includes_tier():
     out = lsr.compute_source_freshness([], cadence_hours=6, now_epoch=0.0)
-    # asia_disclosure is planned but still gets a tier entry.
-    assert out["asia_disclosure"]["tier"] == lsr.SOURCE_TIER_PLANNED
+    # asia_disclosure is now partial/optional — tier reflects that.
+    assert out["asia_disclosure"]["tier"] == lsr.SOURCE_TIER_OPTIONAL
     assert out["polymarket"]["tier"] == lsr.SOURCE_TIER_CORE
 
 

@@ -244,7 +244,8 @@ function SignalEventCard({
   const sourceLabel = SOURCE_LABELS[ev.source_name] ?? ev.source_name;
   const isArchived =
     displayState === 'optional_unconfigured_with_archive' ||
-    displayState === 'planned_coverage';
+    displayState === 'planned_coverage' ||
+    displayState === 'optional_unconfigured_with_coverage';
   const isStaleRow = displayState === 'stale_active';
 
   return (
@@ -802,6 +803,20 @@ function SignalStatTiles({
       value: 'planned / not scored',
       small: true,
       testId: 'tile-status-planned',
+    });
+  } else if (displayState === 'optional_unconfigured_with_coverage') {
+    // Asia Disclosure when EDINET/OpenDART keys are missing: render the
+    // 11-country coverage list but never imply current_live presence.
+    tiles.push({
+      label: 'Coverage rows',
+      value: String(coverage),
+      testId: 'tile-coverage',
+    });
+    tiles.push({
+      label: 'Source status',
+      value: 'optional / not configured',
+      small: true,
+      testId: 'tile-status-optional-unconfigured',
     });
   } else if (displayState === 'stale_active') {
     tiles.push({

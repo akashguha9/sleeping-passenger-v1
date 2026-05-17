@@ -112,14 +112,22 @@ def test_source_failure_does_not_abort_whole_run(monkeypatch) -> None:
     assert report["summary"]["would_run"] >= 1
 
 
-def test_planned_adapter_skipped_with_clear_reason(monkeypatch) -> None:
+def test_partial_adapter_asia_disclosure_proceeds_to_would_run(monkeypatch) -> None:
+    """Asia Disclosure is no longer ADAPTER_PLANNED — EDINET (Japan) and
+    OpenDART (Korea) are wired official-API sub-sources.  The orchestrator
+    must therefore route it to would_run (or would_write in write mode),
+    not skip it with the legacy ``adapter_planned_not_implemented``
+    reason.  Sub-source-level missing-key handling lives in the loader."""
     _all_live_keys(monkeypatch)
     report = build_orchestrator_report(
         list(ALL_KEYS), write_mode=False, plan_only=False, cadence_hours=6
     )
     by_key = {e["source_key"]: e for e in report["entries"]}
-    assert by_key["asia_disclosure"]["action"] == "skipped"
-    assert by_key["asia_disclosure"]["reason"] == "adapter_planned_not_implemented"
+    assert by_key["asia_disclosure"]["action"] in {"would_run", "would_write"}
+    assert (
+        by_key["asia_disclosure"].get("reason", "")
+        != "adapter_planned_not_implemented"
+    )
 
 
 def test_write_must_be_explicit(monkeypatch) -> None:

@@ -49,6 +49,10 @@ def _strip_live_keys(monkeypatch) -> None:
         "SEC_DEFAULT_CIK",
         "SEC_DEFAULT_WATCHLIST",
         "SEC_USE_DEFAULT_WATCHLIST",
+        "EDINET_API_KEY",
+        "JAPAN_EDINET_API_KEY",
+        "OPENDART_API_KEY",
+        "KOREA_DART_API_KEY",
     ):
         monkeypatch.delenv(key, raising=False)
 
@@ -161,7 +165,9 @@ def test_etherscan_with_no_rows_renders_optional_empty(tmp_path, monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def test_asia_disclosure_planned_coverage_shape(tmp_path, monkeypatch):
+def test_asia_disclosure_optional_unconfigured_with_coverage_shape(tmp_path, monkeypatch):
+    """Without EDINET/OpenDART keys, Asia Disclosure renders coverage rows
+    only — no current-live signals, optional-not-configured warning."""
     _isolated_db(tmp_path, monkeypatch)
     _strip_live_keys(monkeypatch)
 
@@ -170,12 +176,13 @@ def test_asia_disclosure_planned_coverage_shape(tmp_path, monkeypatch):
     payload = _build_live_sources_status(now_iso="2026-05-17T17:00:00+00:00")
     entry = payload["sources"]["asia_disclosure"]
 
-    assert entry["display_state"] == "planned_coverage"
+    assert entry["display_state"] == "optional_unconfigured_with_coverage"
     assert entry["is_current_live"] is False
     assert entry["current_live_count"] == 0
     assert entry["coverage_row_count"] == 11
     assert entry["display_count_label"] == "Coverage rows"
-    assert "planned" in entry["source_display_warning"].lower()
+    warning = entry["source_display_warning"].lower()
+    assert "optional" in warning and "not configured" in warning
 
 
 def test_asia_disclosure_coverage_rows_exposed_at_top_level(tmp_path, monkeypatch):
@@ -316,7 +323,10 @@ def test_optional_and_planned_excluded_from_stale_count(tmp_path, monkeypatch):
     excluded = {(e["source"], e["reason"]) for e in payload.get("excluded_from_stale", [])}
     assert ("etherscan", "optional_config_missing") in excluded
     assert ("grok_xai", "optional_config_missing") in excluded
-    assert ("asia_disclosure", "planned_not_scored") in excluded
+    # Asia Disclosure: now adapter_status=partial with optional EDINET /
+    # OpenDART keys.  With no keys configured it is excluded via
+    # optional_config_missing instead of planned_not_scored.
+    assert ("asia_disclosure", "optional_config_missing") in excluded
 
 
 def test_advisory_invariants_intact_under_display_state(tmp_path, monkeypatch):

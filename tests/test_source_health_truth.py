@@ -113,11 +113,14 @@ def test_present_credentials_allow_never_run_state():
 # ---------------------------------------------------------------------------
 
 
-def test_planned_source_is_not_claimed_implemented():
+def test_asia_disclosure_is_partial_not_implemented():
+    """Asia Disclosure must report PARTIAL — never IMPLEMENTED — because
+    only EDINET and OpenDART are real; the rest remain placeholders.
+    Without keys, freshness is never_run (no runs yet), which is also
+    honest."""
     now = 1_700_000_000.0
     result = lsr.compute_source_freshness([], cadence_hours=6, now_epoch=now)
-    assert result["asia_disclosure"]["adapter_status"] == lsr.ADAPTER_PLANNED
-    # Planned sources without runs should be never_run, not fresh
+    assert result["asia_disclosure"]["adapter_status"] == lsr.ADAPTER_PARTIAL
     assert result["asia_disclosure"]["freshness_state"] == lsr.FRESHNESS_NEVER_RUN
 
 

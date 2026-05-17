@@ -107,13 +107,16 @@ def test_india_loader_remains_untouched():
     assert "India" in india["display_name"] or "india" in india["display_name"].lower()
 
 
-def test_asia_disclosure_source_family_remains_planned():
-    """The source-health registry classification can remain planned/not
-    scored — that is correct and honest until a real integration exists.
-    Country-list configuration and source-health scoring are intentionally
-    independent layers."""
+def test_asia_disclosure_source_family_is_partial_with_official_apis():
+    """Asia Disclosure now wires EDINET (Japan) + OpenDART (Korea) official
+    APIs as real sub-sources.  Family status moves from planned to partial
+    because the remaining providers (SSE/SZSE/HKEX/TDnet/SGX/legacy-DART)
+    remain placeholders.  Tier moves to optional so missing keys are
+    informational, not stale."""
     from scripts.live_source_registry import get_source_family
 
     family = get_source_family("asia_disclosure")
-    assert family["adapter_status"] == "planned"
-    assert family["tier"] == "planned"
+    assert family["adapter_status"] in {"partial", "implemented"}
+    assert family["tier"] == "optional"
+    assert "EDINET_API_KEY" in family["env_keys"]
+    assert "OPENDART_API_KEY" in family["env_keys"]
