@@ -1320,10 +1320,19 @@ def _build_live_sources_status(
         # Asia Disclosure is a partial adapter whose two real sub-sources
         # (EDINET + OpenDART) each have their own env key (with aliases).
         # ``requires_api_key`` on the parent registry record is False, so
-        # the generic ``credential_configured`` is always True for it.  Mark
-        # the parent ``optional_config_missing`` when neither sub-source has
-        # a key configured, so the UI can render the same not-configured
-        # banner it shows for Etherscan/Grok without keys.
+        # the generic ``credential_configured`` is always True for it.  We
+        # mark the parent ``optional_config_missing`` ONLY when *both*
+        # conditions hold:
+        #   (a) neither sub-source has a key configured in this process's
+        #       env, AND
+        #   (b) no active sub-source has produced a successful run — i.e.
+        #       freshness_state is not "fresh" and the last refresh did
+        #       not succeed.
+        # Condition (b) closes the contradiction where a successful
+        # OpenDART/EDINET refresh marks the parent HEALTHY but a later
+        # render in a process with no env key still slanders it as
+        # "optional — not configured".  The truth filter respects the
+        # actual run history, not just the env probe.
         if source_key == "asia_disclosure" and stale_excluded_reason is None:
             try:
                 try:
@@ -1337,8 +1346,15 @@ def _build_live_sources_status(
                 _asia_sub_state = asia_disclosure_subsource_state()
             except Exception:
                 _asia_sub_state = {"any_configured": False, "sub_sources": {}}
-            if not bool(_asia_sub_state.get("any_configured")):
+            any_sub_configured = bool(_asia_sub_state.get("any_configured"))
+            has_active_subsource_success = bool(
+                freshness_state == "fresh" or last_refresh_success
+            )
+            if not any_sub_configured and not has_active_subsource_success:
                 stale_excluded_reason = "optional_config_missing"
+            _asia_sub_state["has_active_subsource_success"] = (
+                has_active_subsource_success
+            )
             entry["asia_disclosure_subsource_state"] = _asia_sub_state
 
         is_stale = False

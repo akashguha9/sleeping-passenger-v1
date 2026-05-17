@@ -531,3 +531,200 @@ def test_india_remains_its_own_source_family():
     assert "india" in ALL_SOURCE_KEYS
     india = get_source_family("india")
     assert india["adapter_status"] == "implemented"
+
+
+# ---------------------------------------------------------------------------
+# Asia Disclosure — excluded_from_stale must reflect sub-source health
+# (EDINET / OpenDART integration).  See the truth-fix doc: HEALTHY parent
+# + "optional — not configured" stale-banner row is a contradiction.
+# ---------------------------------------------------------------------------
+
+
+def _seed_asia_disclosure_success(
+    db_path: Path,
+    *,
+    timestamp: str = "2026-05-17T16:55:00+00:00",
+    refresh_finished_at: str = "2026-05-17T16:55:01+00:00",
+    fetched: int = 3,
+) -> None:
+    """Seed a successful OpenDART-style source_run_log + refresh row so
+    asia_disclosure looks freshly healthy in this DB."""
+    import scripts.persistence as p
+
+    p.log_source_run(
+        source_name="asia_disclosure",
+        status="ok",
+        fetched_count=fetched,
+        skipped_reason="",
+        error_message="",
+        timestamp_utc=timestamp,
+        duration_ms=20,
+        db_path=db_path,
+    )
+    p.record_live_source_refresh_run(
+        run_id="asia-ok-1",
+        source_name="asia_disclosure",
+        attempted=True,
+        success=True,
+        skipped=False,
+        started_at=timestamp,
+        finished_at=refresh_finished_at,
+        duration_seconds=1.0,
+        rows_before=0,
+        rows_after=fetched,
+        rows_added=fetched,
+        db_path=db_path,
+    )
+    for i in range(fetched):
+        p.insert_signal_event(
+            event_id=f"asia_disclosure-opendart-{i}",
+            source_name="asia_disclosure",
+            raw_payload={
+                "provider": "opendart",
+                "disclosure_system": "OpenDART",
+                "country": "South Korea",
+                "source_class": "official_api",
+                "title": f"OpenDART filing {i}",
+            },
+            fetched_at=timestamp,
+            db_path=db_path,
+        )
+
+
+def test_asia_disclosure_with_opendart_success_is_not_optional_config_missing(
+    tmp_path, monkeypatch
+):
+    """OPENDART_API_KEY configured and a recent successful run → parent
+    must NOT be flagged optional_config_missing in excluded_from_stale,
+    and the per-entry stale_excluded_reason must be absent.  This is the
+    core contradiction the truth-fix closes."""
+    db = _isolated_db(tmp_path, monkeypatch)
+    _strip_live_keys(monkeypatch)
+    monkeypatch.setenv("OPENDART_API_KEY", "placeholder")
+
+    _seed_asia_disclosure_success(db)
+
+    from scripts.api_server import _build_live_sources_status
+
+    payload = _build_live_sources_status(now_iso="2026-05-17T17:00:00+00:00")
+    entry = payload["sources"]["asia_disclosure"]
+
+    assert entry.get("stale_excluded_reason") is None
+    assert entry["is_stale"] is False
+    excluded = {(e["source"], e["reason"]) for e in payload.get("excluded_from_stale", [])}
+    assert ("asia_disclosure", "optional_config_missing") not in excluded
+
+    # And the parent should look like a current-live, configured source.
+    assert entry["is_current_live"] is True
+    assert entry["display_state"] == "current_live"
+    assert entry["current_live_count"] == 3
+
+
+def test_asia_disclosure_with_both_keys_missing_is_optional_config_missing(
+    tmp_path, monkeypatch
+):
+    """When BOTH EDINET and OpenDART keys are missing and no active
+    sub-source has succeeded, optional_config_missing is the truthful
+    label and the source belongs in excluded_from_stale."""
+    _isolated_db(tmp_path, monkeypatch)
+    _strip_live_keys(monkeypatch)
+
+    from scripts.api_server import _build_live_sources_status
+
+    payload = _build_live_sources_status(now_iso="2026-05-17T17:00:00+00:00")
+    entry = payload["sources"]["asia_disclosure"]
+
+    assert entry["is_stale"] is False
+    assert entry.get("stale_excluded_reason") == "optional_config_missing"
+    excluded = {(e["source"], e["reason"]) for e in payload.get("excluded_from_stale", [])}
+    assert ("asia_disclosure", "optional_config_missing") in excluded
+
+
+def test_asia_disclosure_edinet_no_rows_opendart_success_is_partial_healthy(
+    tmp_path, monkeypatch
+):
+    """If EDINET reports no_rows but OpenDART succeeds, the parent must
+    surface as fresh/healthy (a real sub-source produced data) and never
+    as optional_config_missing.  Truthful PARTIAL HEALTHY — not faked."""
+    db = _isolated_db(tmp_path, monkeypatch)
+    _strip_live_keys(monkeypatch)
+    # Only OpenDART key present in the env.
+    monkeypatch.setenv("OPENDART_API_KEY", "placeholder")
+
+    # OpenDART produced rows; record a successful refresh.  No EDINET rows.
+    _seed_asia_disclosure_success(db, fetched=2)
+
+    from scripts.api_server import _build_live_sources_status
+
+    payload = _build_live_sources_status(now_iso="2026-05-17T17:00:00+00:00")
+    entry = payload["sources"]["asia_disclosure"]
+
+    assert entry.get("stale_excluded_reason") is None
+    assert entry["is_stale"] is False
+    assert entry["freshness_state"] == "fresh"
+    assert entry["is_current_live"] is True
+    # Health score derived from freshness=fresh + scored path → healthy.
+    assert entry.get("health_label") == "healthy"
+    # Sub-source state reflects the partial truth: OpenDART configured,
+    # EDINET not — but the parent is not labelled missing-config.
+    sub = entry.get("asia_disclosure_subsource_state") or {}
+    assert sub.get("any_configured") is True
+    assert sub.get("has_active_subsource_success") is True
+    sub_map = sub.get("sub_sources") or {}
+    assert sub_map.get("korea_opendart", {}).get("configured") is True
+    assert sub_map.get("japan_edinet", {}).get("configured") is False
+
+
+def test_asia_disclosure_healthy_payload_has_no_optional_config_missing_in_excluded(
+    tmp_path, monkeypatch
+):
+    """Stale-banner reason must match backend per-entry truth: when
+    asia_disclosure shows up as healthy/fresh in the per-source map, it
+    must NOT appear in excluded_from_stale with optional_config_missing.
+
+    This is the cross-field consistency check the UI relies on — the
+    frontend ``StaleRefreshBanner`` reads ``excluded_from_stale`` and
+    must not contradict the ``sources`` table the UI also renders.
+    """
+    db = _isolated_db(tmp_path, monkeypatch)
+    _strip_live_keys(monkeypatch)
+    monkeypatch.setenv("OPENDART_API_KEY", "placeholder")
+
+    _seed_asia_disclosure_success(db)
+
+    from scripts.api_server import _build_live_sources_status
+
+    payload = _build_live_sources_status(now_iso="2026-05-17T17:00:00+00:00")
+    entry = payload["sources"]["asia_disclosure"]
+    healthy = entry.get("health_label") == "healthy" and entry["is_current_live"]
+    excluded = {(e["source"], e["reason"]) for e in payload.get("excluded_from_stale", [])}
+    if healthy:
+        assert ("asia_disclosure", "optional_config_missing") not in excluded, (
+            "healthy parent must not appear in excluded_from_stale as "
+            "optional_config_missing"
+        )
+        assert entry.get("stale_excluded_reason") is None
+
+
+def test_asia_disclosure_not_excluded_when_no_key_but_run_succeeded(
+    tmp_path, monkeypatch
+):
+    """The central truth-fix guarantee: a process whose env no longer has
+    the sub-source key but whose DB shows a successful sub-source run
+    must NOT slander the source as optional_config_missing.  Run history
+    is the source of truth, not just the env probe.
+    """
+    db = _isolated_db(tmp_path, monkeypatch)
+    _strip_live_keys(monkeypatch)
+    # Simulate: key was set when refresh ran; rows persisted; env now bare.
+    _seed_asia_disclosure_success(db)
+
+    from scripts.api_server import _build_live_sources_status
+
+    payload = _build_live_sources_status(now_iso="2026-05-17T17:00:00+00:00")
+    excluded = {e["source"] for e in payload.get("excluded_from_stale", [])}
+    assert "asia_disclosure" not in excluded
+    entry = payload["sources"]["asia_disclosure"]
+    assert entry.get("stale_excluded_reason") is None
+    sub = entry.get("asia_disclosure_subsource_state") or {}
+    assert sub.get("has_active_subsource_success") is True
