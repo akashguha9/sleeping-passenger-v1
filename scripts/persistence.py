@@ -1327,10 +1327,18 @@ def insert_signal_event(
 def get_signal_events(
     source_name: str | None = None,
     limit: int = 100,
-    db_path: Path = DB_PATH,
+    db_path: Path | None = None,
 ) -> list[dict[str, Any]]:
-    """Return recent signal events, optionally filtered by source."""
-    conn = _get_conn(db_path)
+    """Return recent signal events, optionally filtered by source.
+
+    Resolves ``DB_PATH`` lazily so tests that monkeypatch
+    ``persistence.DB_PATH`` see the override.  Python default arguments
+    bind at function-definition time, which we deliberately avoid here so
+    /live-signals reads do not leak into the runtime DB during isolated
+    tests.
+    """
+    target = db_path if db_path is not None else DB_PATH
+    conn = _get_conn(target)
     try:
         if source_name:
             rows = conn.execute(

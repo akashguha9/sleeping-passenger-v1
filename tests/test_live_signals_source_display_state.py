@@ -229,7 +229,15 @@ def test_asia_disclosure_coverage_keyed_by_source(tmp_path, monkeypatch):
 
 def test_asia_disclosure_does_not_fake_live_signals(tmp_path, monkeypatch):
     """Coverage rows are configuration only — they must NEVER appear as
-    rows in /live-signals or be counted as current_live."""
+    rows in /live-signals or be counted as current_live.
+
+    Real EDINET/OpenDART rows are allowed once ingestion succeeds, but in
+    the isolated no-key/no-ingestion setup the count is 0 because nothing
+    has been persisted into the test DB.  This test pins both invariants:
+    (a) coverage countries never bleed into signal_events, (b) the
+    monkeypatched DB is the only DB read by _get_live_signals (regression
+    for the previous default-arg DB_PATH leak that exposed runtime rows).
+    """
     _isolated_db(tmp_path, monkeypatch)
     _strip_live_keys(monkeypatch)
 
@@ -240,9 +248,152 @@ def test_asia_disclosure_does_not_fake_live_signals(tmp_path, monkeypatch):
     assert entry["current_live_count"] == 0
     assert entry["rows_are_current_live"] is False
 
+    # Isolated, empty DB: no ingestion has occurred, no rows must surface.
     signals = _get_live_signals(source_name="asia_disclosure", limit=200)
     assert signals["count"] == 0
     assert signals["live_signal_events"] == []
+
+    # Coverage rows are configuration metadata — they must not be
+    # synthesised into signal_events.  Cross-check the coverage countries
+    # never appear as event source rows.
+    coverage_countries = {
+        r["country"]
+        for r in (payload.get("asia_disclosure_coverage_rows") or [])
+    }
+    assert coverage_countries  # sanity: coverage table is populated
+    for event in signals["live_signal_events"]:
+        payload_blob = event.get("raw_payload") or {}
+        # If a row ever appears, its country must come from real
+        # provider data, not be a bare echo of the coverage row.
+        if isinstance(payload_blob, dict):
+            assert payload_blob.get("source_class") != "coverage_only"
+
+
+def test_asia_disclosure_real_provider_rows_appear_as_live_signals(
+    tmp_path, monkeypatch
+):
+    """Real EDINET/OpenDART rows persisted into signal_events are
+    legitimate Asia Disclosure live signals and MUST be returned by
+    _get_live_signals with provider/disclosure_system/source_class
+    metadata that proves they came from an official API — not coverage."""
+    import scripts.persistence as p
+
+    db = _isolated_db(tmp_path, monkeypatch)
+    _strip_live_keys(monkeypatch)
+
+    p.insert_signal_event(
+        event_id="asia_disclosure_edinet_test_1",
+        source_name="asia_disclosure",
+        raw_payload={
+            "signal_type": "asia_regulatory_disclosure",
+            "issuer_name": "Test EDINET Issuer",
+            "ticker_or_identifier": "1234",
+            "exchange_or_regulator": "EDINET",
+            "jurisdiction": "JP",
+            "country": "Japan",
+            "disclosure_system": "EDINET",
+            "provider": "edinet",
+            "source_class": "official_api",
+            "title": "EDINET Filing",
+        },
+        fetched_at="2026-05-17T10:00:00+00:00",
+        db_path=db,
+    )
+    p.insert_signal_event(
+        event_id="asia_disclosure_opendart_test_1",
+        source_name="asia_disclosure",
+        raw_payload={
+            "signal_type": "asia_regulatory_disclosure",
+            "issuer_name": "Test OpenDART Issuer",
+            "ticker_or_identifier": "005930",
+            "exchange_or_regulator": "OpenDART",
+            "jurisdiction": "KR",
+            "country": "South Korea",
+            "disclosure_system": "OpenDART",
+            "provider": "opendart",
+            "source_class": "official_api",
+            "title": "OpenDART Filing",
+        },
+        fetched_at="2026-05-17T11:00:00+00:00",
+        db_path=db,
+    )
+
+    from scripts.api_server import _get_live_signals
+
+    signals = _get_live_signals(source_name="asia_disclosure", limit=200)
+    assert signals["count"] == 2
+
+    providers = set()
+    systems = set()
+    countries = set()
+    for event in signals["live_signal_events"]:
+        payload_blob = event["raw_payload"]
+        assert isinstance(payload_blob, dict)
+        # Real provider rows carry these official-API markers.
+        assert payload_blob["source_class"] == "official_api"
+        providers.add(payload_blob["provider"])
+        systems.add(payload_blob["disclosure_system"])
+        countries.add(payload_blob["country"])
+    assert providers == {"edinet", "opendart"}
+    assert systems == {"EDINET", "OpenDART"}
+    assert countries == {"Japan", "South Korea"}
+
+    # Coverage-table-only countries (e.g. those without an active API in
+    # this test) MUST NOT appear merely because they are listed in the
+    # coverage rows.
+    assert "China" not in countries
+    assert "Singapore" not in countries
+
+    # Advisory invariants are stamped onto every event.
+    for event in signals["live_signal_events"]:
+        assert event["advisory_status"] == "ADVISORY_ONLY"
+        assert event["execution_gate"] == "LOCKED"
+        assert event["ai_execution_count"] == 0
+    assert signals["advisory_status"] == "ADVISORY_ONLY"
+    assert signals["human_review_required"] is True
+    assert signals["ai_execution_count"] == 0
+
+
+def test_get_live_signals_uses_isolated_db_path(tmp_path, monkeypatch):
+    """Regression: _get_live_signals must honour the monkeypatched
+    persistence.DB_PATH.  Previously ``get_signal_events`` froze the
+    default ``db_path=DB_PATH`` at function-definition time, so callers
+    that did not pass an explicit path silently read from the real
+    runtime DB (``runtime/mvp_local.db``).  This test pins lazy
+    resolution by seeding only the isolated DB and asserting the runtime
+    DB's rows do not leak through."""
+    import scripts.persistence as p
+
+    db = _isolated_db(tmp_path, monkeypatch)
+    _strip_live_keys(monkeypatch)
+
+    # Seed two distinct rows into the isolated DB only.
+    p.insert_signal_event(
+        event_id="iso-edinet-1",
+        source_name="asia_disclosure",
+        raw_payload={"provider": "edinet", "source_class": "official_api"},
+        fetched_at="2026-05-17T09:00:00+00:00",
+        db_path=db,
+    )
+    p.insert_signal_event(
+        event_id="iso-opendart-1",
+        source_name="asia_disclosure",
+        raw_payload={"provider": "opendart", "source_class": "official_api"},
+        fetched_at="2026-05-17T09:01:00+00:00",
+        db_path=db,
+    )
+
+    from scripts.api_server import _get_live_signals
+
+    signals = _get_live_signals(source_name="asia_disclosure", limit=500)
+    # Exactly the two seeded rows — never the runtime DB's rows.
+    assert signals["count"] == 2
+    event_ids = {e["event_id"] for e in signals["live_signal_events"]}
+    assert event_ids == {"iso-edinet-1", "iso-opendart-1"}
+
+    # Sanity-check unrelated sources also resolve through the same DB.
+    other = _get_live_signals(source_name="gdelt", limit=10)
+    assert other["count"] == 0
 
 
 # ---------------------------------------------------------------------------
