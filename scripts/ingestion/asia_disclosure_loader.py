@@ -1,5 +1,5 @@
 """
-Asia Disclosure unified read-only loader — Phase C.8 (EDINET/OpenDART wired).
+Asia Disclosure unified read-only loader — Phase C.8 + public-page sprint.
 
 This loader fans out to per-country sub-sources and aggregates their
 read-only metadata into the canonical Asia Disclosure stream.
@@ -14,6 +14,17 @@ Sub-source status (May 2026):
                            without scraping or paid registration.  Kept as
                            inactive entries so country/jurisdiction filters
                            remain meaningful.
+  - Public-page providers (sgx_public, mops, hkexnews, cninfo, tadawul,
+    adx, dfm, kap, idx, tase_magna, russia):
+                           registered with verified landing URLs and a
+                           generic public-page fetch/parse path.  Each
+                           ships ``active=False`` + ``source_class=
+                           planned_public_page`` until a per-source parser
+                           is verified against live responses.  Inactive
+                           public-page providers are excluded from stale
+                           accounting and never produce fake rows.  The
+                           parser path is exercised in tests by flipping
+                           ``active`` via a patched ``_PROVIDER_CONFIGS``.
 
 Safety
 ------
@@ -60,17 +71,83 @@ ASIA_DISCLOSURE_COUNTRIES: tuple[str, ...] = (
 )
 
 _ASIA_DISCLOSURE_COUNTRY_ROWS: tuple[dict[str, str], ...] = (
-    {"country": "China", "disclosure_source": "", "source_url": "", "status": "Active", "notes": ""},
-    {"country": "Japan", "disclosure_source": "EDINET", "source_url": "", "status": "Active", "notes": ""},
-    {"country": "Russia", "disclosure_source": "", "source_url": "", "status": "Active", "notes": ""},
-    {"country": "South Korea", "disclosure_source": "OpenDART", "source_url": "", "status": "Active", "notes": ""},
-    {"country": "Turkey", "disclosure_source": "", "source_url": "", "status": "Active", "notes": ""},
-    {"country": "Indonesia", "disclosure_source": "", "source_url": "", "status": "Active", "notes": ""},
-    {"country": "Saudi Arabia", "disclosure_source": "", "source_url": "", "status": "Active", "notes": ""},
-    {"country": "Taiwan", "disclosure_source": "", "source_url": "", "status": "Active", "notes": ""},
-    {"country": "Israel", "disclosure_source": "", "source_url": "", "status": "Active", "notes": ""},
-    {"country": "Singapore", "disclosure_source": "", "source_url": "", "status": "Active", "notes": ""},
-    {"country": "United Arab Emirates", "disclosure_source": "", "source_url": "", "status": "Active", "notes": ""},
+    {
+        "country": "China",
+        "disclosure_source": "CNINFO",
+        "source_url": "http://www.cninfo.com.cn/new/index",
+        "status": "Active",
+        "notes": "Cninfo public disclosure index (planned public-page parser).",
+    },
+    {
+        "country": "Japan",
+        "disclosure_source": "EDINET",
+        "source_url": "https://disclosure2.edinet-fsa.go.jp/",
+        "status": "Active",
+        "notes": "EDINET official API wired (Subscription-Key required).",
+    },
+    {
+        "country": "Russia",
+        "disclosure_source": "",
+        "source_url": "",
+        "status": "Active",
+        "notes": "Russia disclosure ingestion planned pending safe public source verification.",
+    },
+    {
+        "country": "South Korea",
+        "disclosure_source": "OpenDART",
+        "source_url": "https://opendart.fss.or.kr/",
+        "status": "Active",
+        "notes": "OpenDART official API wired (crtfc_key required).",
+    },
+    {
+        "country": "Turkey",
+        "disclosure_source": "KAP",
+        "source_url": "https://www.kap.org.tr/en/",
+        "status": "Active",
+        "notes": "KAP public disclosure platform (planned public-page parser).",
+    },
+    {
+        "country": "Indonesia",
+        "disclosure_source": "IDX",
+        "source_url": "https://www.idx.co.id/en/news/news/",
+        "status": "Active",
+        "notes": "IDX news / company announcements (planned public-page parser).",
+    },
+    {
+        "country": "Saudi Arabia",
+        "disclosure_source": "Saudi Exchange (Tadawul)",
+        "source_url": "https://www.saudiexchange.sa/wps/portal/saudiexchange/newsandreports/issuer-news",
+        "status": "Active",
+        "notes": "Tadawul issuer news (planned public-page parser).",
+    },
+    {
+        "country": "Taiwan",
+        "disclosure_source": "MOPS",
+        "source_url": "https://mops.twse.com.tw/mops/web/index",
+        "status": "Active",
+        "notes": "Taiwan MOPS public disclosure search (planned public-page parser).",
+    },
+    {
+        "country": "Israel",
+        "disclosure_source": "TASE Maya / MAGNA",
+        "source_url": "https://maya.tase.co.il/",
+        "status": "Active",
+        "notes": "TASE Maya / ISA MAGNA disclosures (planned public-page parser).",
+    },
+    {
+        "country": "Singapore",
+        "disclosure_source": "SGX",
+        "source_url": "https://www.sgx.com/securities/company-announcements",
+        "status": "Active",
+        "notes": "SGX company announcements (planned public-page parser).",
+    },
+    {
+        "country": "United Arab Emirates",
+        "disclosure_source": "ADX / DFM",
+        "source_url": "https://www.adx.ae/English/Pages/NewsAndEvents/CompaniesDisclosure.aspx",
+        "status": "Active",
+        "notes": "Abu Dhabi Securities Exchange + Dubai Financial Market (planned public-page parsers).",
+    },
 )
 
 
@@ -223,11 +300,265 @@ _PROVIDER_CONFIGS: dict[str, dict[str, Any]] = {
             "provider which uses OPENDART_API_KEY."
         ),
     },
+    # ------------------------------------------------------------------
+    # Public-page providers (no API key, no login).  All ship inactive
+    # with ``source_class='planned_public_page'`` until a per-source
+    # parser is verified against live responses.  When activated, the
+    # loader uses the generic public-page fetch path
+    # (``_fetch_public_page_provider``) and per-source response shape
+    # extractors.  Every entry below ships a real, well-known landing
+    # URL — no fabricated endpoints, no example.com placeholders.
+    # ------------------------------------------------------------------
+    "sgx_public": {
+        "jurisdiction": "SG",
+        "country": "Singapore",
+        "exchange_or_regulator": "SGX",
+        "disclosure_system": "SGX Company Announcements",
+        "disclosure_type": "exchange_announcement",
+        "url": None,
+        "landing_url": "https://www.sgx.com/securities/company-announcements",
+        "params": {},
+        "requires_key": False,
+        "key_env": None,
+        "alt_key_envs": (),
+        "active": False,
+        "source_class": "planned_public_page",
+        "fetch_kind": "html",
+        "language": "en",
+        "note": (
+            "Singapore Exchange company announcements — public listing page; "
+            "parser not yet wired (planned_public_page)."
+        ),
+    },
+    "mops": {
+        "jurisdiction": "TW",
+        "country": "Taiwan",
+        "exchange_or_regulator": "MOPS",
+        "disclosure_system": "Taiwan MOPS (Market Observation Post System)",
+        "disclosure_type": "exchange_announcement",
+        "url": None,
+        "landing_url": "https://mops.twse.com.tw/mops/web/index",
+        "params": {},
+        "requires_key": False,
+        "key_env": None,
+        "alt_key_envs": (),
+        "active": False,
+        "source_class": "planned_public_page",
+        "fetch_kind": "html",
+        "language": "zh-TW",
+        "note": (
+            "Taiwan MOPS public disclosure search — parser not yet wired "
+            "(planned_public_page)."
+        ),
+    },
+    "hkexnews": {
+        "jurisdiction": "HK",
+        "country": "Hong Kong",
+        "exchange_or_regulator": "HKEXnews",
+        "disclosure_system": "HKEXnews",
+        "disclosure_type": "exchange_announcement",
+        "url": None,
+        "landing_url": "https://www.hkexnews.hk/",
+        "params": {},
+        "requires_key": False,
+        "key_env": None,
+        "alt_key_envs": (),
+        "active": False,
+        "source_class": "planned_public_page",
+        "fetch_kind": "html",
+        "language": "en",
+        "note": (
+            "HKEXnews public listing — parser not yet wired "
+            "(planned_public_page)."
+        ),
+    },
+    "cninfo": {
+        "jurisdiction": "CN",
+        "country": "China",
+        "exchange_or_regulator": "CNINFO",
+        "disclosure_system": "CNINFO",
+        "disclosure_type": "exchange_announcement",
+        "url": None,
+        "landing_url": "http://www.cninfo.com.cn/new/index",
+        "params": {},
+        "requires_key": False,
+        "key_env": None,
+        "alt_key_envs": (),
+        "active": False,
+        "source_class": "planned_public_page",
+        "fetch_kind": "html",
+        "language": "zh-CN",
+        "note": (
+            "Cninfo (China) public disclosure index — parser not yet wired "
+            "(planned_public_page)."
+        ),
+    },
+    "tadawul": {
+        "jurisdiction": "SA",
+        "country": "Saudi Arabia",
+        "exchange_or_regulator": "Saudi Exchange (Tadawul)",
+        "disclosure_system": "Tadawul Issuer News",
+        "disclosure_type": "exchange_announcement",
+        "url": None,
+        "landing_url": (
+            "https://www.saudiexchange.sa/wps/portal/saudiexchange/newsandreports/issuer-news"
+        ),
+        "params": {},
+        "requires_key": False,
+        "key_env": None,
+        "alt_key_envs": (),
+        "active": False,
+        "source_class": "planned_public_page",
+        "fetch_kind": "html",
+        "language": "en",
+        "note": (
+            "Saudi Exchange (Tadawul) issuer news — parser not yet wired "
+            "(planned_public_page)."
+        ),
+    },
+    "adx": {
+        "jurisdiction": "AE",
+        "country": "United Arab Emirates",
+        "exchange_or_regulator": "ADX",
+        "disclosure_system": "Abu Dhabi Securities Exchange Disclosures",
+        "disclosure_type": "exchange_announcement",
+        "url": None,
+        "landing_url": (
+            "https://www.adx.ae/English/Pages/NewsAndEvents/CompaniesDisclosure.aspx"
+        ),
+        "params": {},
+        "requires_key": False,
+        "key_env": None,
+        "alt_key_envs": (),
+        "active": False,
+        "source_class": "planned_public_page",
+        "fetch_kind": "html",
+        "language": "en",
+        "note": (
+            "Abu Dhabi Securities Exchange disclosures — parser not yet wired "
+            "(planned_public_page)."
+        ),
+    },
+    "dfm": {
+        "jurisdiction": "AE",
+        "country": "United Arab Emirates",
+        "exchange_or_regulator": "DFM",
+        "disclosure_system": "Dubai Financial Market Disclosures",
+        "disclosure_type": "exchange_announcement",
+        "url": None,
+        "landing_url": "https://www.dfm.ae/issuers/listed-securities/disclosures",
+        "params": {},
+        "requires_key": False,
+        "key_env": None,
+        "alt_key_envs": (),
+        "active": False,
+        "source_class": "planned_public_page",
+        "fetch_kind": "html",
+        "language": "en",
+        "note": (
+            "Dubai Financial Market disclosures — parser not yet wired "
+            "(planned_public_page)."
+        ),
+    },
+    "kap": {
+        "jurisdiction": "TR",
+        "country": "Turkey",
+        "exchange_or_regulator": "KAP",
+        "disclosure_system": "KAP Public Disclosure Platform",
+        "disclosure_type": "exchange_announcement",
+        "url": None,
+        "landing_url": "https://www.kap.org.tr/en/",
+        "params": {},
+        "requires_key": False,
+        "key_env": None,
+        "alt_key_envs": (),
+        "active": False,
+        "source_class": "planned_public_page",
+        "fetch_kind": "html",
+        "language": "tr",
+        "note": (
+            "KAP Turkey public disclosure platform — parser not yet wired "
+            "(planned_public_page)."
+        ),
+    },
+    "idx": {
+        "jurisdiction": "ID",
+        "country": "Indonesia",
+        "exchange_or_regulator": "IDX",
+        "disclosure_system": "Indonesia Stock Exchange News",
+        "disclosure_type": "exchange_announcement",
+        "url": None,
+        "landing_url": "https://www.idx.co.id/en/news/news/",
+        "params": {},
+        "requires_key": False,
+        "key_env": None,
+        "alt_key_envs": (),
+        "active": False,
+        "source_class": "planned_public_page",
+        "fetch_kind": "html",
+        "language": "en",
+        "note": (
+            "Indonesia Stock Exchange (IDX) news / disclosures — parser not "
+            "yet wired (planned_public_page)."
+        ),
+    },
+    "tase_magna": {
+        "jurisdiction": "IL",
+        "country": "Israel",
+        "exchange_or_regulator": "TASE / MAGNA",
+        "disclosure_system": "TASE Maya / ISA MAGNA",
+        "disclosure_type": "regulatory_disclosure",
+        "url": None,
+        "landing_url": "https://maya.tase.co.il/",
+        "params": {},
+        "requires_key": False,
+        "key_env": None,
+        "alt_key_envs": (),
+        "active": False,
+        "source_class": "planned_public_page",
+        "fetch_kind": "html",
+        "language": "he",
+        "note": (
+            "Israel TASE Maya / MAGNA disclosures — parser not yet wired "
+            "(planned_public_page)."
+        ),
+    },
+    "russia": {
+        "jurisdiction": "RU",
+        "country": "Russia",
+        "exchange_or_regulator": "MOEX/CDR",
+        "disclosure_system": "Russia disclosure (planned)",
+        "disclosure_type": "exchange_announcement",
+        "url": None,
+        "landing_url": None,
+        "params": {},
+        "requires_key": False,
+        "key_env": None,
+        "alt_key_envs": (),
+        "active": False,
+        "source_class": "planned_public_page",
+        "fetch_kind": "html",
+        "language": "ru",
+        "note": (
+            "Russia disclosure ingestion is PLANNED pending verification of a "
+            "safe, public, non-login source.  No URL is registered until "
+            "such a source is verified."
+        ),
+    },
 }
 
 _HEADERS = {
     "User-Agent": "Mozilla/5.0 (compatible; ADF-Phase2/1.0; research-only)",
     "Accept": "application/json",
+}
+
+# Slightly different headers for public-page HTML fetches — we explicitly
+# say we accept HTML so caching proxies don't 406 us.  We never claim a
+# real browser; we identify as an advisory research bot.
+_PUBLIC_PAGE_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (compatible; ADF-PublicPage/1.0; research-only)",
+    "Accept": "text/html,application/xhtml+xml,application/xml,application/rss+xml,application/json;q=0.8,*/*;q=0.5",
+    "Accept-Language": "en;q=0.9",
 }
 
 
@@ -240,6 +571,37 @@ _SUB_HTTP_ERROR = "http_error"
 _SUB_UNREACHABLE = "unreachable"
 _SUB_PARSE_ERROR = "parse_error"
 _SUB_PLACEHOLDER = "placeholder"
+_SUB_PLANNED_PUBLIC_PAGE = "planned_public_page"
+_SUB_BLOCKED = "blocked"
+
+# Sub-source-class labels.  ``official_api`` / ``placeholder`` already
+# existed; ``public_page`` and ``planned_public_page`` are added here so
+# the UI / health summary can render each correctly without inspecting
+# the loader internals.
+_SOURCE_CLASS_OFFICIAL_API = "official_api"
+_SOURCE_CLASS_PLACEHOLDER = "placeholder"
+_SOURCE_CLASS_PUBLIC_PAGE = "public_page"
+_SOURCE_CLASS_PLANNED_PUBLIC_PAGE = "planned_public_page"
+
+# Inactive source-class → sub-source status mapping.  Used when a provider
+# is registered but ``active=False``; the parent skip path emits the
+# matching sub-source status so the truth filter can distinguish
+# "we plan to support this but haven't" from "we never will".
+_INACTIVE_STATUS_BY_CLASS: dict[str, str] = {
+    _SOURCE_CLASS_PLANNED_PUBLIC_PAGE: _SUB_PLANNED_PUBLIC_PAGE,
+    _SOURCE_CLASS_PUBLIC_PAGE: _SUB_PLANNED_PUBLIC_PAGE,
+    _SOURCE_CLASS_PLACEHOLDER: _SUB_PLACEHOLDER,
+}
+
+# Statuses that count as "informational, not stale" — these never count
+# as a failure in the aggregate outcome and never produce fake rows.
+_INFORMATIONAL_STATUSES: frozenset[str] = frozenset(
+    {_SUB_MISSING_KEY, _SUB_PLACEHOLDER, _SUB_PLANNED_PUBLIC_PAGE}
+)
+
+# Default per-call cap for a public-page provider response.  Picked low
+# so we never spam a public listing page.
+_PUBLIC_PAGE_DEFAULT_MAX_ITEMS = 25
 
 
 def _resolve_provider_key(conf: dict[str, Any]) -> str | None:
@@ -277,7 +639,13 @@ def _summarise_subsource_status(
         "sub_sources_skipped": sorted(
             n
             for n, s in sub_status.items()
-            if s.get("status") in {_SUB_MISSING_KEY, _SUB_PLACEHOLDER}
+            if s.get("status")
+            in {_SUB_MISSING_KEY, _SUB_PLACEHOLDER, _SUB_PLANNED_PUBLIC_PAGE}
+        ),
+        "sub_sources_planned_public_page": sorted(
+            n
+            for n, s in sub_status.items()
+            if s.get("status") == _SUB_PLANNED_PUBLIC_PAGE
         ),
         "sub_sources_failed": sorted(
             n
@@ -288,6 +656,7 @@ def _summarise_subsource_status(
                 _SUB_HTTP_ERROR,
                 _SUB_UNREACHABLE,
                 _SUB_PARSE_ERROR,
+                _SUB_BLOCKED,
             }
         ),
         "per_source": {
@@ -373,6 +742,166 @@ def _normalize_opendart_item(
         "language": "ko",
         "raw_payload": dict(item),
     }
+
+
+def _normalize_public_page_item(
+    item: dict[str, Any],
+    conf: dict[str, Any],
+) -> dict[str, Any]:
+    """Map one extracted public-page list item to the canonical shape.
+
+    Designed to be schema-agnostic so a per-provider extractor can emit
+    its raw row using common field aliases (issuer_name / company_name /
+    name, title / headline / subject, published_at / date / pub_date,
+    url / link, ticker / stock_code / symbol).  Missing fields fall back
+    to safe defaults — we never invent a URL or fabricate an ID.
+    """
+    issuer_name = str(
+        item.get("issuer_name")
+        or item.get("company_name")
+        or item.get("issuer")
+        or item.get("name")
+        or ""
+    )
+    ticker = str(
+        item.get("ticker")
+        or item.get("ticker_or_identifier")
+        or item.get("stock_code")
+        or item.get("symbol")
+        or item.get("code")
+        or ""
+    )
+    title_raw = str(
+        item.get("title")
+        or item.get("headline")
+        or item.get("subject")
+        or item.get("report_name")
+        or ""
+    )
+    summary = str(
+        item.get("summary")
+        or item.get("description")
+        or item.get("snippet")
+        or title_raw
+        or ""
+    )
+    published_at = str(
+        item.get("published_at")
+        or item.get("date")
+        or item.get("pub_date")
+        or item.get("filing_date")
+        or item.get("timestamp")
+        or ""
+    )
+    url = str(
+        item.get("url")
+        or item.get("link")
+        or item.get("doc_url")
+        or ""
+    )
+    doc_id = str(
+        item.get("doc_id")
+        or item.get("announcement_id")
+        or item.get("filing_id")
+        or item.get("id")
+        or ""
+    )
+    return {
+        "issuer_name": issuer_name,
+        "ticker_or_identifier": ticker,
+        "exchange_or_regulator": conf.get("exchange_or_regulator", ""),
+        "jurisdiction": conf.get("jurisdiction", ""),
+        "country": conf.get("country", ""),
+        "disclosure_system": conf.get("disclosure_system", ""),
+        "disclosure_type": conf.get("disclosure_type", "exchange_announcement"),
+        "doc_id": doc_id,
+        "published_at": published_at,
+        "url": url,
+        "title": (
+            title_raw
+            or (issuer_name + (" — " + ticker if ticker else ""))
+            or "Public-page Disclosure"
+        ),
+        "summary": summary,
+        "provider": str(item.get("provider") or ""),  # set by caller
+        "source_class": conf.get("source_class", _SOURCE_CLASS_PUBLIC_PAGE),
+        "language": str(conf.get("language") or ""),
+        "raw_payload": dict(item),
+    }
+
+
+def _extract_public_page_items(
+    provider_name: str,
+    data: Any,
+    raw_text: str,
+) -> tuple[list[dict[str, Any]] | None, str | None]:
+    """Best-effort extractor for a public-page response.
+
+    Tries the following shapes in order:
+      1. Parsed JSON with a top-level ``list`` / ``items`` / ``data`` /
+         ``results`` array of dicts.
+      2. Parsed JSON as a top-level list of dicts.
+      3. RSS / Atom XML containing ``<item>`` or ``<entry>`` elements.
+
+    HTML scraping is deliberately NOT performed here — the constraint
+    "do not scrape aggressively" applies and a regex-based HTML scrape
+    too easily produces fake-looking rows.  When no extractor can read
+    the response, returns ``(None, _SUB_PARSE_ERROR)`` so the caller
+    surfaces an honest parse_error rather than falling through to a
+    fabricated empty list.
+    """
+    # 1) JSON dict with a list under a known key.
+    if isinstance(data, dict):
+        for key in ("list", "items", "data", "results", "announcements", "rows"):
+            value = data.get(key)
+            if isinstance(value, list):
+                items = [r for r in value if isinstance(r, dict)]
+                return items, None
+    # 2) JSON list at top level.
+    if isinstance(data, list):
+        items = [r for r in data if isinstance(r, dict)]
+        return items, None
+
+    # 3) RSS / Atom XML.
+    text = (raw_text or "").strip()
+    if text.startswith("<?xml") or "<rss" in text[:200].lower() or "<feed" in text[:200].lower():
+        try:
+            import xml.etree.ElementTree as ET
+
+            root = ET.fromstring(text)
+        except Exception:
+            return None, _SUB_PARSE_ERROR
+        items: list[dict[str, Any]] = []
+        # RSS 2.0 channels/items use no namespace; Atom uses
+        # ``http://www.w3.org/2005/Atom``.  We handle both, ignoring
+        # namespaces by matching on the local tag name.
+        for node in root.iter():
+            tag = node.tag.split("}", 1)[-1].lower()
+            if tag not in {"item", "entry"}:
+                continue
+            row: dict[str, Any] = {}
+            for child in node:
+                ctag = child.tag.split("}", 1)[-1].lower()
+                value = (child.text or "").strip()
+                if ctag == "title":
+                    row["title"] = value
+                elif ctag == "link":
+                    href = child.attrib.get("href") or value
+                    if href:
+                        row["url"] = href
+                elif ctag in {"pubdate", "published", "updated"}:
+                    row["published_at"] = value
+                elif ctag in {"description", "summary", "content"}:
+                    row["summary"] = value
+                elif ctag in {"guid", "id"}:
+                    row["doc_id"] = value
+                elif ctag in {"author", "dc:creator", "creator"}:
+                    row.setdefault("issuer_name", value)
+            if row:
+                items.append(row)
+        return items, None
+
+    return None, _SUB_PARSE_ERROR
 
 
 _PROVIDER_NORMALIZERS: dict[str, Any] = {
@@ -628,7 +1157,16 @@ class AsiaDisclosureLoader(BaseSourceLoader):
         Returns ``(records, status, reason)`` where ``status`` is one of
         the ``_SUB_*`` constants.  ``records`` is the normalized list
         (possibly empty) when ``status`` is ``ok`` or ``no_rows``.
+
+        Public-page providers (``source_class == 'public_page'``) are
+        dispatched to :meth:`_fetch_public_page_provider`; everything
+        else uses the official-API JSON path below.
         """
+        if str(conf.get("source_class") or "") == _SOURCE_CLASS_PUBLIC_PAGE:
+            return self._fetch_public_page_provider(
+                provider_name, conf, requests_mod
+            )
+
         url = conf["url"]
         params = self._build_provider_params(provider_name, conf, api_key)
 
@@ -692,6 +1230,111 @@ class AsiaDisclosureLoader(BaseSourceLoader):
         return records, _SUB_OK, "ok"
 
     # ------------------------------------------------------------------
+    # Public-page provider fetch (no API key, no login, low-volume)
+    # ------------------------------------------------------------------
+
+    def _fetch_public_page_provider(
+        self,
+        provider_name: str,
+        conf: dict[str, Any],
+        requests_mod: Any,
+    ) -> tuple[list[dict[str, Any]], str, str]:
+        """Fetch a public-page provider response (HTML / RSS / JSON).
+
+        Returns ``(records, status, reason)`` like :meth:`_fetch_active_provider`.
+
+        Safety guarantees:
+          * No API key is sent — the provider declares ``requires_key=False``.
+          * Request is GET-only with a low timeout.
+          * Empty / unparseable responses return honest ``no_rows`` /
+            ``parse_error`` statuses, never fabricated rows.
+          * Per-item normalization passes through ``_stamp_record`` so
+            every emitted row carries the advisory contract.
+        """
+        url = conf.get("url") or conf.get("landing_url")
+        if not url:
+            return (
+                [],
+                _SUB_PARSE_ERROR,
+                "public_page provider has no fetchable url",
+            )
+        params: dict[str, Any] = dict(conf.get("params", {}) or {})
+
+        try:
+            resp = requests_mod.get(
+                url,
+                params=params,
+                headers=_PUBLIC_PAGE_HEADERS,
+                timeout=self._timeout,
+            )
+        except Exception as exc:
+            return [], _SUB_UNREACHABLE, f"{type(exc).__name__}: {exc}"
+
+        status_code = getattr(resp, "status_code", None)
+        if status_code == 429:
+            return [], _SUB_RATE_LIMITED, "HTTP 429 rate_limited"
+        if status_code in {401, 403}:
+            # 401/403 on a "public" page usually means anti-bot / WAF block.
+            # Treat as blocked so the operator sees the truthful reason
+            # rather than a generic HTTP error.
+            return [], _SUB_BLOCKED, f"HTTP {status_code} blocked"
+        try:
+            resp.raise_for_status()
+        except Exception as exc:
+            return [], _SUB_HTTP_ERROR, f"{type(exc).__name__}: {exc}"
+
+        raw_text = ""
+        try:
+            raw_text = resp.text or ""
+        except Exception:
+            raw_text = ""
+
+        data: Any = None
+        try:
+            data = resp.json()
+        except Exception:
+            data = None
+
+        raw_items, err = _extract_public_page_items(
+            provider_name, data, raw_text
+        )
+        if err is not None:
+            reason_map = {
+                _SUB_PARSE_ERROR: "public-page response could not be parsed",
+            }
+            return [], err, reason_map.get(err, err)
+
+        max_items = int(conf.get("max_items") or _PUBLIC_PAGE_DEFAULT_MAX_ITEMS)
+        records: list[dict[str, Any]] = []
+        for item in (raw_items or [])[:max_items]:
+            try:
+                rec = _normalize_public_page_item(item, conf)
+            except Exception as exc:
+                return [], _SUB_PARSE_ERROR, (
+                    f"normalize_error: {type(exc).__name__}: {exc}"
+                )
+            rec["provider"] = provider_name
+            if self._query:
+                searchable = " ".join(
+                    [
+                        str(rec.get("issuer_name", "")),
+                        str(rec.get("ticker_or_identifier", "")),
+                        str(rec.get("title", "")),
+                        str(rec.get("summary", "")),
+                        str(rec.get("disclosure_type", "")),
+                        str(rec.get("jurisdiction", "")),
+                    ]
+                ).lower()
+                if self._query not in searchable:
+                    continue
+            self._stamp_record(rec)
+            records.append(rec)
+
+        if not records:
+            return [], _SUB_OK_EMPTY, "public-page returned 0 rows"
+        return records, _SUB_OK, "ok"
+
+    # ------------------------------------------------------------------
     # Public fetch entry point
     # ------------------------------------------------------------------
 
@@ -713,14 +1356,27 @@ class AsiaDisclosureLoader(BaseSourceLoader):
         sub_status: dict[str, dict[str, Any]] = {}
 
         if not active_names:
+            planned_only = True
             for p in selected:
                 conf = _PROVIDER_CONFIGS.get(p, {})
+                source_class = str(conf.get("source_class") or "")
+                inactive_status = _INACTIVE_STATUS_BY_CLASS.get(
+                    source_class, _SUB_PLACEHOLDER
+                )
                 sub_status[p] = {
-                    "status": _SUB_PLACEHOLDER,
-                    "reason": str(conf.get("note") or "placeholder"),
+                    "status": inactive_status,
+                    "reason": str(conf.get("note") or inactive_status),
                     "rows": 0,
                 }
+                if inactive_status != _SUB_PLANNED_PUBLIC_PAGE:
+                    planned_only = False
             summary = _summarise_subsource_status(sub_status, 0)
+            if planned_only:
+                raise SkipLoader(
+                    "[PLANNED_PUBLIC_PAGE] Asia Disclosure public-page "
+                    "providers not yet implemented; "
+                    f"sub_source_status={summary}"
+                )
             raise SkipLoader(
                 "[PLACEHOLDER] Asia Disclosure sub-sources not configured/active; "
                 f"sub_source_status={summary}"
@@ -770,14 +1426,23 @@ class AsiaDisclosureLoader(BaseSourceLoader):
                 records=records[: self._max_items],
             )
 
-        if statuses and statuses.issubset({_SUB_MISSING_KEY, _SUB_PLACEHOLDER}):
+        if statuses and statuses.issubset(_INFORMATIONAL_STATUSES):
             # Distinguish all-missing-key (informational; "optional config
-            # missing") from all-placeholder (legacy planned providers).
+            # missing") from all-placeholder / planned_public_page
+            # (informational; nothing to do until parsers wired or keys
+            # supplied).  Missing-key wins so the operator sees the
+            # actionable banner first.
             if _SUB_MISSING_KEY in statuses:
                 raise SkipLoader(
                     "[OPTIONAL_CONFIG_MISSING] Asia Disclosure has no "
                     "configured sub-source keys (EDINET_API_KEY / "
                     f"OPENDART_API_KEY); sub_source_status={summary}"
+                )
+            if statuses == {_SUB_PLANNED_PUBLIC_PAGE}:
+                raise SkipLoader(
+                    "[PLANNED_PUBLIC_PAGE] Asia Disclosure public-page "
+                    "providers not yet implemented; "
+                    f"sub_source_status={summary}"
                 )
             raise SkipLoader(
                 "[PLACEHOLDER] Asia Disclosure sub-sources not configured/"
@@ -787,6 +1452,12 @@ class AsiaDisclosureLoader(BaseSourceLoader):
         if _SUB_RATE_LIMITED in statuses:
             raise SkipLoader(
                 f"[RATE_LIMITED] Asia Disclosure provider hit rate limit; "
+                f"sub_source_status={summary}"
+            )
+
+        if _SUB_BLOCKED in statuses:
+            raise SkipLoader(
+                f"[BLOCKED] Asia Disclosure public-page provider blocked; "
                 f"sub_source_status={summary}"
             )
 
