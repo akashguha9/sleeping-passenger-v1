@@ -90,7 +90,8 @@ CREATE TABLE IF NOT EXISTS manual_trades (
     confidence_before REAL,
     emotional_state TEXT NOT NULL DEFAULT '',
     mistake_tags TEXT NOT NULL DEFAULT '',
-    lesson TEXT NOT NULL DEFAULT ''
+    lesson TEXT NOT NULL DEFAULT '',
+    ai_model_used TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_mt_event_id ON manual_trades(event_id);
 CREATE TABLE IF NOT EXISTS reconciliation_results (
@@ -387,6 +388,15 @@ def _additive_migrations(conn: sqlite3.Connection) -> None:
         # permission; reconciliation P/L still respects the existing
         # advisory stamps.
         ("manual_trades", "currency", "TEXT NOT NULL DEFAULT ''"),
+        # Operator-supplied label naming which AI/model/source produced the
+        # signal the operator acted on (e.g. "GPT-5.5", "Claude Code",
+        # "Grok", "Gemini", "DeepSeek", "Perplexity", "Copilot",
+        # "Human-only", "Multi-model consensus").  Free-text on purpose —
+        # this is a manual audit field, not an authentication token.
+        # Storing it NEVER grants execution permission; it never reaches a
+        # broker.  Legacy rows default to '' and read back as the explicit
+        # "—" placeholder in the UI.
+        ("manual_trades", "ai_model_used", "TEXT NOT NULL DEFAULT ''"),
         # Reconciliation outcome-quality / process-error fields.
         ("reconciliation_results", "outcome_quality", "TEXT NOT NULL DEFAULT ''"),
         ("reconciliation_results", "process_error", "TEXT NOT NULL DEFAULT ''"),
@@ -736,6 +746,7 @@ def insert_manual_trade(
     trade_mode: str = "REAL_MANUAL",
     created_via: str = "",
     currency: str = "",
+    ai_model_used: str = "",
 ) -> None:
     """Insert a manual trade record. ``leverage`` is record-only (record-keeping
     of human leverage choice — no broker margin/execution implications).
@@ -800,6 +811,14 @@ def insert_manual_trade(
     except Exception:  # pragma: no cover - defensive
         currency_norm = ""
 
+    # Normalise ai_model_used at the persistence boundary.  Free-text
+    # operator label, trimmed and length-capped so a runaway paste cannot
+    # bloat the row.  Empty / hostile input falls through to '' which the
+    # UI renders as "—".  Storing this NEVER grants execution permission.
+    ai_model_used_norm = str(ai_model_used or "").strip()
+    if len(ai_model_used_norm) > 120:
+        ai_model_used_norm = ai_model_used_norm[:120]
+
     conn = _get_conn(db_path)
     try:
         cols = {row[1] for row in conn.execute("PRAGMA table_info(manual_trades)")}
@@ -861,6 +880,10 @@ def insert_manual_trade(
         if has_currency:
             cols_sql = cols_sql + ", currency"
             vals = vals + (currency_norm,)
+        has_ai_model_used = "ai_model_used" in cols
+        if has_ai_model_used:
+            cols_sql = cols_sql + ", ai_model_used"
+            vals = vals + (ai_model_used_norm,)
         placeholders = ", ".join(["?"] * len(vals))
         conn.execute(
             f"INSERT OR IGNORE INTO manual_trades ({cols_sql}) VALUES ({placeholders})",

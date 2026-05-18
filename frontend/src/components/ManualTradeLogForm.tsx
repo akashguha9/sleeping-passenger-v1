@@ -21,6 +21,12 @@ interface FormState {
   leverage: string;
   thesis: string;
   notes: string;
+  // Free-text operator label naming which AI / model / source produced
+  // the signal the operator acted on.  Examples (placeholder copy):
+  // GPT-5.5, Claude Code, Grok, Gemini, DeepSeek, Perplexity, Copilot,
+  // Human-only, Multi-model consensus.  Optional — empty submits as
+  // "—" on the trade card.  Never affects execution permission.
+  ai_model_used: string;
   // Sprint I — operator-selected native currency for the trade.
   // Stored as a supported ISO code (USD/INR/EUR/JPY/...) or UNKNOWN
   // when the operator has not yet selected.  Submitting without
@@ -88,6 +94,7 @@ export function ManualTradeLogForm({ defaultEventId = '', defaultTicker = '', on
     emotional_state: '',
     mistake_tags: '',
     lesson: '',
+    ai_model_used: '',
   });
   const [logged, setLogged] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -189,6 +196,7 @@ export function ManualTradeLogForm({ defaultEventId = '', defaultTicker = '', on
         emotional_state: form.emotional_state.trim(),
         mistake_tags: form.mistake_tags.trim(),
         lesson: form.lesson.trim(),
+        ai_model_used: form.ai_model_used.trim(),
       });
       setLogged(true);
       onLogged?.();
@@ -484,6 +492,21 @@ export function ManualTradeLogForm({ defaultEventId = '', defaultTicker = '', on
             />
           </Field>
         </Section>
+
+        <Field
+          label="AI model used"
+          hint="manual audit label — record-only, never executed"
+        >
+          <input
+            type="text"
+            className="sp-input"
+            data-testid="manual-trade-ai-model-used-input"
+            placeholder="e.g. GPT-5.5, Claude Code, Grok, Human-only"
+            value={form.ai_model_used}
+            onChange={(e) => set('ai_model_used', e.target.value)}
+            maxLength={120}
+          />
+        </Field>
 
         <Field label="Notes (optional)">
           <input

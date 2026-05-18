@@ -298,6 +298,13 @@ export async function postManualTrade(body: {
   // the wire so older callers stay valid; the backend normalises
   // unsupported codes to '' (UNKNOWN) rather than silently defaulting.
   currency?: string;
+  // Free-text operator label naming which AI / model / source produced
+  // the signal the operator acted on (e.g. "GPT-5.5", "Claude Code",
+  // "Grok", "Gemini", "DeepSeek", "Perplexity", "Copilot",
+  // "Human-only", "Multi-model consensus").  Optional; backend stores
+  // verbatim (trimmed, length-capped at 120).  Storing this NEVER
+  // grants execution permission.
+  ai_model_used?: string;
 }): Promise<unknown> {
   return apiFetch('/manual-trades', {
     method: 'POST',
@@ -423,14 +430,17 @@ export async function postMoltbook(body: {
 }
 
 export async function getManualTrades(
-  options?: { origin?: 'manual_trade_log' | string },
+  options?: { origin?: 'manual_trade_log' | 'all' | string },
 ): Promise<ManualTradeListResponse | null> {
+  // Manual Trade Log surface contract: NEVER show seed / demo / fixture /
+  // probe / paper-import rows.  We always send origin=manual_trade_log
+  // unless the caller explicitly asks for the audit scope ("all").  The
+  // backend defaults to the same value (defence in depth), so even if the
+  // query param were ever dropped on the way out the response stays clean.
+  const origin = options?.origin ?? 'manual_trade_log';
   const params = new URLSearchParams();
-  if (options?.origin) {
-    params.set('origin', options.origin);
-  }
-  const qs = params.toString();
-  const path = qs ? `/manual-trades?${qs}` : '/manual-trades';
+  params.set('origin', origin);
+  const path = `/manual-trades?${params.toString()}`;
   try {
     return await apiFetch<ManualTradeListResponse>(path);
   } catch {

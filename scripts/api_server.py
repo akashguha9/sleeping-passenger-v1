@@ -639,6 +639,14 @@ class ManualTradeBody(BaseModel):
     # anything outside the supported set down to '' (UNKNOWN) rather
     # than silently defaulting to USD.
     currency: str = ""
+    # Free-text operator label naming which AI / model / source produced
+    # the signal the operator acted on — e.g. "GPT-5.5", "Claude Code",
+    # "Grok", "Gemini", "DeepSeek", "Perplexity", "Copilot",
+    # "Human-only", "Multi-model consensus".  Optional on the wire
+    # (legacy clients keep working).  Server normalises (trim + 120-char
+    # cap) and reads back via the same field name.  Storing this NEVER
+    # grants execution permission and never reaches a broker.
+    ai_model_used: str = ""
 
 
 class ReconcileBody(BaseModel):
@@ -885,7 +893,7 @@ def post_manual_trade(
     body: ManualTradeBody,
     _auth: None = Depends(require_api_token),
 ) -> dict:
-    return log_manual_trade(
+    result = log_manual_trade(
         event_id=body.event_id,
         ticker=body.ticker,
         side=body.side,
@@ -915,7 +923,33 @@ def post_manual_trade(
         preflight_state_at_decision=body.preflight_state_at_decision,
         trade_mode=body.trade_mode,
         currency=body.currency,
+        ai_model_used=body.ai_model_used,
     )
+    # log_manual_trade returns a structured error dict (status="error" or
+    # status!="logged" with an "error" key) when the row looks like a
+    # seed/probe/automation insertion or fails validation.  Surface those
+    # as HTTP 400 with the same safety stamps the success branch carries
+    # — never as a silent success.  Frontends pattern-match on
+    # detail.reason so the operator sees why the log was refused.
+    if (
+        isinstance(result, dict)
+        and "error" in result
+        and result.get("status") != "logged"
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "message": str(result.get("error") or "manual trade refused"),
+                "reason": str(result.get("reason") or "manual_trade_refused"),
+                "broker_api_called": False,
+                "ai_execution_count": _AI_EXECUTION_COUNT,
+                "execution_gate": "LOCKED",
+                "execution_permission": False,
+                "can_execute": False,
+                "record_keeping_only": True,
+            },
+        )
+    return result
 
 
 @app.post("/manual-trades/{trade_id}/reconcile")
@@ -1017,16 +1051,24 @@ def post_cancel_manual_trade_log(
 
 
 @app.get("/manual-trades")
-def get_manual_trades(origin: str | None = None) -> dict:
+def get_manual_trades(origin: str | None = "manual_trade_log") -> dict:
     """List logged manual trades.
 
-    The optional ``origin`` query parameter scopes the response to a single
-    provenance bucket.  Pass ``origin=manual_trade_log`` to receive only
-    rows the operator entered through the Manual Trade Log UI/API; this is
-    what the Reconciliation page uses to keep seed/demo/import rows out
-    of the live operator surface.  Omitting the parameter returns every
-    row for audit on the Manual Trade Log page.
+    Default scope is ``origin=manual_trade_log`` so the Manual Trade Log
+    surface NEVER shows seed / demo / fixture / smoke / paper-import rows
+    even if such rows exist in the DB.  This is the active fence behind
+    the empty-state contract: "no real manual trades = empty list, never
+    a synthetic fallback AAPL row".
+
+    Pass ``origin=all`` (or any other non-empty string) to override the
+    default and receive every row — kept only as an audit escape hatch
+    for ``/exports/manual-trades.csv`` and DB hygiene tooling.  Routine
+    UI callers should NOT do this; the live operator surface is meant to
+    show user-submitted entries only.
     """
+    if origin == "all" or origin == "*":
+        # Explicit audit override — return every row regardless of provenance.
+        return list_manual_trades(origin=None)
     return list_manual_trades(origin=origin)
 
 

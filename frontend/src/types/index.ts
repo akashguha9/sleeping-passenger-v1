@@ -154,6 +154,13 @@ export interface ManualTradeLog {
   // rows that pre-date the dropdown.  Storing this NEVER grants
   // execution permission.
   currency?: string;
+  // Free-text operator label naming which AI / model / source produced
+  // the signal the operator acted on (e.g. "GPT-5.5", "Claude Code",
+  // "Grok", "Gemini", "DeepSeek", "Perplexity", "Copilot",
+  // "Human-only", "Multi-model consensus").  Optional; legacy rows
+  // read back as '' and the UI renders "—".  Display-only — never
+  // grants execution permission.
+  ai_model_used?: string;
   // Sprint I — Reconciliation origin classifier output.  One of
   // USER_MANUAL / EXCLUDED_PROVENANCE / EXCLUDED_TRADE_MODE /
   // EXCLUDED_LOGGED_BY / EXCLUDED_PROBE_THESIS / EXCLUDED_EVENT_ID /
