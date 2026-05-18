@@ -1249,6 +1249,18 @@ def _build_live_sources_status(
     """Pure builder for /live-sources/status. Imported by tests."""
     import datetime as _dt
 
+    # Parse ``now_iso`` ONCE up front so every freshness/staleness path —
+    # including the ``compute_source_freshness`` helper — sees the same
+    # injected "now".  A naive string is coerced to UTC; production callers
+    # that omit ``now_iso`` fall back to wall-clock UTC.
+    if now_iso:
+        now_dt = _dt.datetime.fromisoformat(str(now_iso).replace("Z", "+00:00"))
+        if now_dt.tzinfo is None:
+            now_dt = now_dt.replace(tzinfo=_dt.timezone.utc)
+    else:
+        now_dt = _dt.datetime.now(_dt.timezone.utc)
+    now_epoch = now_dt.timestamp()
+
     try:
         try:
             from scripts.live_source_registry import compute_source_freshness
@@ -1265,7 +1277,7 @@ def _build_live_sources_status(
                 get_persisted_row_stats_per_source,
             )
         latest_runs = get_latest_source_run_per_source()
-        freshness = compute_source_freshness(latest_runs)
+        freshness = compute_source_freshness(latest_runs, now_epoch=now_epoch)
         try:
             refresh_runs = get_latest_refresh_run_per_source()
         except Exception:
@@ -1298,14 +1310,6 @@ def _build_live_sources_status(
             "can_execute": False,
             "human_review_required": True,
         }
-
-    now_dt = (
-        _dt.datetime.fromisoformat(now_iso.replace("Z", "+00:00"))
-        if now_iso
-        else _dt.datetime.now(_dt.timezone.utc)
-    )
-    if now_dt.tzinfo is None:
-        now_dt = now_dt.replace(tzinfo=_dt.timezone.utc)
 
     refresh_configured = bool(refresh_runs)
     stale_sources: list[str] = []
