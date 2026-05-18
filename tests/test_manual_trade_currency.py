@@ -177,12 +177,12 @@ def test_log_manual_trade_threads_currency(monkeypatch, tmp_path):
     monkeypatch.setattr(api._persistence, "insert_manual_trade", fake_insert)
 
     out = api.log_manual_trade(
-        event_id="EVT_TEST_INR",
+        event_id="EVT_INR_COVERAGE",
         ticker="BHARTIARTL.NS",
         side="BUY",
         quantity=10,
         price=1789.20,
-        thesis="reg test",
+        thesis="regression coverage for INR threading",
         currency="INR",
     )
     assert out.get("operation") == "log_manual_trade"
@@ -204,13 +204,17 @@ def test_log_manual_trade_currency_optional(monkeypatch, tmp_path):
         captured.update(kwargs)
 
     monkeypatch.setattr(api._persistence, "insert_manual_trade", fake_insert)
+    # Use a non-AAPL/180 ticker — the AAPL/$180 fingerprint is now a
+    # fake-marker veto (see scripts/manual_trade_origin).  ``thesis``
+    # also cannot contain the substring "no currency given" because
+    # the leaked-row fingerprint matches that exact phrase.
     api.log_manual_trade(
-        event_id="EVT_NO_CUR",
-        ticker="AAPL",
+        event_id="EVT_NO_CUR_COVERAGE",
+        ticker="MSFT",
         side="BUY",
         quantity=5,
-        price=180.0,
-        thesis="no currency given",
+        price=421.0,
+        thesis="currency omitted by caller, backwards-compat coverage",
     )
     # Omitted currency normalises to '' at the API boundary; the
     # persistence layer then reads it back as UNKNOWN on the next get.

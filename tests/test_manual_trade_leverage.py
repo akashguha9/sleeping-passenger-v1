@@ -43,7 +43,7 @@ def test_log_manual_trade_accepts_leverage(tmp_path, monkeypatch):
     monkeypatch.setattr(api, "_DB_AVAILABLE", False)
 
     result = api.log_manual_trade(
-        event_id="FABRIC_SPY",
+        event_id="EVT_LOG_SPY",
         ticker="SPY",
         side="BUY",
         quantity=10.0,
@@ -76,7 +76,7 @@ def test_log_manual_trade_default_leverage(tmp_path, monkeypatch):
 
     # Default kwarg
     result = api.log_manual_trade(
-        event_id="FABRIC_AAPL",
+        event_id="EVT_LOG_AAPL",
         ticker="AAPL",
         side="BUY",
         quantity=1.0,
@@ -87,7 +87,7 @@ def test_log_manual_trade_default_leverage(tmp_path, monkeypatch):
 
     # Explicit None coerces to 1.0
     result = api.log_manual_trade(
-        event_id="FABRIC_AAPL",
+        event_id="EVT_LOG_AAPL",
         ticker="AAPL",
         side="BUY",
         quantity=1.0,
@@ -108,7 +108,7 @@ def test_log_manual_trade_rejects_leverage_below_1(tmp_path, monkeypatch):
     monkeypatch.setattr(api, "MANUAL_TRADE_LOG", tmp_path / "trades.jsonl")
     monkeypatch.setattr(api, "_DB_AVAILABLE", False)
     result = api.log_manual_trade(
-        event_id="FABRIC_SPY", ticker="SPY", side="BUY",
+        event_id="EVT_LOG_SPY", ticker="SPY", side="BUY",
         quantity=1, price=100, thesis="x", leverage=0.5,
     )
     assert "error" in result
@@ -120,7 +120,7 @@ def test_log_manual_trade_rejects_leverage_above_max(tmp_path, monkeypatch):
     monkeypatch.setattr(api, "MANUAL_TRADE_LOG", tmp_path / "trades.jsonl")
     monkeypatch.setattr(api, "_DB_AVAILABLE", False)
     result = api.log_manual_trade(
-        event_id="FABRIC_SPY", ticker="SPY", side="BUY",
+        event_id="EVT_LOG_SPY", ticker="SPY", side="BUY",
         quantity=1, price=100, thesis="x", leverage=100.0,
     )
     assert "error" in result
@@ -131,7 +131,7 @@ def test_log_manual_trade_rejects_non_numeric_leverage(tmp_path, monkeypatch):
     monkeypatch.setattr(api, "MANUAL_TRADE_LOG", tmp_path / "trades.jsonl")
     monkeypatch.setattr(api, "_DB_AVAILABLE", False)
     result = api.log_manual_trade(
-        event_id="FABRIC_SPY", ticker="SPY", side="BUY",
+        event_id="EVT_LOG_SPY", ticker="SPY", side="BUY",
         quantity=1, price=100, thesis="x", leverage="five",  # type: ignore[arg-type]
     )
     assert "error" in result
@@ -269,7 +269,7 @@ def test_safety_invariants_preserved_with_leverage(tmp_path, monkeypatch):
     monkeypatch.setattr(api, "MANUAL_TRADE_LOG", tmp_path / "trades.jsonl")
     monkeypatch.setattr(api, "_DB_AVAILABLE", False)
     result = api.log_manual_trade(
-        event_id="FABRIC_TSLA",
+        event_id="EVT_LOG_TSLA",
         ticker="TSLA",
         side="SELL",
         quantity=1.0,

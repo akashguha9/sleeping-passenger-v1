@@ -60,7 +60,7 @@ def _import_api():
 
 def _sample_entry_kwargs(mistake_type: str = "missed_signal") -> dict:
     return dict(
-        event_id="FABRIC_SPY",
+        event_id="EVT_LOG_SPY",
         ticker="SPY",
         original_signal_thesis="Persistence above 0.8 in 3 consecutive runs",
         ai_interpretation="Suggests elevated visibility; not a trade signal",
@@ -189,7 +189,7 @@ def test_list_entries_filter_by_ticker(tmp_path, monkeypatch):
     api = _import_api()
     monkeypatch.setattr(api, "MOLTBOOK_LOG", tmp_path / "moltbook.jsonl")
     api.log_moltbook_entry(**_sample_entry_kwargs())
-    api.log_moltbook_entry(**{**_sample_entry_kwargs(), "ticker": "QQQ", "event_id": "FABRIC_QQQ"})
+    api.log_moltbook_entry(**{**_sample_entry_kwargs(), "ticker": "QQQ", "event_id": "EVT_LOG_QQQ"})
     result = api.list_moltbook_entries(ticker="SPY")
     assert result["entry_count"] == 1
     assert result["entries"][0]["ticker"] == "SPY"

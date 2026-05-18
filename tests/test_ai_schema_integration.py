@@ -51,7 +51,7 @@ def test_add_ai_summary_runs_through_validator(tmp_path, monkeypatch):
     monkeypatch.setattr(api, "_DB_AVAILABLE", False)
 
     result = api.add_ai_discussion_summary(
-        "FABRIC_QQQ",
+        "EVT_LOG_QQQ",
         "Price persistence is elevated. No execution implied.",
         ai_payload={
             "model_name": "grok-3-mini",
@@ -90,7 +90,7 @@ def test_add_ai_summary_backwards_compatible_without_payload(tmp_path, monkeypat
     monkeypatch.setattr(api, "AI_SUMMARIES_LOG", tmp_path / "ai_summaries.jsonl")
     monkeypatch.setattr(api, "_DB_AVAILABLE", False)
 
-    result = api.add_ai_discussion_summary("FABRIC_SPY", "Plain text summary only.")
+    result = api.add_ai_discussion_summary("EVT_LOG_SPY", "Plain text summary only.")
     assert result["status"] == "logged"
     assert result["validation_status"] in {"valid", "partial"}
     assert result["advisory_status"] == "ADVISORY_ONLY"
@@ -113,7 +113,7 @@ def test_malformed_ai_payload_does_not_crash(tmp_path, monkeypatch):
     monkeypatch.setattr(api, "_DB_AVAILABLE", False)
 
     result = api.add_ai_discussion_summary(
-        "FABRIC_QQQ",
+        "EVT_LOG_QQQ",
         "Fallback summary text",
         ai_payload="this is not a dict",  # type: ignore[arg-type]
     )
@@ -132,7 +132,7 @@ def test_ai_payload_with_confidence_out_of_range_marks_partial(tmp_path, monkeyp
     monkeypatch.setattr(api, "_DB_AVAILABLE", False)
 
     result = api.add_ai_discussion_summary(
-        "FABRIC_QQQ",
+        "EVT_LOG_QQQ",
         "Confidence rescale test",
         ai_payload={
             "summary": "Confidence rescale test",
@@ -154,7 +154,7 @@ def test_attempted_execution_permission_is_overridden(tmp_path, monkeypatch):
     monkeypatch.setattr(api, "_DB_AVAILABLE", False)
 
     result = api.add_ai_discussion_summary(
-        "FABRIC_QQQ",
+        "EVT_LOG_QQQ",
         "Smuggling attempt",
         ai_payload={
             "summary": "Smuggling attempt",
@@ -185,7 +185,7 @@ def test_broker_order_id_attempt_is_silently_dropped(tmp_path, monkeypatch):
     monkeypatch.setattr(api, "_DB_AVAILABLE", False)
 
     result = api.add_ai_discussion_summary(
-        "FABRIC_QQQ",
+        "EVT_LOG_QQQ",
         "Order id smuggle",
         ai_payload={
             "summary": "Order id smuggle",
@@ -211,7 +211,7 @@ def test_secret_pattern_in_summary_is_redacted(tmp_path, monkeypatch):
     monkeypatch.setattr(api, "_DB_AVAILABLE", False)
 
     leaky_text = "Here is my api_key=sk-ABCDEFGHIJKL1234567890 stop using it"
-    api.add_ai_discussion_summary("FABRIC_QQQ", leaky_text)
+    api.add_ai_discussion_summary("EVT_LOG_QQQ", leaky_text)
 
     rows = _read_jsonl(tmp_path / "ai_summaries.jsonl")
     persisted_blob = json.dumps(rows[0])
@@ -225,7 +225,7 @@ def test_secret_pattern_in_raw_response_is_redacted(tmp_path, monkeypatch):
     monkeypatch.setattr(api, "_DB_AVAILABLE", False)
 
     api.add_ai_discussion_summary(
-        "FABRIC_QQQ",
+        "EVT_LOG_QQQ",
         "Clean summary",
         ai_payload={
             "summary": "Clean summary",
@@ -248,7 +248,7 @@ def test_no_execution_permission_in_response_graph(tmp_path, monkeypatch):
     monkeypatch.setattr(api, "_DB_AVAILABLE", False)
 
     result = api.add_ai_discussion_summary(
-        "FABRIC_QQQ",
+        "EVT_LOG_QQQ",
         "Routine summary",
         ai_payload={"summary": "Routine summary", "confidence_score": 0.5},
     )
@@ -272,7 +272,7 @@ def test_existing_caller_only_summary_text_still_returns_advisory(tmp_path, monk
     monkeypatch.setattr(api, "AI_SUMMARIES_LOG", tmp_path / "ai_summaries.jsonl")
     monkeypatch.setattr(api, "_DB_AVAILABLE", False)
 
-    result = api.add_ai_discussion_summary("FABRIC_QQQ", "Plain text")
+    result = api.add_ai_discussion_summary("EVT_LOG_QQQ", "Plain text")
     assert result["status"] == "logged"
     assert result["advisory_status"] == "ADVISORY_ONLY"
     assert result["ai_execution_count"] == 0

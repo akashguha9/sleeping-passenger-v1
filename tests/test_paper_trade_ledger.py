@@ -346,7 +346,7 @@ def test_log_manual_trade_paper_mode_response_stamps(
         side="BUY",
         quantity=1.0,
         price=1.0,
-        thesis="response stamp test",
+        thesis="response stamp coverage",
         trade_mode="PAPER",
     )
     assert resp["trade_mode"] == "PAPER"
@@ -367,7 +367,7 @@ def test_log_manual_trade_hostile_trade_mode_falls_through_to_real_manual(
         side="BUY",
         quantity=1.0,
         price=1.0,
-        thesis="hostile mode test",
+        thesis="hostile mode coverage",
         trade_mode="PLACE_ORDER",  # not in the allowlist
     )
     assert resp["trade_mode"] == "REAL_MANUAL"

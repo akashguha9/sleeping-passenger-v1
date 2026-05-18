@@ -152,12 +152,12 @@ def test_export_reflection_log_returns_csv(tmp_path, monkeypatch):
     gs = _import_gsheet()
     monkeypatch.setattr(inbox, "REFLECTIONS_LOG", tmp_path / "reflections.jsonl")
     monkeypatch.setattr(gs, "REFLECTIONS_LOG", tmp_path / "reflections.jsonl")
-    inbox.add_user_reflection("FABRIC_SPY", "Test reflection")
+    inbox.add_user_reflection("EVT_LOG_SPY", "Test reflection")
     content = gs.export_reflection_log()
     headers, rows = _parse_csv(content)
     assert headers == gs.REFLECTION_HEADERS
     assert len(rows) == 1
-    assert rows[0]["event_id"] == "FABRIC_SPY"
+    assert rows[0]["event_id"] == "EVT_LOG_SPY"
     assert rows[0]["advisory_status"] == "ADVISORY_ONLY"
     assert rows[0]["ai_execution_count"] == "0"
 
@@ -173,8 +173,8 @@ def test_export_manual_trade_log_returns_csv(tmp_path, monkeypatch):
     # SQLite persistence here is harmless.
     monkeypatch.setattr(inbox, "_DB_AVAILABLE", False)
     inbox.log_manual_trade(
-        event_id="FABRIC_SPY", ticker="SPY", side="BUY",
-        quantity=5, price=450, thesis="test thesis"
+        event_id="EVT_LOG_SPY", ticker="SPY", side="BUY",
+        quantity=5, price=450, thesis="csv export coverage"
     )
     content = gs.export_manual_trade_log()
     headers, rows = _parse_csv(content)
@@ -194,7 +194,7 @@ def test_export_reconciliation_log_returns_csv(tmp_path, monkeypatch):
     monkeypatch.setattr(gs, "RECONCILIATIONS_LOG", tmp_path / "recs.jsonl")
     monkeypatch.setattr(inbox, "_DB_AVAILABLE", False)
     inbox.log_manual_trade(
-        event_id="FABRIC_SPY", ticker="SPY", side="BUY", quantity=1, price=450, thesis="t"
+        event_id="EVT_LOG_SPY", ticker="SPY", side="BUY", quantity=1, price=450, thesis="x"
     )
     trade_id = json.loads((tmp_path / "trades.jsonl").read_text().splitlines()[0])["trade_id"]
     inbox.reconcile_trade(
@@ -215,7 +215,7 @@ def test_export_moltbook_mistake_log_returns_csv(tmp_path, monkeypatch):
     monkeypatch.setattr(mb, "MOLTBOOK_LOG", tmp_path / "moltbook.jsonl")
     monkeypatch.setattr(gs, "MOLTBOOK_LOG", tmp_path / "moltbook.jsonl")
     mb.log_moltbook_entry(
-        event_id="FABRIC_SPY",
+        event_id="EVT_LOG_SPY",
         ticker="SPY",
         original_signal_thesis="Thesis A",
         ai_interpretation="Advisory context",

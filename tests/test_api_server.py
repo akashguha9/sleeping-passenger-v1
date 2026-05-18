@@ -441,7 +441,11 @@ def test_post_decision_requires_status_field(client):
 # ---------------------------------------------------------------------------
 
 _TRADE_PAYLOAD = {
-    "event_id": "TEST_001",
+    # Use a neutral event_id prefix (not TEST_/SEED_/DEMO_/etc.) so the
+    # post route's seed/probe guard does not refuse this synthetic-but-
+    # legitimate happy-path payload.  The guard is exercised explicitly
+    # by tests/test_manual_trade_seed_rejection.py.
+    "event_id": "EV_TRADE_001",
     "ticker": "AAPL",
     "side": "BUY",
     "quantity": 10.0,

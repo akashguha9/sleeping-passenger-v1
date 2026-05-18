@@ -265,12 +265,13 @@ def _log_trade(ticker: str, qty: float, price: float, leverage: float = 1.0):
         side="BUY",
         quantity=qty,
         price=price,
-        # Use a realistic thesis sentence rather than the placeholder
-        # "probe" — the user-manual classifier filters bare "probe" /
-        # "test" theses out of the reconciliation queue, so a test
-        # helper that wants its row to appear in the queue must look
-        # like a real user log.
-        thesis=f"reconciliation extras unit-test thesis for {ticker}",
+        # Use a realistic thesis sentence that does NOT contain any
+        # fake-marker substring (probe/test/seed/demo/fixture/smoke/
+        # sample/mock/"no currency given").  See
+        # scripts/manual_trade_origin.FAKE_THESIS_SUBSTRINGS.  Helper
+        # rows must look like genuine user logs so they pass the
+        # visibility filter at the reconciliation queue boundary.
+        thesis=f"reconciliation extras coverage for {ticker}",
         leverage=leverage,
     )
 
@@ -304,7 +305,9 @@ def test_reconcile_partial_tp_persists_partial_reconciled(isolated_db):
 
 def test_reconcile_close_trade_sets_reconciled_and_wins(isolated_db):
     from scripts.signal_inbox_api import reconcile_trade
-    logged = _log_trade("AAPL", 10.0, 180.0)
+    # NOTE: avoid the AAPL/$180/qty{5,10} fingerprint — that combo is a
+    # fake-marker veto (see scripts/manual_trade_origin.FAKE_AAPL_*).
+    logged = _log_trade("MSFT", 10.0, 180.0)
     trade_id = logged["trade_id"]
 
     resp = reconcile_trade(

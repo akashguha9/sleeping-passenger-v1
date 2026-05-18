@@ -27,7 +27,7 @@ def _assert_safety(item: dict) -> None:
 
 def test_decorator_adds_sensitivity_and_quarantine_fields() -> None:
     item = {
-        "event_id": "FABRIC_BTC",
+        "event_id": "EVT_LOG_BTC",
         "ticker": "BTC",
         "signal_state": "REVIEW",
         "priority_score": 0.55,
@@ -60,7 +60,7 @@ def test_decorator_marks_borderline_signal_fragile() -> None:
     # confidence at 0.4 boundary, persistence at 0.4 boundary — small
     # perturbation will push us across.
     item = {
-        "event_id": "FABRIC_FRAGILE",
+        "event_id": "EVT_LOG_FRAGILE",
         "ticker": "X",
         "confidence_score": 0.40,
         "persistence_score": 0.40,
@@ -77,7 +77,7 @@ def test_decorator_marks_borderline_signal_fragile() -> None:
 
 def test_decorator_quarantines_contaminated_signal() -> None:
     item = {
-        "event_id": "FABRIC_TOX",
+        "event_id": "EVT_LOG_TOX",
         "ticker": "TOX",
         # Hits unreliability + contradiction + hallucination + ai_invalid in one row.
         "reliability_score": 0.1,
@@ -97,7 +97,7 @@ def test_decorator_handles_missing_or_empty_signal() -> None:
     # Empty dict and a dict full of strings — must not crash.
     for bad_item in (
         {},
-        {"event_id": "FABRIC_EMPTY", "ticker": "EMPTY"},
+        {"event_id": "EVT_LOG_EMPTY", "ticker": "EMPTY"},
         {"event_id": "X", "confidence_score": "not_a_number"},
     ):
         result = signal_inbox_api._decorate_inbox_diagnostics(bad_item)
@@ -110,7 +110,7 @@ def test_decorator_handles_missing_or_empty_signal() -> None:
 def test_decorator_never_grants_execution_permission() -> None:
     # Even a signal that hand-crafts those flags must be re-stamped.
     item = {
-        "event_id": "FABRIC_BAD",
+        "event_id": "EVT_LOG_BAD",
         "ticker": "BAD",
         "advisory_status": "ALLOWED",
         "execution_gate": "OPEN",
@@ -128,7 +128,7 @@ def test_list_inbox_items_includes_diagnostic_rollups(monkeypatch) -> None:
     # Stub the underlying fabric/bridge calls so we don't depend on DB state.
     fake_items = [
         {
-            "event_id": "FABRIC_FRESH",
+            "event_id": "EVT_LOG_FRESH",
             "ticker": "FRESH",
             "signal_state": "REVIEW",
             "entry_type": "UNKNOWN",
@@ -146,7 +146,7 @@ def test_list_inbox_items_includes_diagnostic_rollups(monkeypatch) -> None:
             "contradiction_score": 0.1,
         },
         {
-            "event_id": "FABRIC_TOX",
+            "event_id": "EVT_LOG_TOX",
             "ticker": "TOX",
             "signal_state": "REVIEW",
             "entry_type": "UNKNOWN",

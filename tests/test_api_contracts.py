@@ -246,7 +246,7 @@ def test_contract_post_manual_trade_happy_path(client) -> None:
         "side": "BUY",
         "quantity": 1.0,
         "price": 100.0,
-        "thesis": "contract test",
+        "thesis": "contract happy path coverage",
         "reactor_state_at_decision": "WARM_WATCH",
         "decision_grade_energy_at_decision": 0.5,
     }

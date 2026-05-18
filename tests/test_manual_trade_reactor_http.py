@@ -101,7 +101,7 @@ _REACTOR_PAYLOAD_FULL = {
     "side": "BUY",
     "quantity": 2.0,
     "price": 1500.0,
-    "thesis": "reactor http snapshot test",
+    "thesis": "reactor http snapshot coverage sentence",
     "reactor_state_at_decision": "WARM_WATCH",
     "decision_grade_energy_at_decision": 0.42,
     "echo_risk_score_at_decision": 0.18,

@@ -25,7 +25,7 @@ from scripts import self_test_journal_quality as jq
 
 def _complete_entry() -> dict:
     return {
-        "signal_id": "FABRIC_QQQ",
+        "signal_id": "EVT_LOG_QQQ",
         "thesis": "Persistence has rebuilt above breakdown level",
         "invalidation_level": 415.5,
         "expected_horizon": "2-3 weeks",
@@ -35,7 +35,7 @@ def _complete_entry() -> dict:
         "exit_plan": "Stop below 415.5; take half off at 440",
         "confidence_before": 0.65,
         "emotional_state": "calm",
-        "source_references": ["FABRIC_QQQ", "moltbook_entry_12"],
+        "source_references": ["EVT_LOG_QQQ", "moltbook_entry_12"],
         "post_trade_outcome": "+2.1% over 9 days",
         "reconciliation_status": "WIN",
         "mistake_tags": ["none"],

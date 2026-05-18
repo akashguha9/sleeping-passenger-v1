@@ -109,7 +109,7 @@ def test_get_signal_detail_advisory_fields(tmp_path, monkeypatch):
     monkeypatch.setattr(api, "REFLECTIONS_LOG", tmp_path / "reflections.jsonl")
     monkeypatch.setattr(api, "AI_SUMMARIES_LOG", tmp_path / "ai_summaries.jsonl")
     monkeypatch.setattr(api, "MANUAL_TRADE_LOG", tmp_path / "manual_trade.jsonl")
-    result = api.get_signal_detail("FABRIC_SPY")
+    result = api.get_signal_detail("EVT_LOG_SPY")
     assert result["advisory_status"] == "ADVISORY_ONLY"
     assert result["human_review_required"] is True
     assert result["execution_mode"] == "HUMAN_ONLY"
@@ -134,7 +134,7 @@ def test_run_validation_empty_event_id():
 
 def test_run_validation_advisory_fields():
     api = _import_api()
-    result = api.run_validation("FABRIC_SPY")
+    result = api.run_validation("EVT_LOG_SPY")
     assert result["advisory_status"] == "ADVISORY_ONLY"
     assert result["human_review_required"] is True
     assert result["execution_mode"] == "HUMAN_ONLY"
@@ -149,14 +149,14 @@ def test_run_validation_advisory_fields():
 
 def test_run_validation_checks_are_booleans():
     api = _import_api()
-    result = api.run_validation("FABRIC_SPY")
+    result = api.run_validation("EVT_LOG_SPY")
     for key, val in result["validation"]["validation_checks"].items():
         assert isinstance(val, bool), f"check {key!r} should be bool, got {type(val)}"
 
 
 def test_run_validation_notes_not_empty():
     api = _import_api()
-    result = api.run_validation("FABRIC_NONEXISTENT")
+    result = api.run_validation("EVT_LOG_NONEXISTENT")
     assert len(result["validation"]["validation_notes"]) > 0
 
 
@@ -168,14 +168,14 @@ def test_run_validation_notes_not_empty():
 def test_add_user_reflection_writes_log(tmp_path, monkeypatch):
     api = _import_api()
     monkeypatch.setattr(api, "REFLECTIONS_LOG", tmp_path / "reflections.jsonl")
-    result = api.add_user_reflection("FABRIC_SPY", "Looks good to me")
+    result = api.add_user_reflection("EVT_LOG_SPY", "Looks good to me")
     assert result["status"] == "logged"
     assert result["advisory_status"] == "ADVISORY_ONLY"
     assert result["ai_execution_count"] == 0
     assert (tmp_path / "reflections.jsonl").exists()
     rows = [json.loads(l) for l in (tmp_path / "reflections.jsonl").read_text().splitlines()]
     assert len(rows) == 1
-    assert rows[0]["event_id"] == "FABRIC_SPY"
+    assert rows[0]["event_id"] == "EVT_LOG_SPY"
     assert rows[0]["reflection_text"] == "Looks good to me"
     assert rows[0]["advisory_status"] == "ADVISORY_ONLY"
     assert rows[0]["ai_execution_count"] == 0
@@ -189,7 +189,7 @@ def test_add_user_reflection_empty_event_id():
 
 def test_add_user_reflection_empty_text():
     api = _import_api()
-    result = api.add_user_reflection("FABRIC_SPY", "")
+    result = api.add_user_reflection("EVT_LOG_SPY", "")
     assert "error" in result
 
 
@@ -201,7 +201,7 @@ def test_add_user_reflection_empty_text():
 def test_add_ai_summary_writes_log(tmp_path, monkeypatch):
     api = _import_api()
     monkeypatch.setattr(api, "AI_SUMMARIES_LOG", tmp_path / "ai_summaries.jsonl")
-    result = api.add_ai_discussion_summary("FABRIC_QQQ", "Price persistence is elevated.")
+    result = api.add_ai_discussion_summary("EVT_LOG_QQQ", "Price persistence is elevated.")
     assert result["status"] == "logged"
     assert result["advisory_status"] == "ADVISORY_ONLY"
     assert result["ai_execution_count"] == 0
@@ -215,7 +215,7 @@ def test_add_ai_summary_writes_log(tmp_path, monkeypatch):
 def test_add_ai_summary_empty_inputs():
     api = _import_api()
     assert "error" in api.add_ai_discussion_summary("", "text")
-    assert "error" in api.add_ai_discussion_summary("FABRIC_SPY", "")
+    assert "error" in api.add_ai_discussion_summary("EVT_LOG_SPY", "")
 
 
 # ---------------------------------------------------------------------------
@@ -227,7 +227,7 @@ def test_mark_signal_valid_statuses(tmp_path, monkeypatch):
     api = _import_api()
     monkeypatch.setattr(api, "INBOX_STATES_LOG", tmp_path / "inbox_states.jsonl")
     for status in ("pending", "watchlist", "human_review", "rejected"):
-        result = api.mark_signal("FABRIC_SPY", status)
+        result = api.mark_signal("EVT_LOG_SPY", status)
         assert result["user_status"] == status
         assert result["advisory_status"] == "ADVISORY_ONLY"
         assert result["ai_execution_count"] == 0
@@ -235,7 +235,7 @@ def test_mark_signal_valid_statuses(tmp_path, monkeypatch):
 
 def test_mark_signal_invalid_status():
     api = _import_api()
-    result = api.mark_signal("FABRIC_SPY", "BUY_NOW")
+    result = api.mark_signal("EVT_LOG_SPY", "BUY_NOW")
     assert "error" in result
     assert result["ai_execution_count"] == 0
 
@@ -259,7 +259,7 @@ def test_log_manual_trade_human_only(tmp_path, monkeypatch):
     # pollutes the Reconciliation queue with synthetic SPY/QQQ rows.
     monkeypatch.setattr(api, "_DB_AVAILABLE", False)
     result = api.log_manual_trade(
-        event_id="FABRIC_SPY",
+        event_id="EVT_LOG_SPY",
         ticker="SPY",
         side="BUY",
         quantity=10.0,
@@ -280,7 +280,7 @@ def test_log_manual_trade_persisted_correctly(tmp_path, monkeypatch):
     monkeypatch.setattr(api, "MANUAL_TRADE_LOG", tmp_path / "trades.jsonl")
     monkeypatch.setattr(api, "_DB_AVAILABLE", False)
     result = api.log_manual_trade(
-        event_id="FABRIC_QQQ",
+        event_id="EVT_LOG_QQQ",
         ticker="QQQ",
         side="SELL",
         quantity=5.0,
@@ -300,7 +300,7 @@ def test_log_manual_trade_persisted_correctly(tmp_path, monkeypatch):
 def test_log_manual_trade_invalid_side():
     api = _import_api()
     result = api.log_manual_trade(
-        event_id="FABRIC_SPY", ticker="SPY", side="AUTO", quantity=1, price=1, thesis="x"
+        event_id="EVT_LOG_SPY", ticker="SPY", side="AUTO", quantity=1, price=1, thesis="x"
     )
     assert "error" in result
 
@@ -308,7 +308,7 @@ def test_log_manual_trade_invalid_side():
 def test_log_manual_trade_invalid_quantity():
     api = _import_api()
     result = api.log_manual_trade(
-        event_id="FABRIC_SPY", ticker="SPY", side="BUY", quantity=-5, price=100, thesis="x"
+        event_id="EVT_LOG_SPY", ticker="SPY", side="BUY", quantity=-5, price=100, thesis="x"
     )
     assert "error" in result
 
@@ -316,7 +316,7 @@ def test_log_manual_trade_invalid_quantity():
 def test_log_manual_trade_invalid_price():
     api = _import_api()
     result = api.log_manual_trade(
-        event_id="FABRIC_SPY", ticker="SPY", side="BUY", quantity=1, price=0, thesis="x"
+        event_id="EVT_LOG_SPY", ticker="SPY", side="BUY", quantity=1, price=0, thesis="x"
     )
     assert "error" in result
 
@@ -340,8 +340,11 @@ def test_reconcile_trade_advisory_fields(tmp_path, monkeypatch):
     monkeypatch.setattr(api, "RECONCILIATIONS_LOG", tmp_path / "recs.jsonl")
     monkeypatch.setattr(api, "_DB_AVAILABLE", False)
     api.log_manual_trade(
-        event_id="FABRIC_SPY", ticker="SPY", side="BUY",
-        quantity=1, price=450, thesis="test"
+        event_id="EVT_LOG_SPY", ticker="SPY", side="BUY",
+        quantity=1, price=450,
+        # Avoid exact-match probe theses ("test", "probe", "seed", …)
+        # — the canonical guard rejects them at the log entry point.
+        thesis="reconcile-path coverage"
     )
     trade_id = json.loads((tmp_path / "trades.jsonl").read_text().splitlines()[0])["trade_id"]
     result = api.reconcile_trade(

@@ -106,7 +106,7 @@ def _log_duplicate_pair(symbol: str = "ICICIBANK.NS") -> tuple[str, str]:
         side="BUY",
         quantity=10.0,
         price=950.0,
-        thesis="duplicate test - first entry",
+        thesis="duplicate first entry coverage",
     )
     b = signal_inbox_api.log_manual_trade(
         event_id="EV_DUP",
@@ -114,7 +114,7 @@ def _log_duplicate_pair(symbol: str = "ICICIBANK.NS") -> tuple[str, str]:
         side="BUY",
         quantity=10.0,
         price=950.0,
-        thesis="duplicate test - SECOND (mis-logged) entry",
+        thesis="duplicate SECOND mis-logged entry coverage",
     )
     return a["trade_id"], b["trade_id"]
 
@@ -267,7 +267,7 @@ def test_human_manual_log_carries_created_via_provenance(tmp_db: Path) -> None:
         side="BUY",
         quantity=1.0,
         price=100.0,
-        thesis="provenance smoke",
+        thesis="provenance coverage sentence",
     )
     conn = sqlite3.connect(str(tmp_db))
     try:
@@ -366,7 +366,7 @@ def test_cancel_refused_response_carries_reason_field(tmp_db: Path) -> None:
         side="BUY",
         quantity=5.0,
         price=950.0,
-        thesis="reason-field test thesis",
+        thesis="reason-field reasoning sentence",
     )
     signal_inbox_api.reconcile_trade(
         a["trade_id"],

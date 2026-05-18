@@ -318,7 +318,7 @@ def _write_paper_csv(path: Path, *, with_reactor_fields: bool) -> None:
     row["paper_trade_id"] = "PAPER_AUTO_1"
     row["symbol"] = "BTC"
     row["side"] = "BUY"
-    row["thesis"] = "auto-attach paper test"
+    row["thesis"] = "auto-attach paper coverage"
     row["source_signal_id"] = "SIG_PAPER_X"
     if with_reactor_fields:
         row["reactor_state_at_decision"] = "COLD_OBSERVE"

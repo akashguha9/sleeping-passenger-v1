@@ -49,7 +49,7 @@ def test_decorate_with_reactor_diagnostics_attaches_required_fields():
     api = _import_inbox()
     enriched = api._decorate_with_reactor_diagnostics(
         {
-            "event_id": "FABRIC_TEST",
+            "event_id": "EVT_LOG_TEST",
             "ticker": "TEST",
             "priority_score": 0.5,
             "persistence_score": 0.4,
