@@ -227,6 +227,15 @@ class ManualTradeLog:
     # ISO codes (USD/INR/EUR/JPY/…); legacy rows default to '' which
     # reads back as UNKNOWN.  Storing the currency NEVER grants execution.
     currency: str = ""
+    # Free-text label the operator types to record which AI / model /
+    # source produced the signal they acted on (e.g. "GPT-5.5",
+    # "Claude Code", "Grok", "Gemini", "DeepSeek", "Perplexity",
+    # "Copilot", "Human-only", "Multi-model consensus").  Optional;
+    # legacy rows default to '' and the UI renders "—".  This field is a
+    # journal annotation only — storing it NEVER grants execution
+    # permission, never calls a broker, and never alters the safety
+    # stamps.
+    ai_model_used: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -1138,6 +1147,25 @@ def _safe_currency(value: Any) -> str:
     return "" if code == "UNKNOWN" else code
 
 
+def _safe_ai_model_used(value: Any) -> str:
+    """Normalise the operator's AI-model label at the API boundary.
+
+    Free-text journal field — accepts anything the operator types
+    (e.g. "GPT-5.5", "Claude Code", "Grok 4", "Gemini 2.5 Pro",
+    "DeepSeek R1", "Perplexity", "Copilot", "Human-only",
+    "Multi-model consensus").  Trimmed and length-capped at 120 chars so
+    a runaway paste cannot bloat a row.  Empty input falls through to ''
+    which the UI renders as the explicit "—" placeholder.  Storing this
+    NEVER grants execution permission and never reaches a broker.
+    """
+    if value is None:
+        return ""
+    text = str(value).strip()
+    if len(text) > 120:
+        text = text[:120]
+    return text
+
+
 def log_manual_trade(
     *,
     event_id: str,
@@ -1169,6 +1197,7 @@ def log_manual_trade(
     preflight_state_at_decision: str = "",
     trade_mode: str = "REAL_MANUAL",
     currency: str = "",
+    ai_model_used: str = "",
 ) -> dict[str, Any]:
     """7. Log a manual trade execution (HUMAN_ONLY; no broker API called).
 
@@ -1211,6 +1240,111 @@ def log_manual_trade(
             "log_manual_trade",
             f"leverage must be between {_LEVERAGE_MIN} and {_LEVERAGE_MAX}",
         )
+
+    # Seed/demo/probe rejection.  This entry point is what stamps a row
+    # with created_via='manual_trade_log', which is what makes the row
+    # appear in the user's Manual Trade Log.  Probe-thesis / seed
+    # event_id / synthetic logged_by values are exactly what produced
+    # the leaked AAPL/SPY/QQQ rows the operator saw, so reject them here
+    # rather than let them through with a user-manual stamp.  Internal
+    # callers that genuinely need seed rows must use
+    # persistence.insert_manual_trade directly with created_via='' so the
+    # row stays excluded from the live operator surface.
+    #
+    # Note on paper-ledger imports: ``logged_by='paper_ledger_import'`` is
+    # a LEGITIMATE non-UI workflow (CSV imports into the paper journal).
+    # Those rows are already filtered out of the live Manual Trade Log by
+    # the read-side classifier (``is_user_manual_trade`` excludes any
+    # ``logged_by`` in ``EXCLUDED_LOGGED_BY``), so we don't reject them
+    # at the POST boundary.  Only the truly synthetic test/fixture
+    # markers are blocked here.
+    try:
+        try:
+            from scripts.manual_trade_origin import (
+                PROBE_EVENT_ID_PREFIXES,
+                PROBE_THESIS_VALUES,
+            )
+        except ModuleNotFoundError:  # pragma: no cover - script-style fallback
+            from manual_trade_origin import (  # type: ignore[no-redef]
+                PROBE_EVENT_ID_PREFIXES,
+                PROBE_THESIS_VALUES,
+            )
+    except Exception:  # pragma: no cover - defensive
+        PROBE_EVENT_ID_PREFIXES = ()  # type: ignore[assignment]
+        PROBE_THESIS_VALUES = frozenset()  # type: ignore[assignment]
+
+    # Synthetic test-fixture markers that have no legitimate workflow.
+    # (paper_ledger_import is intentionally absent — see note above.)
+    _LOGGED_BY_HARD_REJECT: frozenset[str] = frozenset(
+        {"seed", "demo", "smoke_test", "smoke", "fixture", "mock", "sample", "calibration_seed"}
+    )
+
+    _thesis_norm = str(thesis or "").strip().lower()
+    if _thesis_norm in PROBE_THESIS_VALUES:
+        return _error_response(
+            "log_manual_trade",
+            "thesis looks like a seed/probe placeholder; please describe the trade",
+        )
+    _event_id_norm = str(event_id or "").strip()
+    if _event_id_norm.startswith(PROBE_EVENT_ID_PREFIXES):
+        return _error_response(
+            "log_manual_trade",
+            "event_id uses a seed/demo/fixture prefix; not a real manual trade",
+        )
+    _logged_by_norm = str(logged_by or "").strip().lower()
+    if _logged_by_norm in _LOGGED_BY_HARD_REJECT:
+        return _error_response(
+            "log_manual_trade",
+            "logged_by names a test/fixture source; not an explicit user action",
+        )
+
+    # Stricter fake-marker rejection (Sprint-recovery 2026-05-18).  The
+    # canonical classifier above rejects exact-match probe theses and
+    # known seed event_id prefixes; ``fake_manual_trade_reason`` adds the
+    # substring + AAPL-fingerprint + EV_AAPL + empty-AI-model rules so
+    # fabrications like ``thesis="no currency given"`` can never reach
+    # the DB carrying a ``manual_trade_log`` stamp.  Returns a structured
+    # error response identified by REJECT_REASON_NON_USER_MARKER which
+    # the HTTP layer surfaces as a 400 with the same safety stamps.
+    try:
+        try:
+            from scripts.manual_trade_origin import (
+                REJECT_REASON_NON_USER_MARKER,
+                fake_manual_trade_reason,
+            )
+        except ModuleNotFoundError:  # pragma: no cover - script-style fallback
+            from manual_trade_origin import (  # type: ignore[no-redef]
+                REJECT_REASON_NON_USER_MARKER,
+                fake_manual_trade_reason,
+            )
+    except Exception:  # pragma: no cover - defensive
+        REJECT_REASON_NON_USER_MARKER = "rejected_non_user_manual_trade_marker"
+        fake_manual_trade_reason = None  # type: ignore[assignment]
+
+    if fake_manual_trade_reason is not None:
+        candidate = {
+            "trade_id": "",  # not yet assigned; trade_id rule never fires here
+            "event_id": str(event_id or ""),
+            "ticker": str(ticker or ""),
+            "side": str(side or ""),
+            "quantity": quantity,
+            "price": price,
+            "thesis": str(thesis or ""),
+            "notes": str(notes or ""),
+            "risk_reason": str(risk_reason or ""),
+            "logged_by": str(logged_by or ""),
+            "ai_model_used": str(ai_model_used or ""),
+        }
+        _marker_reason = fake_manual_trade_reason(candidate)
+        if _marker_reason:
+            resp = _error_response(
+                "log_manual_trade",
+                f"rejected: row matches fake-manual-trade marker ({_marker_reason})",
+            )
+            # Tag with the stable reason code the HTTP layer surfaces.
+            resp["reason"] = REJECT_REASON_NON_USER_MARKER
+            resp["marker_reason"] = _marker_reason
+            return resp
 
     # Auto-attach reactor-at-decision snapshot when the caller did not
     # supply one.  This is the fix for reactor_snapshot_count=0 in the
@@ -1319,6 +1453,7 @@ def log_manual_trade(
         # provenance) and are excluded from the live queue.
         created_via=MANUAL_TRADE_LOG_PROVENANCE,
         currency=_safe_currency(currency),
+        ai_model_used=_safe_ai_model_used(ai_model_used),
     )
     append_jsonl(MANUAL_TRADE_LOG, trade.to_dict(), stamp=False)
     if _DB_AVAILABLE and _persistence is not None:
@@ -1349,6 +1484,7 @@ def log_manual_trade(
                 trade_mode=trade.trade_mode,
                 created_via=trade.created_via,
                 currency=trade.currency,
+                ai_model_used=trade.ai_model_used,
             )
         except Exception:
             pass
@@ -1385,6 +1521,7 @@ def log_manual_trade(
         # Advisory-only — never affects execution permission.
         "reactor_snapshot_source": attach_source,
         "trade_mode": trade.trade_mode,
+        "ai_model_used": trade.ai_model_used,
         # Paper-trade safety stamps. For PAPER rows: paper_trade_only=True,
         # real_capital_at_risk=False. For REAL_MANUAL rows: paper_trade_only=
         # False, real_capital_at_risk only reflects that the operator says
@@ -2004,12 +2141,19 @@ def list_manual_trades(
         if wanted == MANUAL_TRADE_LOG_PROVENANCE:
             try:
                 try:
-                    from scripts.manual_trade_origin import is_user_manual_trade
+                    from scripts.manual_trade_origin import (
+                        is_visible_manual_trade,
+                    )
                 except ModuleNotFoundError:
                     from manual_trade_origin import (  # type: ignore[no-redef]
-                        is_user_manual_trade,
+                        is_visible_manual_trade,
                     )
-                trades = [t for t in trades if is_user_manual_trade(t)]
+                # ``is_visible_manual_trade`` applies the canonical
+                # user-manual predicate AND the stricter fake-marker
+                # veto.  Origin alone is not enough — the leaked AAPL
+                # row was stamped ``manual_trade_log`` yet was synthetic
+                # (incident 2026-05-18).  See scripts/manual_trade_origin.
+                trades = [t for t in trades if is_visible_manual_trade(t)]
             except Exception:
                 trades = [
                     t for t in trades

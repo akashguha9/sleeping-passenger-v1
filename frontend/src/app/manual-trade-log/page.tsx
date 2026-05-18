@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { getManualTrades, getReconciliationQueue } from '@/lib/apiClient';
+import { filterVisibleManualTrades } from '@/lib/manualTradeFakeMarkers';
 import type {
   ManualTradeListResponse,
   ManualTradeLog,
@@ -30,7 +31,11 @@ export default function ManualTradeLogPage() {
     );
   }, []);
 
-  const trades = result?.trades ?? [];
+  // Defence-in-depth: backend GET already strips fake / synthetic rows
+  // via is_visible_manual_trade.  This second pass refuses to render
+  // anything that still slipped through (rolled-back backend, hand-
+  // patched DB, intermediary proxy).  See scripts/manual_trade_origin.
+  const trades = filterVisibleManualTrades(result?.trades);
   const isOffline = !loading && result === null;
 
   return (
@@ -128,8 +133,8 @@ export default function ManualTradeLogPage() {
             ) : (
               <AdvisoryEmptyState
                 variant="no_data"
-                title="No trades logged yet"
-                message="No manual or paper journal entries yet. Log one above to begin building the journal."
+                title="No manual trades logged yet."
+                message="Log a trade above to begin the journal — seed, demo, and fallback rows are filtered out by design."
                 hint="Paper-trade ledger workflow: python scripts/export_paper_trade_template.py"
               />
             )
@@ -193,6 +198,17 @@ function TradeCard({ t }: { t: ManualTradeLog }) {
           {t.thesis}
         </p>
       )}
+
+      <div
+        className="flex items-center gap-2 text-[10px] font-mono mb-2"
+        style={{ color: 'var(--sp-mist)' }}
+        data-testid={`manual-trade-ai-model-used-${t.trade_id}`}
+      >
+        <span>AI model used:</span>
+        <span style={{ color: t.ai_model_used ? 'var(--sp-bone)' : 'var(--sp-mist)' }}>
+          {t.ai_model_used && t.ai_model_used.trim() ? t.ai_model_used : '—'}
+        </span>
+      </div>
 
       <div className="flex items-center gap-3 text-[10px] font-mono flex-wrap" style={{ color: 'var(--sp-mist)' }}>
         <span className="truncate">{t.trade_id}</span>
