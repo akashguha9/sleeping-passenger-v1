@@ -221,6 +221,50 @@ def run_preflight(
             if not invariants_ok:
                 blocking_issues.append("signal_reactor_safety_invariant_failed")
 
+    # 7. Geometry reflection layer — diagnostic seventh subcheck.
+    # Same contract as signal_reactor: a healthy module returns an
+    # advisory payload with safety stamps intact; a broken safety
+    # contract is a blocking regression. The geometry layer itself can
+    # never unlock execution.
+    geo_run = _import_check(
+        "signal_geometry_reflection", "build_signal_geometry_diagnostics"
+    )
+    if geo_run is None:
+        warnings.append("signal_geometry_reflection_unavailable")
+    else:
+        geo_result = _safe_call(geo_run, [])
+        if not isinstance(geo_result, dict):
+            warnings.append("signal_geometry_reflection_unavailable")
+        else:
+            geo_safety = geo_result.get("safety") or {}
+            geo_invariants_ok = (
+                geo_result.get("advisory_status") == "ADVISORY_ONLY"
+                and geo_result.get("execution_gate") == "LOCKED"
+                and geo_safety.get("broker_api_called") is False
+                and geo_safety.get("ai_execution_count") == 0
+                and geo_safety.get("execution_permission") is False
+                and geo_safety.get("can_execute") is False
+                and geo_safety.get("broker_order_id") == "NONE"
+                and geo_safety.get("human_review_required") is True
+            )
+            payload["subchecks"]["signal_geometry_reflection"] = {
+                "ok": bool(geo_invariants_ok),
+                "recommendation": str(
+                    geo_result.get("recommendation") or "observe"
+                ),
+                "safety_invariants_ok": bool(geo_invariants_ok),
+                "advisory_status": geo_result.get("advisory_status"),
+                "execution_gate": geo_result.get("execution_gate"),
+                "canonical_truth_source": geo_result.get(
+                    "canonical_truth_source"
+                ),
+                "jsonl_role": geo_result.get("jsonl_role"),
+            }
+            if not geo_invariants_ok:
+                blocking_issues.append(
+                    "signal_geometry_reflection_safety_invariant_failed"
+                )
+
     payload["ok"] = len(blocking_issues) == 0
 
     if not payload["ok"]:

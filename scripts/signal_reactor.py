@@ -232,6 +232,27 @@ def evaluate_signal_reactor(
     except Exception:
         components["route"] = {}
 
+    # Geometry reflection layer — advisory-only diagnostics from
+    # docs/SIGNAL_GEOMETRY_REFLECTION_LAYER.md. Pure module, degrades
+    # safely on missing inputs; never returns a BUY/SELL.
+    try:
+        try:
+            from scripts.signal_geometry_reflection import (
+                build_signal_geometry_diagnostics,
+            )
+        except ModuleNotFoundError:
+            from signal_geometry_reflection import (
+                build_signal_geometry_diagnostics,
+            )
+        components["geometry_reflection"] = _safe_call(
+            build_signal_geometry_diagnostics,
+            cluster,
+            context=event_context,
+            operator_state=operator_state,
+        )
+    except Exception:
+        components["geometry_reflection"] = {}
+
     field_geometry = components.get("field_geometry") or {}
     echo_quality = components.get("echo_quality") or {}
     waste_load = components.get("waste_load") or {}
@@ -241,6 +262,13 @@ def evaluate_signal_reactor(
     route = components.get("route") or {}
     lead_trace = components.get("lead_trace") or {}
     lead_waste = components.get("lead_waste") or {}
+    geometry_reflection = components.get("geometry_reflection") or {}
+    geometry_diag = geometry_reflection.get("signal_geometry_diagnostics") or {}
+    geometry_vetoes = list(geometry_reflection.get("vetoes") or [])
+    chaos_attractor = geometry_diag.get("chaos_attractor") or {}
+    mobius_inversion = geometry_diag.get("mobius_inversion") or {}
+    field_diag = geometry_diag.get("field_diagnostics") or {}
+    leverage_policy = geometry_diag.get("leverage_policy") or {}
 
     signal_energy = _clamp(
         lead_trace.get("signal_energy")
@@ -293,6 +321,16 @@ def evaluate_signal_reactor(
     # Decision rules in precedence order
     vetoes: list[str] = []
     reasons: list[str] = []
+    # Geometry reflection vetoes never *promote* a state — they can only
+    # downgrade it. They are recorded on the reactor payload so the
+    # operator can see why advisory grade fell, but the canonical
+    # precedence order below still applies.
+    geometry_blocking = bool(
+        leverage_policy.get("leverage_veto") or
+        _clamp(mobius_inversion.get("mobius_inversion_risk")) >= 0.6 or
+        chaos_attractor.get("chaos_attractor_flag") is True or
+        _clamp(field_diag.get("curl_score")) >= 0.6
+    )
 
     if gallardo_block or operator_heat_score >= 0.7:
         reactor_state = "OPERATOR_CONTROL_RODS"
@@ -334,6 +372,21 @@ def evaluate_signal_reactor(
         reactor_state = "COLD_OBSERVE"
         recommendation = "observe"
         reasons.append("insufficient_evidence")
+
+    # Geometry-reflection downgrade: never promotes, only attenuates.
+    if geometry_blocking and reactor_state in {
+        "FUSION_REVIEW_CANDIDATE",
+        "WARM_WATCH",
+    }:
+        reactor_state = "HOT_CONTAINMENT_REQUIRED"
+        recommendation = "cool_down"
+        vetoes.append("geometry_reflection_block")
+    # Always surface geometry vetoes (advisory) without changing precedence.
+    if geometry_vetoes:
+        for v in geometry_vetoes:
+            tag = f"geometry::{v}"
+            if tag not in vetoes:
+                vetoes.append(tag)
 
     # Allowed actions — broker_execute is always False.
     operator_actions = operator.get("allowed_actions", {}) or {}
@@ -389,6 +442,21 @@ def evaluate_signal_reactor(
         "reasons": reasons,
         "allowed_actions": allowed_actions,
         "component_outputs": components,
+        "geometry_reflection_summary": {
+            "recommendation": geometry_reflection.get("recommendation"),
+            "vetoes": geometry_reflection.get("vetoes") or [],
+            "mobius_inversion_risk": _clamp(
+                mobius_inversion.get("mobius_inversion_risk")
+            ),
+            "chaos_attractor_flag": bool(
+                chaos_attractor.get("chaos_attractor_flag")
+            ),
+            "field_curl_score": _clamp(field_diag.get("curl_score")),
+            "leverage_within_policy": leverage_policy.get(
+                "leverage_within_policy", True
+            ),
+            "human_review_required": True,
+        },
     })
 
 

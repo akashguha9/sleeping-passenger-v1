@@ -525,6 +525,61 @@ def _reactor_self_check() -> dict[str, Any]:
     return out
 
 
+def _geometry_reflection_self_check() -> dict[str, Any]:
+    """Deterministic, data-free check that the geometry-reflection layer
+    is importable and that its safety contract still holds.
+
+    Pure: no DB read, no live API.
+    """
+    out: dict[str, Any] = {
+        "available": False,
+        "recommendation": "observe",
+        "safety_invariants_ok": False,
+        "import_error": None,
+        "vetoes_on_empty_cluster": [],
+    }
+    try:
+        try:
+            from scripts.signal_geometry_reflection import (  # type: ignore[import-not-found]
+                build_signal_geometry_diagnostics,
+            )
+        except ModuleNotFoundError:
+            from signal_geometry_reflection import (  # type: ignore[no-redef]
+                build_signal_geometry_diagnostics,
+            )
+    except Exception as exc:
+        out["import_error"] = f"{type(exc).__name__}: {exc}"
+        return out
+
+    try:
+        payload = build_signal_geometry_diagnostics([])
+    except Exception as exc:
+        out["import_error"] = f"evaluate_failed:{type(exc).__name__}: {exc}"
+        return out
+    if not isinstance(payload, dict):
+        out["import_error"] = "geometry_returned_non_dict"
+        return out
+
+    safety = payload.get("safety") or {}
+    invariants_ok = (
+        payload.get("advisory_status") == "ADVISORY_ONLY"
+        and payload.get("execution_gate") == "LOCKED"
+        and safety.get("broker_api_called") is False
+        and safety.get("ai_execution_count") == 0
+        and safety.get("execution_permission") is False
+        and safety.get("can_execute") is False
+        and safety.get("broker_order_id") == "NONE"
+        and safety.get("human_review_required") is True
+    )
+    out["available"] = True
+    out["recommendation"] = str(payload.get("recommendation") or "observe")
+    out["safety_invariants_ok"] = bool(invariants_ok)
+    out["vetoes_on_empty_cluster"] = list(payload.get("vetoes") or [])
+    out["canonical_truth_source"] = payload.get("canonical_truth_source")
+    out["jsonl_role"] = payload.get("jsonl_role")
+    return out
+
+
 def _moltbook_summary(conn: sqlite3.Connection) -> dict[str, Any]:
     if not _table_exists(conn, "moltbook_entries"):
         return {"available": False}
@@ -779,6 +834,7 @@ def build_report(
         reconciliation_extended = _reconciliation_extended_summary(conn)
         process_quality = _build_process_quality_summary(conn)
         reactor_self_check = _reactor_self_check()
+        geometry_reflection_self_check = _geometry_reflection_self_check()
 
         period_start, period_end = _period_window(days, period, now=now)
         period_payload: dict[str, Any] | None = None
@@ -824,6 +880,10 @@ def build_report(
         limitations.append("signal_reactor_unavailable")
     elif not reactor_self_check.get("safety_invariants_ok"):
         limitations.append("signal_reactor_safety_invariant_failed")
+    if not geometry_reflection_self_check.get("available"):
+        limitations.append("signal_geometry_reflection_unavailable")
+    elif not geometry_reflection_self_check.get("safety_invariants_ok"):
+        limitations.append("signal_geometry_reflection_safety_invariant_failed")
     limitations.append("pnl_unverified_by_broker")
 
     report = {
@@ -844,6 +904,7 @@ def build_report(
         "journal_quality": journal_quality,
         "process_quality": process_quality,
         "reactor_self_check": reactor_self_check,
+        "geometry_reflection_self_check": geometry_reflection_self_check,
         "limitations": limitations,
         "advisory_disclaimer": ADVISORY_DISCLAIMER,
     }
@@ -884,6 +945,7 @@ def build_self_test_summary(db_path: Path | None = None) -> dict[str, Any]:
     extended = report.get("reconciliation_extended", {}) or {}
     ai_validation = report.get("ai_validation_distribution", {}) or {}
     reactor = report.get("reactor_self_check", {}) or {}
+    geometry = report.get("geometry_reflection_self_check", {}) or {}
 
     incomplete_journal_count = (
         int(journal.get("trade_count_considered", 0))
@@ -930,6 +992,13 @@ def build_self_test_summary(db_path: Path | None = None) -> dict[str, Any]:
         "reactor_state": str(reactor.get("reactor_state", "INSUFFICIENT_DATA")),
         "reactor_safety_invariants_ok": bool(
             reactor.get("safety_invariants_ok", False)
+        ),
+        "geometry_reflection_available": bool(geometry.get("available", False)),
+        "geometry_reflection_recommendation": str(
+            geometry.get("recommendation", "observe")
+        ),
+        "geometry_reflection_safety_invariants_ok": bool(
+            geometry.get("safety_invariants_ok", False)
         ),
         "limitations": list(report.get("limitations", [])),
         "advisory_disclaimer": ADVISORY_DISCLAIMER,
@@ -1093,6 +1162,26 @@ def _render_markdown(report: dict[str, Any]) -> str:
         )
         if rc.get("import_error"):
             lines.append(f"- Import error: `{rc['import_error']}`")
+        lines.append("")
+    gr = report.get("geometry_reflection_self_check", {}) or {}
+    if gr:
+        lines.append("## Signal Geometry Reflection Self-Check")
+        lines.append("")
+        lines.append(f"- Available: **{gr.get('available', False)}**")
+        lines.append(
+            f"- Recommendation on empty cluster: **{gr.get('recommendation', 'observe')}**"
+        )
+        lines.append(
+            f"- Safety invariants OK: **{gr.get('safety_invariants_ok', False)}**"
+        )
+        lines.append(
+            f"- Canonical truth source: `{gr.get('canonical_truth_source', 'sqlite')}`"
+        )
+        lines.append(
+            f"- JSONL role: `{gr.get('jsonl_role', 'audit_fallback_only')}`"
+        )
+        if gr.get("import_error"):
+            lines.append(f"- Import error: `{gr['import_error']}`")
         lines.append("")
     lines.append("## Limitations")
     lines.append("")
