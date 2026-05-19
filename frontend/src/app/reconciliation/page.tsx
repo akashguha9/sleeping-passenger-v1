@@ -345,20 +345,13 @@ export default function ReconciliationPage() {
           </h2>
 
           {unreconciledTrades.length === 0 ? (
-            <div
-              className="text-sm text-slate-500 text-center py-8 bg-slate-800/40 rounded-lg border border-slate-700/40"
-              data-testid="awaiting-reconciliation-empty"
-            >
-              No user-created manual logs awaiting reconciliation.
-              {reconciledButLearningIncomplete.length > 0 && (
-                <div
-                  className="text-[11px] text-slate-500 mt-2"
-                  data-testid="awaiting-empty-journal-hint"
-                >
-                  {reconciledButLearningIncomplete.length} reconciled trade(s) still need journal fields — see Learning Completeness.
-                </div>
-              )}
-            </div>
+            <AwaitingEmptyState
+              offline={manualTrades === null}
+              cancelledCount={
+                (manualTrades?.trades ?? []).filter((t) => isCancelledLog(t)).length
+              }
+              reconciledIncompleteCount={reconciledButLearningIncomplete.length}
+            />
           ) : (
             <div className="space-y-3 mb-5" data-testid="awaiting-reconciliation-list">
               {unreconciledTrades.map((t) => (
@@ -636,6 +629,75 @@ function ReconciliationActionButtons({ trade, onAction }: ActionButtonsProps) {
       >
         Record-keeping only. No broker call.
       </span>
+    </div>
+  );
+}
+
+/**
+ * Empty state for the Awaiting Reconciliation column.  Differentiates
+ * the three real cases the operator needs to distinguish so the tab
+ * stops feeling "silently empty":
+ *   - backend offline / unreachable
+ *   - no user-manual rows at all (all DB rows are quarantined or
+ *     never reached the canonical 'manual_trade_log' provenance)
+ *   - all canonical rows were soft-cancelled from this tab
+ *   - 0 awaiting but reconciled-incomplete rows need journal fields
+ * Record-keeping only — no broker call.
+ */
+function AwaitingEmptyState({
+  offline,
+  cancelledCount,
+  reconciledIncompleteCount,
+}: {
+  offline: boolean;
+  cancelledCount: number;
+  reconciledIncompleteCount: number;
+}) {
+  let primary = 'No user-created manual logs awaiting reconciliation.';
+  let secondary: string | null = null;
+  let variant = 'no_canonical_rows';
+  if (offline) {
+    primary = 'Backend unreachable — cannot load reconciliation queue.';
+    secondary =
+      'Start the FastAPI server (python scripts/api_server.py) on 127.0.0.1:8000 and refresh.';
+    variant = 'backend_offline';
+  } else if (cancelledCount > 0) {
+    primary = `No awaiting trades — ${cancelledCount} canonical row(s) were soft-cancelled.`;
+    secondary =
+      'Cancelled rows stay in the audit trail. Log a new manual trade to populate this list.';
+    variant = 'all_cancelled';
+  } else if (reconciledIncompleteCount > 0) {
+    primary = 'No awaiting trades — all canonical rows are reconciled.';
+    secondary = `${reconciledIncompleteCount} reconciled trade(s) still need journal fields — see Learning Completeness.`;
+    variant = 'all_reconciled_journal_gap';
+  } else {
+    primary =
+      'No user-created manual logs awaiting reconciliation. Log a trade from Manual Trade Log to begin.';
+    variant = 'no_canonical_rows';
+  }
+  return (
+    <div
+      className="text-sm text-slate-500 text-center py-8 bg-slate-800/40 rounded-lg border border-slate-700/40"
+      data-testid="awaiting-reconciliation-empty"
+      data-empty-variant={variant}
+    >
+      {primary}
+      {secondary && (
+        <div
+          className="text-[11px] text-slate-500 mt-2"
+          data-testid="awaiting-empty-secondary"
+        >
+          {secondary}
+        </div>
+      )}
+      {!offline && reconciledIncompleteCount > 0 && variant !== 'all_reconciled_journal_gap' && (
+        <div
+          className="text-[11px] text-slate-500 mt-2"
+          data-testid="awaiting-empty-journal-hint"
+        >
+          {reconciledIncompleteCount} reconciled trade(s) still need journal fields — see Learning Completeness.
+        </div>
+      )}
     </div>
   );
 }

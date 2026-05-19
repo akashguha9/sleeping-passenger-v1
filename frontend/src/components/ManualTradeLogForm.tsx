@@ -1,7 +1,11 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { postManualTrade } from '@/lib/apiClient';
+import {
+  postManualTrade,
+  ApiHttpError,
+  ApiTokenRequiredError,
+} from '@/lib/apiClient';
 import { HumanOnlyBadge } from './HumanOnlyBadge';
 import { AdvisoryOnlyBadge } from './AdvisoryOnlyBadge';
 import {
@@ -201,8 +205,8 @@ export function ManualTradeLogForm({ defaultEventId = '', defaultTicker = '', on
       setLogged(true);
       onLogged?.();
       setTimeout(() => setLogged(false), 4000);
-    } catch {
-      setError('Failed to log trade — backend may be offline. Start the FastAPI server and try again.');
+    } catch (err) {
+      setError(describeSubmitError(err));
     } finally {
       setSubmitting(false);
     }
@@ -541,6 +545,38 @@ export function ManualTradeLogForm({ defaultEventId = '', defaultTicker = '', on
       </form>
     </div>
   );
+}
+
+// Translate the apiClient error classes into the operator-facing message
+// the form renders.  Distinguishes the three failure modes the user can
+// actually act on:
+//   * network/CORS failure → "backend offline" (start the server)
+//   * 401/403 token gate   → "set MVP_API_TOKEN for this session"
+//   * 4xx/5xx with body    → show the structured reason from the backend
+//                            (e.g. "rejected_non_user_manual_trade_marker")
+// Anything else falls through to a generic safe copy. Record-keeping
+// only — this function never authorises execution.
+export function describeSubmitError(err: unknown): string {
+  if (err instanceof ApiTokenRequiredError) {
+    return 'Backend refused: write requires MVP_API_TOKEN — set it for this session and retry. No broker call was made.';
+  }
+  if (err instanceof ApiHttpError) {
+    const code = err.status;
+    const reason = err.reason ? ` [${err.reason}]` : '';
+    const msg = err.message || `HTTP ${code}`;
+    if (code === 400 || code === 422) {
+      return `Backend refused (HTTP ${code})${reason}: ${msg}. Fix the input and retry — no broker call was made.`;
+    }
+    if (code === 413 || code === 429) {
+      return `Backend rate-limited or rejected payload (HTTP ${code}): ${msg}.`;
+    }
+    return `Backend error (HTTP ${code})${reason}: ${msg}. No broker call was made.`;
+  }
+  if (err instanceof TypeError) {
+    // fetch() raises TypeError on true network/CORS failure.
+    return 'Failed to reach backend — start the FastAPI server (python scripts/api_server.py) and confirm it is on 127.0.0.1:8000, then retry. No broker call was made.';
+  }
+  return 'Failed to log trade — unexpected error. No broker call was made.';
 }
 
 function Section({

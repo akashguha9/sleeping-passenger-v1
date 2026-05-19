@@ -35,7 +35,20 @@ export default function ManualTradeLogPage() {
   // via is_visible_manual_trade.  This second pass refuses to render
   // anything that still slipped through (rolled-back backend, hand-
   // patched DB, intermediary proxy).  See scripts/manual_trade_origin.
-  const trades = filterVisibleManualTrades(result?.trades);
+  const visibleTrades = filterVisibleManualTrades(result?.trades);
+  // Soft-cancelled rows (CANCELLED_DUPLICATE / CANCELLED_LOG) stay in
+  // the DB for audit but must not visually duplicate in the operator's
+  // "Previously Logged" list — otherwise a cancelled bogus entry (e.g.
+  // the ASDC gibberish row from 2026-05-18) keeps looking like an
+  // active log even though Reconciliation already filters it out.
+  // The count is still surfaced so the operator knows audit history
+  // exists.  Cancellation is record-keeping only — no broker call.
+  const isCancelledLog = (row: ManualTradeLog) => {
+    const s = String(row.reconciliation_status ?? '').toUpperCase();
+    return s === 'CANCELLED_DUPLICATE' || s === 'CANCELLED_LOG';
+  };
+  const trades = visibleTrades.filter((t) => !isCancelledLog(t));
+  const cancelledCount = visibleTrades.length - trades.length;
   const isOffline = !loading && result === null;
 
   return (
@@ -112,8 +125,16 @@ export default function ManualTradeLogPage() {
         <div className="lg:col-span-2">
           <div className="flex items-baseline justify-between mb-3">
             <h2 className="sp-eyebrow">Previously Logged</h2>
-            <span className="text-xs font-mono" style={{ color: 'var(--sp-mist)' }}>
-              {loading ? '…' : trades.length}
+            <span
+              className="text-xs font-mono"
+              style={{ color: 'var(--sp-mist)' }}
+              data-testid="manual-trade-count"
+            >
+              {loading
+                ? '…'
+                : cancelledCount > 0
+                ? `${trades.length} active · ${cancelledCount} cancelled (audit-only)`
+                : trades.length}
             </span>
           </div>
 
