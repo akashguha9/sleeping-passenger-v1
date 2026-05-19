@@ -712,6 +712,29 @@ class MoltbookEntryBody(BaseModel):
     future_rule_update: str = ""
 
 
+class ReconciliationAutoUpdateBody(BaseModel):
+    # Sheet-sync auto-update body.  Bookkeeping only — never reaches a broker.
+    # ``action`` must be one of the four accepted reconciliation outcomes.
+    ticker: str
+    action: str
+    live_price: float | None = None
+    tp_price: float | None = None
+    sl_price: float | None = None
+    booked_percent: float | None = None
+    ride_percent: float | None = None
+    sheet_row_number: int | None = None
+    source: str = "google_sheet_sync"
+    # Safety stamps the caller MUST send.  Server re-asserts them on the
+    # response regardless of what the client sent — these fields exist to
+    # let us reject hostile payloads at the boundary in future, never to
+    # allow the caller to flip the gate.
+    advisory_only: bool = True
+    human_execution_required: bool = True
+    broker_api_called: bool = False
+    ai_execution_count: int = 0
+    execution_gate: str = "LOCKED"
+
+
 # ---------------------------------------------------------------------------
 # GET /health
 # ---------------------------------------------------------------------------
@@ -2113,6 +2136,113 @@ def post_moltbook(
         recalibration_note=body.recalibration_note,
         future_rule_update=body.future_rule_update,
     )
+
+
+# ---------------------------------------------------------------------------
+# Reconciliation auto-update — Google Sheet sync entry point
+# ---------------------------------------------------------------------------
+
+
+_RECONCILIATION_AUTO_UPDATE_ACTIONS: frozenset[str] = frozenset(
+    {
+        "LOG_PARTIAL_TP",
+        "STOP_HIT",
+        "CLOSE_TRADE",
+        "RECONCILE_UPDATE_OUTCOME",
+    }
+)
+_SHEET_SYNC_AUDIT_LOG_NAME = "sheet_sync_reconciliation_audit.jsonl"
+
+
+@app.post("/reconciliation/auto-update")
+def post_reconciliation_auto_update(
+    body: ReconciliationAutoUpdateBody,
+    _auth: None = Depends(require_api_token),
+) -> dict:
+    """Bookkeeping endpoint for the Google Sheet reconciliation sync.
+
+    Accepts one of four reconciliation actions from the sheet sync script
+    and appends an audit record to the JSONL log so the operator can trace
+    every sheet-driven state change.  This route NEVER places, modifies,
+    or cancels a broker order; it NEVER increments ``ai_execution_count``;
+    ``broker_api_called`` is always False.  Unknown actions are rejected
+    with HTTP 400.
+    """
+    action = (body.action or "").strip().upper()
+    ticker = (body.ticker or "").strip()
+    if action not in _RECONCILIATION_AUTO_UPDATE_ACTIONS:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "message": f"unknown reconciliation action: {body.action!r}",
+                "reason": "unknown_action",
+                "accepted_actions": sorted(_RECONCILIATION_AUTO_UPDATE_ACTIONS),
+                "advisory_status": _ADVISORY_STATUS,
+                "execution_mode": _EXECUTION_MODE,
+                "execution_gate": "LOCKED",
+                "broker_api_called": False,
+                "broker_order_id": "NONE",
+                "ai_execution_count": _AI_EXECUTION_COUNT,
+                "human_review_required": True,
+                "record_keeping_only": True,
+            },
+        )
+
+    from datetime import datetime, timezone
+
+    try:
+        from scripts.runtime_common import LOG_DIR, append_jsonl
+    except ModuleNotFoundError:  # pragma: no cover — script-style fallback
+        from runtime_common import LOG_DIR, append_jsonl  # type: ignore[no-redef]
+
+    received_at = (
+        datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+    )
+    audit_record = {
+        "received_at": received_at,
+        "ticker": ticker,
+        "action": action,
+        "live_price": body.live_price,
+        "tp_price": body.tp_price,
+        "sl_price": body.sl_price,
+        "booked_percent": body.booked_percent,
+        "ride_percent": body.ride_percent,
+        "sheet_row_number": body.sheet_row_number,
+        "source": body.source or "google_sheet_sync",
+        # Re-asserted server-side — see CONTRACT in module docstring.
+        "advisory_only": True,
+        "human_execution_required": True,
+        "broker_api_called": False,
+        "ai_execution_count": _AI_EXECUTION_COUNT,
+        "execution_gate": "LOCKED",
+        "record_keeping_only": True,
+    }
+    try:
+        append_jsonl(LOG_DIR / _SHEET_SYNC_AUDIT_LOG_NAME, audit_record, stamp=False)
+    except Exception as exc:  # pragma: no cover — disk-full / readonly FS
+        log = logging.getLogger("api_server.reconciliation_auto_update")
+        log.warning("failed to append sheet-sync audit row: %s", exc)
+
+    return {
+        "status": "recorded",
+        "ticker": ticker,
+        "action": action,
+        "sheet_row_number": body.sheet_row_number,
+        "source": body.source or "google_sheet_sync",
+        "received_at": received_at,
+        "advisory_status": _ADVISORY_STATUS,
+        "execution_mode": _EXECUTION_MODE,
+        "execution_gate": "LOCKED",
+        "broker_api_called": False,
+        "broker_order_id": "NONE",
+        "ai_execution_count": _AI_EXECUTION_COUNT,
+        "execution_permission": False,
+        "can_execute": False,
+        "human_review_required": True,
+        "human_execution_required": True,
+        "advisory_only": True,
+        "record_keeping_only": True,
+    }
 
 
 # ---------------------------------------------------------------------------

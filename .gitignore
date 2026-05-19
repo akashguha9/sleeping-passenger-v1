@@ -131,3 +131,8 @@ frontend/*.tsbuildinfo
 
 # Local Claude Code project settings
 .claude/
+
+google-service-account.json
+service-account*.json
+google-service-account*.json
+credentials*.json
