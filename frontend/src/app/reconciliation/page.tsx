@@ -344,7 +344,14 @@ export default function ReconciliationPage() {
             Awaiting Reconciliation ({unreconciledTrades.length})
           </h2>
 
-          {unreconciledTrades.length === 0 ? (
+          {queueLoading ? (
+            <div
+              className="text-sm text-slate-500 text-center py-8 bg-slate-800/40 rounded-lg border border-slate-700/40"
+              data-testid="awaiting-reconciliation-loading"
+            >
+              Loading awaiting reconciliation list…
+            </div>
+          ) : unreconciledTrades.length === 0 ? (
             <AwaitingEmptyState
               offline={manualTrades === null}
               cancelledCount={
