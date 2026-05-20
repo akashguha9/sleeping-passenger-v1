@@ -138,6 +138,44 @@ CREATE TABLE IF NOT EXISTS moltbook_entries (
 );
 CREATE INDEX IF NOT EXISTS idx_mb_ticker ON moltbook_entries(ticker);
 CREATE INDEX IF NOT EXISTS idx_mb_mistake_type ON moltbook_entries(mistake_type);
+CREATE TABLE IF NOT EXISTS duplicate_fingerprints (
+    fingerprint TEXT PRIMARY KEY,
+    source_type TEXT NOT NULL DEFAULT '',
+    event_type TEXT NOT NULL DEFAULT '',
+    ticker TEXT NOT NULL DEFAULT '',
+    event_id TEXT NOT NULL DEFAULT '',
+    observed_date TEXT NOT NULL DEFAULT '',
+    thesis_excerpt TEXT NOT NULL DEFAULT '',
+    first_seen_at TEXT NOT NULL,
+    last_seen_at TEXT NOT NULL,
+    seen_count INTEGER NOT NULL DEFAULT 1,
+    advisory_status TEXT NOT NULL DEFAULT 'ADVISORY_ONLY',
+    human_review_required INTEGER NOT NULL DEFAULT 1,
+    advisory_only INTEGER NOT NULL DEFAULT 1
+);
+CREATE INDEX IF NOT EXISTS idx_dfp_ticker ON duplicate_fingerprints(ticker);
+CREATE INDEX IF NOT EXISTS idx_dfp_event ON duplicate_fingerprints(event_id);
+CREATE TABLE IF NOT EXISTS signal_cell_index (
+    cell_key TEXT PRIMARY KEY,
+    source_type TEXT NOT NULL DEFAULT '',
+    jurisdiction TEXT NOT NULL DEFAULT '',
+    geography TEXT NOT NULL DEFAULT '',
+    sector TEXT NOT NULL DEFAULT '',
+    asset_tags TEXT NOT NULL DEFAULT '',
+    event_type TEXT NOT NULL DEFAULT '',
+    time_bucket TEXT NOT NULL DEFAULT '',
+    narrative_cluster TEXT NOT NULL DEFAULT '',
+    freshness_state TEXT NOT NULL DEFAULT 'unknown',
+    chaos_score REAL NOT NULL DEFAULT 0.0,
+    mvp_state TEXT NOT NULL DEFAULT 'candidate',
+    first_seen_at TEXT NOT NULL,
+    last_seen_at TEXT NOT NULL,
+    seen_count INTEGER NOT NULL DEFAULT 1,
+    advisory_only INTEGER NOT NULL DEFAULT 1,
+    human_review_required INTEGER NOT NULL DEFAULT 1
+);
+CREATE INDEX IF NOT EXISTS idx_sci_sector ON signal_cell_index(sector);
+CREATE INDEX IF NOT EXISTS idx_sci_cluster ON signal_cell_index(narrative_cluster);
 CREATE TABLE IF NOT EXISTS source_health (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     run_at TEXT NOT NULL,
@@ -1122,9 +1160,14 @@ def insert_moltbook_entry(
     recalibration_note: str,
     future_rule_update: str,
     logged_at: str,
-    db_path: Path = DB_PATH,
+    db_path: Path | None = None,
 ) -> None:
-    conn = _get_conn(db_path)
+    # Resolve DB_PATH lazily so tests that monkeypatch ``persistence.DB_PATH``
+    # (or the conftest runtime-DB isolation fixture) see the override.  An
+    # eager ``db_path=DB_PATH`` default binds at import time and would write
+    # to the real runtime DB regardless of any later override.
+    target = db_path if db_path is not None else DB_PATH
+    conn = _get_conn(target)
     try:
         conn.execute(
             "INSERT OR IGNORE INTO moltbook_entries"
@@ -1174,6 +1217,156 @@ def get_moltbook_entries(
             rows = conn.execute(
                 "SELECT * FROM moltbook_entries ORDER BY logged_at DESC"
             ).fetchall()
+    finally:
+        conn.close()
+    return [_to_dict(r) for r in rows]
+
+
+# ---------------------------------------------------------------------------
+# Signal geometry — duplicate fingerprints + signal-cell index
+#
+# These tables persist the (probabilistic) duplicate-fingerprint hint and the
+# (coarse) signal-cell index computed in scripts/signal_geometry_reflection.py
+# so the audit trail survives process restarts.  Neither is canonical truth
+# about a trade — SQLite's moltbook_entries / manual_trades remain canonical.
+# Both upserts are advisory-only and never touch broker / execution state.
+# ---------------------------------------------------------------------------
+
+
+def upsert_duplicate_fingerprint(
+    fingerprint: str,
+    *,
+    source_type: str = "",
+    event_type: str = "",
+    ticker: str = "",
+    event_id: str = "",
+    observed_date: str = "",
+    thesis_excerpt: str = "",
+    db_path: Path | None = None,
+) -> dict[str, Any]:
+    """Record (or bump the seen-count of) one duplicate fingerprint.
+
+    Returns ``{"is_new": bool, "seen_count": int}``.  The first sighting
+    inserts; later sightings increment ``seen_count`` and refresh
+    ``last_seen_at`` so the operator can audit how often an echo recurs.
+    """
+    target = db_path if db_path is not None else DB_PATH
+    now = utc_timestamp()
+    conn = _get_conn(target)
+    try:
+        existing = conn.execute(
+            "SELECT seen_count FROM duplicate_fingerprints WHERE fingerprint=?",
+            (fingerprint,),
+        ).fetchone()
+        if existing is None:
+            conn.execute(
+                "INSERT INTO duplicate_fingerprints"
+                " (fingerprint, source_type, event_type, ticker, event_id,"
+                "  observed_date, thesis_excerpt, first_seen_at, last_seen_at,"
+                "  seen_count, advisory_status, human_review_required, advisory_only)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, 1, 1)",
+                (
+                    fingerprint, source_type, event_type, str(ticker).upper(),
+                    event_id, observed_date, thesis_excerpt[:280], now, now,
+                    _ADVISORY_STATUS,
+                ),
+            )
+            conn.commit()
+            return {"is_new": True, "seen_count": 1}
+        new_count = int(existing["seen_count"]) + 1
+        conn.execute(
+            "UPDATE duplicate_fingerprints SET seen_count=?, last_seen_at=?"
+            " WHERE fingerprint=?",
+            (new_count, now, fingerprint),
+        )
+        conn.commit()
+        return {"is_new": False, "seen_count": new_count}
+    finally:
+        conn.close()
+
+
+def get_duplicate_fingerprints(
+    ticker: str | None = None,
+    db_path: Path | None = None,
+) -> list[dict[str, Any]]:
+    target = db_path if db_path is not None else DB_PATH
+    conn = _get_conn(target)
+    try:
+        if ticker:
+            rows = conn.execute(
+                "SELECT * FROM duplicate_fingerprints WHERE ticker=?"
+                " ORDER BY last_seen_at DESC",
+                (str(ticker).upper(),),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM duplicate_fingerprints ORDER BY last_seen_at DESC"
+            ).fetchall()
+    finally:
+        conn.close()
+    return [_to_dict(r) for r in rows]
+
+
+def upsert_signal_cell(
+    cell_key: str,
+    *,
+    source_type: str = "",
+    jurisdiction: str = "",
+    geography: str = "",
+    sector: str = "",
+    asset_tags: str = "",
+    event_type: str = "",
+    time_bucket: str = "",
+    narrative_cluster: str = "",
+    freshness_state: str = "unknown",
+    chaos_score: float = 0.0,
+    mvp_state: str = "candidate",
+    db_path: Path | None = None,
+) -> dict[str, Any]:
+    """Insert or refresh one signal-cell index row keyed by ``cell_key``."""
+    target = db_path if db_path is not None else DB_PATH
+    now = utc_timestamp()
+    conn = _get_conn(target)
+    try:
+        existing = conn.execute(
+            "SELECT seen_count FROM signal_cell_index WHERE cell_key=?",
+            (cell_key,),
+        ).fetchone()
+        if existing is None:
+            conn.execute(
+                "INSERT INTO signal_cell_index"
+                " (cell_key, source_type, jurisdiction, geography, sector,"
+                "  asset_tags, event_type, time_bucket, narrative_cluster,"
+                "  freshness_state, chaos_score, mvp_state, first_seen_at,"
+                "  last_seen_at, seen_count, advisory_only, human_review_required)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 1, 1)",
+                (
+                    cell_key, source_type, jurisdiction, geography, sector,
+                    asset_tags, event_type, time_bucket, narrative_cluster,
+                    freshness_state, float(chaos_score), mvp_state, now, now,
+                ),
+            )
+            conn.commit()
+            return {"is_new": True, "seen_count": 1}
+        new_count = int(existing["seen_count"]) + 1
+        conn.execute(
+            "UPDATE signal_cell_index SET seen_count=?, last_seen_at=?,"
+            " freshness_state=?, chaos_score=?, mvp_state=? WHERE cell_key=?",
+            (new_count, now, freshness_state, float(chaos_score), mvp_state, cell_key),
+        )
+        conn.commit()
+        return {"is_new": False, "seen_count": new_count}
+    finally:
+        conn.close()
+
+
+def get_signal_cells(db_path: Path | None = None) -> list[dict[str, Any]]:
+    target = db_path if db_path is not None else DB_PATH
+    conn = _get_conn(target)
+    try:
+        rows = conn.execute(
+            "SELECT * FROM signal_cell_index ORDER BY last_seen_at DESC"
+        ).fetchall()
     finally:
         conn.close()
     return [_to_dict(r) for r in rows]
@@ -1259,6 +1452,8 @@ def get_db_status(db_path: Path = DB_PATH) -> dict[str, Any]:
         "manual_trades",
         "reconciliation_results",
         "moltbook_entries",
+        "duplicate_fingerprints",
+        "signal_cell_index",
         "source_health",
         "export_logs",
         "signal_events",
@@ -1957,6 +2152,10 @@ __all__ = [
     "get_all_reconciliations",
     "insert_moltbook_entry",
     "get_moltbook_entries",
+    "upsert_duplicate_fingerprint",
+    "get_duplicate_fingerprints",
+    "upsert_signal_cell",
+    "get_signal_cells",
     "insert_source_health",
     "get_latest_source_health",
     "log_export",

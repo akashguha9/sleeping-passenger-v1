@@ -78,6 +78,25 @@ MISTAKE_CATEGORIES: frozenset[str] = frozenset(
     }
 )
 
+# Outcome-based learning categories used by the reconciliation→Moltbook
+# bridge (scripts/moltbook_reconciliation_bridge.py).  These describe how a
+# *closed* trade resolved, not the signal-decision quality the original 12
+# MISTAKE_CATEGORIES describe.  Kept as a SEPARATE frozenset so the public
+# MISTAKE_CATEGORIES contract (and the tests that assert len == 12) stays
+# unchanged.  They never authorise execution.
+LOSS_REVIEW_CATEGORIES: frozenset[str] = frozenset(
+    {
+        "trade_loss",        # generic closed-at-a-loss, no finer signal
+        "manual_exit_loss",  # operator manually exited before stop breach
+        "stop_loss_breach",  # exit driven by a stop-loss breach
+    }
+)
+
+# The full set log_moltbook_entry will accept.  Validation widens to include
+# the loss-review categories so honest closed-loss entries can be recorded
+# without loosening the original signal-quality taxonomy.
+ACCEPTED_MISTAKE_TYPES: frozenset[str] = MISTAKE_CATEGORIES | LOSS_REVIEW_CATEGORIES
+
 _ADVISORY_STATUS = "ADVISORY_ONLY"
 _EXECUTION_MODE = "HUMAN_ONLY"
 _AI_EXECUTION_COUNT = 0
@@ -177,10 +196,10 @@ def log_moltbook_entry(
         return _error_response("log_moltbook_entry", "event_id required")
     if not ticker:
         return _error_response("log_moltbook_entry", "ticker required")
-    if mistake_type not in MISTAKE_CATEGORIES:
+    if mistake_type not in ACCEPTED_MISTAKE_TYPES:
         return _error_response(
             "log_moltbook_entry",
-            f"mistake_type must be one of {sorted(MISTAKE_CATEGORIES)}, got {mistake_type!r}",
+            f"mistake_type must be one of {sorted(ACCEPTED_MISTAKE_TYPES)}, got {mistake_type!r}",
         )
     if not lesson_learned:
         return _error_response("log_moltbook_entry", "lesson_learned required")
@@ -203,7 +222,19 @@ def log_moltbook_entry(
         logged_at=utc_timestamp(),
     )
     append_jsonl(MOLTBOOK_LOG, entry.to_dict(), stamp=False)
-    if _DB_AVAILABLE and _persistence is not None:
+    # SQLite is canonical, but ONLY for real runtime writes.  When a test
+    # monkeypatches MOLTBOOK_LOG to a tmp path the JSONL write is isolated;
+    # we must NOT then leak the row into the canonical runtime DB.  The
+    # sentinel comparison mirrors the read-path guard in
+    # list_moltbook_entries and is the fix for the historical pollution
+    # where test/demo entries (FABRIC_SPY, "Persistence above 0.8",
+    # Thesis A …) accumulated in runtime/mvp_local.db because only the
+    # JSONL path was isolated.
+    if (
+        _DB_AVAILABLE
+        and _persistence is not None
+        and MOLTBOOK_LOG == _MOLTBOOK_LOG_ORIG
+    ):
         try:
             _persistence.insert_moltbook_entry(
                 entry.entry_id, entry.event_id, entry.ticker,
@@ -303,6 +334,8 @@ def get_mistake_category_summary() -> dict[str, Any]:
 __all__ = [
     "MOLTBOOK_LOG",
     "MISTAKE_CATEGORIES",
+    "LOSS_REVIEW_CATEGORIES",
+    "ACCEPTED_MISTAKE_TYPES",
     "MoltbookEntry",
     "log_moltbook_entry",
     "list_moltbook_entries",

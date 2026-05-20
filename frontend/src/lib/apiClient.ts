@@ -401,8 +401,12 @@ export async function getReconciliationQueue(
 export async function getMoltbook(): Promise<ApiResult<MoltbookListResponse>> {
   try {
     const raw = await apiFetch<Record<string, unknown>>('/moltbook');
-    const items = (raw.items as MoltbookEntry[]) ?? [];
-    return { data: { items, item_count: items.length }, isMock: false };
+    const items =
+      ((raw.items as MoltbookEntry[] | undefined) ??
+        (raw.entries as MoltbookEntry[] | undefined) ??
+        []);
+    const item_count = Number(raw.item_count ?? raw.entry_count ?? items.length);
+    return { data: { items, item_count }, isMock: false };
   } catch {
     return {
       data: { items: MOCK_MOLTBOOK_ENTRIES, item_count: MOCK_MOLTBOOK_ENTRIES.length },

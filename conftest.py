@@ -53,6 +53,36 @@ os.environ.setdefault(
 )
 
 
+@pytest.fixture(autouse=True)
+def _isolate_runtime_db(tmp_path, monkeypatch):
+    """Session-wide safety net: no test may write the operator's runtime DB.
+
+    The historical Moltbook pollution (FABRIC_SPY / "Persistence above 0.8"
+    rows in runtime/mvp_local.db) happened because some tests exercised
+    write paths — notably ``POST /moltbook`` → ``insert_moltbook_entry`` —
+    whose eager ``db_path=DB_PATH`` default bound at import time and was
+    never rebound to a temp DB.  This autouse fixture redirects
+    ``persistence.DB_PATH`` to a per-test temp file so any lazily-resolved
+    write lands in throwaway storage by default.
+
+    Tests that need their own DB still monkeypatch ``persistence.DB_PATH``
+    or pass ``db_path=`` explicitly; those overrides win because they run
+    after this fixture.  This is defence in depth, not a substitute for
+    per-test isolation.
+    """
+    try:
+        try:
+            import scripts.persistence as _persistence
+        except ModuleNotFoundError:  # pragma: no cover - script-style env
+            import persistence as _persistence  # type: ignore[no-redef]
+    except Exception:  # pragma: no cover - persistence import optional
+        yield
+        return
+    safe_db = tmp_path / "runtime_isolated_mvp_local.db"
+    monkeypatch.setattr(_persistence, "DB_PATH", safe_db, raising=False)
+    yield
+
+
 @pytest.fixture
 def scratch_path():
     path = _SCRATCH_ROOT / f"codex-{uuid.uuid4().hex[:8]}"
