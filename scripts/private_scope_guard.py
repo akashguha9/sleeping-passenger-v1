@@ -82,6 +82,7 @@ APPROVED_DOMAINS: tuple[str, ...] = (
     "execution_integrity_audit",
     "no_execution",
     "hygiene",
+    "complex_systems",  # advisory-only complex-systems signal doctrine layer
 )
 
 # Explicit allowlist for individual files / directories whose name does

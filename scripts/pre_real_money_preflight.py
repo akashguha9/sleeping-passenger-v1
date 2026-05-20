@@ -265,6 +265,48 @@ def run_preflight(
                     "signal_geometry_reflection_safety_invariant_failed"
                 )
 
+    # 8. Complex-systems doctrine layer — diagnostic eighth subcheck.
+    # Same contract as the geometry layer: a healthy module returns an
+    # advisory payload with safety stamps intact; a broken safety contract
+    # is a blocking regression. This layer can never unlock execution.
+    cs_run = _import_check(
+        "complex_systems_diagnostics", "build_complex_systems_diagnostics"
+    )
+    if cs_run is None:
+        warnings.append("complex_systems_diagnostics_unavailable")
+    else:
+        cs_result = _safe_call(cs_run, [])
+        if not isinstance(cs_result, dict):
+            warnings.append("complex_systems_diagnostics_unavailable")
+        else:
+            cs_safety = cs_result.get("safety") or {}
+            cs_invariants_ok = (
+                cs_result.get("advisory_status") == "ADVISORY_ONLY"
+                and cs_result.get("execution_gate") == "LOCKED"
+                and cs_safety.get("broker_api_called") is False
+                and cs_safety.get("ai_execution_count") == 0
+                and cs_safety.get("execution_permission") is False
+                and cs_safety.get("can_execute") is False
+                and cs_safety.get("broker_order_id") == "NONE"
+                and cs_safety.get("human_review_required") is True
+            )
+            payload["subchecks"]["complex_systems_diagnostics"] = {
+                "ok": bool(cs_invariants_ok),
+                "advisory_decision_bias": str(
+                    cs_result.get("advisory_decision_bias") or "insufficient_data"
+                ),
+                "safety_invariants_ok": bool(cs_invariants_ok),
+                "advisory_status": cs_result.get("advisory_status"),
+                "execution_gate": cs_result.get("execution_gate"),
+                "doctrine": cs_result.get("doctrine"),
+                "canonical_truth_source": cs_result.get("canonical_truth_source"),
+                "jsonl_role": cs_result.get("jsonl_role"),
+            }
+            if not cs_invariants_ok:
+                blocking_issues.append(
+                    "complex_systems_diagnostics_safety_invariant_failed"
+                )
+
     payload["ok"] = len(blocking_issues) == 0
 
     if not payload["ok"]:
