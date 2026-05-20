@@ -100,11 +100,13 @@ EXPLICIT_IN_SCOPE: frozenset[str] = frozenset({
 # Modules deliberately marked OUT_OF_SCOPE inside ``scripts/``.  This
 # list exists so the guard report distinguishes "we know this is out of
 # scope and have accepted it" from "this is new and needs an operator
-# decision".  Empty after the GMAT scraper was relocated to
-# ``tools/gmat_scraper/`` (see ``QUARANTINED_TOOL_DIRS`` below) — leave
-# it as a frozenset so future operators have an obvious slot to use
-# when they accept a *new* in-scripts/ out-of-scope module.
-KNOWN_OUT_OF_SCOPE: frozenset[str] = frozenset()
+# decision".  Adding here is an explicit operator acknowledgement: the
+# file is intentionally outside the approved MVP domains but accepted.
+KNOWN_OUT_OF_SCOPE: frozenset[str] = frozenset({
+    # local operator helper for advisory-only five-model synthesis prompt
+    # recovery; no broker execution, no order placement, no API trading writes.
+    "run_five_model_synthesis.ps1",
+})
 
 # Quarantined non-MVP tool directories.  These live under ``tools/`` so
 # they are physically off the MVP runtime surface — no module under
