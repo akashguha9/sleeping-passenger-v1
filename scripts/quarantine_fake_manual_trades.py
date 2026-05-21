@@ -61,6 +61,16 @@ try:
 except ModuleNotFoundError:  # pragma: no cover
     from persistence import DB_PATH as _DEFAULT_DB_PATH  # type: ignore[no-redef]
 
+try:
+    from scripts import operator_permission_guard as _guard
+except ModuleNotFoundError:  # pragma: no cover - script-style fallback
+    import operator_permission_guard as _guard  # type: ignore[no-redef]
+
+# Operation identity for the central permission guard.  Re-stamping provenance
+# is a REPAIR_WRITE (OPERATOR+), never a delete and never an execution action.
+OPERATION_NAME = "quarantine_fake_manual_trades"
+OPERATION_CLASS = _guard.OperationClass.REPAIR_WRITE
+
 
 @dataclass(frozen=True)
 class QuarantineCandidate:
@@ -186,14 +196,25 @@ def main(argv: list[str] | None = None) -> int:
         help=f"SQLite DB path (default: {_DEFAULT_DB_PATH}).",
     )
     parser.add_argument(
+        "--apply",
         "--yes",
+        dest="apply",
         action="store_true",
-        help="Actually apply the quarantine.  Without this flag the script only prints.",
+        help="Actually apply the quarantine (requires MVP_OPERATOR_ROLE=OPERATOR "
+             "or ADMIN and a recent dry-run receipt).  Without this flag the "
+             "script only prints.",
     )
     parser.add_argument(
         "--dry-run",
         action="store_true",
-        help="Explicit no-op flag (default behaviour).  Useful in scripts.",
+        help="Explicit dry-run (default behaviour); writes a permission "
+             "dry-run receipt so a subsequent --apply can proceed.",
+    )
+    parser.add_argument(
+        "--operator-role",
+        default=None,
+        help="VIEWER|OPERATOR|ADMIN (default: MVP_OPERATOR_ROLE env, else "
+             "VIEWER).  --apply requires OPERATOR or ADMIN.",
     )
     args = parser.parse_args(argv)
 
@@ -202,11 +223,45 @@ def main(argv: list[str] | None = None) -> int:
         print(f"[quarantine] ERROR: DB not found at {db_path}", file=sys.stderr)
         return 2
 
-    dry_run = not args.yes
+    dry_run = not args.apply
     candidates = find_candidates(db_path)
     _print_report(candidates, dry_run=dry_run, db_path=db_path)
 
-    if dry_run or not candidates:
+    if dry_run:
+        # A dry-run is read-only and open to any role.  It records a receipt so
+        # a later --apply (by an authorized role) can prove a dry-run happened.
+        receipt = _guard.write_dry_run_receipt(
+            OPERATION_NAME, target_count=len(candidates), db_path=str(db_path)
+        )
+        print(f"[quarantine] dry-run receipt written: {receipt.name}")
+        print("[quarantine] To apply (PowerShell):")
+        print('[quarantine]   $env:MVP_OPERATOR_ROLE="OPERATOR"')
+        print(f"[quarantine]   python scripts\\quarantine_fake_manual_trades.py "
+              f"--apply --db {db_path}")
+        return 0
+
+    # --apply path: central permission guard (fails closed; audits allow/deny).
+    role = (_guard.OperatorRole(_guard._auth.normalize_role(args.operator_role))
+            if args.operator_role else _guard.load_operator_role_from_env())
+    request = _guard.PermissionRequest(
+        operation_name=OPERATION_NAME,
+        operation_class=OPERATION_CLASS,
+        operator_role=role,
+        apply_requested=True,
+        dry_run_completed=_guard.validate_dry_run_receipt(
+            OPERATION_NAME, str(db_path)
+        ),
+        db_path=str(db_path),
+        safety_stamps=_guard.caller_safety_stamps(),
+    )
+    try:
+        _guard.require_permission_or_exit(request)
+    except PermissionError as exc:
+        print(f"[quarantine] [DENY] {exc}", file=sys.stderr)
+        return 2
+
+    if not candidates:
+        print("[quarantine] permission granted; no candidates to quarantine (no-op).")
         return 0
 
     updated = apply_quarantine(db_path, candidates)

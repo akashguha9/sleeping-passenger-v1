@@ -159,6 +159,13 @@ except ModuleNotFoundError:  # pragma: no cover
         security_headers,
     )
 
+# Read-only diagnostics service — the single backend source for the cockpit.
+# Bound at module level so tests can patch ``scripts.api_server.get_diagnostics_snapshot``.
+try:
+    from scripts.diagnostics_service import get_diagnostics_snapshot
+except ModuleNotFoundError:  # pragma: no cover - script-style fallback
+    from diagnostics_service import get_diagnostics_snapshot  # type: ignore[no-redef]
+
 
 _logger = logging.getLogger("sleeping_passenger.api")
 if not _logger.handlers:
@@ -1216,36 +1223,75 @@ def get_learning_completeness(limit: int | None = 50) -> dict:
 # ---------------------------------------------------------------------------
 # Operator cockpit — read-only aggregate of the closed-loop diagnostics.
 #
-# Surfaces the closed-loop health, truth purity, Moltbook learning, source
-# independence, broken-windows repair debt, and defensive alpha in ONE compact
-# advisory payload so the operator can see system integrity at a glance without
-# leaving the app.  Strictly read-only: no DB writes, no broker calls, no
-# execution endpoint.  Every sub-report fails soft (defaults to safe zeros with
-# a note) so the cockpit never 500s on a partial environment.
+# Backed by the single read-only ``diagnostics_service`` (which reuses a fresh
+# derived snapshot or recomputes once).  This replaced the previous per-hit
+# fail-soft aggregation that recomputed every heavy audit and could collapse a
+# crashed subreport into fake-clean zeros.  Now a failed subreport surfaces as
+# DEGRADED in ``partial_failures`` and escalates the top-level ``status`` — it
+# can never read as "clean".  Strictly read-only: no DB writes, no broker
+# calls, no execution endpoint.
 # ---------------------------------------------------------------------------
+
+
+def _cockpit_panel_data(subreports: dict, name: str) -> dict:
+    """Return a subreport's raw ``data`` dict, or ``{}`` when degraded/absent.
+
+    A DEGRADED (crashed) subreport carries ``data = None``; the empty-dict
+    fallback keeps the frontend panels renderable, but the failure is NOT
+    hidden — it is surfaced explicitly via the top-level ``status`` and the
+    ``partial_failures`` list so the cockpit can never read a crash as clean.
+    """
+    sub = subreports.get(name)
+    if isinstance(sub, dict) and isinstance(sub.get("data"), dict):
+        return sub["data"]
+    return {}
 
 
 @app.get("/diagnostics/cockpit")
 def get_diagnostics_cockpit() -> dict:
     """Aggregate the advisory closed-loop diagnostics for the operator cockpit.
 
-    Read-only.  Never grants execution permission; never places a broker order.
+    Sourced from ``scripts.diagnostics_service.get_diagnostics_snapshot`` —
+    cache-first, recompute-once, explicit degraded taxonomy.  Read-only: never
+    grants execution permission; never places a broker order.
     """
-    def _safe(import_path: str, attr: str, *args, **kwargs) -> dict:
-        try:
-            try:
-                mod = __import__(f"scripts.{import_path}", fromlist=[attr])
-            except ModuleNotFoundError:
-                mod = __import__(import_path, fromlist=[attr])
-            return getattr(mod, attr)(*args, **kwargs) or {}
-        except Exception as exc:  # pragma: no cover - defensive
-            return {"unavailable": f"{type(exc).__name__}"}
+    try:
+        snapshot = get_diagnostics_snapshot(
+            use_cache=True,
+            refresh=False,
+            include_heavy=True,
+            max_age_seconds=300,
+        )
+    except Exception as exc:  # pragma: no cover - defensive: never 500 the cockpit
+        _logger.warning("diagnostics_service unavailable: %s", type(exc).__name__)
+        snapshot = {
+            "status": "UNKNOWN",
+            "degraded_state": "UNKNOWN",
+            "generated_at_utc": None,
+            "cache_status": "unavailable",
+            "partial_failures": [{
+                "subreport": "diagnostics_service",
+                "error_type": type(exc).__name__,
+                "safe_recovery_command": "python scripts/diagnostics_service.py",
+            }],
+            "subreports": {},
+            "diagnostics_health": 0.0,
+            "canonical_truth_source": "sqlite",
+            "cache_role": "derived_non_canonical",
+            "safety_stamps": {
+                "advisory_status": _ADVISORY_STATUS,
+                "execution_gate": "LOCKED",
+                "broker_api_called": False,
+                "ai_execution_count": _AI_EXECUTION_COUNT,
+            },
+        }
 
-    closed_loop = _safe("closed_loop_learning_audit", "build_audit")
-    truth_purity = _safe("runtime_truth_purity_audit", "build_audit")
-    source_independence = _safe("source_independence_audit", "build_report")
-    broken_windows = _safe("broken_windows_report", "build_report")
-    defensive_alpha = _safe("defensive_alpha_report", "build_report")
+    subreports = snapshot.get("subreports", {})
+    closed_loop = _cockpit_panel_data(subreports, "closed_loop")
+    truth_purity = _cockpit_panel_data(subreports, "truth_purity")
+    source_independence = _cockpit_panel_data(subreports, "source_independence")
+    broken_windows = _cockpit_panel_data(subreports, "broken_windows")
+    defensive_alpha = _cockpit_panel_data(subreports, "defensive_alpha")
 
     return {
         "report": "operator_cockpit",
@@ -1254,6 +1300,22 @@ def get_diagnostics_cockpit() -> dict:
             "action is performed. These panels measure system integrity and "
             "learning quality; they never place, modify, or cancel an order."
         ),
+        # --- diagnostics_service: explicit health / degraded taxonomy ----------
+        "status": snapshot.get("status", "UNKNOWN"),
+        "degraded_state": snapshot.get("degraded_state", snapshot.get("status", "UNKNOWN")),
+        "generated_at_utc": snapshot.get("generated_at_utc"),
+        "cache_status": snapshot.get("cache_status", "unavailable"),
+        "cache_role": snapshot.get("cache_role", "derived_non_canonical"),
+        "canonical_truth_source": snapshot.get("canonical_truth_source", "sqlite"),
+        "diagnostics_health": snapshot.get("diagnostics_health"),
+        "partial_failures": snapshot.get("partial_failures", []),
+        "subreports": {
+            name: {k: v for k, v in sub.items() if k != "data"}
+            for name, sub in subreports.items()
+            if isinstance(sub, dict)
+        },
+        "safety_stamps": snapshot.get("safety_stamps", {}),
+        # --- frontend-compatible panel projection (unchanged shape) -----------
         "closed_loop": {
             "closed_loop_coverage": closed_loop.get("closed_loop_coverage", 0.0),
             "signals_without_outcomes": closed_loop.get("signals_without_outcomes", 0),
@@ -1292,13 +1354,15 @@ def get_diagnostics_cockpit() -> dict:
             "ai_execution_count_zero_verified": closed_loop.get(
                 "ai_execution_count_zero_verified", True),
         },
+        # --- safety stamps (top-level shorthands, unchanged) ------------------
+        "advisory_only": True,
         "advisory_status": _ADVISORY_STATUS,
+        "human_review_required": True,
         "execution_gate": "LOCKED",
         "broker_api_called": False,
         "ai_execution_count": _AI_EXECUTION_COUNT,
         "execution_permission": False,
         "can_execute": False,
-        "human_review_required": True,
     }
 
 

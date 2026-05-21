@@ -106,3 +106,60 @@ def test_preflight_bridge_idempotency_check_passes_clean(tmp_path):
     db = _clean_db(tmp_path)
     chk = preflight.check_moltbook_bridge_idempotent(db)
     assert chk["status"] == "PASS"
+
+
+# ---------------------------------------------------------------------------
+# Kanté Defensive Sprint — guard coverage + diagnostics service in the gate
+# ---------------------------------------------------------------------------
+
+
+def test_release_gate_surfaces_guard_and_service_summary(tmp_path):
+    db = _clean_db(tmp_path)
+    result = release_gate.evaluate(db, check_backend=False)
+    # The advisory guard/diagnostics summary is exposed at the gate top level.
+    assert result["operator_permission_guard_available"] is True
+    assert result["auth_guard_status"] in {"PASS", "WARN"}
+    assert isinstance(result["mutation_scripts_guarded"], int)
+    assert isinstance(result["mutation_scripts_unguarded"], int)
+    assert result["diagnostics_service_available"] is True
+    assert "release_gate_impact" in result
+
+
+def test_known_mutation_scripts_are_guarded(tmp_path):
+    """The two primary mutation scripts wired this sprint count as guarded."""
+    coverage = preflight.scan_mutation_script_guarding()
+    assert "quarantine_fake_manual_trades.py" in coverage["guarded"]
+    assert "moltbook_cleanup_fake_seed.py" in coverage["guarded"]
+
+
+def test_guard_coverage_warns_when_unguarded_present():
+    """An unguarded mutation script must produce a WARN coverage status."""
+    assert preflight.evaluate_guard_coverage_status(0, guard_available=True) == "PASS"
+    assert preflight.evaluate_guard_coverage_status(2, guard_available=True) == "WARN"
+    # A missing guard module is itself a WARN.
+    assert preflight.evaluate_guard_coverage_status(0, guard_available=False) == "WARN"
+
+
+def test_diagnostics_service_unavailable_is_warn(monkeypatch):
+    """If the diagnostics service can't be imported, the summary impact is WARN."""
+    import builtins
+    real_import = builtins.__import__
+
+    def _block(name, *a, **k):
+        if "diagnostics_service" in name:
+            raise ModuleNotFoundError(name)
+        return real_import(name, *a, **k)
+
+    monkeypatch.setattr(builtins, "__import__", _block)
+    health = preflight.diagnostics_service_health()
+    assert health["available"] is False
+    assert health["status"] == "UNKNOWN"
+    summary = preflight.build_kante_defensive_summary()
+    assert summary["release_gate_impact"] == "WARN"
+
+
+def test_guard_coverage_check_is_info_non_blocking(tmp_path):
+    """The preflight guard check must be INFO so it never flips the verdict."""
+    chk = preflight.check_kante_defensive_gates()
+    assert chk["status"] == "INFO"
+    assert chk["name"] == "kante_defensive_gates"

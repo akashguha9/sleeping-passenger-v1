@@ -333,6 +333,138 @@ def check_mock_fallback_explicit() -> dict[str, Any]:
                   f"source_mode={mode} not in {sorted(VALID_SOURCE_MODES)}.")
 
 
+# ---------------------------------------------------------------------------
+# Kanté Defensive Sprint — operator-guard coverage + diagnostics service health
+# ---------------------------------------------------------------------------
+
+# Modules considered an acceptable centralized authorization boundary.  A
+# mutation-capable script is "guarded" if it routes through either of these.
+_GUARD_MARKERS = ("operator_permission_guard", "operator_audit_log")
+
+
+def scan_mutation_script_guarding() -> dict[str, Any]:
+    """Discover ``--apply`` / ``--yes`` mutation scripts and their guard status.
+
+    Read-only static scan of ``scripts/*.py``: a script that declares an
+    ``--apply`` or ``--yes`` argparse flag is mutation-capable; it is *guarded*
+    iff it references a centralized authorization boundary.
+    """
+    scripts_dir = REPO_ROOT / "scripts"
+    guarded: list[str] = []
+    unguarded: list[str] = []
+    for path in sorted(scripts_dir.glob("*.py")):
+        try:
+            text = path.read_text(encoding="utf-8", errors="ignore")
+        except OSError:  # pragma: no cover - defensive
+            continue
+        is_mutation = ('"--apply"' in text or "'--apply'" in text
+                       or '"--yes"' in text or "'--yes'" in text)
+        if not is_mutation or "add_argument" not in text:
+            continue
+        if any(marker in text for marker in _GUARD_MARKERS):
+            guarded.append(path.name)
+        else:
+            unguarded.append(path.name)
+    return {"guarded": guarded, "unguarded": unguarded}
+
+
+def diagnostics_service_health() -> dict[str, Any]:
+    """Best-effort, cheap read of diagnostics_service availability + status.
+
+    Does NOT force a heavy recompute: if no cached snapshot exists, the status
+    is reported UNKNOWN rather than recomputing inside a preflight.
+    """
+    try:
+        try:
+            from scripts.diagnostics_service import get_diagnostics_snapshot
+            from scripts import diagnostics_snapshot_cache as cache
+        except ModuleNotFoundError:  # pragma: no cover - script-style fallback
+            from diagnostics_service import get_diagnostics_snapshot  # type: ignore
+            import diagnostics_snapshot_cache as cache  # type: ignore
+    except Exception as exc:  # pragma: no cover - defensive
+        return {"available": False, "status": "UNKNOWN",
+                "detail": f"import failed: {type(exc).__name__}"}
+    try:
+        if cache.read_snapshot() is None:
+            return {"available": True, "status": "UNKNOWN",
+                    "detail": "no cached snapshot (not recomputing in preflight)"}
+        # Huge max_age so an existing (even stale) snapshot is reused, never
+        # recomputed, keeping the preflight cheap.
+        snap = get_diagnostics_snapshot(
+            use_cache=True, refresh=False, include_heavy=False,
+            max_age_seconds=10 ** 9)
+        return {"available": True, "status": str(snap.get("status", "UNKNOWN")),
+                "detail": f"cache_status={snap.get('cache_status')}"}
+    except Exception as exc:  # pragma: no cover - defensive
+        return {"available": True, "status": "UNKNOWN",
+                "detail": f"snapshot read failed: {type(exc).__name__}"}
+
+
+def evaluate_guard_coverage_status(unguarded_count: int, guard_available: bool) -> str:
+    """Pure: PASS iff the guard is importable and no mutation script is unwired."""
+    if not guard_available:
+        return WARN
+    return WARN if unguarded_count > 0 else PASS
+
+
+def build_kante_defensive_summary() -> dict[str, Any]:
+    """Summarize operator-guard coverage + diagnostics service for the gate.
+
+    Advisory / non-blocking: surfaced for operator visibility.  ``release_gate
+    _impact`` is WARN when coverage is incomplete or the service is down, but
+    this summary does not by itself FAIL the release gate.
+    """
+    try:
+        try:
+            from scripts import operator_permission_guard  # noqa: F401
+        except ModuleNotFoundError:  # pragma: no cover - script-style fallback
+            import operator_permission_guard  # type: ignore  # noqa: F401
+        guard_available = True
+    except Exception:  # pragma: no cover - defensive
+        guard_available = False
+
+    coverage = scan_mutation_script_guarding()
+    svc = diagnostics_service_health()
+    guard_status = evaluate_guard_coverage_status(
+        len(coverage["unguarded"]), guard_available)
+
+    impact = PASS
+    if guard_status == WARN or not svc["available"] or svc["status"] == "UNKNOWN":
+        impact = WARN
+    if svc["status"] in {"BLOCK"}:
+        impact = WARN  # advisory only; never auto-BLOCK the release here
+
+    return {
+        "operator_permission_guard_available": guard_available,
+        "auth_guard_status": guard_status,
+        "mutation_scripts_guarded": coverage["guarded"],
+        "mutation_scripts_unguarded": coverage["unguarded"],
+        "mutation_scripts_guarded_count": len(coverage["guarded"]),
+        "mutation_scripts_unguarded_count": len(coverage["unguarded"]),
+        "diagnostics_service_available": svc["available"],
+        "diagnostics_service_status": svc["status"],
+        "release_gate_impact": impact,
+    }
+
+
+def check_kante_defensive_gates() -> dict[str, Any]:
+    """INFO check: surface guard coverage + diagnostics service in the preflight.
+
+    Deliberately INFO (never affects the gate verdict): the unguarded-script
+    and service-status signals are advisory.  The detailed status lives in the
+    ``kante_defensive`` summary block of the report.
+    """
+    summary = build_kante_defensive_summary()
+    detail = (
+        f"guard={'avail' if summary['operator_permission_guard_available'] else 'MISSING'}; "
+        f"mutation guarded={summary['mutation_scripts_guarded_count']}, "
+        f"unguarded={summary['mutation_scripts_unguarded_count']}; "
+        f"diagnostics_service={summary['diagnostics_service_status']} "
+        f"(impact={summary['release_gate_impact']})."
+    )
+    return _check("kante_defensive_gates", INFO, detail, **summary)
+
+
 def check_backend_health(timeout: float = 1.0) -> dict[str, Any]:
     """Probe the local backend /health route.  WARN (not FAIL) if not running."""
     host = os.environ.get("API_HOST", "127.0.0.1")
@@ -371,6 +503,7 @@ def run_preflight(
         check_no_broker_route(),
         check_frontend_env(),
         check_mock_fallback_explicit(),
+        check_kante_defensive_gates(),
     ]
     if check_backend:
         checks.append(check_backend_health())
@@ -384,6 +517,8 @@ def run_preflight(
         "checked_backend": bool(check_backend),
         "checks": checks,
         "counts": counts,
+        # Advisory, non-blocking Kanté-defensive coverage summary.
+        "kante_defensive": build_kante_defensive_summary(),
         **_contract.advisory_safety_stamps(),
     }
 
@@ -425,6 +560,9 @@ __all__ = [
     "check_moltbook_bridge_idempotent", "check_closed_losses_detectable",
     "check_execution_locked", "check_no_broker_route", "check_frontend_env",
     "check_mock_fallback_explicit", "check_backend_health",
+    "check_kante_defensive_gates", "scan_mutation_script_guarding",
+    "diagnostics_service_health", "evaluate_guard_coverage_status",
+    "build_kante_defensive_summary",
 ]
 
 

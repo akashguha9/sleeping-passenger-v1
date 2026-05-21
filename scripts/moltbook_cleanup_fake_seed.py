@@ -146,6 +146,9 @@ def _build_parser() -> argparse.ArgumentParser:
                    help="Path to runtime/mvp_local.db (default: persistence module).")
     p.add_argument("--apply", action="store_true",
                    help="Actually delete matches (default: dry-run report only).")
+    p.add_argument("--dry-run", action="store_true",
+                   help="Explicit dry-run (default behaviour); writes a "
+                        "permission dry-run receipt. Read-only.")
     p.add_argument("--operator-role", default=None,
                    help="VIEWER|OPERATOR|ADMIN (default: MVP_OPERATOR_ROLE env). "
                         "--apply requires ADMIN.")
@@ -159,6 +162,11 @@ def main(argv: list[str] | None = None) -> int:
     # Destructive cleanup is an ADMIN-only write-like action; the dry-run
     # report is read-only.  Fail closed for unauthorized roles.
     if args.apply:
+        # Authority for the *role* requirement remains the established
+        # operator_auth enforcement boundary (cleanup_scripts → ADMIN); the
+        # central operator_permission_guard then verifies the advisory safety
+        # invariants + DB-path safety and writes the unified audit event.  Both
+        # must pass — the more restrictive (ADMIN) wins.
         try:
             try:
                 from scripts.operator_audit_log import enforce as _enforce
@@ -169,7 +177,44 @@ def main(argv: list[str] | None = None) -> int:
         except PermissionError as exc:
             print(f"[DENY] {exc}")
             return 2
+        try:
+            try:
+                from scripts import operator_permission_guard as _guard
+            except ModuleNotFoundError:  # pragma: no cover - script-style fallback
+                import operator_permission_guard as _guard  # type: ignore[no-redef]
+            role = (_guard.OperatorRole(_guard._auth.normalize_role(args.operator_role))
+                    if args.operator_role else _guard.load_operator_role_from_env())
+            _guard.require_permission_or_exit(_guard.PermissionRequest(
+                operation_name="moltbook_cleanup_fake_seed",
+                operation_class=_guard.OperationClass.REPAIR_WRITE,
+                operator_role=role,
+                apply_requested=True,
+                dry_run_completed=_guard.validate_dry_run_receipt(
+                    "moltbook_cleanup_fake_seed", str(db_path)),
+                db_path=str(db_path),
+                safety_stamps=_guard.caller_safety_stamps(),
+                # Idempotent narrow-signature delete; default mode is the
+                # read-only dry-run report.  No separate receipt is mandated.
+                reason=f"{_guard.NO_DRY_RUN_NEEDED}: idempotent narrow-signature "
+                       "fake-seed delete; default mode is dry-run.",
+            ))
+        except PermissionError as exc:
+            print(f"[DENY] {exc}")
+            return 2
     report = cleanup(db_path, apply=args.apply)
+    if not args.apply:
+        # Dry-run is read-only and open to any role; record a receipt so a
+        # later --apply (by an authorized ADMIN) can prove a dry-run happened.
+        try:
+            try:
+                from scripts import operator_permission_guard as _guard
+            except ModuleNotFoundError:  # pragma: no cover - script-style fallback
+                import operator_permission_guard as _guard  # type: ignore[no-redef]
+            _guard.write_dry_run_receipt(
+                "moltbook_cleanup_fake_seed",
+                target_count=report["matched"], db_path=str(db_path))
+        except Exception:  # pragma: no cover - receipt is best-effort, never blocks
+            pass
     if args.json:
         print(json.dumps(report, indent=2, default=str))
     else:

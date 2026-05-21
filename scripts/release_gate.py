@@ -53,6 +53,11 @@ def evaluate(
 
     reasons = [f"{c['name']}: {c['detail']}" for c in fails + warns]
 
+    # Surface the Kanté-defensive guard/diagnostics summary at the gate top
+    # level (advisory, non-blocking) so the operator sees auth-guard coverage
+    # and diagnostics-service availability without digging into the preflight.
+    kante = preflight.get("kante_defensive", {})
+
     return {
         "report": "release_gate",
         "verdict": verdict,
@@ -64,6 +69,16 @@ def evaluate(
         "reasons": reasons,
         "failing_checks": [c["name"] for c in fails],
         "warning_checks": [c["name"] for c in warns],
+        # Kanté-defensive advisory summary (does not change the verdict).
+        "auth_guard_status": kante.get("auth_guard_status"),
+        "operator_permission_guard_available": kante.get(
+            "operator_permission_guard_available"),
+        "mutation_scripts_guarded": kante.get("mutation_scripts_guarded_count"),
+        "mutation_scripts_unguarded": kante.get("mutation_scripts_unguarded_count"),
+        "mutation_scripts_unguarded_names": kante.get("mutation_scripts_unguarded"),
+        "diagnostics_service_available": kante.get("diagnostics_service_available"),
+        "diagnostics_service_status": kante.get("diagnostics_service_status"),
+        "release_gate_impact": kante.get("release_gate_impact"),
         "preflight": preflight,
         **_contract.advisory_safety_stamps(),
     }

@@ -103,6 +103,16 @@ def tmp_db(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
             fn.__kwdefaults__ = kwdefs or None
 
 
+@pytest.fixture(autouse=True)
+def _guard_isolation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """Redirect the permission guard's receipt dir + audit log to tmp, and
+    clear the operator-role env so each test starts from the safe default."""
+    from scripts import operator_permission_guard as guard
+    monkeypatch.setenv(guard.RECEIPT_DIR_ENV_VAR, str(tmp_path / "guard_receipts"))
+    monkeypatch.setenv(guard.AUDIT_PATH_ENV_VAR, str(tmp_path / "guard_audit.jsonl"))
+    monkeypatch.delenv(guard.ROLE_ENV_VAR, raising=False)
+
+
 # ---------------------------------------------------------------------------
 # Classifier-level rules — pure, no DB.
 # ---------------------------------------------------------------------------
@@ -469,10 +479,14 @@ def test_quarantine_main_default_is_dry_run(tmp_db: Path, capsys) -> None:
     assert row[0] == "manual_trade_log"  # untouched
 
 
-def test_quarantine_main_yes_applies(tmp_db: Path) -> None:
+def test_quarantine_main_yes_applies(tmp_db: Path,
+                                     monkeypatch: pytest.MonkeyPatch) -> None:
     _plant_fake_row(tmp_db, "MT_6b11745fc3f3", "no currency given")
     _plant_real_row(tmp_db)
-    rc = quarantine_main(["--db", str(tmp_db), "--yes"])
+    # Apply is now guarded: needs an OPERATOR role and a recent dry-run receipt.
+    monkeypatch.setenv("MVP_OPERATOR_ROLE", "OPERATOR")
+    assert quarantine_main(["--db", str(tmp_db), "--dry-run"]) == 0  # writes receipt
+    rc = quarantine_main(["--db", str(tmp_db), "--apply"])
     assert rc == 0
     # Fake row re-stamped.
     conn = sqlite3.connect(str(tmp_db))

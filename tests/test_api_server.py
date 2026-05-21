@@ -859,3 +859,200 @@ def test_manual_trade_response_confirms_no_broker_call(client):
     assert data.get("broker_order_id") == "NONE"
     assert data.get("execution_mode") == "HUMAN_ONLY"
     assert data.get("ai_execution_count") == 0
+
+
+# ---------------------------------------------------------------------------
+# /diagnostics/cockpit — now backed by scripts.diagnostics_service
+# ---------------------------------------------------------------------------
+
+
+def _fake_snapshot_with_degraded() -> dict:
+    """A diagnostics_service snapshot where one subreport CRASHED (DEGRADED).
+
+    The cockpit must surface this as a partial failure and keep the top-level
+    status non-clean — it must never collapse the crash into zero/clean.
+    """
+    return {
+        "report": "diagnostics_service",
+        "status": "DEGRADED",
+        "degraded_state": "DEGRADED",
+        "generated_at_utc": "2026-05-21T00:00:00Z",
+        "cache_status": "hit",
+        "cache_role": "derived_non_canonical",
+        "canonical_truth_source": "sqlite",
+        "diagnostics_health": 0.8,
+        "partial_failures": [
+            {
+                "subreport": "broken_windows",
+                "error_type": "RuntimeError",
+                "safe_recovery_command": "python scripts/broken_windows_report.py",
+            }
+        ],
+        "subreports": {
+            "truth_purity": {
+                "status": "CLEAN",
+                "elapsed_ms": 1.0,
+                "data": {
+                    "truth_purity_score": 1.0,
+                    "fake_rows_detected": 0,
+                    "release_gate_passed": True,
+                },
+            },
+            "broken_windows": {
+                "status": "DEGRADED",
+                "error_type": "RuntimeError",
+                "safe_recovery_command": "python scripts/broken_windows_report.py",
+            },
+            "closed_loop": {
+                "status": "CLEAN",
+                "elapsed_ms": 1.0,
+                "data": {
+                    "closed_loop_coverage": 0.9,
+                    "learning_efficiency": {"lesson_conversion_rate": 0.5},
+                    "advisory_only_verified": True,
+                },
+            },
+        },
+        "safety_stamps": {
+            "advisory_status": "ADVISORY_ONLY",
+            "execution_gate": "LOCKED",
+            "broker_api_called": False,
+            "ai_execution_count": 0,
+            "human_review_required": True,
+        },
+    }
+
+
+@pytest.fixture()
+def cockpit_client():
+    """A TestClient with diagnostics_service patched to a controlled snapshot."""
+    try:
+        from fastapi.testclient import TestClient
+    except ImportError:
+        pytest.skip("fastapi[testclient] not installed")
+    import scripts.api_server as srv
+    return TestClient(srv.app, raise_server_exceptions=True), srv
+
+
+def test_cockpit_calls_diagnostics_service(cockpit_client):
+    tc, srv = cockpit_client
+    snap = _fake_snapshot_with_degraded()
+    with patch.object(srv, "get_diagnostics_snapshot",
+                      return_value=snap) as mock_get:
+        r = tc.get("/diagnostics/cockpit")
+    assert r.status_code == 200
+    # Proof the endpoint sources from diagnostics_service (not per-hit aggregation).
+    assert mock_get.called
+    _, kwargs = mock_get.call_args
+    assert kwargs.get("use_cache") is True
+    assert kwargs.get("refresh") is False
+
+
+def test_cockpit_exposes_cache_status_and_degraded_taxonomy(cockpit_client):
+    tc, srv = cockpit_client
+    with patch.object(srv, "get_diagnostics_snapshot",
+                      return_value=_fake_snapshot_with_degraded()):
+        data = tc.get("/diagnostics/cockpit").json()
+    assert data["cache_status"] == "hit"
+    assert data["cache_role"] == "derived_non_canonical"
+    assert data["canonical_truth_source"] == "sqlite"
+    assert data["status"] == "DEGRADED"
+    assert data["degraded_state"] == "DEGRADED"
+    assert data["generated_at_utc"] == "2026-05-21T00:00:00Z"
+
+
+def test_cockpit_surfaces_partial_failures_not_fake_clean(cockpit_client):
+    tc, srv = cockpit_client
+    with patch.object(srv, "get_diagnostics_snapshot",
+                      return_value=_fake_snapshot_with_degraded()):
+        data = tc.get("/diagnostics/cockpit").json()
+    # The crashed subreport must be visible as a partial failure...
+    pf = data["partial_failures"]
+    assert any(p["subreport"] == "broken_windows" for p in pf)
+    # ...and the per-subreport map must record DEGRADED (never silently CLEAN).
+    assert data["subreports"]["broken_windows"]["status"] == "DEGRADED"
+    # ...and the top-level status must NOT read clean.
+    assert data["status"] not in {"CLEAN"}
+
+
+def test_cockpit_subreports_omit_heavy_data_blob(cockpit_client):
+    """The cockpit projects a lightweight subreport map (status only, no data)."""
+    tc, srv = cockpit_client
+    with patch.object(srv, "get_diagnostics_snapshot",
+                      return_value=_fake_snapshot_with_degraded()):
+        data = tc.get("/diagnostics/cockpit").json()
+    for sub in data["subreports"].values():
+        assert "data" not in sub
+        assert "status" in sub
+
+
+def test_cockpit_safety_stamps_present(cockpit_client):
+    tc, srv = cockpit_client
+    with patch.object(srv, "get_diagnostics_snapshot",
+                      return_value=_fake_snapshot_with_degraded()):
+        data = tc.get("/diagnostics/cockpit").json()
+    assert data["advisory_only"] is True
+    assert data["advisory_status"] == "ADVISORY_ONLY"
+    assert data["human_review_required"] is True
+    assert data["execution_gate"] == "LOCKED"
+    assert data["broker_api_called"] is False
+    assert data["ai_execution_count"] == 0
+    assert data["execution_permission"] is False
+    assert data["can_execute"] is False
+    assert data["safety_stamps"]["execution_gate"] == "LOCKED"
+
+
+def test_cockpit_frontend_shape_preserved(cockpit_client):
+    """The legacy nested panel shape the frontend consumes must survive."""
+    tc, srv = cockpit_client
+    with patch.object(srv, "get_diagnostics_snapshot",
+                      return_value=_fake_snapshot_with_degraded()):
+        data = tc.get("/diagnostics/cockpit").json()
+    for key in ("closed_loop", "truth_purity", "source_independence",
+                "broken_windows", "defensive_alpha", "invariants",
+                "learning_efficiency"):
+        assert key in data
+    assert data["truth_purity"]["release_gate_passed"] is True
+    assert data["closed_loop"]["closed_loop_coverage"] == 0.9
+
+
+def test_cockpit_degraded_subreport_panel_falls_back_without_lying(cockpit_client):
+    """A crashed (DEGRADED) panel falls back to neutral values, but the crash
+    is still loudly visible via partial_failures + status — not hidden."""
+    tc, srv = cockpit_client
+    with patch.object(srv, "get_diagnostics_snapshot",
+                      return_value=_fake_snapshot_with_degraded()):
+        data = tc.get("/diagnostics/cockpit").json()
+    # broken_windows crashed → panel uses neutral defaults...
+    assert data["broken_windows"]["release_gate_impact"] == "CLEAR"
+    # ...but the failure is NOT swept under the rug.
+    assert any(p["subreport"] == "broken_windows"
+               for p in data["partial_failures"])
+    assert data["status"] == "DEGRADED"
+
+
+def test_cockpit_service_unavailable_degrades_to_unknown(cockpit_client):
+    """If diagnostics_service raises, cockpit must degrade to UNKNOWN, not 500."""
+    tc, srv = cockpit_client
+    with patch.object(srv, "get_diagnostics_snapshot",
+                      side_effect=RuntimeError("boom")):
+        r = tc.get("/diagnostics/cockpit")
+    assert r.status_code == 200
+    data = r.json()
+    assert data["status"] == "UNKNOWN"
+    assert data["cache_status"] == "unavailable"
+    assert any(p["subreport"] == "diagnostics_service"
+               for p in data["partial_failures"])
+    # Safety invariants still hold even in the degraded path.
+    assert data["execution_gate"] == "LOCKED"
+    assert data["ai_execution_count"] == 0
+
+
+def test_cockpit_is_get_only(cockpit_client):
+    """The cockpit must be read-only: POST/PUT/DELETE are not allowed."""
+    tc, _ = cockpit_client
+    for method in ("post", "put", "delete", "patch"):
+        resp = getattr(tc, method)("/diagnostics/cockpit")
+        assert resp.status_code in (404, 405), (
+            f"{method.upper()} /diagnostics/cockpit should not be allowed"
+        )
