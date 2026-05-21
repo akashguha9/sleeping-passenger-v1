@@ -81,6 +81,18 @@ DEFAULT_OPERATOR_CAPACITY: float = 8.0
 # signal does not carry an explicit ``half_life_hours``.
 DEFAULT_HALF_LIFE_HOURS: float = 48.0
 
+# Spec-named ``staleness_grade`` (Task 5) mapped from the internal half-life
+# bucket. Kept separate so the human-facing grade and the internal bucket can
+# evolve independently without breaking either consumer.
+_STALENESS_GRADE: dict[str, str] = {
+    "fresh": "FRESH",
+    "aging": "AGING",
+    "stale": "STALE",
+    "expired": "EXPIRED",
+    "unknown_age": "UNKNOWN_AGE",
+    "insufficient_data": "INSUFFICIENT_DATA",
+}
+
 CASCADE_STATES: tuple[str, ...] = (
     "no_cascade",
     "early_feedback",
@@ -343,14 +355,19 @@ def compute_signal_half_life(signal: Any, *, now_hours: Any = None) -> dict[str,
     if not has_s0 and not has_age:
         return _stamp({
             "live_signal_score": None,
+            # Spec-named canonical alias (Task 5).
+            "live_signal_strength": None,
             "initial_strength": None,
             "signal_age_hours": None,
             "half_life_hours": round(half_life, 4),
             "half_life_bucket": "insufficient_data",
+            "staleness_grade": _STALENESS_GRADE["insufficient_data"],
             "stale_signal_flag": False,
             "freshness_penalty": None,
             "reinforcement": 0.0,
             "contradiction": 0.0,
+            "reinforcement_count": reinforcement_count,
+            "contradiction_count": contradiction_count,
             "confidence_note": (
                 "Insufficient data: no initial strength and no age. "
                 "Cannot compute live decay — treat as INSUFFICIENT_DATA."
@@ -391,14 +408,19 @@ def compute_signal_half_life(signal: Any, *, now_hours: Any = None) -> dict[str,
 
     return _stamp({
         "live_signal_score": round(live, 4),
+        # Spec-named canonical alias (Task 5): live_signal_strength.
+        "live_signal_strength": round(live, 4),
         "initial_strength": round(s0, 4) if has_s0 else None,
         "signal_age_hours": round(age_hours, 4) if has_age else None,
         "half_life_hours": round(half_life, 4),
         "half_life_bucket": bucket,
+        "staleness_grade": _STALENESS_GRADE.get(bucket, bucket.upper()),
         "stale_signal_flag": stale_flag,
         "freshness_penalty": freshness_penalty,
         "reinforcement": round(reinforcement, 4),
         "contradiction": round(contradiction, 4),
+        "reinforcement_count": reinforcement_count,
+        "contradiction_count": contradiction_count,
         "confidence_note": note,
     })
 
@@ -771,7 +793,11 @@ def compute_queueing_attention_gate(
     return _stamp({
         "operator_load_score": operator_load_score,
         "queue_rho": round(rho, 4),
+        # Spec-named canonical aliases (Task 6).
+        "queue_pressure_ratio": round(rho, 4),
+        "no_new_risk_recommended": no_new_risk_flag,
         "arrival_count": arrival,
+        "signal_arrival_rate": arrival,
         "operator_capacity": round(capacity, 4),
         "intake_state": intake_state,
         "no_new_risk_flag": no_new_risk_flag,
@@ -854,8 +880,44 @@ def compute_rawlsian_survival_sizing(
     else:
         leverage_warning = "Rest-of-world: spot-only. No leverage permitted."
 
+    # Spec-named numeric size (Task 7):
+    #   survival_adjusted_size = base_size * survival_factor
+    #       * (1 - chaos_risk) * (1 - operator_load_score)
+    #       * source_independence_score
+    # base_size defaults to 1.0 (one notional unit) so the output is a
+    # multiplier on the operator's own unit, never an absolute order size.
+    base_size = _clamp(_first(data, "base_size"), 0.0, 1.0) if _present(
+        data, "base_size") else 1.0
+    source_independence = (
+        _clamp(_first(data, "source_independence_score"))
+        if _present(data, "source_independence_score") else 1.0
+    )
+    survival_adjusted_size = round(
+        base_size
+        * survival_quality
+        * (1.0 - uncertainty)
+        * (1.0 - op_load)
+        * source_independence,
+        4,
+    )
+    survival_reason = (
+        f"survival_quality={survival_quality:.2f} after penalties "
+        f"(uncertainty={uncertainty:.2f}, operator_load={op_load:.2f}, "
+        f"crowding={crowd:.2f}, source_independence={source_independence:.2f}); "
+        f"band={band}."
+    )
+
     return _stamp({
         "suggested_size_band": band,
+        # Spec-named canonical aliases (Task 7).
+        "suggested_position_band": band,
+        "survival_adjusted_size": survival_adjusted_size,
+        "survival_factor": round(survival_quality, 4),
+        "survival_reason": survival_reason,
+        "not_execution_instruction": (
+            "This is an advisory survival-sizing bias, NOT an order, position, "
+            "or execution instruction. A human decides and executes."
+        ),
         "leverage_allowed_boolean": leverage_allowed,
         "leverage_ceiling": leverage_ceiling,
         "leverage_is_default": False,

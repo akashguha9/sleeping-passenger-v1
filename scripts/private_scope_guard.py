@@ -96,6 +96,11 @@ APPROVED_DOMAINS: tuple[str, ...] = (
     "performance_probe",  # performance_probe.py — bounded-load probe
     "schema_migration",   # schema_migrations.py — non-destructive schema versioning
     "query_plan",         # sqlite_query_plan_audit.py — indexed-read evidence
+    # Closed-loop learning sprint — advisory-only DB-backed audit/report layer.
+    "broken_windows",   # broken_windows_report.py — repair-debt visibility
+    "defensive",        # defensive_alpha_report.py — bad-decisions-prevented ledger
+    "truth_purity",     # runtime_truth_purity_audit.py — fake-data canonical guard
+    "closed_loop",      # closed_loop_learning_audit.py — signal->lesson chain audit
 )
 
 # Explicit allowlist for individual files / directories whose name does

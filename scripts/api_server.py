@@ -1214,6 +1214,95 @@ def get_learning_completeness(limit: int | None = 50) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Operator cockpit — read-only aggregate of the closed-loop diagnostics.
+#
+# Surfaces the closed-loop health, truth purity, Moltbook learning, source
+# independence, broken-windows repair debt, and defensive alpha in ONE compact
+# advisory payload so the operator can see system integrity at a glance without
+# leaving the app.  Strictly read-only: no DB writes, no broker calls, no
+# execution endpoint.  Every sub-report fails soft (defaults to safe zeros with
+# a note) so the cockpit never 500s on a partial environment.
+# ---------------------------------------------------------------------------
+
+
+@app.get("/diagnostics/cockpit")
+def get_diagnostics_cockpit() -> dict:
+    """Aggregate the advisory closed-loop diagnostics for the operator cockpit.
+
+    Read-only.  Never grants execution permission; never places a broker order.
+    """
+    def _safe(import_path: str, attr: str, *args, **kwargs) -> dict:
+        try:
+            try:
+                mod = __import__(f"scripts.{import_path}", fromlist=[attr])
+            except ModuleNotFoundError:
+                mod = __import__(import_path, fromlist=[attr])
+            return getattr(mod, attr)(*args, **kwargs) or {}
+        except Exception as exc:  # pragma: no cover - defensive
+            return {"unavailable": f"{type(exc).__name__}"}
+
+    closed_loop = _safe("closed_loop_learning_audit", "build_audit")
+    truth_purity = _safe("runtime_truth_purity_audit", "build_audit")
+    source_independence = _safe("source_independence_audit", "build_report")
+    broken_windows = _safe("broken_windows_report", "build_report")
+    defensive_alpha = _safe("defensive_alpha_report", "build_report")
+
+    return {
+        "report": "operator_cockpit",
+        "advisory_disclaimer": (
+            "Advisory diagnostics only. Human execution required. No broker "
+            "action is performed. These panels measure system integrity and "
+            "learning quality; they never place, modify, or cancel an order."
+        ),
+        "closed_loop": {
+            "closed_loop_coverage": closed_loop.get("closed_loop_coverage", 0.0),
+            "signals_without_outcomes": closed_loop.get("signals_without_outcomes", 0),
+            "manual_trades_without_reconciliation": closed_loop.get(
+                "manual_trades_without_reconciliation", 0),
+            "closed_losses_without_moltbook": closed_loop.get(
+                "closed_losses_without_moltbook", 0),
+            "unresolved_repair_debt": closed_loop.get("unresolved_repair_debt", 0),
+        },
+        "learning_efficiency": closed_loop.get("learning_efficiency", {}),
+        "truth_purity": {
+            "truth_purity_score": truth_purity.get("truth_purity_score", 1.0),
+            "fake_rows_detected": truth_purity.get("fake_rows_detected", 0),
+            "release_gate_passed": truth_purity.get("release_gate_passed", False),
+        },
+        "source_independence": {
+            "cohort_count": source_independence.get("cohort_count", 0),
+            "flagged_cohorts": source_independence.get("flagged_cohorts", []),
+        },
+        "broken_windows": {
+            "repair_debt_score": broken_windows.get("repair_debt_score", 0.0),
+            "release_gate_impact": broken_windows.get("release_gate_impact", "CLEAR"),
+            "recommended_next_repair": broken_windows.get("recommended_next_repair", ""),
+        },
+        "defensive_alpha": {
+            "total_defensive_events": defensive_alpha.get("total_defensive_events", 0),
+            "fake_data_rows_blocked": defensive_alpha.get("fake_data_rows_blocked", 0),
+            "closed_losses_captured_as_lessons": defensive_alpha.get(
+                "closed_losses_captured_as_lessons", 0),
+        },
+        "invariants": {
+            "advisory_only_verified": closed_loop.get("advisory_only_verified", True),
+            "human_execution_verified": closed_loop.get("human_execution_verified", True),
+            "broker_api_called_false_verified": closed_loop.get(
+                "broker_api_called_false_verified", True),
+            "ai_execution_count_zero_verified": closed_loop.get(
+                "ai_execution_count_zero_verified", True),
+        },
+        "advisory_status": _ADVISORY_STATUS,
+        "execution_gate": "LOCKED",
+        "broker_api_called": False,
+        "ai_execution_count": _AI_EXECUTION_COUNT,
+        "execution_permission": False,
+        "can_execute": False,
+        "human_review_required": True,
+    }
+
+
+# ---------------------------------------------------------------------------
 # Source health
 # ---------------------------------------------------------------------------
 

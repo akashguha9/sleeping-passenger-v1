@@ -523,3 +523,79 @@ def test_orchestrator_doctrine_string_present():
     assert payload["doctrine"] == "Survive first. Learn second. Scale later."
     assert payload["canonical_truth_source"] == "sqlite"
     assert payload["jsonl_role"] == "audit_fallback_only"
+
+
+# ---------------------------------------------------------------------------
+# Spec-named canonical fields (Tasks 5/6/7) — the reflection demands these
+# exact field names exist as outputs, not just the underlying behaviour.
+# ---------------------------------------------------------------------------
+
+
+def test_half_life_exposes_spec_named_fields():
+    fresh = compute_signal_half_life(
+        {"initial_strength": 0.9, "age_hours": 1, "half_life_hours": 48}
+    )
+    stale = compute_signal_half_life(
+        {"initial_strength": 0.9, "age_hours": 240, "half_life_hours": 48}
+    )
+    # live_signal_strength must mirror the internal score and decay with age.
+    assert fresh["live_signal_strength"] == fresh["live_signal_score"]
+    assert fresh["live_signal_strength"] > stale["live_signal_strength"]
+    # staleness_grade is a human-facing grade, not the internal bucket name.
+    assert fresh["staleness_grade"] == "FRESH"
+    assert stale["staleness_grade"] in {"STALE", "EXPIRED"}
+    # reinforcement/contradiction counts are echoed back as integers.
+    assert isinstance(fresh["reinforcement_count"], int)
+    assert isinstance(fresh["contradiction_count"], int)
+
+
+def test_half_life_insufficient_data_grade():
+    out = compute_signal_half_life({})
+    assert out["live_signal_strength"] is None
+    assert out["staleness_grade"] == "INSUFFICIENT_DATA"
+
+
+def test_queue_exposes_spec_named_fields():
+    overloaded = compute_queueing_attention_gate(
+        {"open_reconciliation_items": 20, "unreconciled_manual_trades": 10,
+         "operator_processing_capacity": 8}
+    )
+    # queue_pressure_ratio == queue_rho; overload recommends NO NEW RISK.
+    assert overloaded["queue_pressure_ratio"] == overloaded["queue_rho"]
+    assert overloaded["queue_pressure_ratio"] > 1.0
+    assert overloaded["no_new_risk_recommended"] is True
+    assert overloaded["signal_arrival_rate"] == overloaded["arrival_count"]
+    calm = compute_queueing_attention_gate(
+        {"live_signal_count": 1, "operator_processing_capacity": 8}
+    )
+    assert calm["no_new_risk_recommended"] is False
+
+
+def test_survival_adjusted_size_formula_and_advisory():
+    # High uncertainty / load / low independence must shrink the numeric size.
+    strong = compute_rawlsian_survival_sizing(
+        {"market": "US", "evidence_strength": 0.9, "source_independence_score": 1.0},
+        operator_load=0.0, crowding=0.0, moltbook_repair_state=1.0,
+    )
+    weak = compute_rawlsian_survival_sizing(
+        {"market": "US", "chaos_score": 0.8, "source_independence_score": 0.2},
+        operator_load=0.7, crowding=0.6, moltbook_repair_state=0.0,
+    )
+    assert 0.0 <= weak["survival_adjusted_size"] < strong["survival_adjusted_size"] <= 1.0
+    assert strong["suggested_position_band"] == strong["suggested_size_band"]
+    # Advisory-only language must be explicit and human review required.
+    assert "NOT an order" in weak["not_execution_instruction"]
+    assert weak["human_review_required"] is True
+    assert isinstance(weak["survival_reason"], str) and weak["survival_reason"]
+
+
+def test_survival_adjusted_size_low_independence_reduces():
+    base = compute_rawlsian_survival_sizing(
+        {"market": "US", "evidence_strength": 0.8, "source_independence_score": 1.0},
+        operator_load=0.1, crowding=0.1, moltbook_repair_state=1.0,
+    )
+    echoed = compute_rawlsian_survival_sizing(
+        {"market": "US", "evidence_strength": 0.8, "source_independence_score": 0.3},
+        operator_load=0.1, crowding=0.1, moltbook_repair_state=1.0,
+    )
+    assert echoed["survival_adjusted_size"] < base["survival_adjusted_size"]

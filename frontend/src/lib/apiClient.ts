@@ -384,6 +384,47 @@ export async function getLearningCompleteness(
   }
 }
 
+export interface CockpitResponse {
+  report: string;
+  advisory_disclaimer: string;
+  closed_loop: {
+    closed_loop_coverage: number;
+    signals_without_outcomes: number;
+    manual_trades_without_reconciliation: number;
+    closed_losses_without_moltbook: number;
+    unresolved_repair_debt: number;
+  };
+  learning_efficiency: Record<string, number | boolean>;
+  truth_purity: {
+    truth_purity_score: number;
+    fake_rows_detected: number;
+    release_gate_passed: boolean;
+  };
+  source_independence: { cohort_count: number; flagged_cohorts: string[] };
+  broken_windows: {
+    repair_debt_score: number;
+    release_gate_impact: string;
+    recommended_next_repair: string;
+  };
+  defensive_alpha: {
+    total_defensive_events: number;
+    fake_data_rows_blocked: number;
+    closed_losses_captured_as_lessons: number;
+  };
+  invariants: Record<string, boolean>;
+  advisory_status: string;
+  broker_api_called: boolean;
+  ai_execution_count: number;
+}
+
+export async function getDiagnosticsCockpit(): Promise<CockpitResponse | null> {
+  try {
+    return await apiFetch<CockpitResponse>('/diagnostics/cockpit');
+  } catch {
+    return null;
+  }
+}
+
 export async function getReconciliationQueue(
   limit = 100,
 ): Promise<ReconciliationQueueResponse | null> {
