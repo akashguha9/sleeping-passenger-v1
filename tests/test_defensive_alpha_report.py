@@ -45,7 +45,24 @@ def test_report_counts_stale_and_repaired(tmp_path):
 
 
 def test_report_counts_fake_data_blocked(tmp_path):
+    """A quarantined fake row is a defensive WIN — it was successfully excluded
+    from canonical active truth, so it counts as ``fake_data_rows_blocked``."""
+    from scripts.manual_trade_origin import QUARANTINE_PROVENANCE
     db = tmp_path / "fake.db"
+    persistence.init_schema(db)
+    persistence.insert_manual_trade(
+        "MT_blocked", "FABRIC_SPY", "SPY", "BUY", 1.0, 400.0,
+        "2026-05-16T07:00:00+00:00", "Persistence above 0.8", "", "seed", db,
+        created_via=QUARANTINE_PROVENANCE,
+    )
+    rep = dar.build_report(db)
+    assert rep["fake_data_rows_blocked"] >= 1
+
+
+def test_report_counts_fake_data_still_leaking(tmp_path):
+    """A detected-but-not-yet-cleaned fake row is NOT a win — it is surfaced as
+    ``fake_data_rows_still_leaking`` and excluded from the blocked count."""
+    db = tmp_path / "leaking.db"
     persistence.init_schema(db)
     conn = sqlite3.connect(str(db))
     conn.execute(
@@ -58,7 +75,8 @@ def test_report_counts_fake_data_blocked(tmp_path):
     conn.commit()
     conn.close()
     rep = dar.build_report(db)
-    assert rep["fake_data_rows_blocked"] >= 1
+    assert rep["fake_data_rows_still_leaking"] >= 1
+    assert rep["fake_data_rows_blocked"] == 0
 
 
 def test_report_verifies_advisory_invariants(tmp_path):

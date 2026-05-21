@@ -101,6 +101,13 @@ APPROVED_DOMAINS: tuple[str, ...] = (
     "defensive",        # defensive_alpha_report.py — bad-decisions-prevented ledger
     "truth_purity",     # runtime_truth_purity_audit.py — fake-data canonical guard
     "closed_loop",      # closed_loop_learning_audit.py — signal->lesson chain audit
+    # Bruce Lee / JKD sprint — advisory-only decision-discipline diagnostics.
+    # Scores/gates only; no broker execution, no order placement, no API writes.
+    "jkd",              # jkd_decision_discipline.py — JKD advisory decision score
+    "bruce_lee",        # bruce_lee_*.py — decision-quality index + discipline report
+    "reality_check",    # finger_moon_reality_check.py — reality-confirmation diagnostic
+    "diablo",           # diablo_narrative_veto.py — advisory hard-veto combinations
+    "economy_of_motion",  # economy_of_motion_audit.py — hygiene/ornamentation audit
 )
 
 # Explicit allowlist for individual files / directories whose name does

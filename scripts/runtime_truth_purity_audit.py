@@ -11,6 +11,19 @@ mock / seed pollution that should never live in operator truth:
     * trade-derived (loss-review) Moltbook entries with a BLANK
       manual_trade_log_id (an orphaned lesson that cannot be traced to a trade)
 
+Quarantine recognition (Sprint 2026-05-21)
+------------------------------------------
+A fake ``manual_trades`` row whose ``created_via`` has already been re-stamped
+to ``QUARANTINE_PROVENANCE`` by ``scripts/quarantine_fake_manual_trades.py`` is
+**no longer counted as active pollution**.  The canonical classifier reads such
+a row as ``ORIGIN_EXCLUDED_PROVENANCE`` and the Manual Trade Log GET route
+already drops it — it is excluded from canonical *active* truth even though the
+row is preserved on disk for audit.  These rows are reported under
+``quarantined_rows_excluded`` (transparency) and do NOT fail the release gate.
+Only un-quarantined fake rows count toward ``fake_rows_detected`` and block
+release.  This lets a DB that has been honestly cleaned-by-quarantine pass the
+gate, while any *newly* leaked fake row still fails it closed.
+
 The audit reuses the *same* fake-detection vocabulary as
 ``scripts/manual_trade_origin.py`` and ``scripts/moltbook_cleanup_fake_seed.py``
 so detection and cleanup can never drift apart.
@@ -52,12 +65,14 @@ try:
         is_fake_manual_trade_row,
         fake_manual_trade_reason,
         FAKE_EVENT_ID_PREFIXES,
+        QUARANTINE_PROVENANCE,
     )
 except ModuleNotFoundError:  # pragma: no cover - script-style fallback
     from manual_trade_origin import (  # type: ignore[no-redef]
         is_fake_manual_trade_row,
         fake_manual_trade_reason,
         FAKE_EVENT_ID_PREFIXES,
+        QUARANTINE_PROVENANCE,
     )
 
 try:
@@ -141,6 +156,7 @@ def build_audit(db_path: Path | None = None) -> dict[str, Any]:
         "advisory_disclaimer": ADVISORY_DISCLAIMER,
         "truth_purity_score": 1.0,
         "fake_rows_detected": 0,
+        "quarantined_rows_excluded": 0,
         "affected_tables": [],
         "pollution_examples": [],
         "release_gate_passed": True,
@@ -165,6 +181,7 @@ def build_audit(db_path: Path | None = None) -> dict[str, Any]:
     affected: set[str] = set()
     examples: list[dict[str, Any]] = []
     fake_count = 0
+    quarantined_count = 0
     total_scanned = 0
 
     try:
@@ -189,22 +206,31 @@ def build_audit(db_path: Path | None = None) -> dict[str, Any]:
         trades = _rows(conn, "SELECT * FROM manual_trades")
         total_scanned += len(trades)
         for row in trades:
-            if is_fake_manual_trade_row(row):
-                fake_count += 1
-                affected.add("manual_trades")
-                if len(examples) < 20:
-                    examples.append({
-                        "table": "manual_trades",
-                        "id": row.get("trade_id"),
-                        "event_id": row.get("event_id"),
-                        "ticker": row.get("ticker"),
-                        "reason": fake_manual_trade_reason(row) or "fake_trade",
-                    })
+            if not is_fake_manual_trade_row(row):
+                continue
+            # A fake row already re-stamped by the quarantine script is
+            # excluded from canonical *active* truth (the GET route drops it).
+            # Count it separately; it must NOT fail the release gate, otherwise
+            # an honestly-cleaned DB can never pass.
+            if str(row.get("created_via") or "").strip() == QUARANTINE_PROVENANCE:
+                quarantined_count += 1
+                continue
+            fake_count += 1
+            affected.add("manual_trades")
+            if len(examples) < 20:
+                examples.append({
+                    "table": "manual_trades",
+                    "id": row.get("trade_id"),
+                    "event_id": row.get("event_id"),
+                    "ticker": row.get("ticker"),
+                    "reason": fake_manual_trade_reason(row) or "fake_trade",
+                })
     finally:
         conn.close()
 
     report["total_rows_scanned"] = total_scanned
     report["fake_rows_detected"] = fake_count
+    report["quarantined_rows_excluded"] = quarantined_count
     report["affected_tables"] = sorted(affected)
     report["pollution_examples"] = examples
     report["release_gate_passed"] = fake_count == 0
@@ -213,6 +239,13 @@ def build_audit(db_path: Path | None = None) -> dict[str, Any]:
         report["notes"].append(
             f"{fake_count} polluted row(s) detected. Canonical truth is "
             "compromised until cleanup is run explicitly."
+        )
+    if quarantined_count:
+        report["notes"].append(
+            f"{quarantined_count} fake row(s) already quarantined "
+            f"(created_via={QUARANTINE_PROVENANCE!r}) — preserved on disk for "
+            "audit but excluded from canonical active truth; they do not block "
+            "release."
         )
     # Purity score: clean fraction of scanned rows (1.0 when nothing scanned).
     if total_scanned:
@@ -249,6 +282,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"  DB available          : {rep['db_available']}")
         print(f"  rows scanned          : {rep['total_rows_scanned']}")
         print(f"  fake rows detected    : {rep['fake_rows_detected']}")
+        print(f"  quarantined (excluded): {rep['quarantined_rows_excluded']}")
         print(f"  affected tables       : {rep['affected_tables']}")
         print(f"  truth purity score    : {rep['truth_purity_score']}")
         print(f"  release gate passed   : {rep['release_gate_passed']}")

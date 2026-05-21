@@ -100,7 +100,12 @@ def build_report(db_path: Path | None = None) -> dict[str, Any]:
         # --- prevention counts ------------------------------------------
         "bad_promotions_blocked": bad_promotions_blocked,
         "stale_signals_downgraded": int(bvr.get("stale_signals_detected", 0)),
-        "fake_data_rows_blocked": int(purity.get("fake_rows_detected", 0)),
+        # "Blocked" = fake rows successfully excluded from canonical active
+        # truth via quarantine (the defensive win).  Un-quarantined fake rows
+        # (``fake_rows_detected``) are NOT a win — they are still leaking and
+        # are surfaced separately below so the count stays honest.
+        "fake_data_rows_blocked": int(purity.get("quarantined_rows_excluded", 0)),
+        "fake_data_rows_still_leaking": int(purity.get("fake_rows_detected", 0)),
         "closed_losses_captured_as_lessons": int(
             bvr.get("closed_losses_repaired_into_moltbook", 0)
         ),

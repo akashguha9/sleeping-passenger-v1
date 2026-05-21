@@ -104,6 +104,74 @@ def test_missing_db_fails_gate_closed(tmp_path):
     assert rep["release_gate_passed"] is False
 
 
+def test_quarantined_fake_trade_does_not_block_release(tmp_path):
+    """A fake row already re-stamped to QUARANTINE_PROVENANCE is excluded
+    from canonical active truth: it is reported under
+    ``quarantined_rows_excluded`` but must NOT count as active pollution or
+    fail the release gate.  This is the Mission-A 2026-05-21 contract."""
+    db = tmp_path / "quarantined.db"
+    persistence.init_schema(db)
+    # Fake by event_id prefix, but already quarantined.
+    persistence.insert_manual_trade(
+        "MT_quar1", "FABRIC_SPY", "SPY", "BUY", 1.0, 400.0,
+        "2026-05-16T07:00:00+00:00", "Persistence above 0.8", "", "seed", db,
+        created_via=tpa.QUARANTINE_PROVENANCE,
+    )
+    rep = tpa.build_audit(db)
+    assert rep["fake_rows_detected"] == 0
+    assert rep["quarantined_rows_excluded"] == 1
+    assert rep["release_gate_passed"] is True
+    assert rep["truth_purity_score"] == 1.0
+
+
+def test_unquarantined_fake_trade_still_blocks_release(tmp_path):
+    """A NEWLY leaked fake row (not yet quarantined) must still fail the gate
+    closed — quarantine recognition must not blunt detection of fresh
+    pollution."""
+    db = tmp_path / "fresh_pollution.db"
+    persistence.init_schema(db)
+    persistence.insert_manual_trade(
+        "MT_fresh", "FABRIC_QQQ", "QQQ", "BUY", 1.0, 400.0,
+        "2026-05-16T07:00:00+00:00", "Persistence above 0.8", "", "seed", db,
+        created_via="manual_trade_log",
+    )
+    rep = tpa.build_audit(db)
+    assert rep["fake_rows_detected"] >= 1
+    assert rep["release_gate_passed"] is False
+    assert "manual_trades" in rep["affected_tables"]
+    assert rep["recommended_cleanup_command"]
+
+
+def test_real_trade_preserved_alongside_quarantined(tmp_path):
+    """A genuine operator trade is never confused with a quarantined fake row
+    and stays visible (origin USER_MANUAL)."""
+    db = tmp_path / "mixed.db"
+    persistence.init_schema(db)
+    persistence.insert_manual_trade(
+        "MT_quar2", "FABRIC_SPY", "SPY", "BUY", 1.0, 400.0,
+        "2026-05-16T07:00:00+00:00", "Persistence above 0.8", "", "seed", db,
+        created_via=tpa.QUARANTINE_PROVENANCE,
+    )
+    persistence.insert_manual_trade(
+        "MT_real_ok", "EV_USER_REAL", "ICICIBANK.NS", "BUY", 3.0, 40.0,
+        "2026-05-16T08:00:00+00:00",
+        "break of pivot on bank-nifty breadth confirmation", "", "human", db,
+        created_via="manual_trade_log",
+    )
+    rep = tpa.build_audit(db)
+    assert rep["fake_rows_detected"] == 0
+    assert rep["quarantined_rows_excluded"] == 1
+    assert rep["release_gate_passed"] is True
+    # Real row is still a visible user-manual trade.
+    from scripts.manual_trade_origin import is_visible_manual_trade
+    import sqlite3 as _sql
+    conn = _sql.connect(str(db)); conn.row_factory = _sql.Row
+    real = dict(conn.execute(
+        "SELECT * FROM manual_trades WHERE trade_id='MT_real_ok'").fetchone())
+    conn.close()
+    assert is_visible_manual_trade(real) is True
+
+
 def test_advisory_only_stamps_present(tmp_path):
     db = tmp_path / "stamp.db"
     persistence.init_schema(db)
