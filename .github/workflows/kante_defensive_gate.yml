@@ -1,0 +1,68 @@
+name: kante-defensive-gate
+
+# Kanté Sprint 2 — merge-blocking defensive gate for the advisory MVP.
+#
+# Safety doctrine — every job:
+#   * Must NOT reference broker execution, order placement, or auto-trading.
+#   * Must NOT require secrets, .env, or a live network refresh.
+#   * Runs read-only gates on a clean checkout with no local DB.
+#
+# Merge is allowed iff (all of):
+#   tests_pass AND release_gate_pass AND compliance_pass
+#   AND no_secrets AND no_runtime_db_committed AND no_broker_execution_modules
+# Any single failure fails the gate closed.
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  defensive-gate:
+    name: defensive gate (release + compliance + hygiene)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+
+      - name: Compile scripts and tests
+        run: python -m compileall scripts tests -q
+
+      - name: Defensive test subset (auth + contract + gates + canonical bridge)
+        run: |
+          python -m pytest -q \
+            tests/test_release_gate.py \
+            tests/test_compliance_preflight.py \
+            tests/test_operator_auth.py \
+            tests/test_operator_auth_enforcement.py \
+            tests/test_advisory_contract.py \
+            tests/test_reactor_canonical_inputs.py \
+            tests/test_performance_query_bounds.py \
+            tests/test_config_contract.py \
+            tests/test_schema_migrations.py \
+            tests/test_db_integrity_audit.py \
+            tests/test_architecture_fitness.py \
+            tests/test_fault_injection_resilience.py \
+            tests/test_operator_readiness_report.py \
+            tests/test_ci_gate_workflows.py
+
+      - name: Repo hygiene gate (no runtime DB / secret / broker module tracked)
+        run: python scripts/repo_hygiene_gate.py
+
+      - name: Initialize empty runtime schema (gitignored; never committed)
+        run: python -c "from scripts import persistence; persistence.init_schema(persistence.DB_PATH)"
+
+      - name: Release gate
+        run: python scripts/release_gate.py
+
+      - name: Compliance preflight
+        run: python scripts/compliance_preflight.py
+
+      - name: Architecture fitness
+        run: python scripts/architecture_fitness.py

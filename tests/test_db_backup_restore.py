@@ -29,6 +29,19 @@ from scripts.restore_db import (  # type: ignore
 )
 
 
+@pytest.fixture(autouse=True)
+def _operator_auth_env(tmp_path, monkeypatch):
+    """Backup/restore CLIs now enforce operator auth (Kanté Sprint 2 — Task 1).
+
+    Grant ADMIN for the whole module (covers both OPERATOR backup and ADMIN
+    restore) and redirect the audit log to a per-test temp file so the real
+    operator audit log is never touched.
+    """
+    monkeypatch.setenv("MVP_OPERATOR_ROLE", "ADMIN")
+    monkeypatch.setenv("MVP_OPERATOR_AUDIT_PATH",
+                       str(tmp_path / "operator_audit.jsonl"))
+
+
 def _make_db(path: Path, rows: int = 3) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with sqlite3.connect(str(path)) as conn:

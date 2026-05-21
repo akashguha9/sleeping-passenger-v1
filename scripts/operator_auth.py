@@ -68,11 +68,13 @@ ACTION_REGISTRY: dict[str, dict[str, str]] = {
     "reconciliation_update": {"min_role": OPERATOR, "kind": "write"},
     "run_moltbook_bridge": {"min_role": OPERATOR, "kind": "write"},
     "export_reports": {"min_role": OPERATOR, "kind": "write"},
+    "backup_db": {"min_role": OPERATOR, "kind": "write"},
     # ADMIN (privileged maintenance)
     "cleanup_scripts": {"min_role": ADMIN, "kind": "admin"},
     "restore_db": {"min_role": ADMIN, "kind": "admin"},
     "config_mutation": {"min_role": ADMIN, "kind": "admin"},
     "release_gate_override": {"min_role": ADMIN, "kind": "admin"},
+    "database_maintenance": {"min_role": ADMIN, "kind": "admin"},
 }
 
 # Actions that are STRUCTURALLY forbidden for every role.  These exist so a

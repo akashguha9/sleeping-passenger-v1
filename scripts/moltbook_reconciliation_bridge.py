@@ -481,6 +481,8 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--db-path", type=str, default=None)
     p.add_argument("--write", action="store_true",
                    help="Actually create entries (default: dry-run).")
+    p.add_argument("--operator-role", default=None,
+                   help="VIEWER|OPERATOR|ADMIN (default: MVP_OPERATOR_ROLE env).")
     p.add_argument("--json", action="store_true", help="Emit JSON.")
     return p
 
@@ -488,6 +490,19 @@ def _build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
     db_path = Path(args.db_path) if args.db_path else _default_db_path()
+    # Write-like enforcement: only the WRITE path is gated (dry-run is read-only
+    # and available to any role).  Fails closed for an unauthorized role.
+    if args.write:
+        try:
+            try:
+                from scripts.operator_audit_log import enforce as _enforce
+            except ModuleNotFoundError:  # pragma: no cover - script-style fallback
+                from operator_audit_log import enforce as _enforce  # type: ignore[no-redef]
+            _enforce("run_moltbook_bridge", role=args.operator_role,
+                     resource="moltbook_entries")
+        except PermissionError as exc:
+            print(f"[DENY] {exc}")
+            return 2
     report = sync_reconciliation_losses_to_moltbook(db_path, write=args.write)
     if args.json:
         print(json.dumps(report, indent=2, default=str))

@@ -146,6 +146,9 @@ def _build_parser() -> argparse.ArgumentParser:
                    help="Path to runtime/mvp_local.db (default: persistence module).")
     p.add_argument("--apply", action="store_true",
                    help="Actually delete matches (default: dry-run report only).")
+    p.add_argument("--operator-role", default=None,
+                   help="VIEWER|OPERATOR|ADMIN (default: MVP_OPERATOR_ROLE env). "
+                        "--apply requires ADMIN.")
     p.add_argument("--json", action="store_true", help="Emit JSON.")
     return p
 
@@ -153,6 +156,19 @@ def _build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
     db_path = Path(args.db_path) if args.db_path else _default_db_path()
+    # Destructive cleanup is an ADMIN-only write-like action; the dry-run
+    # report is read-only.  Fail closed for unauthorized roles.
+    if args.apply:
+        try:
+            try:
+                from scripts.operator_audit_log import enforce as _enforce
+            except ModuleNotFoundError:  # pragma: no cover - script-style fallback
+                from operator_audit_log import enforce as _enforce  # type: ignore[no-redef]
+            _enforce("cleanup_scripts", role=args.operator_role,
+                     resource="moltbook_entries.fake_seed")
+        except PermissionError as exc:
+            print(f"[DENY] {exc}")
+            return 2
     report = cleanup(db_path, apply=args.apply)
     if args.json:
         print(json.dumps(report, indent=2, default=str))

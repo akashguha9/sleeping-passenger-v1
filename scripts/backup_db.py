@@ -238,6 +238,12 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Optional label appended to the filename (e.g. predemo, prerestore).",
     )
     parser.add_argument(
+        "--operator-role",
+        default=None,
+        help="VIEWER|OPERATOR|ADMIN (default: MVP_OPERATOR_ROLE env). "
+             "Creating a backup requires OPERATOR.",
+    )
+    parser.add_argument(
         "--json",
         action="store_true",
         help="Emit a single JSON object on stdout instead of human text.",
@@ -248,6 +254,24 @@ def _build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
+
+    # Creating a backup file is an OPERATOR-level write-like action.  Fail
+    # closed for unauthorized roles (the source DB is never read until cleared).
+    try:
+        try:
+            from scripts.operator_audit_log import enforce as _enforce
+        except ModuleNotFoundError:  # pragma: no cover - script-style fallback
+            from operator_audit_log import enforce as _enforce  # type: ignore[no-redef]
+        _enforce("backup_db", role=args.operator_role,
+                 resource=str(args.db_path or "runtime/mvp_local.db"))
+    except PermissionError as exc:
+        msg = str(exc)
+        if args.json:
+            print(json.dumps({"ok": False, "error": msg, "denied": True}))
+        else:
+            print(f"[DENY] {msg}")
+            print("RESULT: FAIL")
+        return 2
 
     try:
         label = _sanitize_label(args.label)

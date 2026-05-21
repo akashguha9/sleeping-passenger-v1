@@ -90,6 +90,12 @@ APPROVED_DOMAINS: tuple[str, ...] = (
     "local_stack",    # start_local_stack.ps1 launcher
     "business",       # business_value_report.py
     "compliance",     # compliance_preflight.py
+    # Kanté Sprint 2 — enforcement / fitness / resilience defensive layer.
+    "architecture",     # architecture_fitness.py — dependency-boundary fitness
+    "fault_injection",  # fault_injection_probe.py — resilience probe
+    "performance_probe",  # performance_probe.py — bounded-load probe
+    "schema_migration",   # schema_migrations.py — non-destructive schema versioning
+    "query_plan",         # sqlite_query_plan_audit.py — indexed-read evidence
 )
 
 # Explicit allowlist for individual files / directories whose name does
