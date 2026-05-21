@@ -108,6 +108,11 @@ APPROVED_DOMAINS: tuple[str, ...] = (
     "reality_check",    # finger_moon_reality_check.py — reality-confirmation diagnostic
     "diablo",           # diablo_narrative_veto.py — advisory hard-veto combinations
     "economy_of_motion",  # economy_of_motion_audit.py — hygiene/ornamentation audit
+    # Enforcement / scalability / compliance ceiling sprint — advisory-only,
+    # read-only diagnostics service + derived cache + reliability ledger.
+    # No broker execution, no order placement, no API trading writes.
+    "diagnostics",      # diagnostics_snapshot_cache.py / diagnostics_service.py
+    "model_reliability",  # model_reliability_ledger.py — per-model calibration ledger
 )
 
 # Explicit allowlist for individual files / directories whose name does
