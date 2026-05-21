@@ -59,6 +59,11 @@ try:
 except ModuleNotFoundError:  # pragma: no cover - script-style fallback
     from manual_trade_origin import is_user_manual_trade  # type: ignore[no-redef]
 
+try:
+    from scripts import advisory_contract as _contract
+except ModuleNotFoundError:  # pragma: no cover - script-style fallback
+    import advisory_contract as _contract  # type: ignore[no-redef]
+
 
 # Outcome labels that explicitly mean "this position closed at a loss".
 _LOSS_STATUS = {"LOSS", "CLOSED_LOSS", "STOP_LOSS", "LOSING"}
@@ -371,11 +376,12 @@ def sync_reconciliation_losses_to_moltbook(
         "skipped_duplicate": 0,
         "skipped_insufficient_data": 0,
         "created_entries": [],
-        "advisory_status": "ADVISORY_ONLY",
-        "execution_mode": "HUMAN_ONLY",
-        "execution_gate": "LOCKED",
+        # Stamps sourced from the shared advisory contract (values unchanged).
+        "advisory_status": _contract.ADVISORY_STATUS,
+        "execution_mode": _contract.EXECUTION_MODE_HUMAN_ONLY,
+        "execution_gate": _contract.EXECUTION_GATE_LOCKED,
         "broker_api_called": False,
-        "ai_execution_count": 0,
+        "ai_execution_count": _contract.AI_EXECUTION_COUNT,
         "human_review_required": True,
         "generated_at": utc_timestamp(),
     }

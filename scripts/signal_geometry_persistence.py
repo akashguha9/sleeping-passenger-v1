@@ -35,6 +35,11 @@ except ModuleNotFoundError:  # pragma: no cover - script-style fallback
     import persistence as _persistence  # type: ignore[no-redef]
 
 try:
+    from scripts import advisory_contract as _contract
+except ModuleNotFoundError:  # pragma: no cover - script-style fallback
+    import advisory_contract as _contract  # type: ignore[no-redef]
+
+try:
     from scripts.signal_geometry_reflection import (
         build_signal_cell,
         _signal_fingerprint,
@@ -134,8 +139,11 @@ def persist_signal_geometry(
         "fingerprint": persist_duplicate_fingerprint(signal, db_path=db_path),
         "signal_cell": persist_signal_cell(signal, db_path=db_path),
         "advisory_only": True,
-        "human_review_required": True,
-        "canonical_source": "sqlite",
+        "human_review_required": _contract.advisory_safety_stamps()[
+            "human_review_required"
+        ],
+        # SQLite is canonical; the duplicate-fingerprint hint is audit-only.
+        "canonical_source": _contract.CANONICAL_STORE,
     }
 
 

@@ -83,6 +83,13 @@ APPROVED_DOMAINS: tuple[str, ...] = (
     "no_execution",
     "hygiene",
     "complex_systems",  # advisory-only complex-systems signal doctrine layer
+    # Kanté defensive sprint — advisory-only safety / deploy / compliance layer.
+    "advisory",       # advisory_contract.py — shared safety stamp
+    "deploy",         # local_deploy_preflight.py
+    "release",        # release_gate.py
+    "local_stack",    # start_local_stack.ps1 launcher
+    "business",       # business_value_report.py
+    "compliance",     # compliance_preflight.py
 )
 
 # Explicit allowlist for individual files / directories whose name does

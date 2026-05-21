@@ -54,19 +54,18 @@ import hashlib
 import math
 from typing import Any, Iterable
 
-ADVISORY_STATUS = "ADVISORY_ONLY"
-EXECUTION_GATE_LOCKED = "LOCKED"
+# Safety vocabulary is sourced from the single shared advisory contract so
+# this layer cannot drift to an inconsistent stamp.  The emitted values are
+# byte-identical to the legacy literal that lived here.
+try:
+    from scripts import advisory_contract as _contract
+except ModuleNotFoundError:  # pragma: no cover - script-style fallback
+    import advisory_contract as _contract  # type: ignore[no-redef]
 
-SAFETY_STAMPS: dict[str, Any] = {
-    "advisory_status": ADVISORY_STATUS,
-    "execution_gate": EXECUTION_GATE_LOCKED,
-    "broker_api_called": False,
-    "ai_execution_count": 0,
-    "execution_permission": False,
-    "can_execute": False,
-    "broker_order_id": "NONE",
-    "human_review_required": True,
-}
+ADVISORY_STATUS = _contract.ADVISORY_STATUS
+EXECUTION_GATE_LOCKED = _contract.EXECUTION_GATE_LOCKED
+
+SAFETY_STAMPS: dict[str, Any] = _contract.advisory_safety_stamps()
 
 # Indian equities may be evaluated up to 4x leverage as a CEILING, not a
 # default. Everything else is spot-only (ceiling = 1.0).

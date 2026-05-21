@@ -63,8 +63,15 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
-ADVISORY_STATUS = "ADVISORY_ONLY"
-EXECUTION_GATE_LOCKED = "LOCKED"
+# Safety constants sourced from the single shared advisory contract so this
+# read-only queue cannot drift to an inconsistent stamp.  Values unchanged.
+try:
+    from scripts import advisory_contract as _contract
+except ModuleNotFoundError:  # pragma: no cover - script-style fallback
+    import advisory_contract as _contract  # type: ignore[no-redef]
+
+ADVISORY_STATUS = _contract.ADVISORY_STATUS
+EXECUTION_GATE_LOCKED = _contract.EXECUTION_GATE_LOCKED
 
 # Provenance contract for the Reconciliation queue.  ONLY rows whose
 # created_via column equals this exact value AND that pass the user-
