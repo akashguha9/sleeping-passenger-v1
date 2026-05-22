@@ -98,18 +98,88 @@ if (Test-Path ".\config\thresholds.yaml") {
   $thresholds = Get-Content ".\config\thresholds.yaml" -Raw -Encoding UTF8
 }
 
+# ------------------------------------------------------------
+# DAILY PAYLOAD (v2) — verified truth + fresh discovery seeds
+# ------------------------------------------------------------
+# These nine files are the authoritative current-holdings/discovery inputs.
+# moltbook/open_positions.json and signal_ledger.json are now demoted to
+# HISTORICAL CONTEXT ONLY and may never override verified portfolio truth.
+
+function Read-PayloadFile {
+  param([string]$RelPath)
+  if (Test-Path $RelPath) {
+    return Get-Content $RelPath -Raw -Encoding UTF8
+  }
+  return "MISSING_FILE"
+}
+
+$verifiedHoldings   = Read-PayloadFile ".\data\daily_payload\verified_current_holdings.json"
+$closedPositions    = Read-PayloadFile ".\data\daily_payload\closed_positions.json"
+$soldPositions      = Read-PayloadFile ".\data\daily_payload\sold_positions.json"
+$doNotTreatAsOpen   = Read-PayloadFile ".\data\daily_payload\do_not_treat_as_open.json"
+$marketSnapshot     = Read-PayloadFile ".\data\daily_payload\today_market_snapshot.json"
+$priceMovers        = Read-PayloadFile ".\data\daily_payload\today_price_movers.json"
+$newsEvents         = Read-PayloadFile ".\data\daily_payload\today_news_events.json"
+$filingsEvents      = Read-PayloadFile ".\data\daily_payload\today_filings_events.json"
+$yesterdayCandidates = Read-PayloadFile ".\data\daily_payload\yesterday_final_candidates.json"
+
+# Compute the Portfolio Truth Gate + discovery context block in Python so all
+# five models receive the SAME authoritative truth header.
+$portfolioTruthContext = ""
+try {
+  $portfolioTruthContext = & python ".\scripts\daily_synthesis_pipeline.py" --write 2>$null | Out-String
+} catch {
+  $portfolioTruthContext = "PORTFOLIO_TRUTH_GATE_UNAVAILABLE: could not run scripts/daily_synthesis_pipeline.py"
+}
+if ([string]::IsNullOrWhiteSpace($portfolioTruthContext)) {
+  $portfolioTruthContext = "PORTFOLIO_TRUTH_GATE_UNAVAILABLE: empty output from daily_synthesis_pipeline.py"
+}
+
 $sharedContext = @"
 
+$portfolioTruthContext
+
 ============================================================
-PASTED REPO CONTEXT
+DAILY PAYLOAD (v2) — VERIFIED TRUTH IS AUTHORITATIVE
 ============================================================
 
-moltbook/open_positions.json:
+data/daily_payload/verified_current_holdings.json:
+$verifiedHoldings
+
+data/daily_payload/closed_positions.json:
+$closedPositions
+
+data/daily_payload/sold_positions.json:
+$soldPositions
+
+data/daily_payload/do_not_treat_as_open.json:
+$doNotTreatAsOpen
+
+data/daily_payload/today_market_snapshot.json:
+$marketSnapshot
+
+data/daily_payload/today_price_movers.json:
+$priceMovers
+
+data/daily_payload/today_news_events.json:
+$newsEvents
+
+data/daily_payload/today_filings_events.json:
+$filingsEvents
+
+data/daily_payload/yesterday_final_candidates.json:
+$yesterdayCandidates
+
+============================================================
+HISTORICAL CONTEXT ONLY (NOT portfolio truth — never manage from these)
+============================================================
+
+moltbook/open_positions.json (STALE — historical/contaminated; do NOT treat as open):
 $openPositions
 
 ============================================================
 
-moltbook/signal_ledger.json:
+moltbook/signal_ledger.json (historical signal memory only):
 $signalLedger
 
 ============================================================
@@ -610,10 +680,77 @@ If Gemini or Mistral identify macro uncertainty, downgrade aggression.
 If GPT identifies fake confidence or missing data, downgrade.
 
 ============================================================
+PORTFOLIO TRUTH AUDIT — MANDATORY FIRST STEP (before reading consensus)
+============================================================
+
+Before you read any model's consensus, establish portfolio truth using the
+PORTFOLIO TRUTH GATE block and the data/daily_payload/* files in the context.
+
+Compute and display:
+  H = V MINUS (C UNION S UNION D)
+    V = OPEN tickers in verified_current_holdings.json
+    C = CLOSED/EXITED/SOLD tickers in closed_positions.json
+    S = tickers in sold_positions.json
+    D = not_owned_do_not_manage UNION closed_or_sold_positions
+
+Rules that override everything below:
+- Only tickers in H are current holdings. SELL / EXIT REVIEW is allowed ONLY for
+  tickers in H. If a ticker is not in H, SELL / EXIT REVIEW is forbidden.
+- UNG, TIP, TLT, FCG, GLD must NOT be managed/exited/TP'd/held unless they are
+  in H. moltbook/open_positions.json and signal_ledger.json are HISTORICAL ONLY.
+- Phantom positions must NOT block fresh discovery. "No executable trade" is
+  allowed; "no candidates" is NOT allowed unless discovery truly failed and you
+  log the failure explicitly.
+
+Model Contamination Audit — for each model compute:
+  contamination_score(model) = phantom_management_mentions / max(1, total_position_management_mentions)
+If contamination_score > 0, mark that model's portfolio-management section as
+contaminated, but do NOT discard its fresh-discovery section unless that section
+also relies on false holdings.
+
+Fresh Cross-Model Candidate Board — rank by:
+  FCS(t) = 0.35*mean_model_candidate_score + 0.20*cross_model_agreement
+           + 0.15*freshness + 0.10*data_quality + 0.10*narrative_or_event_strength
+           + 0.10*liquidity_quality - 0.10*chaos_risk - 0.10*staleness_penalty
+           - 0.15*portfolio_contamination_penalty
+  cross_model_agreement(t) = models_mentioning_t / 5
+Execution Readiness:
+  ERS(t) = 0.30*data_quality + 0.20*source_health + 0.15*invalidation_defined
+           + 0.15*sizing_defined + 0.10*portfolio_truth_clean + 0.10*human_review_ready
+Classification:
+  FCS>=0.70 and ERS>=0.75  -> EXECUTABLE-PAPER-BUY
+  FCS>=0.70 and ERS<0.75   -> BUY-CANDIDATE / NOT-EXECUTABLE (say why)
+  0.55<=FCS<0.70           -> WATCHLIST
+  FCS<0.55                 -> WAIT or AVOID (per chaos/bear signal)
+
+============================================================
 OUTPUT FORMAT
 ============================================================
 
 # Five-Model MVP Synthesis Report
+
+## 0. Portfolio Truth Audit
+
+Show H, closed/sold, do-not-treat-as-open, phantom mentions, and which model
+sections were contaminated by phantom management. Then continue.
+
+## 0b. Fresh Cross-Model Candidate Board
+
+| Ticker | Models Mentioning | Freshness | FCS | ERS | Candidate Quality | Execution Quality | Classification | Why |
+|---|---|---:|---:|---|---|---|---|---|
+
+Mandatory final boards (each must be present, "None" only with proof of search):
+- Executable paper buys
+- Buy-candidate but not executable
+- Watchlist upgrades
+- Sell/exit review for VERIFIED holdings (t in H) only
+- Avoid/sell-bias candidates
+- Stale/remove candidates
+- Phantom-position quarantine board
+- Moltbook logging sentence
+
+Hard final rule: if executable buys = none, still provide
+"Top 5 fresh candidates to study today."
 
 ## 1. Executive Verdict
 

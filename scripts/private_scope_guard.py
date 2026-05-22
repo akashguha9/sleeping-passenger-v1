@@ -122,6 +122,15 @@ APPROVED_DOMAINS: tuple[str, ...] = (
     # stress probe over signal_events + cockpit hot paths.  No mutation, no
     # broker execution, no order placement, no API writes; bounded workers.
     "stress_probe",  # cockpit_concurrency_stress_probe.py
+    # Daily five-model synthesis truth/discovery sprint — advisory-only layer
+    # that sources holdings truth from data/daily_payload/ and produces fresh
+    # candidates without letting phantom positions block discovery.  Scores and
+    # gates only; no broker execution, no order placement, no API trading writes.
+    "daily",            # daily_payload.py / daily_synthesis_pipeline.py / daily_discovery_config.py
+    "portfolio_truth",  # portfolio_truth_gate.py — H = V \ (C ∪ S ∪ D)
+    "discovery",        # fresh_market_discovery.py — null-safe candidate quality score
+    "candidate_executable",  # candidate_executable_split.py — CQS/EQS classification
+    "anti_staleness",   # anti_staleness.py — freshness labels + novelty enforcement
 )
 
 # Explicit allowlist for individual files / directories whose name does

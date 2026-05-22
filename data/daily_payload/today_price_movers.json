@@ -1,0 +1,14 @@
+{
+  "run_date": "2026-05-22",
+  "movers": [
+    {
+      "ticker": "RTX",
+      "asset_name": "RTX Corp",
+      "market": "US",
+      "move_pct": null,
+      "volume_ratio": null,
+      "freshness": "UNVERIFIED",
+      "source": "placeholder_or_live_feed"
+    }
+  ]
+}

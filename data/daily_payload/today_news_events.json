@@ -1,0 +1,13 @@
+{
+  "run_date": "2026-05-22",
+  "events": [
+    {
+      "ticker": "RTX",
+      "headline": null,
+      "event_type": "news",
+      "timestamp_utc": null,
+      "source": null,
+      "freshness": "UNVERIFIED"
+    }
+  ]
+}

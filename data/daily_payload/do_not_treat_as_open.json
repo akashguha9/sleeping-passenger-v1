@@ -1,0 +1,6 @@
+{
+  "run_date": "2026-05-22",
+  "not_owned_do_not_manage": ["UNG", "TIP", "TLT", "FCG"],
+  "closed_or_sold_positions": ["GLD"],
+  "operator_note": "Do not treat these tickers as open positions even if they appear in stale moltbook, open_positions, signal_ledger, prompt text, or previous synthesis reports. This file is the manual hard override and outranks every stale artifact."
+}
