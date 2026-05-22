@@ -468,17 +468,22 @@ def run(
 ) -> RepairReport:
     """Public entry point used by tests.  Returns the assembled report.
 
-    Function-level guard (Kanté Task 4): the ``apply`` write branch requires a
-    guard-validated :class:`PermissionDecision`.  A direct importer calling
-    ``run(db, apply=True)`` without one hits
-    :func:`assert_permission_decision_allowed`, which raises ``PermissionError``
-    before any backup/UPDATE.  The dry-run (``apply=False``) scan needs none.
+    Function-level guard (Kanté Task 4 / collapsed Task B): the ``apply`` write
+    branch calls the shared :func:`operator_permission_guard.assert_guarded_mutation`
+    helper (the same enforcement the decorator/context manager use).  A direct
+    importer calling ``run(db, apply=True)`` without a guard-validated decision
+    raises ``PermissionError`` before any backup/UPDATE.  The dry-run
+    (``apply=False``) scan needs none.
     """
     report = _scan(db_path)
     if not apply:
         return report
-    _guard.assert_permission_decision_allowed(
-        permission_decision, expected_operation_class=OPERATION_CLASS
+    _guard.assert_guarded_mutation(
+        permission_decision,
+        operation_name=OPERATION_NAME,
+        operation_class=OPERATION_CLASS,
+        expected_role_floor=_guard.OperatorRole.OPERATOR,
+        require_dry_run=True,
     )
     if not db_path.exists():
         report.warnings.append("apply_skipped_db_missing")
@@ -592,20 +597,11 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     # --apply path: central permission guard (fails closed; audits allow/deny).
-    role = (_guard.OperatorRole(_guard._auth.normalize_role(args.operator_role))
-            if args.operator_role else _guard.load_operator_role_from_env())
-    request = _guard.PermissionRequest(
-        operation_name=OPERATION_NAME,
-        operation_class=OPERATION_CLASS,
-        operator_role=role,
-        apply_requested=True,
-        dry_run_completed=_guard.validate_dry_run_receipt(
-            OPERATION_NAME, str(db_path)),
-        db_path=str(db_path),
-        safety_stamps=_guard.caller_safety_stamps(),
-    )
+    # CLI request/role/receipt boilerplate collapsed into build_apply_decision.
     try:
-        decision = _guard.require_permission_or_exit(request)
+        decision = _guard.build_apply_decision(
+            OPERATION_NAME, OPERATION_CLASS, str(db_path),
+            operator_role=args.operator_role)
     except PermissionError as exc:
         print(f"[repair] [DENY] {exc}", file=sys.stderr)
         return 2

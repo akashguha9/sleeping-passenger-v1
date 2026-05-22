@@ -32,6 +32,53 @@ except ModuleNotFoundError:  # pragma: no cover - script-style fallback
 PASS, WARN, FAIL = "PASS", "WARN", "FAIL"
 
 
+def _stress_probe_summary() -> dict[str, Any]:
+    """Read the last persisted stress-probe summary (Kanté Task C), WARN-only.
+
+    Read-only and cheap: the release gate never *runs* the probe (that is a
+    deliberate, separate operator action) — it only surfaces the last run's
+    derived, non-canonical ``last_run.json`` summary if present.  Maps the
+    probe's stress gate to a release impact that is WARN-only by default and
+    only escalates to FAIL on a real reliability disaster the probe itself
+    flagged (a DB-lock under concurrent reads).
+    """
+    out: dict[str, Any] = {
+        "stress_probe_available": False,
+        "stress_gate_status": "UNKNOWN",
+        "stress_score": None,
+        "stress_release_impact": PASS,
+    }
+    try:
+        try:
+            from scripts import cockpit_concurrency_stress_probe as probe
+        except ModuleNotFoundError:  # pragma: no cover - script-style fallback
+            import cockpit_concurrency_stress_probe as probe  # type: ignore[no-redef]
+        out["stress_probe_available"] = True
+    except Exception:  # pragma: no cover - defensive
+        return out
+
+    summary = probe.read_summary()
+    if not summary:
+        # Probe exists but has not been run — advisory only, no impact.
+        out["stress_gate_status"] = "NOT_RUN"
+        return out
+
+    status = str(summary.get("stress_gate_status") or "UNKNOWN").upper()
+    out["stress_gate_status"] = status
+    out["stress_score"] = summary.get("stress_score")
+    db_locked = int(summary.get("db_locked_errors", 0) or 0)
+
+    if status == "BLOCK" and db_locked > 0:
+        # The only condition allowed to FAIL the release: a DB-lock disaster the
+        # probe directly observed under concurrent reads.
+        out["stress_release_impact"] = FAIL
+    elif status in {"BLOCK", "WARN"}:
+        out["stress_release_impact"] = WARN
+    else:
+        out["stress_release_impact"] = PASS
+    return out
+
+
 def evaluate(
     db_path: Path | None = None,
     *,
@@ -75,6 +122,24 @@ def evaluate(
             f"{kante.get('mutation_scripts_unguarded_names')}; WARN."
         )
 
+    # Concurrency/stress probe (Kanté Task C).  WARN-only by default; only a
+    # DB-lock disaster the probe itself observed can FAIL the gate.
+    stress = _stress_probe_summary()
+    stress_impact = stress["stress_release_impact"]
+    if stress_impact == FAIL:
+        verdict = FAIL
+        reasons.append(
+            "stress_probe: db_locked_errors under concurrent reads "
+            f"(stress_gate_status={stress['stress_gate_status']}); FAIL."
+        )
+    elif stress_impact == WARN and verdict == PASS:
+        verdict = WARN
+        reasons.append(
+            "stress_probe: last run "
+            f"stress_gate_status={stress['stress_gate_status']} "
+            f"(score={stress['stress_score']}); WARN."
+        )
+
     return {
         "report": "release_gate",
         "verdict": verdict,
@@ -101,6 +166,11 @@ def evaluate(
         "diagnostics_service_available": kante.get("diagnostics_service_available"),
         "diagnostics_service_status": kante.get("diagnostics_service_status"),
         "release_gate_impact": kante.get("release_gate_impact"),
+        # Concurrency/stress probe surface (Kanté Task C; WARN-only by default).
+        "stress_probe_available": stress["stress_probe_available"],
+        "stress_gate_status": stress["stress_gate_status"],
+        "stress_score": stress["stress_score"],
+        "stress_release_impact": stress_impact,
         "preflight": preflight,
         **_contract.advisory_safety_stamps(),
     }

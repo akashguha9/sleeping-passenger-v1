@@ -126,21 +126,28 @@ def cleanup(
             from scripts import operator_permission_guard as _guard
         except ModuleNotFoundError:  # pragma: no cover - script-style fallback
             import operator_permission_guard as _guard  # type: ignore[no-redef]
-        _guard.assert_permission_decision_allowed(
+        # Dual-mode function: only the destructive branch is guarded, via the
+        # shared guarded_mutation_context (Kanté Task B).  require_dry_run is
+        # False because this idempotent narrow-signature delete declares
+        # NO_DRY_RUN_NEEDED at the CLI; ADMIN role remains enforced upstream by
+        # operator_auth.enforce("cleanup_scripts").
+        with _guard.guarded_mutation_context(
             permission_decision,
-            expected_operation_class=_guard.OperationClass.REPAIR_WRITE,
-        )
-    if apply and matches:
-        conn = sqlite3.connect(str(db_path))
-        try:
-            cur = conn.execute(
-                "DELETE FROM moltbook_entries" + _WHERE_CLAUSE,
-                FAKE_SPY_SIGNATURE,
-            )
-            removed = cur.rowcount or 0
-            conn.commit()
-        finally:
-            conn.close()
+            operation_name="moltbook_cleanup_fake_seed",
+            operation_class=_guard.OperationClass.REPAIR_WRITE,
+            require_dry_run=False,
+        ):
+            if matches:
+                conn = sqlite3.connect(str(db_path))
+                try:
+                    cur = conn.execute(
+                        "DELETE FROM moltbook_entries" + _WHERE_CLAUSE,
+                        FAKE_SPY_SIGNATURE,
+                    )
+                    removed = cur.rowcount or 0
+                    conn.commit()
+                finally:
+                    conn.close()
     return {
         "operation": "moltbook_cleanup_fake_seed",
         "db_path": str(db_path),
@@ -206,22 +213,17 @@ def main(argv: list[str] | None = None) -> int:
                 from scripts import operator_permission_guard as _guard
             except ModuleNotFoundError:  # pragma: no cover - script-style fallback
                 import operator_permission_guard as _guard  # type: ignore[no-redef]
-            role = (_guard.OperatorRole(_guard._auth.normalize_role(args.operator_role))
-                    if args.operator_role else _guard.load_operator_role_from_env())
-            decision = _guard.require_permission_or_exit(_guard.PermissionRequest(
-                operation_name="moltbook_cleanup_fake_seed",
-                operation_class=_guard.OperationClass.REPAIR_WRITE,
-                operator_role=role,
-                apply_requested=True,
-                dry_run_completed=_guard.validate_dry_run_receipt(
-                    "moltbook_cleanup_fake_seed", str(db_path)),
-                db_path=str(db_path),
-                safety_stamps=_guard.caller_safety_stamps(),
-                # Idempotent narrow-signature delete; default mode is the
-                # read-only dry-run report.  No separate receipt is mandated.
+            # CLI authorization boilerplate collapsed into build_apply_decision
+            # (Kanté Task B).  Idempotent narrow-signature delete; default mode
+            # is the read-only dry-run report, so NO_DRY_RUN_NEEDED is declared.
+            decision = _guard.build_apply_decision(
+                "moltbook_cleanup_fake_seed",
+                _guard.OperationClass.REPAIR_WRITE,
+                str(db_path),
+                operator_role=args.operator_role,
                 reason=f"{_guard.NO_DRY_RUN_NEEDED}: idempotent narrow-signature "
                        "fake-seed delete; default mode is dry-run.",
-            ))
+            )
         except PermissionError as exc:
             print(f"[DENY] {exc}")
             return 2

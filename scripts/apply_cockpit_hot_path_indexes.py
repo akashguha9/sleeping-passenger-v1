@@ -80,21 +80,25 @@ def planned_indexes(db_path: Path | None = None) -> list[str]:
     return stmts
 
 
+@_guard.guarded_mutation(
+    operation_name=OPERATION_NAME,
+    operation_class=OPERATION_CLASS,
+    expected_role_floor=_guard.OperatorRole.ADMIN,
+    require_dry_run=True,
+)
 def apply_indexes(
     db_path: Path,
     statements: list[str],
     *,
-    permission_decision: "_guard.PermissionDecision",
+    permission_decision: "_guard.PermissionDecision | None" = None,
 ) -> dict[str, Any]:
     """Execute the additive CREATE INDEX statements (function-level guarded).
 
-    Re-asserts the guard at the write boundary so a direct importer cannot
-    bypass the ADMIN/MIGRATION_WRITE requirement.  Refuses any statement that
+    The :func:`operator_permission_guard.guarded_mutation` decorator (Kanté Task
+    B) re-asserts the guard at the write boundary so a direct importer cannot
+    bypass the ADMIN + MIGRATION_WRITE requirement.  Refuses any statement that
     is not an additive ``CREATE INDEX IF NOT EXISTS``.
     """
-    _guard.assert_permission_decision_allowed(
-        permission_decision, expected_operation_class=OPERATION_CLASS
-    )
     created: list[str] = []
     refused: list[str] = []
     conn = sqlite3.connect(str(db_path))
@@ -153,20 +157,12 @@ def main(argv: list[str] | None = None) -> int:
               f"--apply --db-path {db_path}")
         return 0
 
-    role = (_guard.OperatorRole(_guard._auth.normalize_role(args.operator_role))
-            if args.operator_role else _guard.load_operator_role_from_env())
-    request = _guard.PermissionRequest(
-        operation_name=OPERATION_NAME,
-        operation_class=OPERATION_CLASS,
-        operator_role=role,
-        apply_requested=True,
-        dry_run_completed=_guard.validate_dry_run_receipt(
-            OPERATION_NAME, str(db_path)),
-        db_path=str(db_path),
-        safety_stamps=_guard.caller_safety_stamps(),
-    )
+    # CLI request/role/receipt boilerplate collapsed into build_apply_decision
+    # (Kanté Task B).  MIGRATION_WRITE is ADMIN-only inside the guard.
     try:
-        decision = _guard.require_permission_or_exit(request)
+        decision = _guard.build_apply_decision(
+            OPERATION_NAME, OPERATION_CLASS, str(db_path),
+            operator_role=args.operator_role)
     except PermissionError as exc:
         print(f"[indexes] [DENY] {exc}", file=sys.stderr)
         return 2

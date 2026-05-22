@@ -24,6 +24,8 @@ audit-only, never canonical truth.
 from __future__ import annotations
 
 import argparse
+import contextlib
+import functools
 import hashlib
 import json
 import os
@@ -31,6 +33,7 @@ import re
 import sys
 import tempfile
 import uuid
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
@@ -188,19 +191,73 @@ def load_operator_role_from_env(default: str = "VIEWER") -> OperatorRole:
     return OperatorRole(normalized)
 
 
-def safe_db_path_allowed(db_path: str | None) -> bool:
-    """True iff ``db_path`` is a concrete file path inside an allowed location.
+# POSIX system directories never hold a runtime DB — denied on every platform.
+_POSIX_SYSTEM_PREFIXES: tuple[str, ...] = (
+    "/etc/", "/root/", "/var/", "/usr/", "/bin/",
+    "/sbin/", "/proc/", "/sys/", "/dev/",
+)
+# URL-like targets are never a local file DB.
+_URL_PREFIXES: tuple[str, ...] = ("http://", "https://", "file://")
+# A Windows drive-letter absolute path, e.g. ``C:\`` or ``C:/``.
+_WINDOWS_DRIVE_RE = re.compile(r"^[A-Za-z]:[\\/]")
 
-    Allowed: anywhere under the repo root, or under the system temp dir (which
-    covers pytest ``tmp_path`` fixtures).  Denied: ``None``/empty (ambiguous),
-    and any external arbitrary path (e.g. ``/etc``, ``C:\\Windows``).
+
+def classify_db_path(db_path: str | None) -> str | None:
+    """Return a denial-reason code for an unsafe ``db_path``, or ``None`` if allowed.
+
+    Cross-platform by string pattern, NOT by :class:`pathlib.Path` semantics:
+    on Linux CI a Windows path such as ``C:\\Windows\\System32\\evil.db`` is
+    otherwise mis-parsed as a *relative* filename and resolved under the repo
+    (cwd), which would wrongly allow it.  We therefore detect Windows-drive,
+    UNC, system-directory, traversal and URL patterns explicitly before any
+    ``resolve()`` is attempted.
+
+    Reason codes: ``missing_db_path``, ``windows_system_path``,
+    ``path_traversal``, ``external_db_path``, ``unsafe_db_path``.
     """
-    if not db_path or not str(db_path).strip():
-        return False
+    if db_path is None:
+        return "missing_db_path"
+    raw = str(db_path)
+    if not raw.strip():
+        return "missing_db_path"
+
+    lowered = raw.strip().lower()
+
+    # URL-like targets are never a local runtime DB.
+    if lowered.startswith(_URL_PREFIXES):
+        return "external_db_path"
+
+    # Windows system path, detected on any platform (both slash styles).
+    norm_slashes = raw.replace("\\", "/").lower()
+    if "/windows/system32" in norm_slashes:
+        return "windows_system_path"
+
+    # UNC network path (\\host\share or //host/share).
+    if raw.startswith("\\\\") or raw.startswith("//"):
+        return "external_db_path"
+
+    # Parent-directory traversal in any path segment (checked on the RAW string
+    # so ``../../evil.db`` is rejected before resolution can hide it).
+    if ".." in re.split(r"[\\/]+", raw):
+        return "path_traversal"
+
+    # POSIX system directories — rejected on every platform.
+    if any(raw.startswith(prefix) for prefix in _POSIX_SYSTEM_PREFIXES):
+        return "external_db_path"
+
+    # On a non-Windows platform a drive-letter path or any backslash signals a
+    # foreign Windows path that pathlib would mis-resolve as relative.
+    if os.name != "nt":
+        if _WINDOWS_DRIVE_RE.match(raw):
+            return "windows_system_path"
+        if "\\" in raw:
+            return "external_db_path"
+
+    # Finally, the path must resolve inside the repo root or the system temp dir.
     try:
-        target = Path(db_path).resolve()
+        target = Path(raw).resolve()
     except (OSError, ValueError):
-        return False
+        return "unsafe_db_path"
     allowed_roots = [_REPO_ROOT.resolve()]
     try:
         allowed_roots.append(Path(tempfile.gettempdir()).resolve())
@@ -209,10 +266,22 @@ def safe_db_path_allowed(db_path: str | None) -> bool:
     for root in allowed_roots:
         try:
             target.relative_to(root)
-            return True
+            return None
         except ValueError:
             continue
-    return False
+    return "external_db_path"
+
+
+def safe_db_path_allowed(db_path: str | None) -> bool:
+    """True iff ``db_path`` is a concrete file path inside an allowed location.
+
+    Allowed: anywhere under the repo root, or under the system temp dir (which
+    covers pytest ``tmp_path`` fixtures).  Denied: ``None``/empty/whitespace,
+    Windows system paths (even on Linux CI), UNC/URL paths, POSIX system
+    directories, ``..`` traversal, and any external arbitrary path.  Delegates
+    to :func:`classify_db_path` so both share one cross-platform deny list.
+    """
+    return classify_db_path(db_path) is None
 
 
 def forbid_execution_operation(
@@ -316,11 +385,14 @@ def evaluate_permission(request: PermissionRequest) -> PermissionDecision:
             )
 
     # DBPathAllowed — mutations must target an allowed runtime/repo/temp path.
-    if is_mutation and not safe_db_path_allowed(request.db_path):
-        denial.append(
-            "db_path_not_allowed: target DB path is missing, ambiguous, or "
-            "outside the allowed runtime/repo location."
-        )
+    if is_mutation:
+        path_reason = classify_db_path(request.db_path)
+        if path_reason is not None:
+            denial.append(
+                f"db_path_not_allowed ({path_reason}): target DB path is "
+                "missing, foreign, or outside the allowed runtime/repo/temp "
+                "location."
+            )
 
     # SafetyInvariantClean.
     clean, problems = _safety_invariant_clean(request.safety_stamps)
@@ -504,6 +576,196 @@ def require_permission_or_exit(
             + " | ".join(decision.denial_reasons)
         )
     return decision
+
+
+# ---------------------------------------------------------------------------
+# Guarded-mutation decorator / context manager (Kanté Defensive Sprint — Task B)
+#
+# Before this, every mutation function hand-wrote the same write-boundary
+# preamble (``assert_permission_decision_allowed(decision, expected_class=...)``)
+# and every CLI hand-built the same PermissionRequest → require_permission_or_exit
+# dance.  This collapses both into one declarative surface so the guard can never
+# drift between scripts.  Neither helper mutates anything: they only enforce.
+# ---------------------------------------------------------------------------
+
+# Least-privilege ordering for the optional write-boundary role floor.
+_ROLE_RANK: dict[OperatorRole, int] = {
+    OperatorRole.VIEWER: 0,
+    OperatorRole.OPERATOR: 1,
+    OperatorRole.ADMIN: 2,
+}
+
+
+def _role_meets_floor(role_value: Any, floor: OperatorRole) -> bool:
+    """True iff ``role_value`` (a role enum or its string) is >= ``floor``."""
+    if isinstance(role_value, OperatorRole):
+        role = role_value
+    else:
+        try:
+            role = OperatorRole(_auth.normalize_role(str(role_value)))
+        except (ValueError, KeyError):
+            return False
+    return _ROLE_RANK.get(role, -1) >= _ROLE_RANK.get(floor, 99)
+
+
+def assert_guarded_mutation(
+    decision: PermissionDecision | None,
+    *,
+    operation_class: OperationClass,
+    operation_name: str = "",
+    expected_role_floor: OperatorRole | None = None,
+    require_dry_run: bool = True,
+) -> PermissionDecision:
+    """Shared write-boundary enforcement for the decorator, context manager, and
+    dual-mode (scan-then-write) functions whose control flow doesn't fit a single
+    ``with`` block.
+
+    Re-runs :func:`assert_permission_decision_allowed` (decision present, allowed,
+    correct class, not FORBIDDEN_EXECUTION, clean locked invariants) and adds two
+    defence-in-depth checks: a missing dry-run when ``require_dry_run`` is set,
+    and a sub-floor role when ``expected_role_floor`` is given.  Raises
+    :class:`PermissionError` before the wrapped write can run.  Performs no IO.
+    """
+    assert_permission_decision_allowed(
+        decision, expected_operation_class=operation_class
+    )
+    # decision is a valid, allowed PermissionDecision past the assert above.
+    problems: list[str] = []
+    if require_dry_run and not getattr(decision, "dry_run_completed", False):
+        problems.append("dry_run_required_at_write_boundary")
+    if expected_role_floor is not None and not _role_meets_floor(
+        getattr(decision, "operator_role", None), expected_role_floor
+    ):
+        problems.append(
+            f"role_below_floor: {getattr(decision, 'operator_role', None)} "
+            f"< {expected_role_floor.value}"
+        )
+    if problems:
+        label = operation_name or operation_class.value
+        raise PermissionError(
+            f"guarded_mutation[{label}] DENY: " + " | ".join(problems)
+        )
+    return decision  # type: ignore[return-value]
+
+
+def guarded_mutation(
+    *,
+    operation_class: OperationClass,
+    operation_name: str = "",
+    expected_role_floor: OperatorRole | None = None,
+    require_dry_run: bool = True,
+    decision_arg: str = "permission_decision",
+):
+    """Decorator that enforces the permission guard at a write function's boundary.
+
+    The wrapped function MUST receive a guard-validated :class:`PermissionDecision`
+    via the ``permission_decision`` keyword (or ``decision_arg``).  Before the
+    body runs the decorator calls :func:`assert_guarded_mutation`, so a caller that
+    imports the write function directly — bypassing the CLI ``main`` — still
+    cannot reach the mutation without a clean, allowed, correctly-classed
+    decision.  ``FORBIDDEN_EXECUTION`` can never be wrapped (advisory-only ceiling).
+
+    The decorator itself performs no IO and no mutation; it only raises
+    :class:`PermissionError` or delegates to the wrapped function.  CLI-layer
+    ``--apply`` + dry-run-receipt enforcement is unchanged and still required.
+    """
+    if operation_class == OperationClass.FORBIDDEN_EXECUTION:
+        raise ValueError(
+            "guarded_mutation cannot wrap a FORBIDDEN_EXECUTION operation — "
+            "this MVP is advisory-only and no decorator may authorize execution."
+        )
+
+    def decorator(func):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            decision = kwargs.get(decision_arg)
+            assert_guarded_mutation(
+                decision,
+                operation_class=operation_class,
+                operation_name=operation_name or getattr(func, "__name__", ""),
+                expected_role_floor=expected_role_floor,
+                require_dry_run=require_dry_run,
+            )
+            return func(*args, **kwargs)
+
+        wrapper.__guarded_mutation__ = {
+            "operation_name": operation_name or getattr(func, "__name__", ""),
+            "operation_class": operation_class.value,
+            "expected_role_floor": (
+                expected_role_floor.value if expected_role_floor else None
+            ),
+            "require_dry_run": bool(require_dry_run),
+            "decision_arg": decision_arg,
+        }
+        return wrapper
+
+    return decorator
+
+
+@contextlib.contextmanager
+def guarded_mutation_context(
+    decision: PermissionDecision | None,
+    *,
+    operation_class: OperationClass,
+    operation_name: str = "",
+    expected_role_floor: OperatorRole | None = None,
+    require_dry_run: bool = True,
+) -> Iterator[PermissionDecision]:
+    """Context-manager form of :func:`guarded_mutation` for dual-mode functions.
+
+    A function that both *scans* (read-only) and optionally *writes* cannot be a
+    pure decorated write target, so it wraps only its write block::
+
+        with guarded_mutation_context(decision, operation_class=REPAIR_WRITE):
+            conn.execute("UPDATE ...")
+
+    Enforcement happens on ``__enter__`` (before the block); the body never runs
+    when the decision is missing/denied/mis-classed.  No IO of its own.
+    """
+    validated = assert_guarded_mutation(
+        decision,
+        operation_class=operation_class,
+        operation_name=operation_name,
+        expected_role_floor=expected_role_floor,
+        require_dry_run=require_dry_run,
+    )
+    yield validated
+
+
+def build_apply_decision(
+    operation_name: str,
+    operation_class: OperationClass,
+    db_path: str | None,
+    *,
+    operator_role: str | None = None,
+    reason: str | None = None,
+    audit_path: str | Path | None = None,
+) -> PermissionDecision:
+    """Collapse the per-CLI ``--apply`` authorization boilerplate into one call.
+
+    Resolves the role (explicit ``--operator-role`` arg, else ``MVP_OPERATOR_ROLE``
+    env, else VIEWER), checks for a recent dry-run receipt, builds the
+    :class:`PermissionRequest` with the canonical advisory safety stamps, and
+    runs :func:`require_permission_or_exit` (which audits allow *and* deny and
+    raises :class:`PermissionError` on deny).  The caller wraps this in
+    ``try/except PermissionError`` and returns its CLI deny code (2).
+    """
+    role = (
+        OperatorRole(_auth.normalize_role(operator_role))
+        if operator_role
+        else load_operator_role_from_env()
+    )
+    request = PermissionRequest(
+        operation_name=operation_name,
+        operation_class=operation_class,
+        operator_role=role,
+        apply_requested=True,
+        dry_run_completed=validate_dry_run_receipt(operation_name, db_path),
+        db_path=db_path,
+        safety_stamps=caller_safety_stamps(),
+        reason=reason,
+    )
+    return require_permission_or_exit(request, audit_path=audit_path)
 
 
 # ---------------------------------------------------------------------------
@@ -805,10 +1067,15 @@ __all__ = [
     "evaluate_permission",
     "assert_permission_decision_allowed",
     "require_permission_or_exit",
+    "assert_guarded_mutation",
+    "guarded_mutation",
+    "guarded_mutation_context",
+    "build_apply_decision",
     "write_operator_audit_event",
     "read_recent_audit_events",
     "load_operator_role_from_env",
     "safe_db_path_allowed",
+    "classify_db_path",
     "forbid_execution_operation",
     "db_path_hash",
     "write_dry_run_receipt",

@@ -118,6 +118,10 @@ APPROVED_DOMAINS: tuple[str, ...] = (
     # the apply path is ADMIN/MIGRATION_WRITE guarded, CREATE INDEX IF NOT
     # EXISTS only, never drops/deletes, no broker execution.
     "cockpit_hot_path",  # cockpit_hot_path_query_audit.py / apply_cockpit_hot_path_indexes.py
+    # Kanté defensive sprint (Task C) — advisory-only, read-only concurrency /
+    # stress probe over signal_events + cockpit hot paths.  No mutation, no
+    # broker execution, no order placement, no API writes; bounded workers.
+    "stress_probe",  # cockpit_concurrency_stress_probe.py
 )
 
 # Explicit allowlist for individual files / directories whose name does

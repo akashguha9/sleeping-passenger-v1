@@ -127,11 +127,17 @@ def find_candidates(db_path: Path) -> list[QuarantineCandidate]:
     return candidates
 
 
+@_guard.guarded_mutation(
+    operation_name=OPERATION_NAME,
+    operation_class=OPERATION_CLASS,
+    expected_role_floor=_guard.OperatorRole.OPERATOR,
+    require_dry_run=True,
+)
 def apply_quarantine(
     db_path: Path,
     candidates: Iterable[QuarantineCandidate],
     *,
-    permission_decision: "_guard.PermissionDecision",
+    permission_decision: "_guard.PermissionDecision | None" = None,
 ) -> int:
     """Re-stamp the candidates' provenance to ``QUARANTINE_PROVENANCE``.
 
@@ -139,15 +145,14 @@ def apply_quarantine(
     update is wrapped in a single transaction so an interrupted run
     leaves the DB in a consistent state.
 
-    Function-level guard (Kanté Task 4): a caller — including one importing
-    this function directly, bypassing the CLI — MUST pass a guard-validated
-    :class:`PermissionDecision`.  :func:`assert_permission_decision_allowed`
-    raises ``PermissionError`` before any write if the decision is missing,
-    denied, of the wrong operation class, or has dirty safety stamps.
+    Function-level guard (Kanté Task 4 / collapsed Task B): the
+    :func:`operator_permission_guard.guarded_mutation` decorator enforces the
+    write boundary, so a caller importing this function directly — bypassing the
+    CLI — still cannot run it without a guard-validated, allowed, OPERATOR+
+    REPAIR_WRITE :class:`PermissionDecision`.  The decorator raises
+    ``PermissionError`` before any write if the decision is missing, denied, of
+    the wrong operation class, sub-floor, or has dirty safety stamps.
     """
-    _guard.assert_permission_decision_allowed(
-        permission_decision, expected_operation_class=OPERATION_CLASS
-    )
     candidate_list = list(candidates)
     if not candidate_list:
         return 0
@@ -255,21 +260,12 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     # --apply path: central permission guard (fails closed; audits allow/deny).
-    role = (_guard.OperatorRole(_guard._auth.normalize_role(args.operator_role))
-            if args.operator_role else _guard.load_operator_role_from_env())
-    request = _guard.PermissionRequest(
-        operation_name=OPERATION_NAME,
-        operation_class=OPERATION_CLASS,
-        operator_role=role,
-        apply_requested=True,
-        dry_run_completed=_guard.validate_dry_run_receipt(
-            OPERATION_NAME, str(db_path)
-        ),
-        db_path=str(db_path),
-        safety_stamps=_guard.caller_safety_stamps(),
-    )
+    # The per-CLI request/role/receipt boilerplate is collapsed into
+    # build_apply_decision (Kanté Task B).
     try:
-        decision = _guard.require_permission_or_exit(request)
+        decision = _guard.build_apply_decision(
+            OPERATION_NAME, OPERATION_CLASS, str(db_path),
+            operator_role=args.operator_role)
     except PermissionError as exc:
         print(f"[quarantine] [DENY] {exc}", file=sys.stderr)
         return 2
