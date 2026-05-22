@@ -127,13 +127,27 @@ def find_candidates(db_path: Path) -> list[QuarantineCandidate]:
     return candidates
 
 
-def apply_quarantine(db_path: Path, candidates: Iterable[QuarantineCandidate]) -> int:
+def apply_quarantine(
+    db_path: Path,
+    candidates: Iterable[QuarantineCandidate],
+    *,
+    permission_decision: "_guard.PermissionDecision",
+) -> int:
     """Re-stamp the candidates' provenance to ``QUARANTINE_PROVENANCE``.
 
     Returns the number of rows updated.  Does NOT delete rows.  Each
     update is wrapped in a single transaction so an interrupted run
     leaves the DB in a consistent state.
+
+    Function-level guard (Kanté Task 4): a caller — including one importing
+    this function directly, bypassing the CLI — MUST pass a guard-validated
+    :class:`PermissionDecision`.  :func:`assert_permission_decision_allowed`
+    raises ``PermissionError`` before any write if the decision is missing,
+    denied, of the wrong operation class, or has dirty safety stamps.
     """
+    _guard.assert_permission_decision_allowed(
+        permission_decision, expected_operation_class=OPERATION_CLASS
+    )
     candidate_list = list(candidates)
     if not candidate_list:
         return 0
@@ -255,7 +269,7 @@ def main(argv: list[str] | None = None) -> int:
         safety_stamps=_guard.caller_safety_stamps(),
     )
     try:
-        _guard.require_permission_or_exit(request)
+        decision = _guard.require_permission_or_exit(request)
     except PermissionError as exc:
         print(f"[quarantine] [DENY] {exc}", file=sys.stderr)
         return 2
@@ -264,7 +278,7 @@ def main(argv: list[str] | None = None) -> int:
         print("[quarantine] permission granted; no candidates to quarantine (no-op).")
         return 0
 
-    updated = apply_quarantine(db_path, candidates)
+    updated = apply_quarantine(db_path, candidates, permission_decision=decision)
     print(f"[quarantine] Updated {updated} row(s) — created_via stamped {QUARANTINE_PROVENANCE!r}.")
     print("[quarantine] No rows were deleted.  Audit history preserved.")
     return 0

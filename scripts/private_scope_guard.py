@@ -113,6 +113,11 @@ APPROVED_DOMAINS: tuple[str, ...] = (
     # No broker execution, no order placement, no API trading writes.
     "diagnostics",      # diagnostics_snapshot_cache.py / diagnostics_service.py
     "model_reliability",  # model_reliability_ledger.py — per-model calibration ledger
+    # Kanté defensive sprint (follow-up) — advisory-only cockpit hot-path
+    # query/index evidence + guarded additive-index apply.  Read-only audit;
+    # the apply path is ADMIN/MIGRATION_WRITE guarded, CREATE INDEX IF NOT
+    # EXISTS only, never drops/deletes, no broker execution.
+    "cockpit_hot_path",  # cockpit_hot_path_query_audit.py / apply_cockpit_hot_path_indexes.py
 )
 
 # Explicit allowlist for individual files / directories whose name does

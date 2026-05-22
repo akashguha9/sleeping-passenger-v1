@@ -421,6 +421,69 @@ def read_recent_audit_events(
 # ---------------------------------------------------------------------------
 
 
+def assert_permission_decision_allowed(
+    decision: PermissionDecision | None,
+    expected_operation_class: OperationClass | None = None,
+) -> None:
+    """Fail closed at the *write boundary* — raise unless ``decision`` is a clean allow.
+
+    This is the function-level guard the actual mutation functions call so a
+    future caller cannot bypass the CLI ``main`` by importing the write function
+    directly.  It re-validates the decision object itself (it does not re-run
+    role logic) and raises :class:`PermissionError` when ANY of the following
+    hold:
+
+    * ``decision`` is missing (``None``);
+    * ``decision.allowed`` is false;
+    * ``expected_operation_class`` is given and does not match the decision;
+    * the operation class is ``FORBIDDEN_EXECUTION``;
+    * the locked advisory invariants are violated — ``execution_gate`` is not
+      ``LOCKED``, ``advisory_only`` is not true, ``human_execution_required`` is
+      not true, ``broker_api_called`` is truthy, or ``ai_execution_count`` != 0.
+
+    Returns ``None`` on success.
+    """
+    if decision is None:
+        raise PermissionError(
+            "permission_decision_required: write boundary reached without a "
+            "PermissionDecision — the operator_permission_guard was bypassed."
+        )
+    if not isinstance(decision, PermissionDecision):
+        raise PermissionError(
+            "permission_decision_invalid: expected a PermissionDecision, got "
+            f"{type(decision).__name__}."
+        )
+    problems: list[str] = []
+    if not decision.allowed:
+        problems.append(
+            "decision_not_allowed: "
+            + ("; ".join(decision.denial_reasons) or "denied")
+        )
+    if expected_operation_class is not None:
+        expected = expected_operation_class.value
+        if str(decision.operation_class) != expected:
+            problems.append(
+                f"operation_class_mismatch: decision is "
+                f"{decision.operation_class!r}, expected {expected!r}."
+            )
+    if str(decision.operation_class) == OperationClass.FORBIDDEN_EXECUTION.value:
+        problems.append("forbidden_execution: broker/order/execution is never allowed.")
+    if str(decision.execution_gate).upper() != _contract.EXECUTION_GATE_LOCKED:
+        problems.append(f"execution_gate_not_locked: {decision.execution_gate!r}.")
+    if decision.advisory_only is not True:
+        problems.append("advisory_only_not_asserted.")
+    if decision.human_execution_required is not True:
+        problems.append("human_execution_required_not_asserted.")
+    if decision.broker_api_called not in (False, None, 0):
+        problems.append("broker_api_called_truthy.")
+    if decision.ai_execution_count not in (0, None):
+        problems.append(f"ai_execution_count_nonzero: {decision.ai_execution_count}.")
+    if problems:
+        raise PermissionError(
+            "operator_permission_guard ASSERT DENY: " + " | ".join(problems)
+        )
+
+
 def require_permission_or_exit(
     request: PermissionRequest,
     *,
@@ -611,6 +674,41 @@ def _self_test() -> int:
             db_path="/etc/shadow", safety_stamps=clean))
         check("unsafe_db_path_denied", not d.allowed)
 
+        # 6b. assert_permission_decision_allowed: write-boundary guard.
+        allow = evaluate_permission(PermissionRequest(
+            "quarantine", OperationClass.REPAIR_WRITE, OperatorRole.OPERATOR,
+            apply_requested=True, dry_run_completed=True, db_path=db,
+            safety_stamps=clean))
+        try:
+            assert_permission_decision_allowed(
+                allow, expected_operation_class=OperationClass.REPAIR_WRITE)
+            check("assert_allows_clean_decision", True)
+        except PermissionError:
+            check("assert_allows_clean_decision", False)
+        # None decision must raise.
+        try:
+            assert_permission_decision_allowed(None)
+            check("assert_rejects_missing_decision", False)
+        except PermissionError:
+            check("assert_rejects_missing_decision", True)
+        # Operation-class mismatch must raise.
+        try:
+            assert_permission_decision_allowed(
+                allow, expected_operation_class=OperationClass.RESTORE_WRITE)
+            check("assert_rejects_class_mismatch", False)
+        except PermissionError:
+            check("assert_rejects_class_mismatch", True)
+        # Denied decision must raise.
+        denied = evaluate_permission(PermissionRequest(
+            "quarantine", OperationClass.REPAIR_WRITE, OperatorRole.VIEWER,
+            apply_requested=True, dry_run_completed=True, db_path=db,
+            safety_stamps=clean))
+        try:
+            assert_permission_decision_allowed(denied)
+            check("assert_rejects_denied_decision", False)
+        except PermissionError:
+            check("assert_rejects_denied_decision", True)
+
         # 7. Receipt round-trip + staleness.
         write_dry_run_receipt("quarantine_selftest", 3, db)
         check("receipt_valid", validate_dry_run_receipt("quarantine_selftest", db))
@@ -705,6 +803,7 @@ __all__ = [
     "ROLE_ENV_VAR",
     "NO_DRY_RUN_NEEDED",
     "evaluate_permission",
+    "assert_permission_decision_allowed",
     "require_permission_or_exit",
     "write_operator_audit_event",
     "read_recent_audit_events",

@@ -17,6 +17,20 @@ from pathlib import Path
 import scripts.persistence as persistence
 import scripts.moltbook_api as moltbook_api
 import scripts.moltbook_cleanup_fake_seed as cleanup
+from scripts import operator_permission_guard as _guard
+
+
+def _allowed_cleanup_decision(db: Path) -> "_guard.PermissionDecision":
+    """A clean OPERATOR REPAIR_WRITE allow for the function-level write guard."""
+    return _guard.evaluate_permission(_guard.PermissionRequest(
+        operation_name="moltbook_cleanup_fake_seed",
+        operation_class=_guard.OperationClass.REPAIR_WRITE,
+        operator_role=_guard.OperatorRole.OPERATOR,
+        apply_requested=True,
+        dry_run_completed=True,
+        db_path=str(db),
+        safety_stamps=_guard.caller_safety_stamps(),
+    ))
 
 
 def _sample_entry_kwargs(**over):
@@ -123,7 +137,8 @@ def test_cleanup_removes_only_fake_spy_and_is_idempotent(tmp_path):
         manual_trade_log_id="", mistake_type="no_trade_correct", **real2,
     )
 
-    rep = cleanup.cleanup(db, apply=True)
+    rep = cleanup.cleanup(db, apply=True,
+                          permission_decision=_allowed_cleanup_decision(db))
     assert rep["removed"] == 1
     remaining = {r["entry_id"] for r in persistence.get_moltbook_entries(db_path=db)}
     assert "MB_fake" not in remaining
@@ -131,7 +146,8 @@ def test_cleanup_removes_only_fake_spy_and_is_idempotent(tmp_path):
     assert "MB_qqq" in remaining
 
     # Idempotent: a second run removes nothing.
-    rep2 = cleanup.cleanup(db, apply=True)
+    rep2 = cleanup.cleanup(db, apply=True,
+                           permission_decision=_allowed_cleanup_decision(db))
     assert rep2["removed"] == 0
 
 

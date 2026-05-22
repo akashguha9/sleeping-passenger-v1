@@ -1286,6 +1286,20 @@ def get_diagnostics_cockpit() -> dict:
             },
         }
 
+    # Operator-guard coverage (cheap static scan; advisory, never crashes the
+    # cockpit).  Lets the UI show guard-coverage + mutation-guard release impact
+    # alongside the diagnostics integrity state.
+    guard_summary: dict = {}
+    try:
+        try:
+            from scripts.local_deploy_preflight import build_kante_defensive_summary
+        except ModuleNotFoundError:  # pragma: no cover - script-style fallback
+            from local_deploy_preflight import build_kante_defensive_summary  # type: ignore
+        guard_summary = build_kante_defensive_summary()
+    except Exception as exc:  # pragma: no cover - defensive
+        _logger.warning("guard summary unavailable: %s", type(exc).__name__)
+        guard_summary = {}
+
     subreports = snapshot.get("subreports", {})
     closed_loop = _cockpit_panel_data(subreports, "closed_loop")
     truth_purity = _cockpit_panel_data(subreports, "truth_purity")
@@ -1315,6 +1329,13 @@ def get_diagnostics_cockpit() -> dict:
             if isinstance(sub, dict)
         },
         "safety_stamps": snapshot.get("safety_stamps", {}),
+        # --- operator-guard coverage (advisory) -------------------------------
+        "auth_guard_status": guard_summary.get("auth_guard_status"),
+        "mutation_guard_coverage": guard_summary.get("mutation_guard_coverage"),
+        "mutation_guard_release_impact": guard_summary.get(
+            "mutation_guard_release_impact"),
+        "mutation_scripts_unguarded_count": guard_summary.get(
+            "mutation_scripts_unguarded_count"),
         # --- frontend-compatible panel projection (unchanged shape) -----------
         "closed_loop": {
             "closed_loop_coverage": closed_loop.get("closed_loop_coverage", 0.0),

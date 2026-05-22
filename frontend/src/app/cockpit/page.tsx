@@ -22,6 +22,109 @@ function Panel({ title, children }: { title: string; children: React.ReactNode }
   );
 }
 
+// Maps the diagnostics degraded-state taxonomy to a colour. A DEGRADED or
+// BLOCK state is never shown as a healthy green — a crashed subreport must be
+// visibly unhealthy so the operator cannot mistake it for clean.
+function statusColor(status?: string): string {
+  switch ((status ?? 'UNKNOWN').toUpperCase()) {
+    case 'CLEAN':
+      return 'text-emerald-400';
+    case 'WARN':
+      return 'text-amber-400';
+    case 'BLOCK':
+      return 'text-red-400';
+    case 'DEGRADED':
+      return 'text-orange-400';
+    default:
+      return 'text-slate-400';
+  }
+}
+
+function DiagnosticsIntegrityPanel({ data }: { data: CockpitResponse }) {
+  const status = (data.status ?? 'UNKNOWN').toUpperCase();
+  const partials = data.partial_failures ?? [];
+  const firstRecovery = partials.find((p) => p.safe_recovery_command)?.safe_recovery_command;
+  const guardCoverage =
+    data.mutation_guard_coverage != null
+      ? `${Math.round(data.mutation_guard_coverage * 100)}%`
+      : '—';
+  return (
+    <div
+      data-testid="diagnostics-integrity-panel"
+      className="bg-slate-800/60 border border-slate-700/60 rounded-lg p-4 md:col-span-2 lg:col-span-3"
+    >
+      <h2 className="text-sm font-semibold text-slate-300 mb-3">Diagnostics Integrity</h2>
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
+        <div className="flex items-center justify-between px-3 py-2 rounded bg-slate-900/40 border border-slate-700/30">
+          <span className="text-xs text-slate-400">Status</span>
+          <span
+            data-testid="diagnostics-status"
+            className={`text-xs font-mono font-bold ${statusColor(status)}`}
+          >
+            {status}
+          </span>
+        </div>
+        <Stat label="Cache" value={data.cache_status ?? '—'} />
+        <Stat label="Partial failures" value={partials.length} />
+        <Stat label="Guard coverage" value={guardCoverage} />
+        <Stat label="Auth guard" value={data.auth_guard_status ?? '—'} />
+        <Stat label="Mutation guard" value={data.mutation_guard_release_impact ?? '—'} />
+        <Stat label="Cache role" value={data.cache_role ?? '—'} />
+        <Stat label="Canonical truth" value={data.canonical_truth_source ?? '—'} />
+        <Stat label="Generated (UTC)" value={data.generated_at_utc ?? '—'} />
+      </div>
+
+      {/* Each partial failure is surfaced with its error type and the SAFE,
+          read-only recovery command — never hidden behind a clean status. */}
+      {partials.length > 0 && (
+        <div data-testid="partial-failures" className="mt-3 space-y-2">
+          <p className="text-xs font-semibold text-orange-400">
+            Partial failures ({partials.length}) — degraded subreports:
+          </p>
+          {partials.map((p) => (
+            <div
+              key={p.subreport}
+              className="px-3 py-2 rounded bg-slate-900/60 border border-orange-800/40 text-xs"
+            >
+              <div className="flex items-center justify-between">
+                <span className="font-mono text-slate-200">{p.subreport}</span>
+                <span className={`font-mono ${statusColor(p.status ?? 'DEGRADED')}`}>
+                  {p.status ?? 'DEGRADED'}
+                </span>
+              </div>
+              <div className="text-slate-400 mt-1">
+                error: <span className="font-mono text-slate-300">{p.error_type}</span>
+              </div>
+              {p.safe_recovery_command && (
+                <div className="text-slate-400 mt-1">
+                  recover:{' '}
+                  <span data-testid="recovery-command" className="font-mono text-slate-300">
+                    {p.safe_recovery_command}
+                  </span>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {firstRecovery && partials.length === 0 && (
+        <p className="text-xs text-slate-400 mt-2">
+          Recovery command:{' '}
+          <span data-testid="recovery-command" className="font-mono text-slate-300">
+            {firstRecovery}
+          </span>
+        </p>
+      )}
+
+      <p className="text-[11px] text-slate-500 mt-3">
+        This panel reports system integrity only. Advisory diagnostics; no broker
+        action is performed.
+      </p>
+    </div>
+  );
+}
+
 export default function CockpitPage() {
   const [data, setData] = useState<CockpitResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -65,6 +168,8 @@ export default function CockpitPage() {
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          <DiagnosticsIntegrityPanel data={data} />
+
           <Panel title="Closed Loop Health">
             <Stat label="coverage" value={data.closed_loop.closed_loop_coverage} />
             <Stat label="signals without outcomes" value={data.closed_loop.signals_without_outcomes} />

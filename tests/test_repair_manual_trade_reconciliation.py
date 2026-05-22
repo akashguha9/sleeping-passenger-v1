@@ -36,11 +36,26 @@ if str(_REPO) not in sys.path:
     sys.path.insert(0, str(_REPO))
 
 from scripts.repair_manual_trade_reconciliation import (
+    OPERATION_CLASS,
     QUARANTINE_PROVENANCE,
     SAFETY_STAMPS,
     _serialise,
     run,
 )
+from scripts import operator_permission_guard as _guard
+
+
+def _allowed_decision(db: Path) -> "_guard.PermissionDecision":
+    """A clean OPERATOR REPAIR_WRITE allow for the function-level write guard."""
+    return _guard.evaluate_permission(_guard.PermissionRequest(
+        operation_name="repair_manual_trade_reconciliation",
+        operation_class=OPERATION_CLASS,
+        operator_role=_guard.OperatorRole.OPERATOR,
+        apply_requested=True,
+        dry_run_completed=True,
+        db_path=str(db),
+        safety_stamps=_guard.caller_safety_stamps(),
+    ))
 
 
 # ---------------------------------------------------------------------------
@@ -184,7 +199,7 @@ def test_apply_quarantines_bogus_and_fixes_india(tmp_path: Path) -> None:
             "currency": "USD",
         },
     ])
-    report = run(db, apply=True)
+    report = run(db, apply=True, permission_decision=_allowed_decision(db))
     assert report.applied is True
     assert report.backup_path  # backup was made
     assert Path(report.backup_path).exists()
@@ -198,7 +213,7 @@ def test_apply_quarantines_bogus_and_fixes_india(tmp_path: Path) -> None:
     assert _select(db, "MT_old_quarantined")["currency"] == "USD"
 
     # Idempotent: second apply produces no further changes.
-    report2 = run(db, apply=True)
+    report2 = run(db, apply=True, permission_decision=_allowed_decision(db))
     assert report2.changes_written == 0
 
 
@@ -214,7 +229,7 @@ def test_safety_invariants_never_touched(tmp_path: Path) -> None:
             "ai_execution_count": 0,
         },
     ])
-    run(db, apply=True)
+    run(db, apply=True, permission_decision=_allowed_decision(db))
     after = _select(db, "MT_safety")
     assert after["broker_api_called"] == 0
     assert after["ai_execution_count"] == 0
@@ -238,7 +253,7 @@ def test_cancelled_canonical_row_is_reported_not_deleted(tmp_path: Path) -> None
             "ai_model_used": "GPT-5.5",
         },
     ])
-    report = run(db, apply=True)
+    report = run(db, apply=True, permission_decision=_allowed_decision(db))
     assert any(
         f.trade_id == "MT_asdc_user" for f in report.cancelled_user_rows
     )
@@ -296,7 +311,7 @@ def test_missing_db_does_not_crash(tmp_path: Path) -> None:
     db = tmp_path / "does_not_exist.db"
     report = run(db, apply=False)
     assert "db_missing" in report.warnings
-    report2 = run(db, apply=True)
+    report2 = run(db, apply=True, permission_decision=_allowed_decision(db))
     assert "apply_skipped_db_missing" in report2.warnings or "db_missing" in report2.warnings
     assert report2.applied is False
 
@@ -316,7 +331,7 @@ def test_no_destructive_delete_on_apply(tmp_path: Path) -> None:
             "price": 40.72,  # below floor
         },
     ])
-    report = run(db, apply=True, repair_india_scale=True)
+    report = run(db, apply=True, repair_india_scale=True, permission_decision=_allowed_decision(db))
     assert _select(db, "MT_low_scale")["price"] == 40.72  # untouched
     notes = _select(db, "MT_low_scale")["notes"] or ""
     assert "india_nse_price_below_floor" in notes

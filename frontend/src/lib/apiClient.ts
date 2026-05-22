@@ -384,9 +384,31 @@ export async function getLearningCompleteness(
   }
 }
 
+export interface CockpitPartialFailure {
+  subreport: string;
+  status?: string;
+  error_type: string;
+  safe_recovery_command?: string | null;
+}
+
 export interface CockpitResponse {
   report: string;
   advisory_disclaimer: string;
+  // Diagnostics integrity / degraded-state taxonomy (Kanté Task 6).  All
+  // optional so older mock fixtures still type-check.
+  status?: 'CLEAN' | 'WARN' | 'BLOCK' | 'DEGRADED' | 'UNKNOWN' | string;
+  degraded_state?: string;
+  cache_status?: string;
+  cache_role?: string;
+  canonical_truth_source?: string;
+  generated_at_utc?: string | null;
+  diagnostics_health?: number | null;
+  partial_failures?: CockpitPartialFailure[];
+  // Operator-guard coverage (advisory).
+  auth_guard_status?: string | null;
+  mutation_guard_coverage?: number | null;
+  mutation_guard_release_impact?: string | null;
+  mutation_scripts_unguarded_count?: number | null;
   closed_loop: {
     closed_loop_coverage: number;
     signals_without_outcomes: number;

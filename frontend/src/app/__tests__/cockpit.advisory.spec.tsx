@@ -109,3 +109,87 @@ describe('Operator Cockpit', () => {
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// Kanté Task 6 — diagnostics integrity: DEGRADED / partial failures / cache.
+// ---------------------------------------------------------------------------
+
+function degradedPayload() {
+  return {
+    ...payload(),
+    status: 'DEGRADED',
+    degraded_state: 'DEGRADED',
+    cache_status: 'miss_recomputed',
+    cache_role: 'derived_non_canonical',
+    canonical_truth_source: 'sqlite',
+    generated_at_utc: '2026-05-22T00:00:00Z',
+    diagnostics_health: 0.6,
+    partial_failures: [
+      {
+        subreport: 'broken_windows',
+        status: 'DEGRADED',
+        error_type: 'OperationalError',
+        safe_recovery_command: 'python scripts/broken_windows_report.py',
+      },
+    ],
+    auth_guard_status: 'PASS',
+    mutation_guard_coverage: 1.0,
+    mutation_guard_release_impact: 'PASS',
+    mutation_scripts_unguarded_count: 0,
+  };
+}
+
+describe('Operator Cockpit — diagnostics integrity', () => {
+  beforeEach(() => {
+    mockCockpit.mockReset();
+  });
+
+  it('shows the DEGRADED status visibly', async () => {
+    mockCockpit.mockResolvedValue(degradedPayload());
+    render(<CockpitPage />);
+    await waitFor(() => expect(screen.getByTestId('diagnostics-integrity-panel')).toBeTruthy());
+    expect(screen.getByTestId('diagnostics-status').textContent).toMatch(/DEGRADED/);
+  });
+
+  it('shows partial failures with error type and recovery command', async () => {
+    mockCockpit.mockResolvedValue(degradedPayload());
+    render(<CockpitPage />);
+    await waitFor(() => expect(screen.getByTestId('partial-failures')).toBeTruthy());
+    const text = screen.getByTestId('partial-failures').textContent ?? '';
+    expect(text).toMatch(/broken_windows/);
+    expect(text).toMatch(/OperationalError/);
+    expect(screen.getByTestId('recovery-command').textContent).toMatch(
+      /python scripts\/broken_windows_report\.py/,
+    );
+  });
+
+  it('shows cache status, derived_non_canonical role and canonical truth', async () => {
+    mockCockpit.mockResolvedValue(degradedPayload());
+    const { container } = render(<CockpitPage />);
+    await waitFor(() => expect(screen.getByTestId('diagnostics-integrity-panel')).toBeTruthy());
+    const text = container.textContent ?? '';
+    expect(text).toMatch(/miss_recomputed/);
+    expect(text).toMatch(/derived_non_canonical/);
+    expect(text).toMatch(/sqlite/);
+  });
+
+  it('shows guard coverage and mutation guard impact', async () => {
+    mockCockpit.mockResolvedValue(degradedPayload());
+    const { container } = render(<CockpitPage />);
+    await waitFor(() => expect(screen.getByTestId('diagnostics-integrity-panel')).toBeTruthy());
+    const text = container.textContent ?? '';
+    expect(text).toMatch(/Guard coverage/);
+    expect(text).toMatch(/Mutation guard/);
+  });
+
+  it('keeps the advisory banner and adds no execution affordances when degraded', async () => {
+    mockCockpit.mockResolvedValue(degradedPayload());
+    const { container } = render(<CockpitPage />);
+    await waitFor(() => expect(screen.getByTestId('advisory-banner')).toBeTruthy());
+    expect(container.querySelectorAll('button').length).toBe(0);
+    const text = (container.textContent ?? '').toLowerCase();
+    for (const forbidden of ['place order', 'execute trade', 'buy now', 'sell now']) {
+      expect(text.includes(forbidden)).toBe(false);
+    }
+  });
+});

@@ -102,13 +102,34 @@ def find_fake_seed_rows(db_path: Path) -> list[dict[str, Any]]:
         conn.close()
 
 
-def cleanup(db_path: Path, *, apply: bool) -> dict[str, Any]:
+def cleanup(
+    db_path: Path,
+    *,
+    apply: bool,
+    permission_decision: Any | None = None,
+) -> dict[str, Any]:
     """Find (and optionally delete) the fake SPY seed rows.
 
     Returns a structured report; ``removed`` is 0 unless ``apply`` is True.
+
+    Function-level guard (Kanté Task 4): the destructive ``apply`` branch
+    requires a guard-validated :class:`PermissionDecision`.  A direct importer
+    that calls ``cleanup(db, apply=True)`` without one hits
+    :func:`assert_permission_decision_allowed`, which raises ``PermissionError``
+    before the DELETE runs.  The read-only (``apply=False``) path needs no
+    decision.
     """
     matches = find_fake_seed_rows(db_path)
     removed = 0
+    if apply:
+        try:
+            from scripts import operator_permission_guard as _guard
+        except ModuleNotFoundError:  # pragma: no cover - script-style fallback
+            import operator_permission_guard as _guard  # type: ignore[no-redef]
+        _guard.assert_permission_decision_allowed(
+            permission_decision,
+            expected_operation_class=_guard.OperationClass.REPAIR_WRITE,
+        )
     if apply and matches:
         conn = sqlite3.connect(str(db_path))
         try:
@@ -159,6 +180,9 @@ def _build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
     db_path = Path(args.db_path) if args.db_path else _default_db_path()
+    # The guard-validated decision (apply path only) is threaded into the write
+    # function so the DELETE boundary itself re-checks it (Kanté Task 4).
+    decision = None
     # Destructive cleanup is an ADMIN-only write-like action; the dry-run
     # report is read-only.  Fail closed for unauthorized roles.
     if args.apply:
@@ -184,7 +208,7 @@ def main(argv: list[str] | None = None) -> int:
                 import operator_permission_guard as _guard  # type: ignore[no-redef]
             role = (_guard.OperatorRole(_guard._auth.normalize_role(args.operator_role))
                     if args.operator_role else _guard.load_operator_role_from_env())
-            _guard.require_permission_or_exit(_guard.PermissionRequest(
+            decision = _guard.require_permission_or_exit(_guard.PermissionRequest(
                 operation_name="moltbook_cleanup_fake_seed",
                 operation_class=_guard.OperationClass.REPAIR_WRITE,
                 operator_role=role,
@@ -201,7 +225,7 @@ def main(argv: list[str] | None = None) -> int:
         except PermissionError as exc:
             print(f"[DENY] {exc}")
             return 2
-    report = cleanup(db_path, apply=args.apply)
+    report = cleanup(db_path, apply=args.apply, permission_decision=decision)
     if not args.apply:
         # Dry-run is read-only and open to any role; record a receipt so a
         # later --apply (by an authorized ADMIN) can prove a dry-run happened.

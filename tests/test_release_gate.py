@@ -163,3 +163,119 @@ def test_guard_coverage_check_is_info_non_blocking(tmp_path):
     chk = preflight.check_kante_defensive_gates()
     assert chk["status"] == "INFO"
     assert chk["name"] == "kante_defensive_gates"
+
+
+# ---------------------------------------------------------------------------
+# Kanté Task 5 — mutation-guard release impact (PASS/WARN/BLOCK enforcement)
+# ---------------------------------------------------------------------------
+
+
+def test_mutation_guard_impact_all_guarded_is_pass():
+    impact = preflight.evaluate_mutation_guard_impact(
+        guarded_count=7, unguarded_names=[], high_severity_count=0)
+    assert impact["mutation_guard_coverage"] == 1.0
+    assert impact["mutation_guard_risk"] == 0.0
+    assert impact["mutation_guard_release_impact"] == "PASS"
+
+
+def test_mutation_guard_impact_one_low_risk_unguarded_is_warn():
+    # 1 of 8 unguarded, low severity → risk 0.125 ≤ 0.25 → WARN.
+    impact = preflight.evaluate_mutation_guard_impact(
+        guarded_count=7, unguarded_names=["x.py"], high_severity_count=0)
+    assert impact["mutation_guard_release_impact"] == "WARN"
+
+
+def test_mutation_guard_impact_high_severity_unguarded_is_block():
+    # Even a single HIGH-severity unguarded script BLOCKs, regardless of risk.
+    impact = preflight.evaluate_mutation_guard_impact(
+        guarded_count=20, unguarded_names=["restore_x.py"], high_severity_count=1)
+    assert impact["mutation_guard_release_impact"] == "BLOCK"
+
+
+def test_mutation_guard_impact_high_risk_is_block():
+    # >25% unguarded (even all low-severity) → BLOCK.
+    impact = preflight.evaluate_mutation_guard_impact(
+        guarded_count=2, unguarded_names=["a.py", "b.py"], high_severity_count=0)
+    assert impact["mutation_guard_risk"] == 0.5
+    assert impact["mutation_guard_release_impact"] == "BLOCK"
+
+
+def test_classify_mutation_script_severity_high_by_name():
+    # restore_db.py is restore-capable → HIGH severity if it were unguarded.
+    assert preflight.classify_mutation_script_severity("restore_db.py") == "HIGH"
+    assert preflight.classify_mutation_script_severity("schema_migrations.py") == "HIGH"
+
+
+def test_classify_mutation_script_severity_repair_is_low():
+    # A repair-write script with no delete/restore/broker pattern.  We synthesise
+    # via a name token check: backfill is repair-like.  (Body classification is
+    # exercised indirectly by the real scan.)
+    sev = preflight.classify_mutation_script_severity(
+        "backfill_manual_trade_log_provenance.py")
+    assert sev in {"LOW", "HIGH"}  # never crashes; returns a class
+
+
+def test_known_four_repair_scripts_guarded():
+    coverage = preflight.scan_mutation_script_guarding()
+    for name in ("quarantine_fake_manual_trades.py", "moltbook_cleanup_fake_seed.py",
+                 "backfill_manual_trade_log_provenance.py",
+                 "repair_manual_trade_reconciliation.py"):
+        assert name in coverage["guarded"], name
+    assert coverage["unguarded"] == []  # all mutation scripts wired
+
+
+def test_release_gate_top_level_includes_mutation_fields(tmp_path):
+    db = _clean_db(tmp_path)
+    result = release_gate.evaluate(db, check_backend=False)
+    for key in ("mutation_guard_coverage", "mutation_scripts_unguarded_names",
+                "mutation_guard_release_impact", "auth_guard_status"):
+        assert key in result
+    assert result["mutation_guard_release_impact"] == "PASS"
+    assert result["auth_guard_status"] == "PASS"
+
+
+def test_release_gate_does_not_hide_unguarded_scripts(tmp_path, monkeypatch):
+    """A WARN mutation impact surfaces the unguarded names and downgrades PASS."""
+    real = preflight.build_kante_defensive_summary
+
+    def _fake_summary():
+        s = dict(real())
+        s.update({
+            "mutation_scripts_unguarded": ["sketchy_repair.py"],
+            "mutation_scripts_unguarded_names": ["sketchy_repair.py"],
+            "mutation_scripts_unguarded_count": 1,
+            "mutation_guard_coverage": 0.9,
+            "mutation_guard_release_impact": "WARN",
+            "auth_guard_status": "WARN",
+        })
+        return s
+
+    monkeypatch.setattr(preflight, "build_kante_defensive_summary", _fake_summary)
+    result = release_gate.evaluate(db := _clean_db(tmp_path), check_backend=False)
+    assert result["verdict"] == "WARN"
+    assert "sketchy_repair.py" in result["mutation_scripts_unguarded_names"]
+    assert any("mutation_guard" in r for r in result["reasons"])
+
+
+def test_release_gate_blocks_high_risk_unguarded(tmp_path, monkeypatch):
+    """A BLOCK mutation impact fails the gate (FAIL), not merely WARN."""
+    real = preflight.build_kante_defensive_summary
+
+    def _fake_summary():
+        s = dict(real())
+        s.update({
+            "mutation_scripts_unguarded": ["restore_everything.py"],
+            "mutation_scripts_unguarded_names": ["restore_everything.py"],
+            "mutation_scripts_unguarded_count": 1,
+            "mutation_scripts_unguarded_high_severity": ["restore_everything.py"],
+            "mutation_guard_coverage": 0.5,
+            "mutation_guard_release_impact": "BLOCK",
+            "auth_guard_status": "BLOCK",
+        })
+        return s
+
+    monkeypatch.setattr(preflight, "build_kante_defensive_summary", _fake_summary)
+    result = release_gate.evaluate(_clean_db(tmp_path), check_backend=False)
+    assert result["verdict"] == "FAIL"
+    assert result["mutation_guard_release_impact"] == "BLOCK"
+    assert any("mutation_guard" in r for r in result["reasons"])

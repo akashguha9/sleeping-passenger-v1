@@ -45,10 +45,25 @@ from scripts.manual_trade_origin import (
     is_visible_manual_trade,
 )
 from scripts.quarantine_fake_manual_trades import (
+    OPERATION_CLASS as _QUARANTINE_OP_CLASS,
     apply_quarantine,
     find_candidates,
     main as quarantine_main,
 )
+from scripts import operator_permission_guard as _guard
+
+
+def _allowed_quarantine_decision(db: Path) -> "_guard.PermissionDecision":
+    """A clean OPERATOR REPAIR_WRITE allow for the function-level write guard."""
+    return _guard.evaluate_permission(_guard.PermissionRequest(
+        operation_name="quarantine_fake_manual_trades",
+        operation_class=_QUARANTINE_OP_CLASS,
+        operator_role=_guard.OperatorRole.OPERATOR,
+        apply_requested=True,
+        dry_run_completed=True,
+        db_path=str(db),
+        safety_stamps=_guard.caller_safety_stamps(),
+    ))
 
 
 def _rebind_defaults(fn, new_db: Path) -> None:
@@ -438,7 +453,9 @@ def test_quarantine_apply_yes_hides_row_without_deleting(tmp_db: Path) -> None:
     assert "MT_6b11745fc3f3" in pre_audit_ids
 
     candidates = find_candidates(tmp_db)
-    updated = apply_quarantine(tmp_db, candidates)
+    updated = apply_quarantine(
+        tmp_db, candidates,
+        permission_decision=_allowed_quarantine_decision(tmp_db))
     assert updated >= 1
 
     # After: row STILL exists in DB (no deletes) but provenance changed.
@@ -523,7 +540,9 @@ def test_quarantine_does_not_touch_genuine_rows(tmp_db: Path) -> None:
     assert resp["status"] == "logged"
     candidates = find_candidates(tmp_db)
     assert candidates == []
-    updated = apply_quarantine(tmp_db, candidates)
+    updated = apply_quarantine(
+        tmp_db, candidates,
+        permission_decision=_allowed_quarantine_decision(tmp_db))
     assert updated == 0
 
 

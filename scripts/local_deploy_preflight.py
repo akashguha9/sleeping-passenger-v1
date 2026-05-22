@@ -38,6 +38,10 @@ RUNTIME_DIR = REPO_ROOT / "runtime"
 DEFAULT_DB = RUNTIME_DIR / "mvp_local.db"
 
 PASS, WARN, FAIL, INFO = "PASS", "WARN", "FAIL", "INFO"
+# Mutation-guard release impact can escalate to BLOCK (an unguarded high-risk
+# mutation script).  Distinct from per-check FAIL; the release gate maps a
+# BLOCK mutation impact onto a gate FAIL verdict.
+BLOCK = "BLOCK"
 
 # Core tables the advisory MVP relies on.
 _CORE_TABLES = (
@@ -407,6 +411,70 @@ def evaluate_guard_coverage_status(unguarded_count: int, guard_available: bool) 
     return WARN if unguarded_count > 0 else PASS
 
 
+# A mutation script is HIGH severity (a BLOCK if unguarded) when it can restore
+# the DB, migrate schema, delete/drop, mutate the runtime DB via
+# UPDATE/DELETE/INSERT, or carries a broker/order/execution pattern.  Otherwise
+# it is a low-severity repair-like write (a WARN if unguarded).
+_HIGH_SEVERITY_NAME_TOKENS = ("restore", "migrat", "drop", "delete", "purge",
+                              "wipe", "broker", "execute", "order")
+_HIGH_SEVERITY_SQL_TOKENS = ("DELETE FROM", "DROP TABLE", "DROP INDEX",
+                             "UPDATE ", "INSERT ", "ALTER TABLE")
+_BROKER_EXEC_TOKENS = ("place_order", "submit_order", "execute_trade",
+                       "broker_api", "unlock_execution")
+
+
+def classify_mutation_script_severity(script_name: str) -> str:
+    """Pure-ish: classify an unguarded mutation script as HIGH or LOW severity.
+
+    Reads ``scripts/<name>`` and inspects its name + body.  Defaults to HIGH
+    when the file cannot be read (fail safe — an unreadable unguarded mutation
+    script must not silently downgrade the release impact).
+    """
+    name = script_name.lower()
+    if any(tok in name for tok in _HIGH_SEVERITY_NAME_TOKENS):
+        return "HIGH"
+    path = REPO_ROOT / "scripts" / script_name
+    try:
+        text = path.read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        return "HIGH"
+    upper = text.upper()
+    if any(tok in upper for tok in _HIGH_SEVERITY_SQL_TOKENS):
+        return "HIGH"
+    if any(tok in text for tok in _BROKER_EXEC_TOKENS):
+        return "HIGH"
+    return "LOW"
+
+
+def evaluate_mutation_guard_impact(
+    guarded_count: int,
+    unguarded_names: list[str],
+    *,
+    high_severity_count: int,
+) -> dict[str, Any]:
+    """Pure: compute MutationGuardCoverage / risk and the release impact.
+
+    * risk == 0                         -> PASS
+    * 0 < risk <= 0.25 and no HIGH      -> WARN
+    * risk > 0.25 OR any HIGH unguarded -> BLOCK
+    """
+    total = guarded_count + len(unguarded_names)
+    coverage = guarded_count / max(total, 1)
+    risk = 1.0 - coverage
+    if risk == 0:
+        impact = PASS
+    elif risk <= 0.25 and high_severity_count == 0:
+        impact = WARN
+    else:
+        impact = BLOCK
+    return {
+        "mutation_guard_coverage": round(coverage, 4),
+        "mutation_guard_risk": round(risk, 4),
+        "mutation_guard_release_impact": impact,
+        "mutation_scripts_unguarded_high_severity_count": high_severity_count,
+    }
+
+
 def build_kante_defensive_summary() -> dict[str, Any]:
     """Summarize operator-guard coverage + diagnostics service for the gate.
 
@@ -425,22 +493,46 @@ def build_kante_defensive_summary() -> dict[str, Any]:
 
     coverage = scan_mutation_script_guarding()
     svc = diagnostics_service_health()
-    guard_status = evaluate_guard_coverage_status(
-        len(coverage["unguarded"]), guard_available)
 
-    impact = PASS
-    if guard_status == WARN or not svc["available"] or svc["status"] == "UNKNOWN":
+    # Severity-classify every unguarded mutation script.  A HIGH-severity
+    # unguarded script (restore/migrate/delete/UPDATE/INSERT/broker) escalates
+    # the mutation-guard impact to BLOCK; low-severity repair-like scripts only
+    # WARN.  With all four repair scripts wired, the unguarded set is empty.
+    severities = {name: classify_mutation_script_severity(name)
+                  for name in coverage["unguarded"]}
+    high_severity = [n for n, s in severities.items() if s == "HIGH"]
+
+    mutation = evaluate_mutation_guard_impact(
+        len(coverage["guarded"]), coverage["unguarded"],
+        high_severity_count=len(high_severity))
+    mutation_impact = (mutation["mutation_guard_release_impact"]
+                       if guard_available else WARN)
+
+    # auth_guard_status mirrors the mutation-guard impact (PASS/WARN/BLOCK),
+    # downgraded to WARN if the guard module itself is unimportable.
+    guard_status = mutation_impact if guard_available else WARN
+
+    # Overall release impact = the most severe of mutation-guard impact and the
+    # diagnostics-service signal.  A BLOCK from an unguarded high-risk mutation
+    # script is a real BLOCK (the release gate fails on it).
+    impact = mutation_impact
+    if impact == PASS and (not svc["available"] or svc["status"] == "UNKNOWN"):
         impact = WARN
-    if svc["status"] in {"BLOCK"}:
-        impact = WARN  # advisory only; never auto-BLOCK the release here
+    if svc["status"] == "BLOCK" and impact == PASS:
+        impact = WARN  # diagnostics BLOCK is advisory; do not auto-BLOCK release
 
     return {
         "operator_permission_guard_available": guard_available,
         "auth_guard_status": guard_status,
         "mutation_scripts_guarded": coverage["guarded"],
         "mutation_scripts_unguarded": coverage["unguarded"],
+        "mutation_scripts_unguarded_names": coverage["unguarded"],
         "mutation_scripts_guarded_count": len(coverage["guarded"]),
         "mutation_scripts_unguarded_count": len(coverage["unguarded"]),
+        "mutation_scripts_unguarded_high_severity": high_severity,
+        "mutation_guard_coverage": mutation["mutation_guard_coverage"],
+        "mutation_guard_risk": mutation["mutation_guard_risk"],
+        "mutation_guard_release_impact": mutation_impact,
         "diagnostics_service_available": svc["available"],
         "diagnostics_service_status": svc["status"],
         "release_gate_impact": impact,
@@ -562,6 +654,7 @@ __all__ = [
     "check_mock_fallback_explicit", "check_backend_health",
     "check_kante_defensive_gates", "scan_mutation_script_guarding",
     "diagnostics_service_health", "evaluate_guard_coverage_status",
+    "classify_mutation_script_severity", "evaluate_mutation_guard_impact",
     "build_kante_defensive_summary",
 ]
 

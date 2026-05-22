@@ -53,10 +53,27 @@ def evaluate(
 
     reasons = [f"{c['name']}: {c['detail']}" for c in fails + warns]
 
-    # Surface the Kanté-defensive guard/diagnostics summary at the gate top
-    # level (advisory, non-blocking) so the operator sees auth-guard coverage
-    # and diagnostics-service availability without digging into the preflight.
+    # Kanté-defensive guard/diagnostics summary.  Unlike before, the mutation
+    # guard now *participates in the verdict*: an unguarded high-risk mutation
+    # script (BLOCK) fails the gate; low-risk unguarded scripts (WARN) downgrade
+    # a PASS to WARN.  This is the meaningful enforcement the prior INFO-only
+    # surfacing lacked.
     kante = preflight.get("kante_defensive", {})
+    mutation_impact = kante.get("mutation_guard_release_impact", PASS)
+
+    if mutation_impact == "BLOCK":
+        verdict = FAIL
+        reasons.append(
+            "mutation_guard: unguarded high-risk mutation script(s) detected "
+            f"— {kante.get('mutation_scripts_unguarded_names')} "
+            f"(coverage={kante.get('mutation_guard_coverage')}); BLOCK."
+        )
+    elif mutation_impact == WARN and verdict == PASS:
+        verdict = WARN
+        reasons.append(
+            "mutation_guard: unguarded low-risk mutation script(s) — "
+            f"{kante.get('mutation_scripts_unguarded_names')}; WARN."
+        )
 
     return {
         "report": "release_gate",
@@ -69,13 +86,18 @@ def evaluate(
         "reasons": reasons,
         "failing_checks": [c["name"] for c in fails],
         "warning_checks": [c["name"] for c in warns],
-        # Kanté-defensive advisory summary (does not change the verdict).
+        # Kanté-defensive mutation-guard enforcement (now affects the verdict).
         "auth_guard_status": kante.get("auth_guard_status"),
         "operator_permission_guard_available": kante.get(
             "operator_permission_guard_available"),
+        "mutation_guard_coverage": kante.get("mutation_guard_coverage"),
+        "mutation_guard_risk": kante.get("mutation_guard_risk"),
         "mutation_scripts_guarded": kante.get("mutation_scripts_guarded_count"),
         "mutation_scripts_unguarded": kante.get("mutation_scripts_unguarded_count"),
         "mutation_scripts_unguarded_names": kante.get("mutation_scripts_unguarded"),
+        "mutation_scripts_unguarded_high_severity": kante.get(
+            "mutation_scripts_unguarded_high_severity"),
+        "mutation_guard_release_impact": mutation_impact,
         "diagnostics_service_available": kante.get("diagnostics_service_available"),
         "diagnostics_service_status": kante.get("diagnostics_service_status"),
         "release_gate_impact": kante.get("release_gate_impact"),
@@ -108,6 +130,11 @@ def main(argv: list[str] | None = None) -> int:
         print(f"RELEASE GATE: {result['verdict']}")
         print(f"  db: {result['db_path']} (exists={result['db_exists']})")
         print(f"  fails={result['fail_count']} warns={result['warn_count']}")
+        print(f"  auth_guard_status            : {result['auth_guard_status']}")
+        print(f"  mutation_guard_coverage      : {result['mutation_guard_coverage']}")
+        print(f"  mutation_scripts_unguarded   : {result['mutation_scripts_unguarded']} "
+              f"{result['mutation_scripts_unguarded_names']}")
+        print(f"  mutation_guard_release_impact: {result['mutation_guard_release_impact']}")
         for reason in result["reasons"]:
             print(f"  - {reason}")
         if result["verdict"] == PASS:
