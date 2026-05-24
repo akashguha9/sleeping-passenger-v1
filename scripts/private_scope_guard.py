@@ -140,6 +140,10 @@ APPROVED_DOMAINS: tuple[str, ...] = (
     "why_today",        # why_today.py — "why today, not yesterday?" executable gate
     "memory_decay",     # candidate_memory_decay.py — exp(-lambda*d) candidate decay
     "disagreement",     # model_disagreement.py — cross-model variance / consensus quality
+    # Kalshi read-only adapter sprint — public market-data ingestion + category
+    # allowlist + advisory-only signal normalizer.  Read-only end-to-end; no
+    # trading endpoints, no auth, no order placement, no broker calls.
+    "kalshi",           # kalshi_normalizer.py / kalshi_market_data_adapter.py / kalshi_runner.py
 )
 
 # Explicit allowlist for individual files / directories whose name does

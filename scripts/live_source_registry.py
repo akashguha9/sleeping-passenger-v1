@@ -48,6 +48,10 @@ SOURCE_TIER_PLANNED = "planned"
 _SOURCE_TIERS: dict[str, str] = {
     # Core: free, key-light, broad-coverage daily macro signal.
     "polymarket": SOURCE_TIER_CORE,
+    # Kalshi sits beside Polymarket as a prediction-market source.  The
+    # live adapter is deferred (see scripts/ingestion/kalshi_loader.py),
+    # so we mark it optional for stale-warning grading purposes.
+    "kalshi": SOURCE_TIER_OPTIONAL,
     "gdelt": SOURCE_TIER_CORE,
     "newsapi": SOURCE_TIER_CORE,
     "event_registry": SOURCE_TIER_CORE,
@@ -96,6 +100,31 @@ _SOURCE_REGISTRY: tuple[dict[str, Any], ...] = (
         "implementation_file": "scripts/ingestion/polymarket_loader.py",
         "health_check_supported": True,
         "phase": "phase1",
+    },
+    {
+        "source_key": "kalshi",
+        "display_name": "Kalshi",
+        "category": "event_market",
+        # Scaffold loader registered; live /trade-api/v2 wiring deferred.
+        "adapter_status": ADAPTER_PARTIAL,
+        "requires_api_key": False,
+        "env_keys": ("KALSHI_API_KEY",),
+        "default_refresh_hours": DEFAULT_REFRESH_HOURS,
+        "advisory_only": True,
+        "can_execute": False,
+        "expected_output": "signal_events",
+        "notes": (
+            "Kalshi prediction-market normalizer is live; the live API "
+            "adapter is a scaffold (set KALSHI_USE_MOCK_FIXTURES=1 for "
+            "local mock data). Category allowlist: Elections, Politics, "
+            "Crypto, Commodities, Economics, Finance, Tech & Science."
+        ),
+        "tos_warning": (
+            "Kalshi attribution recommended; no order placement is ever called."
+        ),
+        "implementation_file": "scripts/ingestion/kalshi_loader.py",
+        "health_check_supported": True,
+        "phase": "phase2",
     },
     {
         "source_key": "gdelt",

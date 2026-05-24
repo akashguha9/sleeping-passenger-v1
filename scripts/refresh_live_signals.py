@@ -102,7 +102,7 @@ def _resolve_summary_path(explicit: Path | str | None = None) -> Path:
         return Path(env_val)
     return _SUMMARY_PATH
 
-_PHASE1_KEYS = ("polymarket", "gdelt", "sec_edgar")
+_PHASE1_KEYS = ("polymarket", "kalshi", "gdelt", "sec_edgar")
 _PHASE2_KEYS = (
     "newsapi",
     "event_registry",

@@ -27,6 +27,9 @@ from scripts.live_source_registry import (
 
 EXPECTED_SOURCE_KEYS = (
     "polymarket",
+    # Kalshi sits beside Polymarket as a first-class prediction-market
+    # source.  Added in the Kalshi read-only adapter sprint.
+    "kalshi",
     "gdelt",
     "sec_edgar",
     "newsapi",
@@ -45,12 +48,12 @@ EXPECTED_SOURCE_KEYS = (
 # ---------------------------------------------------------------------------
 
 
-def test_all_eleven_source_families_present_in_canonical_order() -> None:
+def test_all_source_families_present_in_canonical_order() -> None:
     families = list_live_source_families()
     keys = tuple(f["source_key"] for f in families)
     assert keys == EXPECTED_SOURCE_KEYS
     assert ALL_SOURCE_KEYS == EXPECTED_SOURCE_KEYS
-    assert len(families) == 11
+    assert len(families) == len(EXPECTED_SOURCE_KEYS)
 
 
 def test_every_source_has_six_hour_default_cadence() -> None:

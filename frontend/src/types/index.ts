@@ -721,7 +721,7 @@ export interface DbStatusResponse {
   generated_at: string;
 }
 
-export type LiveSignalSource = 'polymarket' | 'gdelt' | 'sec_edgar' | 'newsapi' | 'event_registry' | 'etherscan' | 'grok_xai' | 'market_data' | 'india' | 'global_filings' | 'asia_disclosure';
+export type LiveSignalSource = 'polymarket' | 'kalshi' | 'gdelt' | 'sec_edgar' | 'newsapi' | 'event_registry' | 'etherscan' | 'grok_xai' | 'market_data' | 'india' | 'global_filings' | 'asia_disclosure';
 
 export interface LiveSignalRawPayload {
   event_id?: string;
@@ -805,6 +805,27 @@ export interface LiveSignalRawPayload {
   // asia_disclosure (Phase C.8 — China/HK/Japan/Singapore/Korea disclosures, no execution)
   // Re-uses issuer_name, ticker_or_identifier, exchange_or_regulator, jurisdiction,
   // disclosure_type, published_at, url, summary, provider, language (all already declared above)
+  // kalshi (Kalshi sprint — prediction-market signal, advisory-only)
+  source?: string;
+  source_label?: string;
+  source_market_id?: string;
+  category?: string;
+  category_raw?: string;
+  rules?: string;
+  market_url?: string;
+  implied_probability?: number | null;
+  yes_price?: number | null;
+  no_price?: number | null;
+  open_interest?: number | null;
+  close_time_utc?: string;
+  fetched_at_utc?: string;
+  asset_tags?: string[];
+  event_tags?: string[];
+  semantic_text?: string;
+  cross_venue_match_label?: string | null;
+  is_mock_fixture?: boolean;
+  advisory_only?: boolean;
+  execution_permission?: string;
   [key: string]: unknown;
 }
 

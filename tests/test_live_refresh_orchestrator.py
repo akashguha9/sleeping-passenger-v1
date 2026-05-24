@@ -26,6 +26,7 @@ from scripts.run_live_refresh import (
 
 ALL_KEYS = (
     "polymarket",
+    "kalshi",
     "gdelt",
     "sec_edgar",
     "newsapi",
@@ -107,7 +108,7 @@ def test_source_failure_does_not_abort_whole_run(monkeypatch) -> None:
     report = build_orchestrator_report(
         list(ALL_KEYS), write_mode=False, plan_only=False, cadence_hours=6
     )
-    assert report["summary"]["total"] == 11
+    assert report["summary"]["total"] == len(ALL_KEYS)
     assert report["summary"]["skipped"] >= 1
     assert report["summary"]["would_run"] >= 1
 
@@ -236,4 +237,4 @@ def test_orchestrator_plan_only_route(monkeypatch, capsys) -> None:
     payload = json.loads(capsys.readouterr().out)
     assert payload["plan_only"] is True
     assert payload["mode"] == "dry_run"
-    assert payload["summary"]["total"] == 11
+    assert payload["summary"]["total"] == len(ALL_KEYS)

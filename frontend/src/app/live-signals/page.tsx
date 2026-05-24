@@ -22,6 +22,7 @@ import { SourceHealthBadge } from '@/components/SourceHealthBadge';
 const SOURCE_OPTIONS: { value: '' | LiveSignalSource; label: string }[] = [
   { value: '', label: 'All Sources' },
   { value: 'polymarket', label: 'Polymarket' },
+  { value: 'kalshi', label: 'Kalshi' },
   { value: 'gdelt', label: 'GDELT' },
   { value: 'sec_edgar', label: 'SEC EDGAR' },
   { value: 'newsapi', label: 'NewsAPI' },
@@ -36,6 +37,7 @@ const SOURCE_OPTIONS: { value: '' | LiveSignalSource; label: string }[] = [
 
 const SOURCE_ACCENT: Record<string, string> = {
   polymarket: 'rgba(167, 139, 250, 0.9)',
+  kalshi: 'rgba(142, 196, 168, 0.9)',
   gdelt: 'rgba(125, 211, 252, 0.9)',
   sec_edgar: 'rgba(200, 154, 74, 0.9)',
   newsapi: 'rgba(95, 189, 200, 0.9)',
@@ -50,6 +52,7 @@ const SOURCE_ACCENT: Record<string, string> = {
 
 const SOURCE_LABELS: Record<string, string> = {
   polymarket: 'Polymarket',
+  kalshi: 'Kalshi',
   gdelt: 'GDELT',
   sec_edgar: 'SEC EDGAR',
   newsapi: 'NewsAPI',
@@ -75,6 +78,20 @@ function getSubtitle(ev: LiveSignalEvent): string {
     if (p.volume != null) parts.push(`Vol: ${Number(p.volume).toLocaleString()}`);
     if (p.liquidity != null) parts.push(`Liq: ${Number(p.liquidity).toLocaleString()}`);
     if (p.end_date) parts.push(`Ends: ${p.end_date}`);
+    return parts.join(' · ');
+  }
+  if (ev.source_name === 'kalshi') {
+    const parts: string[] = [];
+    if (p.category) parts.push(String(p.category).toUpperCase());
+    if (p.source_market_id) parts.push(`Market ${p.source_market_id}`);
+    if (p.implied_probability != null) {
+      parts.push(`Implied: ${(Number(p.implied_probability) * 100).toFixed(1)}%`);
+    } else if (p.yes_price != null) {
+      parts.push(`YES: ${Number(p.yes_price).toFixed(2)}`);
+    }
+    if (p.volume != null) parts.push(`Vol: ${Number(p.volume).toLocaleString()}`);
+    if (p.open_interest != null) parts.push(`OI: ${Number(p.open_interest).toLocaleString()}`);
+    if (p.close_time_utc) parts.push(`Closes: ${p.close_time_utc}`);
     return parts.join(' · ');
   }
   if (ev.source_name === 'gdelt') {
@@ -214,6 +231,14 @@ function matchesSearch(ev: LiveSignalEvent, query: string): boolean {
     p.exchange_or_regulator,
     p.disclosure_type,
     p.summary,
+    // kalshi-specific fields
+    p.category,
+    p.source_label,
+    p.source_market_id,
+    p.market_url,
+    p.semantic_text,
+    ...((p.asset_tags as string[] | undefined) ?? []),
+    ...((p.event_tags as string[] | undefined) ?? []),
   ]
     .filter(Boolean)
     .some((v) => String(v).toLowerCase().includes(q));
@@ -566,7 +591,7 @@ export default function LiveSignalsPage() {
             Live Signals
           </h1>
           <p className="text-sm mt-1 max-w-2xl" style={{ color: 'var(--sp-mist)' }}>
-            Polymarket · GDELT · SEC EDGAR · NewsAPI · Event Registry · Etherscan · Grok/xAI · Market Data · India · Global Filings · Asia Disclosure — advisory only.
+            Polymarket · Kalshi · GDELT · SEC EDGAR · NewsAPI · Event Registry · Etherscan · Grok/xAI · Market Data · India · Global Filings · Asia Disclosure — advisory only.
           </p>
         </div>
         <div className="flex items-center gap-2">

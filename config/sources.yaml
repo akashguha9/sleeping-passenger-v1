@@ -8,6 +8,27 @@ polymarket:
   max_markets: 25
   use_mock_on_failure: true
   read_only: true
+kalshi:
+  # Public market-data endpoint base.  Override with the KALSHI_API_BASE
+  # env var.  No auth header is ever sent.  Trading / portfolio / account
+  # endpoints are intentionally NOT listed here and MUST NOT be added.
+  api_base_url: "https://api.elections.kalshi.com/trade-api/v2"
+  timeout_seconds: 12
+  retries: 2
+  backoff_seconds: 1.0
+  max_markets: 25
+  use_mock_on_failure: true
+  read_only: true
+  # Allowed categories the canonical SQLite inbox accepts.  Everything
+  # else is rejected at normalization time (see scripts/kalshi_normalizer.py).
+  allowed_categories:
+    - Elections
+    - Politics
+    - Crypto
+    - Commodities
+    - Economics
+    - Finance
+    - Tech & Science
 system_defaults:
   truth_origin: "public_or_mock"
   external_reality_connected: false
