@@ -66,6 +66,10 @@ _SOURCE_TIERS: dict[str, str] = {
     # Optional: official APIs are wired (EDINET / OpenDART) but keys are
     # optional — missing-key state is informational, not a failure.
     "asia_disclosure": SOURCE_TIER_OPTIONAL,
+    # Derived signal — Polymarket × Kalshi cross-venue disagreement
+    # scanner.  Optional tier because it depends on the prediction-market
+    # sources being fresh; a stale disagreement scan is informational.
+    "prediction_market_disagreement": SOURCE_TIER_OPTIONAL,
 }
 
 
@@ -324,6 +328,34 @@ _SOURCE_REGISTRY: tuple[dict[str, Any], ...] = (
         ),
         "tos_warning": "All targets are exchange-disclosure sites with attribution rules.",
         "implementation_file": "scripts/ingestion/asia_disclosure_loader.py",
+        "health_check_supported": True,
+        "phase": "phase2",
+    },
+    {
+        "source_key": "prediction_market_disagreement",
+        "display_name": "Prediction Market Disagreement",
+        "category": "derived_signal",
+        # Scanner is implemented; the live "freshness" of this source is
+        # entirely driven by the Polymarket × Kalshi inputs being fresh.
+        "adapter_status": ADAPTER_IMPLEMENTED,
+        "requires_api_key": False,
+        "env_keys": (),
+        "default_refresh_hours": DEFAULT_REFRESH_HOURS,
+        "advisory_only": True,
+        "can_execute": False,
+        "expected_output": "signal_events",
+        "notes": (
+            "Polymarket × Kalshi cross-venue disagreement scanner. "
+            "Derived advisory signal — never a trade, broker, or order "
+            "endpoint.  Persisted under signal_events with "
+            "source_name='prediction_market_disagreement'."
+        ),
+        "tos_warning": (
+            "Advisory only.  Surfaces information-fracture between "
+            "two prediction-market venues for human review; no order "
+            "placement, no broker API, no authenticated trading endpoint."
+        ),
+        "implementation_file": "scripts/prediction_market_disagreement_scanner.py",
         "health_check_supported": True,
         "phase": "phase2",
     },

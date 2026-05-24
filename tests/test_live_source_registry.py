@@ -40,6 +40,10 @@ EXPECTED_SOURCE_KEYS = (
     "india",
     "global_filings",
     "asia_disclosure",
+    # Derived signal — Polymarket × Kalshi disagreement scanner.  Added
+    # in the prediction-market closure sprint so source-health/never-run/
+    # stale state are reported alongside other sources.
+    "prediction_market_disagreement",
 )
 
 

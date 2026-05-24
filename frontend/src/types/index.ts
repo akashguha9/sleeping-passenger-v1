@@ -859,6 +859,12 @@ export interface LiveSignalRawPayload {
   probability_source_polymarket?: string;
   probability_source_kalshi?: string;
   status?: string;
+  // Embedding provider stamps written by the disagreement scanner so
+  // the frontend can render explainability without a backend round-trip.
+  embedding_provider?: string;
+  embedding_model?: string;
+  embedding_available?: boolean;
+  embedding_status_reason?: string;
   [key: string]: unknown;
 }
 

@@ -271,3 +271,96 @@ def test_api_wrapper_returns_same_invariants():
     assert result["ai_execution_count"] == 0
     assert result["human_review_required"] is True
     assert isinstance(result.get("sources"), list)
+
+
+# ---------------------------------------------------------------------------
+# Prediction-market disagreement source-health surface
+# ---------------------------------------------------------------------------
+
+
+def test_disagreement_source_appears_in_health_summary_as_never_run():
+    srv = _srv()
+    result = srv.build_source_health_summary([], {})
+    by_source = {s["source_name"]: s for s in result["sources"]}
+    assert "prediction_market_disagreement" in by_source, (
+        "prediction_market_disagreement should appear with NO_RUNS state when "
+        "the scanner has never run"
+    )
+    entry = by_source["prediction_market_disagreement"]
+    assert entry["category"] == "NO_RUNS"
+    assert entry["severity"] == "info"
+    assert entry["label"] == "Prediction Market Disagreement"
+    # Suggested command is the scanner script itself, never phase1/phase2.
+    assert "prediction_market_disagreement_scanner.py" in entry["suggested_command"]
+    assert "run_live_sources_phase" not in entry["suggested_command"]
+
+
+def test_disagreement_source_after_scanner_run_uses_log_row(tmp_path):
+    srv = _srv()
+    p = _p()
+    db = tmp_path / "sh_disagreement.db"
+    p.init_schema(db)
+    p.log_source_run(
+        "prediction_market_disagreement",
+        "OK",
+        3,
+        '{"triggered_count": 1, "embedding_provider": "deterministic"}',
+        "",
+        "2026-05-24T00:00:00Z",
+        420,
+        db_path=db,
+    )
+    latest = p.get_latest_source_run_per_source(db_path=db)
+    counts = p.count_signal_events_by_source(db_path=db)
+    result = srv.build_source_health_summary(latest, counts)
+    by_source = {s["source_name"]: s for s in result["sources"]}
+    entry = by_source["prediction_market_disagreement"]
+    assert entry["status"] == "OK"
+    assert entry["category"] == "OK"
+    assert entry["fetched_count"] == 3
+
+
+def test_disagreement_source_in_compute_source_freshness():
+    """The freshness map (used by /live-sources/status) should include the
+    disagreement source so the frontend never-run/stale/healthy banner
+    can render an honest state for the Disagreements tab.
+    """
+    from scripts.live_source_registry import (
+        ALL_SOURCE_KEYS,
+        compute_source_freshness,
+    )
+
+    assert "prediction_market_disagreement" in ALL_SOURCE_KEYS
+
+    freshness = compute_source_freshness(latest_runs=None, env={})
+    assert "prediction_market_disagreement" in freshness
+    entry = freshness["prediction_market_disagreement"]
+    assert entry["advisory_status"] == "ADVISORY_ONLY"
+    assert entry["execution_gate"] == "LOCKED"
+    assert entry["broker_api_called"] is False
+    assert entry["ai_execution_count"] == 0
+    assert entry["execution_permission"] is False
+    assert entry["can_execute"] is False
+    assert entry["freshness_state"] == "never_run"
+
+
+def test_disagreement_source_is_advisory_only_in_registry():
+    from scripts.live_source_registry import get_source_family
+
+    entry = get_source_family("prediction_market_disagreement")
+    assert entry["display_name"] == "Prediction Market Disagreement"
+    assert entry["advisory_only"] is True
+    assert entry["can_execute"] is False
+    assert entry["requires_api_key"] is False
+    # No broker/trading keywords leaked into operator-visible fields.
+    flat = (
+        " ".join(
+            [
+                str(entry.get("notes", "")),
+                str(entry.get("tos_warning", "")),
+                str(entry.get("display_name", "")),
+            ]
+        )
+    ).lower()
+    for forbidden in ("buy ", " sell ", "place order", "broker_api"):
+        assert forbidden not in flat

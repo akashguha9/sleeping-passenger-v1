@@ -163,6 +163,7 @@ _SOURCE_NAME_MAP: dict[str, str] = {
     "india": "India",
     "global_filings": "Global Filings",
     "asia_disclosure": "Asia Disclosure",
+    "prediction_market_disagreement": "Prediction Market Disagreement",
 }
 
 

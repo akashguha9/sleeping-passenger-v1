@@ -417,6 +417,15 @@ function DisagreementDetailBlock({ ev }: { ev: LiveSignalEvent }) {
   const pairType = String(p.pair_type ?? 'UNKNOWN_PAIR_TYPE');
   const status = String(p.status ?? 'UNKNOWN');
   const reasons = (p.resolution_mismatch_reasons as string[] | undefined) ?? [];
+  const polyProbSource = (p.probability_source_polymarket as string | undefined) ?? '';
+  const kalshiProbSource = (p.probability_source_kalshi as string | undefined) ?? '';
+  const components =
+    (p.pair_score_components as Record<string, number> | undefined) ?? undefined;
+  const embeddingProvider = (p.embedding_provider as string | undefined) ?? '';
+  const embeddingModel = (p.embedding_model as string | undefined) ?? '';
+  const embeddingAvailable = p.embedding_available as boolean | undefined;
+  const embeddingStatusReason =
+    (p.embedding_status_reason as string | undefined) ?? '';
 
   const statusChipClass =
     status === 'ALERT'
@@ -449,6 +458,15 @@ function DisagreementDetailBlock({ ev }: { ev: LiveSignalEvent }) {
           <p className="font-mono" style={{ color: 'var(--sp-mist)' }}>
             Implied probability: {polyProb}
           </p>
+          {polyProbSource && (
+            <p
+              className="text-[10px] font-mono"
+              style={{ color: 'var(--sp-mist)' }}
+              data-testid="disagreement-poly-prob-source"
+            >
+              Polymarket probability source · {polyProbSource}
+            </p>
+          )}
         </div>
         <div data-testid="disagreement-kalshi-row">
           <div className="sp-eyebrow">Kalshi</div>
@@ -456,8 +474,24 @@ function DisagreementDetailBlock({ ev }: { ev: LiveSignalEvent }) {
           <p className="font-mono" style={{ color: 'var(--sp-mist)' }}>
             Implied probability: {kalshiProb}
           </p>
+          {kalshiProbSource && (
+            <p
+              className="text-[10px] font-mono"
+              style={{ color: 'var(--sp-mist)' }}
+              data-testid="disagreement-kalshi-prob-source"
+            >
+              Kalshi probability source · {kalshiProbSource}
+            </p>
+          )}
         </div>
       </div>
+      <PairScoreComponentsBlock
+        components={components}
+        embeddingProvider={embeddingProvider}
+        embeddingModel={embeddingModel}
+        embeddingAvailable={embeddingAvailable}
+        embeddingStatusReason={embeddingStatusReason}
+      />
       <div className="flex flex-wrap items-center gap-2">
         <span className={statusChipClass} data-testid="disagreement-status-chip">
           {statusLabel}
@@ -498,6 +532,159 @@ function DisagreementDetailBlock({ ev }: { ev: LiveSignalEvent }) {
         broker action authorised. Resolution terms may differ across
         venues.
       </p>
+    </div>
+  );
+}
+
+
+/**
+ * Renders the per-axis pair-score components emitted by the disagreement
+ * scanner.  Pure presentational — driven entirely off the persisted
+ * payload so the operator can see why a pair did or did not promote to
+ * a clean alert.  Falls back gracefully when the scanner ran with an
+ * older payload that lacks these fields.
+ */
+const PAIR_SCORE_COMPONENT_LABELS: Array<{
+  key: string;
+  label: string;
+}> = [
+  { key: 'text_score', label: 'Text' },
+  { key: 'entity_score', label: 'Entity' },
+  { key: 'category_score', label: 'Category' },
+  { key: 'date_score', label: 'Date/window' },
+  { key: 'threshold_score', label: 'Threshold' },
+  { key: 'resolution_score', label: 'Resolution' },
+  { key: 'embedding_score', label: 'Embedding' },
+  { key: 'final_score', label: 'Final score' },
+];
+
+function PairScoreComponentsBlock({
+  components,
+  embeddingProvider,
+  embeddingModel,
+  embeddingAvailable,
+  embeddingStatusReason,
+}: {
+  components?: Record<string, number>;
+  embeddingProvider?: string;
+  embeddingModel?: string;
+  embeddingAvailable?: boolean;
+  embeddingStatusReason?: string;
+}) {
+  const hasComponents =
+    components && Object.keys(components).length > 0;
+  const hasEmbeddingMetadata = Boolean(
+    embeddingProvider || embeddingModel || embeddingAvailable !== undefined,
+  );
+  if (!hasComponents && !hasEmbeddingMetadata) {
+    return (
+      <div
+        className="rounded p-2 text-[11px]"
+        data-testid="pair-score-components-fallback"
+        style={{
+          background: 'rgba(13, 16, 21, 0.4)',
+          border: '1px dashed var(--sp-line)',
+          color: 'var(--sp-mist)',
+        }}
+      >
+        Pair score components unavailable for this alert.
+      </div>
+    );
+  }
+  return (
+    <div
+      className="rounded p-2 space-y-1.5 text-[11px]"
+      data-testid="pair-score-components"
+      style={{
+        background: 'rgba(13, 16, 21, 0.4)',
+        border: '1px solid var(--sp-line)',
+      }}
+    >
+      <div className="sp-eyebrow">Pair score components</div>
+      {hasComponents ? (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-x-3 gap-y-1 font-mono">
+          {PAIR_SCORE_COMPONENT_LABELS.map(({ key, label }) => {
+            const value = components ? components[key] : undefined;
+            if (value === undefined || value === null) return null;
+            const isFinal = key === 'final_score';
+            return (
+              <div
+                key={key}
+                data-testid={`pair-score-${key}`}
+                className="flex items-center justify-between gap-1"
+                style={{
+                  color: isFinal ? 'var(--sp-bone)' : 'var(--sp-mist)',
+                }}
+              >
+                <span className="uppercase tracking-widest text-[9px]">
+                  {label}
+                </span>
+                <span
+                  className={isFinal ? 'font-semibold' : ''}
+                  style={{ color: isFinal ? 'var(--sp-cyan)' : 'var(--sp-bone)' }}
+                >
+                  {Number(value).toFixed(2)}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        <p
+          className="font-mono"
+          style={{ color: 'var(--sp-mist)' }}
+          data-testid="pair-score-components-missing"
+        >
+          Pair score components unavailable
+        </p>
+      )}
+      {hasEmbeddingMetadata && (
+        <div
+          className="flex flex-wrap gap-x-3 gap-y-1 font-mono"
+          data-testid="pair-score-embedding-meta"
+        >
+          {embeddingProvider && (
+            <span
+              data-testid="pair-score-embedding-provider"
+              style={{ color: 'var(--sp-mist)' }}
+            >
+              Embedding provider · <span style={{ color: 'var(--sp-bone)' }}>{embeddingProvider}</span>
+            </span>
+          )}
+          {embeddingModel && (
+            <span
+              data-testid="pair-score-embedding-model"
+              style={{ color: 'var(--sp-mist)' }}
+            >
+              Model · <span style={{ color: 'var(--sp-bone)' }}>{embeddingModel}</span>
+            </span>
+          )}
+          {embeddingAvailable !== undefined && (
+            <span
+              data-testid="pair-score-embedding-available"
+              style={{
+                color:
+                  embeddingAvailable === false ? 'var(--sp-gold)' : 'var(--sp-mist)',
+              }}
+            >
+              Availability ·{' '}
+              <span style={{ color: 'var(--sp-bone)' }}>
+                {embeddingAvailable ? 'true' : 'false'}
+              </span>
+            </span>
+          )}
+        </div>
+      )}
+      {embeddingAvailable === false && (
+        <p
+          className="text-[10px]"
+          style={{ color: 'var(--sp-gold)' }}
+          data-testid="pair-score-embedding-fallback"
+        >
+          Embedding unavailable — deterministic/local scoring used
+          {embeddingStatusReason ? ` (${embeddingStatusReason})` : ''}.
+        </p>
+      )}
     </div>
   );
 }

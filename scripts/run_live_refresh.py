@@ -68,6 +68,12 @@ _PHASE2_KEYS = (
     "asia_disclosure",
 )
 
+# Derived-signal sources that appear in the registry for source-health
+# surfacing but do NOT participate in the standard ingestion refresh.
+# They are driven by their own scanner scripts (e.g. the Polymarket ×
+# Kalshi disagreement scanner runs only after fresh inputs exist).
+_DERIVED_SIGNAL_KEYS: frozenset[str] = frozenset({"prediction_market_disagreement"})
+
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
@@ -127,7 +133,11 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def _resolve_source_keys(arg: str) -> list[str]:
     raw = (arg or "all").strip().lower()
     if raw == "all":
-        return list(ALL_SOURCE_KEYS)
+        # Derived-signal sources (e.g. prediction_market_disagreement)
+        # are intentionally excluded from the broad "all" sweep — they
+        # run from their own scanner scripts once the upstream inputs
+        # exist.  An operator can still target them explicitly.
+        return [k for k in ALL_SOURCE_KEYS if k not in _DERIVED_SIGNAL_KEYS]
     return [raw]
 
 

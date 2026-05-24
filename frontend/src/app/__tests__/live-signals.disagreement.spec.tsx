@@ -72,6 +72,20 @@ function makeDisagreementEvent(overrides: any = {}) {
       resolution_mismatch_reasons: [],
       probability_source_polymarket: 'implied_probability',
       probability_source_kalshi: 'implied_probability',
+      pair_score_components: {
+        text_score: 0.82,
+        entity_score: 1.0,
+        category_score: 1.0,
+        date_score: 0.75,
+        threshold_score: 1.0,
+        resolution_score: 1.0,
+        embedding_score: 0.68,
+        final_score: 0.89,
+      },
+      embedding_provider: 'deterministic',
+      embedding_model: 'hashed-token-histogram-16',
+      embedding_available: true,
+      embedding_status_reason: '',
       advisory_status: 'ADVISORY_ONLY',
       execution_permission: 'ADVISORY_ONLY',
       execution_gate: 'LOCKED',
@@ -307,6 +321,99 @@ describe('Live Signals — Disagreements first-class tab', () => {
 
     await waitFor(() => screen.getAllByTestId('signal-event-card'));
     expect(screen.queryAllByTestId('disagreement-detail-block')).toHaveLength(0);
+  });
+
+  it('renders pair_score_components, embedding metadata, and probability sources', async () => {
+    mockLiveSignals.mockResolvedValue({
+      live_signal_events: [makeDisagreementEvent()],
+      count: 1,
+      ...SAFETY,
+    });
+
+    render(<LiveSignalsPage />);
+    await waitFor(() => screen.getByRole('button', { name: 'Disagreements' }));
+    (screen.getByRole('button', { name: 'Disagreements' }) as HTMLButtonElement).click();
+
+    await waitFor(() => screen.getAllByTestId('pair-score-components'));
+    const componentsBlock = screen.getAllByTestId('pair-score-components')[0];
+    expect(componentsBlock.textContent).toMatch(/Pair score components/i);
+    // Per-axis scores render with two decimals.
+    expect(componentsBlock.textContent).toMatch(/0\.82/);
+    expect(componentsBlock.textContent).toMatch(/0\.68/);
+    // Final score visible.
+    expect(screen.getByTestId('pair-score-final_score').textContent).toMatch(/0\.89/);
+    // Embedding provider + model + availability.
+    expect(screen.getByTestId('pair-score-embedding-provider').textContent).toMatch(
+      /deterministic/,
+    );
+    expect(screen.getByTestId('pair-score-embedding-model').textContent).toMatch(
+      /hashed-token-histogram-16/,
+    );
+    expect(screen.getByTestId('pair-score-embedding-available').textContent).toMatch(
+      /true/,
+    );
+    // Probability source lines.
+    expect(
+      screen.getByTestId('disagreement-poly-prob-source').textContent,
+    ).toMatch(/implied_probability/);
+    expect(
+      screen.getByTestId('disagreement-kalshi-prob-source').textContent,
+    ).toMatch(/implied_probability/);
+  });
+
+  it('shows fallback line + warning when embedding is unavailable', async () => {
+    const event = makeDisagreementEvent({
+      raw_payload: {
+        embedding_provider: 'deterministic_fallback_from_real',
+        embedding_model: 'hashed-token-histogram-16',
+        embedding_available: false,
+        embedding_status_reason: 'real_provider_unavailable:no_api_key',
+      },
+    });
+    mockLiveSignals.mockResolvedValue({
+      live_signal_events: [event],
+      count: 1,
+      ...SAFETY,
+    });
+
+    render(<LiveSignalsPage />);
+    await waitFor(() => screen.getByRole('button', { name: 'Disagreements' }));
+    (screen.getByRole('button', { name: 'Disagreements' }) as HTMLButtonElement).click();
+
+    await waitFor(() => screen.getAllByTestId('pair-score-embedding-fallback'));
+    const fallback = screen.getAllByTestId('pair-score-embedding-fallback')[0];
+    expect(fallback.textContent).toMatch(/Embedding unavailable/i);
+    expect(fallback.textContent).toMatch(/deterministic/i);
+    expect(fallback.textContent).toMatch(/real_provider_unavailable/);
+  });
+
+  it('falls back gracefully when pair_score_components are absent', async () => {
+    const event = makeDisagreementEvent({
+      raw_payload: {
+        pair_score_components: undefined,
+        embedding_provider: undefined,
+        embedding_model: undefined,
+        embedding_available: undefined,
+      },
+    });
+    delete (event.raw_payload as any).pair_score_components;
+    delete (event.raw_payload as any).embedding_provider;
+    delete (event.raw_payload as any).embedding_model;
+    delete (event.raw_payload as any).embedding_available;
+
+    mockLiveSignals.mockResolvedValue({
+      live_signal_events: [event],
+      count: 1,
+      ...SAFETY,
+    });
+
+    render(<LiveSignalsPage />);
+    await waitFor(() => screen.getByRole('button', { name: 'Disagreements' }));
+    (screen.getByRole('button', { name: 'Disagreements' }) as HTMLButtonElement).click();
+
+    await waitFor(() => screen.getAllByTestId('pair-score-components-fallback'));
+    const fallback = screen.getAllByTestId('pair-score-components-fallback')[0];
+    expect(fallback.textContent).toMatch(/Pair score components unavailable/i);
   });
 
   it('Disagreement card never uses Buy / Sell / Execute / Arbitrage language', async () => {

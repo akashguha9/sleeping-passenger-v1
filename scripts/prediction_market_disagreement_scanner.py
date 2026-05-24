@@ -50,9 +50,16 @@ try:
         SAME_EVENT_DIFFERENT_THRESHOLD,
         SAME_EVENT_SAME_RESOLUTION,
         SAME_THEME_DIFFERENT_EVENT,
+        PairClassification,
         classify_pair_resolution,
         deterministic_fake_embedding,
         iter_pair_candidates,
+    )
+    from scripts.prediction_market_embedding_providers import (
+        DeterministicEmbeddingProvider,
+        EmbeddingProvider,
+        EmbeddingProviderUnavailable,
+        resolve_embedding_provider,
     )
 except ModuleNotFoundError:  # pragma: no cover
     from prediction_market_semantic_pairing import (  # type: ignore[no-redef]
@@ -61,9 +68,16 @@ except ModuleNotFoundError:  # pragma: no cover
         SAME_EVENT_DIFFERENT_THRESHOLD,
         SAME_EVENT_SAME_RESOLUTION,
         SAME_THEME_DIFFERENT_EVENT,
+        PairClassification,
         classify_pair_resolution,
         deterministic_fake_embedding,
         iter_pair_candidates,
+    )
+    from prediction_market_embedding_providers import (  # type: ignore[no-redef]
+        DeterministicEmbeddingProvider,
+        EmbeddingProvider,
+        EmbeddingProviderUnavailable,
+        resolve_embedding_provider,
     )
 
 CROSS_VENUE_SIGNAL_CLASS = "CROSS_VENUE_DISAGREEMENT"
@@ -80,6 +94,109 @@ _ELIGIBLE_PAIR_TYPES: frozenset[str] = frozenset(
 _DIAGNOSTIC_PAIR_TYPES: frozenset[str] = frozenset(
     {SAME_EVENT_DIFFERENT_THRESHOLD, SAME_THEME_DIFFERENT_EVENT}
 )
+
+# Reason prefixes that disqualify a pair from a clean ALERT regardless of
+# how large the probability gap is.  These come from the semantic-pairing
+# layer's own diagnostics — when any of them appear we degrade to BLOCKED
+# so embedding similarity alone can never override entity / threshold /
+# resolution / category mismatches.
+_ALERT_FORBIDDEN_REASON_PREFIXES: tuple[str, ...] = (
+    "no_shared_asset_entity",
+    "category_mismatch",
+    "entity_mismatch",
+    "threshold_mismatch",
+    "settlement_source_mismatch",
+    "resolution_mismatch_blocks_clean_alert",
+    "incompatible_category",
+    "low_semantic_overlap_no_shared_entity",
+)
+
+# Confidence bands that block any ALERT.
+_BLOCKED_CONFIDENCE_BANDS: frozenset[str] = frozenset({"BLOCKED", "LOW"})
+
+# Confidence-band thresholds against the semantic-pairing final_score.
+_CONFIDENCE_BAND_STRONG = 0.65
+_CONFIDENCE_BAND_MEDIUM = 0.45
+
+# Read-only / advisory contract stamped on every CLI report envelope.
+_READ_ONLY_CONTRACT: dict[str, Any] = {
+    "advisory_status": "ADVISORY_ONLY",
+    "execution_permission": "ADVISORY_ONLY",
+    "execution_gate": "LOCKED",
+    "human_review_required": True,
+    "broker_api_called": False,
+    "ai_execution_count": 0,
+    "trading_endpoints_called": False,
+    "auth_headers_sent": False,
+}
+
+
+def _monotonic() -> float:
+    import time as _time
+
+    return _time.monotonic()
+
+
+def _now_iso() -> str:
+    try:
+        try:
+            from scripts.runtime_common import utc_timestamp
+        except ModuleNotFoundError:
+            from runtime_common import utc_timestamp  # type: ignore[no-redef]
+        return utc_timestamp()
+    except Exception:
+        from datetime import datetime, timezone
+
+        return datetime.now(timezone.utc).isoformat()
+
+
+def _log_source_run(
+    *,
+    status: str,
+    fetched_count: int,
+    error_message: str,
+    timestamp_utc: str,
+    duration_ms: int,
+    extras: dict[str, Any] | None = None,
+) -> None:
+    """Best-effort source_run_log write for the disagreement scanner.
+
+    Mirrors the convention used by ``scripts.live_source_runner`` so the
+    /source-health/summary endpoint can report ``never_run`` / ``stale``
+    / healthy state for the disagreement family.  Always advisory-only;
+    never raises into the caller.
+    """
+    try:
+        try:
+            from scripts import persistence as _persistence
+            from scripts.persistence import log_source_run
+        except ModuleNotFoundError:
+            import persistence as _persistence  # type: ignore[no-redef]
+            from persistence import log_source_run  # type: ignore[no-redef]
+    except Exception:
+        return
+    target_db = getattr(_persistence, "DB_PATH", None)
+    skipped_reason = ""
+    if extras:
+        try:
+            skipped_reason = json.dumps(extras, default=str)
+        except Exception:
+            skipped_reason = ""
+    try:
+        kwargs: dict[str, Any] = {
+            "source_name": PERSISTENCE_SOURCE_NAME,
+            "status": status,
+            "fetched_count": int(fetched_count),
+            "skipped_reason": skipped_reason,
+            "error_message": error_message,
+            "timestamp_utc": timestamp_utc,
+            "duration_ms": int(duration_ms),
+        }
+        if target_db is not None:
+            kwargs["db_path"] = target_db
+        log_source_run(**kwargs)
+    except Exception:
+        return
 
 
 # ---------------------------------------------------------------------------
@@ -189,11 +306,81 @@ def _pair_id(poly: dict[str, Any], kalshi: dict[str, Any]) -> str:
 # ---------------------------------------------------------------------------
 
 
+def _compute_confidence_band(classification: PairClassification) -> str:
+    """Derive ``STRONG`` / ``MEDIUM`` / ``LOW`` / ``BLOCKED`` from a pair.
+
+    ``BLOCKED`` short-circuits on any disqualifying signal — false-match
+    classification, populated ``resolution_mismatch_reasons``, or absent
+    shared entity.  Above ``BLOCKED`` the band falls out of the blended
+    ``final_score`` produced by the semantic-pairing layer.
+    """
+    if classification.pair_type == FALSE_MATCH:
+        return "BLOCKED"
+    if classification.resolution_mismatch_reasons:
+        return "BLOCKED"
+    if not classification.shared_entities:
+        return "BLOCKED"
+    components = classification.pair_score_components or {}
+    try:
+        final_score = float(components.get("final_score") or 0.0)
+    except (TypeError, ValueError):
+        final_score = 0.0
+    if final_score >= _CONFIDENCE_BAND_STRONG:
+        return "STRONG"
+    if final_score >= _CONFIDENCE_BAND_MEDIUM:
+        return "MEDIUM"
+    return "LOW"
+
+
+def _alert_block_reasons(
+    classification: PairClassification,
+    *,
+    gap: float | None,
+    threshold: float,
+    confidence_band: str,
+    eligible_pair_types: frozenset[str],
+) -> list[str]:
+    """Every reason this pair must NOT produce a clean ``ALERT``.
+
+    Empty list ⇒ the pair satisfies every guardrail and may ALERT.
+    Otherwise the scanner downgrades the status (``WATCH`` when the only
+    block is ``below_threshold``, ``BLOCKED`` for everything else) and
+    surfaces this list on the record so an operator can audit exactly
+    why the alert was withheld.
+    """
+    blocks: list[str] = []
+    if gap is None:
+        blocks.append("probability_missing")
+    elif gap < threshold:
+        blocks.append("below_threshold")
+    if classification.pair_type not in eligible_pair_types:
+        blocks.append(f"pair_type_not_eligible:{classification.pair_type}")
+    if classification.resolution_mismatch_reasons:
+        blocks.append("resolution_mismatch_reasons_present")
+    if not classification.shared_entities:
+        blocks.append("no_shared_entity")
+    for reason in classification.reasons or []:
+        for prefix in _ALERT_FORBIDDEN_REASON_PREFIXES:
+            if reason.startswith(prefix):
+                blocks.append(f"forbidden_reason:{prefix}")
+                break
+    if confidence_band in _BLOCKED_CONFIDENCE_BANDS:
+        blocks.append(f"confidence_band_blocked:{confidence_band}")
+    seen: set[str] = set()
+    out: list[str] = []
+    for entry in blocks:
+        if entry not in seen:
+            seen.add(entry)
+            out.append(entry)
+    return out
+
+
 def build_disagreement_alert(
     polymarket: dict[str, Any],
     kalshi: dict[str, Any],
     *,
     disagreement_threshold: float = DEFAULT_DISAGREEMENT_THRESHOLD,
+    embedding_provider: EmbeddingProvider | None = None,
 ) -> dict[str, Any] | None:
     """Compute a disagreement record for one (poly, kalshi) pair.
 
@@ -201,11 +388,36 @@ def build_disagreement_alert(
     (resolution mismatch, different event, false match, missing
     probability, etc.).  Returns a fully-stamped advisory record when
     the pair is eligible — ``disagreement_triggered`` indicates whether
-    the probability gap reached the alert threshold.
+    the probability gap reached the alert threshold AND every
+    cross-axis guardrail in :func:`_alert_block_reasons` passed.
+
+    ``embedding_provider`` selects the embedding source used by the
+    semantic-pairing layer; defaults to the offline deterministic
+    baseline.  The provider's name, model, and availability are
+    stamped onto every alert so the operator can see whether a real
+    provider was actually consulted.
     """
-    classification = classify_pair_resolution(polymarket, kalshi)
+    provider = embedding_provider or DeterministicEmbeddingProvider()
+    classification = classify_pair_resolution(
+        polymarket, kalshi, embedding_fn=provider.as_callable()
+    )
     poly_prob, poly_prob_source = extract_implied_probability_with_source(polymarket)
     kalshi_prob, kalshi_prob_source = extract_implied_probability_with_source(kalshi)
+
+    confidence_band = _compute_confidence_band(classification)
+
+    if poly_prob is None or kalshi_prob is None:
+        gap: float | None = None
+    else:
+        gap = abs(poly_prob - kalshi_prob)
+
+    block_reasons = _alert_block_reasons(
+        classification,
+        gap=gap,
+        threshold=disagreement_threshold,
+        confidence_band=confidence_band,
+        eligible_pair_types=_ELIGIBLE_PAIR_TYPES,
+    )
 
     record_base = {
         "pair_id": _pair_id(polymarket, kalshi),
@@ -223,6 +435,8 @@ def build_disagreement_alert(
         "resolution_mismatch_reasons": list(
             classification.resolution_mismatch_reasons or []
         ),
+        "confidence_band": confidence_band,
+        "alert_block_reasons": list(block_reasons),
         "polymarket_probability": poly_prob,
         "kalshi_probability": kalshi_prob,
         "probability_source_polymarket": poly_prob_source,
@@ -237,6 +451,7 @@ def build_disagreement_alert(
         "broker_api_called": False,
         "ai_execution_count": 0,
         "reasons": list(classification.reasons),
+        **provider.to_status_dict(),
     }
 
     # False matches do not warrant a record at all.
@@ -245,28 +460,36 @@ def build_disagreement_alert(
 
     # Diagnostic-only pair types: emit a watch record, never a clean alert.
     if classification.pair_type in _DIAGNOSTIC_PAIR_TYPES:
-        record_base["probability_gap"] = (
-            abs(poly_prob - kalshi_prob)
-            if poly_prob is not None and kalshi_prob is not None
-            else None
-        )
+        record_base["probability_gap"] = round(gap, 4) if gap is not None else None
         record_base["disagreement_triggered"] = False
         record_base["status"] = "DIAGNOSTIC"
         return record_base
 
-    # SAME_EVENT_SAME_RESOLUTION + AMBIGUOUS_MATCH — eligible for a clean
-    # alert if both probabilities are present and the gap reaches threshold.
-    if poly_prob is None or kalshi_prob is None:
+    # SAME_EVENT_SAME_RESOLUTION + AMBIGUOUS_MATCH — eligible only when
+    # every cross-axis guardrail is satisfied AND the probability gap
+    # reaches the alert threshold.  A large gap is necessary but never
+    # sufficient.
+    if gap is None:
         record_base["probability_gap"] = None
         record_base["disagreement_triggered"] = False
         record_base["status"] = "PROBABILITY_MISSING"
         return record_base
 
-    gap = abs(poly_prob - kalshi_prob)
     record_base["probability_gap"] = round(gap, 4)
-    triggered = gap >= disagreement_threshold and classification.pair_type in _ELIGIBLE_PAIR_TYPES
-    record_base["disagreement_triggered"] = bool(triggered)
-    record_base["status"] = "ALERT" if triggered else "WATCH"
+
+    if not block_reasons:
+        record_base["disagreement_triggered"] = True
+        record_base["status"] = "ALERT"
+    elif block_reasons == ["below_threshold"]:
+        record_base["disagreement_triggered"] = False
+        record_base["status"] = "WATCH"
+    else:
+        # Any non-threshold block (no shared entity, resolution mismatch,
+        # forbidden reason token, low/blocked confidence band, ineligible
+        # pair_type) downgrades to BLOCKED — never ALERT, never WATCH.
+        record_base["disagreement_triggered"] = False
+        record_base["status"] = "BLOCKED"
+
     return record_base
 
 
@@ -281,6 +504,7 @@ def scan_disagreements(
     *,
     disagreement_threshold: float = DEFAULT_DISAGREEMENT_THRESHOLD,
     limit: int | None = None,
+    embedding_provider: EmbeddingProvider | None = None,
 ) -> list[dict[str, Any]]:
     """Run the scanner over an explicit row set; returns advisory records.
 
@@ -288,11 +512,15 @@ def scan_disagreements(
     triggered alerts) so downstream consumers can see why a pair was
     watched but not alerted.
     """
+    provider = embedding_provider or DeterministicEmbeddingProvider()
     pairs = iter_pair_candidates(polymarket_rows, kalshi_rows)
     out: list[dict[str, Any]] = []
     for poly, kalshi in pairs:
         rec = build_disagreement_alert(
-            poly, kalshi, disagreement_threshold=disagreement_threshold
+            poly,
+            kalshi,
+            disagreement_threshold=disagreement_threshold,
+            embedding_provider=provider,
         )
         if rec is None:
             continue
@@ -436,21 +664,60 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Print the alert list as JSON (default human-readable summary).",
     )
+    p.add_argument(
+        "--embedding-provider",
+        choices=("deterministic", "real"),
+        default="deterministic",
+        help=(
+            "Embedding backend used for the semantic-pairing layer. "
+            "'deterministic' (default) is offline and reproducible; "
+            "'real' attempts the configured HTTP provider and falls "
+            "back to deterministic when not configured."
+        ),
+    )
+    p.add_argument(
+        "--embedding-model",
+        type=str,
+        default=None,
+        help="Optional model identifier passed to the real embedding provider.",
+    )
+    p.add_argument(
+        "--embedding-timeout-seconds",
+        type=float,
+        default=None,
+        help="Per-call timeout (seconds) for the real embedding provider (default 10).",
+    )
+    p.add_argument(
+        "--strict-embedding",
+        action="store_true",
+        help=(
+            "Fail (instead of silently falling back) when --embedding-provider "
+            "real is requested but the provider cannot be constructed."
+        ),
+    )
     return p
 
 
-def _summarise(alerts: list[dict[str, Any]]) -> str:
+def _summarise(
+    alerts: list[dict[str, Any]],
+    provider: EmbeddingProvider | None = None,
+) -> str:
     triggered = [a for a in alerts if a.get("disagreement_triggered")]
     watching = [a for a in alerts if a.get("status") == "WATCH"]
     diagnostic = [a for a in alerts if a.get("status") == "DIAGNOSTIC"]
+    blocked = [a for a in alerts if a.get("status") == "BLOCKED"]
     missing = [a for a in alerts if a.get("status") == "PROBABILITY_MISSING"]
+    provider_label = provider.name if provider else "deterministic"
+    provider_available = provider.available if provider else True
     lines = [
         "Polymarket × Kalshi disagreement scanner (advisory-only)",
         f"  total_pairs:       {len(alerts)}",
         f"  triggered_alerts:  {len(triggered)}",
         f"  watch_only:        {len(watching)}",
         f"  diagnostic_only:   {len(diagnostic)}",
+        f"  blocked:           {len(blocked)}",
         f"  missing_prob:      {len(missing)}",
+        f"  embedding:         {provider_label} (available={provider_available})",
         "  contract: ADVISORY_ONLY | HUMAN_REVIEW_REQUIRED | execution_gate=LOCKED | "
         "broker_api_called=False | ai_execution_count=0",
     ]
@@ -470,6 +737,30 @@ def run(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
 
+    started_monotonic = _monotonic()
+    try:
+        provider = resolve_embedding_provider(
+            args.embedding_provider,
+            model=args.embedding_model,
+            timeout_seconds=args.embedding_timeout_seconds,
+            strict=args.strict_embedding,
+        )
+    except EmbeddingProviderUnavailable as exc:
+        # Strict mode: surface a clean non-zero exit.  The advisory
+        # pipeline is read-only so no rollback is required.
+        print(
+            json.dumps(
+                {
+                    "artifact_kind": "prediction_market_disagreement_report",
+                    "source_name": PERSISTENCE_SOURCE_NAME,
+                    "error": "embedding_provider_unavailable",
+                    "detail": str(exc),
+                    "read_only_contract": _READ_ONLY_CONTRACT,
+                }
+            )
+        )
+        return 2
+
     if args.from_fixtures:
         poly_rows, kalshi_rows = _load_from_fixture(args.from_fixtures)
     else:
@@ -480,6 +771,7 @@ def run(argv: list[str] | None = None) -> int:
         kalshi_rows,
         disagreement_threshold=args.threshold,
         limit=args.limit,
+        embedding_provider=provider,
     )
 
     persisted = 0
@@ -487,16 +779,37 @@ def run(argv: list[str] | None = None) -> int:
         # Only persist alerts that actually triggered — diagnostic and
         # watch rows stay in dry-run output.
         triggered = [a for a in alerts if a.get("disagreement_triggered")]
-        try:
-            try:
-                from scripts.runtime_common import utc_timestamp
-            except ModuleNotFoundError:
-                from runtime_common import utc_timestamp  # type: ignore[no-redef]
-            fetched_at = utc_timestamp()
-        except Exception:
-            from datetime import datetime, timezone
-            fetched_at = datetime.now(timezone.utc).isoformat()
+        fetched_at = _now_iso()
         persisted = _persist_alerts(triggered, fetched_at)
+        # Record a source_run_log entry so /source-health/summary and
+        # /live-sources/status report honest never_run/stale/healthy
+        # state for the disagreement source family alongside the other
+        # live sources.  Dry-run never writes a run log entry.
+        duration_ms = int(max(0.0, (_monotonic() - started_monotonic)) * 1000)
+        _log_source_run(
+            status="OK",
+            fetched_count=int(persisted),
+            error_message="",
+            timestamp_utc=fetched_at,
+            duration_ms=duration_ms,
+            extras={
+                "total_pairs": len(alerts),
+                "triggered_count": sum(
+                    1 for a in alerts if a.get("disagreement_triggered")
+                ),
+                "watch_count": sum(1 for a in alerts if a.get("status") == "WATCH"),
+                "diagnostic_count": sum(
+                    1 for a in alerts if a.get("status") == "DIAGNOSTIC"
+                ),
+                "blocked_count": sum(
+                    1 for a in alerts if a.get("status") == "BLOCKED"
+                ),
+                "missing_probability_count": sum(
+                    1 for a in alerts if a.get("status") == "PROBABILITY_MISSING"
+                ),
+                **provider.to_status_dict(),
+            },
+        )
 
     output = {
         "artifact_kind": "prediction_market_disagreement_report",
@@ -507,22 +820,14 @@ def run(argv: list[str] | None = None) -> int:
         "write_mode": args.write,
         "threshold": args.threshold,
         "alerts": alerts,
-        "read_only_contract": {
-            "advisory_status": "ADVISORY_ONLY",
-            "execution_permission": "ADVISORY_ONLY",
-            "execution_gate": "LOCKED",
-            "human_review_required": True,
-            "broker_api_called": False,
-            "ai_execution_count": 0,
-            "trading_endpoints_called": False,
-            "auth_headers_sent": False,
-        },
+        "embedding_provider": provider.to_status_dict(),
+        "read_only_contract": _READ_ONLY_CONTRACT,
     }
 
     if args.json:
         print(json.dumps(output, indent=2, default=str))
     else:
-        print(_summarise(alerts))
+        print(_summarise(alerts, provider))
     return 0
 
 
@@ -536,6 +841,14 @@ __all__ = [
     "extract_implied_probability",
     "extract_implied_probability_with_source",
     "run",
+]
+__all__ += [
+    "_alert_block_reasons",
+    "_compute_confidence_band",
+    "_ALERT_FORBIDDEN_REASON_PREFIXES",
+    "_BLOCKED_CONFIDENCE_BANDS",
+    "_ELIGIBLE_PAIR_TYPES",
+    "_DIAGNOSTIC_PAIR_TYPES",
 ]
 
 
