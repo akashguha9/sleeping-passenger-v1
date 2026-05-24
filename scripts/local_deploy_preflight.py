@@ -119,11 +119,22 @@ def check_sqlite_tables(db_path: Path) -> dict[str, Any]:
     if conn is None:
         return _check("sqlite_tables_exist", FAIL,
                       "DB unreadable or missing; cannot verify tables.")
+    present: set[str] = set()
     try:
-        rows = conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table'"
-        ).fetchall()
-        present = {r["name"] for r in rows}
+        try:
+            rows = conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
+            present = {r["name"] for r in rows}
+        except sqlite3.DatabaseError as exc:
+            # File exists and `_readonly_connect` succeeded, but the
+            # blob is not a real SQLite database — fail closed instead
+            # of letting the DatabaseError bubble up and crash the gate.
+            return _check(
+                "sqlite_tables_exist",
+                FAIL,
+                f"DB file is corrupt or not a SQLite database: {type(exc).__name__}.",
+            )
     finally:
         conn.close()
     missing = [t for t in _CORE_TABLES if t not in present]

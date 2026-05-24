@@ -23,6 +23,7 @@ const SOURCE_OPTIONS: { value: '' | LiveSignalSource; label: string }[] = [
   { value: '', label: 'All Sources' },
   { value: 'polymarket', label: 'Polymarket' },
   { value: 'kalshi', label: 'Kalshi' },
+  { value: 'prediction_market_disagreement', label: 'Disagreements' },
   { value: 'gdelt', label: 'GDELT' },
   { value: 'sec_edgar', label: 'SEC EDGAR' },
   { value: 'newsapi', label: 'NewsAPI' },
@@ -38,6 +39,7 @@ const SOURCE_OPTIONS: { value: '' | LiveSignalSource; label: string }[] = [
 const SOURCE_ACCENT: Record<string, string> = {
   polymarket: 'rgba(167, 139, 250, 0.9)',
   kalshi: 'rgba(142, 196, 168, 0.9)',
+  prediction_market_disagreement: 'rgba(214, 168, 90, 0.9)',
   gdelt: 'rgba(125, 211, 252, 0.9)',
   sec_edgar: 'rgba(200, 154, 74, 0.9)',
   newsapi: 'rgba(95, 189, 200, 0.9)',
@@ -53,6 +55,7 @@ const SOURCE_ACCENT: Record<string, string> = {
 const SOURCE_LABELS: Record<string, string> = {
   polymarket: 'Polymarket',
   kalshi: 'Kalshi',
+  prediction_market_disagreement: 'Prediction Market Disagreement',
   gdelt: 'GDELT',
   sec_edgar: 'SEC EDGAR',
   newsapi: 'NewsAPI',
@@ -67,6 +70,11 @@ const SOURCE_LABELS: Record<string, string> = {
 
 function getTitle(ev: LiveSignalEvent): string {
   const p = ev.raw_payload;
+  if (ev.source_name === 'prediction_market_disagreement') {
+    // The persisted disagreement payload uses ``customer_label`` as its
+    // operator-facing headline; ``title`` may be absent.
+    return (p.customer_label as string) || 'Prediction Market Disagreement Alert';
+  }
   return p.title || p.question as string || ev.event_id;
 }
 
@@ -78,6 +86,15 @@ function getSubtitle(ev: LiveSignalEvent): string {
     if (p.volume != null) parts.push(`Vol: ${Number(p.volume).toLocaleString()}`);
     if (p.liquidity != null) parts.push(`Liq: ${Number(p.liquidity).toLocaleString()}`);
     if (p.end_date) parts.push(`Ends: ${p.end_date}`);
+    return parts.join(' · ');
+  }
+  if (ev.source_name === 'prediction_market_disagreement') {
+    const parts: string[] = [];
+    if (p.pair_type) parts.push(String(p.pair_type));
+    if (p.probability_gap != null) {
+      parts.push(`Gap: ${(Number(p.probability_gap) * 100).toFixed(1)} percentage points`);
+    }
+    if (p.status) parts.push(`Status: ${String(p.status)}`);
     return parts.join(' · ');
   }
   if (ev.source_name === 'kalshi') {
@@ -337,6 +354,10 @@ function SignalEventCard({
         <p className="text-xs" style={{ color: 'var(--sp-mist)' }}>{getSubtitle(ev)}</p>
       )}
 
+      {ev.source_name === 'prediction_market_disagreement' && (
+        <DisagreementDetailBlock ev={ev} />
+      )}
+
       <div className="flex items-center gap-2 flex-wrap pt-0.5">
         <span className="sp-chip">{ev.advisory_status}</span>
         {ev.human_review_required && (
@@ -371,6 +392,116 @@ function SignalEventCard({
     </div>
   );
 }
+
+/**
+ * Per-card body for Disagreement alerts — Polymarket vs Kalshi probabilities,
+ * gap, pair type, status pill, and review-required wording.  The forbidden
+ * customer-facing trading verbs (see live-signals.disagreement.spec.tsx and
+ * tests/test_frontend_no_execution_language.py) MUST NOT appear in this
+ * block, in any subtree, ever.
+ */
+function DisagreementDetailBlock({ ev }: { ev: LiveSignalEvent }) {
+  const p = ev.raw_payload;
+  const polyProb =
+    p.polymarket_probability != null
+      ? `${(Number(p.polymarket_probability) * 100).toFixed(1)}%`
+      : '—';
+  const kalshiProb =
+    p.kalshi_probability != null
+      ? `${(Number(p.kalshi_probability) * 100).toFixed(1)}%`
+      : '—';
+  const gap =
+    p.probability_gap != null
+      ? `${(Number(p.probability_gap) * 100).toFixed(1)} percentage points`
+      : '—';
+  const pairType = String(p.pair_type ?? 'UNKNOWN_PAIR_TYPE');
+  const status = String(p.status ?? 'UNKNOWN');
+  const reasons = (p.resolution_mismatch_reasons as string[] | undefined) ?? [];
+
+  const statusChipClass =
+    status === 'ALERT'
+      ? 'sp-chip sp-chip-rust'
+      : status === 'DIAGNOSTIC' || pairType === 'SAME_EVENT_DIFFERENT_THRESHOLD'
+      ? 'sp-chip sp-chip-warn'
+      : 'sp-chip';
+  const statusLabel =
+    status === 'ALERT'
+      ? 'Alert'
+      : status === 'DIAGNOSTIC' || status === 'PROBABILITY_MISSING'
+      ? `Watch · ${status.toLowerCase()}`
+      : status === 'WATCH'
+      ? 'Watch only'
+      : status;
+
+  return (
+    <div
+      className="rounded p-3 space-y-2 text-xs"
+      data-testid="disagreement-detail-block"
+      style={{
+        background: 'rgba(13, 16, 21, 0.45)',
+        border: '1px solid var(--sp-line)',
+      }}
+    >
+      <div className="grid gap-2 md:grid-cols-2">
+        <div data-testid="disagreement-poly-row">
+          <div className="sp-eyebrow">Polymarket</div>
+          <p style={{ color: 'var(--sp-bone)' }}>{String(p.polymarket_title ?? '—')}</p>
+          <p className="font-mono" style={{ color: 'var(--sp-mist)' }}>
+            Implied probability: {polyProb}
+          </p>
+        </div>
+        <div data-testid="disagreement-kalshi-row">
+          <div className="sp-eyebrow">Kalshi</div>
+          <p style={{ color: 'var(--sp-bone)' }}>{String(p.kalshi_title ?? '—')}</p>
+          <p className="font-mono" style={{ color: 'var(--sp-mist)' }}>
+            Implied probability: {kalshiProb}
+          </p>
+        </div>
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <span className={statusChipClass} data-testid="disagreement-status-chip">
+          {statusLabel}
+        </span>
+        <span
+          className="text-[10px] font-mono uppercase tracking-widest"
+          style={{ color: 'var(--sp-mist)' }}
+          data-testid="disagreement-pair-type"
+        >
+          Pair type · {pairType}
+        </span>
+        <span
+          className="text-[10px] font-mono"
+          style={{ color: 'var(--sp-mist)' }}
+          data-testid="disagreement-gap"
+        >
+          Cross-venue probability gap · {gap}
+        </span>
+      </div>
+      {reasons.length > 0 && (
+        <p
+          className="text-[10px]"
+          style={{ color: 'var(--sp-gold)' }}
+          data-testid="disagreement-mismatch-reasons"
+        >
+          Blocked by resolution mismatch — resolution terms may differ across venues:
+          <span className="ml-1 font-mono" style={{ color: 'var(--sp-bone)' }}>
+            {reasons.join('; ')}
+          </span>
+        </p>
+      )}
+      <p
+        className="text-[10px]"
+        style={{ color: 'var(--sp-mist)' }}
+        data-testid="disagreement-advisory-line"
+      >
+        Disagreement alert · Advisory only · Human review required · No
+        broker action authorised. Resolution terms may differ across
+        venues.
+      </p>
+    </div>
+  );
+}
+
 
 /**
  * Renders an honest, per-source empty state.  Uses /source-health/summary

@@ -272,7 +272,7 @@ def build_readiness_report(
     # preflight check FAIL) on FAIL where they belong.
     is_clean_db = _is_clean_initialised_db(path)
     report["db_clean_initialised"] = is_clean_db
-    if (
+    downgrade_applied = (
         is_clean_db
         and release["verdict"] == _release_gate.FAIL
         and compliance["overall"] != _compliance.FAIL
@@ -280,7 +280,12 @@ def build_readiness_report(
         and unrepaired == 0
         and bridge_idem.get("idempotent", True)
         and not release.get("failing_checks")
-    ):
+    )
+    # Always emit ``clean_db_downgrade_applied`` (True/False) so operators
+    # do not have to differentiate "missing key" from "downgrade did not
+    # apply".  The reason is only set when the downgrade actually fires.
+    report["release_gate"]["clean_db_downgrade_applied"] = bool(downgrade_applied)
+    if downgrade_applied:
         report["release_gate"]["clean_db_downgrade"] = True
         report["release_gate"]["clean_db_downgrade_reason"] = (
             "Release gate FAIL is only from a global runtime artefact "
@@ -290,7 +295,34 @@ def build_readiness_report(
         # The downgrade survives the verdict step below.
         release_for_verdict = _release_gate.WARN
     else:
+        report["release_gate"]["clean_db_downgrade"] = False
+        report["release_gate"]["clean_db_downgrade_reason"] = ""
         release_for_verdict = release["verdict"]
+
+    # Explicit hard-fail blocker enumeration so operators / CI scripts can
+    # branch on the *reason* not just the verdict.  This list mirrors
+    # ``promotion_block_reasons`` but is structured (one tag per blocker).
+    hard_fail_blockers: list[str] = []
+    if release["verdict"] == _release_gate.FAIL and not downgrade_applied:
+        hard_fail_blockers.append("release_gate_fail")
+    if compliance["overall"] == _compliance.FAIL:
+        hard_fail_blockers.append("compliance_fail")
+    if pollution_status == "FAIL":
+        hard_fail_blockers.append("fake_moltbook_pollution")
+    if unrepaired > 0:
+        hard_fail_blockers.append("unrepaired_closed_loss")
+    if not bridge_idem.get("idempotent", True):
+        hard_fail_blockers.append("bridge_not_idempotent")
+    # Look for the explicit "execution_gate_locked" preflight check; FAIL
+    # there means a persisted row has broker_api_called or ai_execution_count
+    # set — never demote.
+    exec_check = next(
+        (c for c in release["preflight"]["checks"]
+         if c["name"] == "execution_gate_locked"), None
+    )
+    if exec_check and exec_check["status"] == "FAIL":
+        hard_fail_blockers.append("execution_gate_unlocked_in_db")
+    report["hard_fail_blockers"] = hard_fail_blockers
 
     # --- readiness verdict + workflow score --------------------------------
     if release_for_verdict == _release_gate.FAIL or compliance["overall"] == _compliance.FAIL:

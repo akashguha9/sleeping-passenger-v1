@@ -104,47 +104,69 @@ def _coerce_float(value: Any) -> float | None:
 def extract_implied_probability(market: dict[str, Any]) -> float | None:
     """Best-effort recovery of a 0..1 implied probability for a market.
 
-    Looks at the conventional Kalshi / Polymarket fields in priority order:
+    Backwards-compatible wrapper around
+    :func:`extract_implied_probability_with_source` that returns only the
+    numeric probability.  Use the ``_with_source`` variant when you need
+    the provenance label too.
+    """
+    prob, _ = extract_implied_probability_with_source(market)
+    return prob
 
-      - ``implied_probability``        (canonical)
-      - ``yes_price`` / ``yes_ask``    (Kalshi 0..1 or 0..100)
-      - ``last_price``                 (Kalshi last traded)
-      - ``outcomePrices``              (Polymarket Gamma response)
-      - ``lastTradePrice``             (Polymarket fallback)
+
+def extract_implied_probability_with_source(
+    market: dict[str, Any],
+) -> tuple[float | None, str]:
+    """Recover ``(probability, source_field_name)`` for a market.
+
+    Field priority (first valid 0..1 wins):
+
+      1. ``implied_probability``   — canonical (must already be 0..1)
+      2. ``yes_price`` / ``yes_ask`` — Kalshi YES leg (0..1 or 0..100)
+      3. ``last_price``            — Kalshi last traded
+      4. ``outcomePrices`` / ``outcome_prices`` — Polymarket Gamma
+      5. ``lastTradePrice``        — Polymarket fallback
+
+    ``"missing"`` is returned for the source when no field yields a
+    valid probability — callers can branch on that to emit
+    ``PROBABILITY_MISSING`` cleanly.
     """
     if not isinstance(market, dict):
-        return None
+        return None, "missing"
+
     direct = _coerce_float(market.get("implied_probability"))
     if direct is not None and 0.0 <= direct <= 1.0:
-        return direct
+        return direct, "implied_probability"
 
     yes = _coerce_float(market.get("yes_price") or market.get("yes_ask"))
     if yes is not None:
         if 0.0 <= yes <= 1.0:
-            return yes
+            return yes, "yes_price"
         if 0.0 <= yes <= 100.0:
-            return yes / 100.0
+            return yes / 100.0, "yes_price"
 
     last = _coerce_float(market.get("last_price") or market.get("lastTradePrice"))
     if last is not None:
         if 0.0 <= last <= 1.0:
-            return last
+            return last, "last_price"
         if 0.0 <= last <= 100.0:
-            return last / 100.0
+            return last / 100.0, "last_price"
 
-    # Polymarket outcomePrices is typically a stringified list like '["0.62","0.38"]'.
-    outcome = market.get("outcomePrices")
-    if isinstance(outcome, str):
-        try:
-            outcome = json.loads(outcome)
-        except (ValueError, TypeError):
-            outcome = None
-    if isinstance(outcome, list) and outcome:
-        first = _coerce_float(outcome[0])
-        if first is not None and 0.0 <= first <= 1.0:
-            return first
+    # Polymarket outcomePrices is typically a stringified list like
+    # '["0.62","0.38"]' or a real list.  Try both ``outcomePrices`` and
+    # the snake_case alias.
+    for field in ("outcomePrices", "outcome_prices"):
+        outcome = market.get(field)
+        if isinstance(outcome, str):
+            try:
+                outcome = json.loads(outcome)
+            except (ValueError, TypeError):
+                outcome = None
+        if isinstance(outcome, list) and outcome:
+            first = _coerce_float(outcome[0])
+            if first is not None and 0.0 <= first <= 1.0:
+                return first, field
 
-    return None
+    return None, "missing"
 
 
 def _pair_id(poly: dict[str, Any], kalshi: dict[str, Any]) -> str:
@@ -182,8 +204,8 @@ def build_disagreement_alert(
     the probability gap reached the alert threshold.
     """
     classification = classify_pair_resolution(polymarket, kalshi)
-    poly_prob = extract_implied_probability(polymarket)
-    kalshi_prob = extract_implied_probability(kalshi)
+    poly_prob, poly_prob_source = extract_implied_probability_with_source(polymarket)
+    kalshi_prob, kalshi_prob_source = extract_implied_probability_with_source(kalshi)
 
     record_base = {
         "pair_id": _pair_id(polymarket, kalshi),
@@ -197,8 +219,14 @@ def build_disagreement_alert(
         "shared_entities": list(classification.shared_entities),
         "shared_thresholds": list(classification.shared_thresholds),
         "shared_months": list(classification.shared_months),
+        "pair_score_components": dict(classification.pair_score_components or {}),
+        "resolution_mismatch_reasons": list(
+            classification.resolution_mismatch_reasons or []
+        ),
         "polymarket_probability": poly_prob,
         "kalshi_probability": kalshi_prob,
+        "probability_source_polymarket": poly_prob_source,
+        "probability_source_kalshi": kalshi_prob_source,
         "disagreement_threshold": disagreement_threshold,
         "signal_class": CROSS_VENUE_SIGNAL_CLASS,
         "customer_label": CUSTOMER_LABEL,
@@ -506,6 +534,7 @@ __all__ = [
     "build_disagreement_alert",
     "scan_disagreements",
     "extract_implied_probability",
+    "extract_implied_probability_with_source",
     "run",
 ]
 

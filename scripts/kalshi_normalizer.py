@@ -307,46 +307,84 @@ _TICKER_PREFIX_MAP: tuple[tuple[str, str], ...] = (
 # whole-word match (word boundaries) — substring matches would be too
 # loose.  Keywords are deliberately narrow: a generic word like "market"
 # is NOT here (it would over-classify Finance).
+#
+# Anchor-discipline rule
+# ----------------------
+# Every keyword here must satisfy two conditions:
+#
+#   1. It NAMES a category-specific entity / event / instrument
+#      (e.g. "bitcoin", "wti crude", "nonfarm payroll", "nvidia").
+#   2. It is unambiguous on the seven approved Kalshi categories —
+#      a sports / culture / weather / entertainment market with this
+#      keyword in its title is essentially impossible.
+#
+# Generic words ("price", "market", "high", "low", "will", "event")
+# are forbidden.  Stock tickers that overlap with non-finance words
+# (e.g. ``KEY`` for KeyCorp) are forbidden.
 _KEYWORD_ANCHORS: tuple[tuple[str, str], ...] = (
-    # Elections
+    # ---- Elections -----------------------------------------------------
     ("presidential election", "Elections"),
     ("presidential primary", "Elections"),
     ("election", "Elections"),
     ("electoral college", "Elections"),
     ("primary election", "Elections"),
     ("ballot measure", "Elections"),
-    # Politics
+    ("senate race", "Elections"),
+    ("house race", "Elections"),
+    ("governor election", "Elections"),
+    ("gubernatorial", "Elections"),
+    # ---- Politics ------------------------------------------------------
     ("senator", "Politics"),
     ("congressional", "Politics"),
+    ("congress", "Politics"),
+    ("senate bill", "Politics"),
+    ("house vote", "Politics"),
     ("impeach", "Politics"),
     ("supreme court", "Politics"),
     ("scotus", "Politics"),
     ("white house", "Politics"),
     ("vice president", "Politics"),
     ("governor", "Politics"),
-    # Crypto
+    ("president approval", "Politics"),
+    ("government shutdown", "Politics"),
+    ("cabinet", "Politics"),
+    ("tariff", "Politics"),
+    ("sanctions", "Politics"),
+    ("nato", "Politics"),
+    ("budget bill", "Politics"),
+    # ---- Crypto --------------------------------------------------------
     ("bitcoin", "Crypto"),
     ("ethereum", "Crypto"),
     ("solana", "Crypto"),
     ("ether", "Crypto"),
     ("dogecoin", "Crypto"),
     ("cryptocurrency", "Crypto"),
-    # Commodities
+    ("stablecoin", "Crypto"),
+    ("tether", "Crypto"),
+    ("usdc", "Crypto"),
+    ("xrp", "Crypto"),
+    # ---- Commodities ---------------------------------------------------
     ("crude oil", "Commodities"),
     ("wti crude", "Commodities"),
     ("brent crude", "Commodities"),
     ("natural gas", "Commodities"),
+    ("gas price", "Commodities"),
     ("gold price", "Commodities"),
     ("silver price", "Commodities"),
     ("wheat futures", "Commodities"),
     ("corn futures", "Commodities"),
-    # Economics
+    ("soybean", "Commodities"),
+    ("soybeans", "Commodities"),
+    ("copper price", "Commodities"),
+    ("opec", "Commodities"),
+    # ---- Economics -----------------------------------------------------
     ("inflation rate", "Economics"),
     ("cpi report", "Economics"),
     ("core cpi", "Economics"),
     ("ppi report", "Economics"),
     ("unemployment rate", "Economics"),
     ("nonfarm payroll", "Economics"),
+    ("nonfarm payrolls", "Economics"),
     ("jobs report", "Economics"),
     ("recession", "Economics"),
     ("federal reserve", "Economics"),
@@ -356,23 +394,35 @@ _KEYWORD_ANCHORS: tuple[tuple[str, str], ...] = (
     ("interest rate", "Economics"),
     ("rate cut", "Economics"),
     ("rate hike", "Economics"),
-    ("treasury yield", "Finance"),
-    # Finance
+    ("gdp growth", "Economics"),
+    ("gdp print", "Economics"),
+    ("mortgage rate", "Economics"),
+    # ---- Finance -------------------------------------------------------
     ("s&p 500", "Finance"),
     ("nasdaq composite", "Finance"),
     ("dow jones", "Finance"),
     ("stock market", "Finance"),
     ("equity index", "Finance"),
-    # Tech & Science
+    ("treasury yield", "Finance"),
+    ("ipo", "Finance"),
+    ("etf", "Finance"),
+    ("treasury bond", "Finance"),
+    ("market cap", "Finance"),
+    # ---- Tech & Science ------------------------------------------------
     ("artificial intelligence", "Tech & Science"),
     ("openai", "Tech & Science"),
     ("gpt model", "Tech & Science"),
     ("semiconductor", "Tech & Science"),
     ("nvidia chip", "Tech & Science"),
+    ("nvidia", "Tech & Science"),
     ("starlink", "Tech & Science"),
     ("spacex", "Tech & Science"),
     ("space launch", "Tech & Science"),
     ("rocket launch", "Tech & Science"),
+    ("nasa", "Tech & Science"),
+    ("satellite launch", "Tech & Science"),
+    ("quantum computer", "Tech & Science"),
+    ("quantum computing", "Tech & Science"),
 )
 
 # Rejection anchors — title keywords that are SO strongly off-allowlist
@@ -381,11 +431,23 @@ _KEYWORD_ANCHORS: tuple[tuple[str, str], ...] = (
 # an extra safety belt; the allowlist gate already excludes unknown
 # categories, so this list need not be exhaustive.
 _REJECTION_KEYWORDS: tuple[str, ...] = (
+    # Sports
     "nba", "nfl", "mlb", "nhl", "fifa", "world cup", "premier league",
-    "super bowl", "world series", "olympics", "oscars", "grammy",
-    "emmy", "tony award", "billboard", "academy award", "hurricane",
-    "tornado", "wildfire", "snowstorm", "snowfall", "weather",
-    "celebrity", "kardashian", "taylor swift",
+    "super bowl", "world series", "olympics", "ncaa", "ncaaf", "ncaab",
+    "stanley cup", "ufc", "f1 race", "formula 1 race", "indycar",
+    "wimbledon", "us open tennis", "french open", "pga tour", "masters golf",
+    # Entertainment / awards / culture
+    "oscars", "grammy", "grammys", "emmy", "emmys", "tony award",
+    "billboard", "academy award", "box office", "movie release",
+    "album release", "tour dates", "concert tour",
+    # Celebrity / social-media drama
+    "celebrity", "kardashian", "taylor swift", "kanye", "drake feud",
+    "tiktok dance", "instagram drama",
+    # Weather (non-economic)
+    "hurricane", "tornado", "wildfire", "snowstorm", "snowfall", "weather",
+    "rainfall total", "blizzard",
+    # Lifestyle / gambling-ish entertainment
+    "reality tv", "bachelor finale", "survivor finale",
 )
 
 

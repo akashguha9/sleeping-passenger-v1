@@ -73,6 +73,18 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Use in-process mock fixtures instead of hitting the network.",
     )
+    p.add_argument(
+        "--show-rejected",
+        type=int,
+        default=0,
+        metavar="N",
+        help=(
+            "Include up to N rejected live markets in the report under "
+            "'rejected_diagnostics' (title, ticker, event_ticker, tags, "
+            "rules_excerpt, rejection reason).  Diagnostics are operator-only "
+            "and never persisted to canonical SQLite."
+        ),
+    )
     return p
 
 
@@ -85,6 +97,7 @@ def _build_report(
     write_mode: bool,
     is_mock: bool,
     event_lookup: dict[str, Any] | None = None,
+    show_rejected: int = 0,
 ) -> dict[str, Any]:
     from scripts.kalshi_normalizer import infer_kalshi_category
 
@@ -97,6 +110,7 @@ def _build_report(
     rejected_summary: dict[str, int] = Counter()
     rejection_reasons: dict[str, int] = Counter()
     rejected_sample_titles: list[str] = []
+    rejected_diagnostics: list[dict[str, Any]] = []
     for rec in raw_records:
         # First-pass: explicit category match.
         explicit = classify_kalshi_category(rec.get("category"), tags=rec.get("tags"))
@@ -114,6 +128,26 @@ def _build_report(
         title = str(rec.get("title") or "").strip()
         if title and len(rejected_sample_titles) < 5:
             rejected_sample_titles.append(title)
+        # Per-row diagnostics: operator-facing only, never persisted.
+        if show_rejected and len(rejected_diagnostics) < int(show_rejected):
+            rules_excerpt = str(
+                rec.get("rules_primary") or rec.get("rules") or ""
+            ).strip().replace("\n", " ")
+            if len(rules_excerpt) > 200:
+                rules_excerpt = rules_excerpt[:200] + "…"
+            rejected_diagnostics.append(
+                {
+                    "title": title,
+                    "subtitle": str(rec.get("subtitle") or "").strip(),
+                    "ticker": str(rec.get("ticker") or "").strip(),
+                    "event_ticker": str(rec.get("event_ticker") or "").strip(),
+                    "series_ticker": str(rec.get("series_ticker") or "").strip(),
+                    "tags": list(rec.get("tags") or []),
+                    "raw_category": explicit["raw_category"] or "",
+                    "rules_excerpt": rules_excerpt,
+                    "rejection_reason": reason,
+                }
+            )
 
     sample = [
         {
@@ -152,6 +186,7 @@ def _build_report(
         "rejected_categories": dict(rejected_summary),
         "rejected_category_reasons": dict(rejection_reasons),
         "rejected_sample_titles": rejected_sample_titles,
+        "rejected_diagnostics": rejected_diagnostics,
         "sample": sample,
         "read_only_contract": {
             "advisory_status": "ADVISORY_ONLY",
@@ -193,6 +228,12 @@ def _format_summary(report: dict[str, Any]) -> str:
     sample_lines = "\n".join(
         f"  - {t[:80]}" for t in rejected_titles
     ) or "  (none)"
+    diagnostics = report.get("rejected_diagnostics") or []
+    diagnostics_lines = "\n".join(
+        f"  - [{d.get('rejection_reason')}] {(d.get('title') or '')[:70]} "
+        f"(ticker={d.get('ticker') or '-'}, raw_cat={d.get('raw_category') or '-'})"
+        for d in diagnostics
+    )
     return "\n".join(
         [
             "Kalshi market-data adapter (read-only, advisory-only)",
@@ -214,6 +255,13 @@ def _format_summary(report: dict[str, Any]) -> str:
             reason_lines,
             "  rejected_sample_titles:",
             sample_lines,
+        ]
+        + (
+            ["  rejected_diagnostics (--show-rejected):", diagnostics_lines]
+            if diagnostics
+            else []
+        )
+        + [
             "  read-only contract: ADVISORY_ONLY | HUMAN_REVIEW_REQUIRED | "
             "execution_gate=LOCKED | broker_api_called=False | ai_execution_count=0",
         ]
@@ -301,6 +349,7 @@ def run(argv: list[str] | None = None) -> int:
         write_mode=args.write,
         is_mock=is_mock,
         event_lookup=event_lookup,
+        show_rejected=int(args.show_rejected or 0),
     )
 
     if args.json:

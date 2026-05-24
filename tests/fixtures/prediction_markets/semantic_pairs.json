@@ -1,0 +1,107 @@
+{
+  "_comment": [
+    "Operator-readable fixture of representative Polymarket × Kalshi candidate pairs.",
+    "Used by tests/test_prediction_market_semantic_pairing.py AND by the CLI flag:",
+    "  python scripts/prediction_market_disagreement_scanner.py \\",
+    "    --from-fixtures tests/fixtures/prediction_markets/semantic_pairs.json \\",
+    "    --dry-run --json",
+    "",
+    "The fixture is intentionally split into 'polymarket' and 'kalshi' arrays —",
+    "the scanner forms the cross-product itself.  Categories/probabilities match",
+    "the canonical advisory-only schemas; nothing here authorises execution."
+  ],
+  "polymarket": [
+    {
+      "event_id": "poly_btc_may_high",
+      "source": "polymarket",
+      "source_name": "polymarket",
+      "market_id": "poly-btc-may-high",
+      "title": "What price will Bitcoin hit in May?",
+      "category": "crypto",
+      "implied_probability": 0.62,
+      "semantic_text": "Title: What price will Bitcoin hit in May?\nRules: Resolves YES if BTC trades at or above $150k at any point in May.\nCategory: crypto"
+    },
+    {
+      "event_id": "poly_btc_may_close_100k",
+      "source": "polymarket",
+      "source_name": "polymarket",
+      "market_id": "poly-btc-may-close-100k",
+      "title": "Will Bitcoin close above $100k on May 31?",
+      "category": "crypto",
+      "implied_probability": 0.30,
+      "semantic_text": "Title: Will Bitcoin close above $100k on May 31?\nRules: Settles to the Coinbase daily close on May 31.\nCategory: crypto"
+    },
+    {
+      "event_id": "poly_fed_cut_june",
+      "source": "polymarket",
+      "source_name": "polymarket",
+      "market_id": "poly-fed-cut-june",
+      "title": "Will the Fed reduce rates at the June meeting?",
+      "category": "economy",
+      "implied_probability": 0.40,
+      "semantic_text": "Title: Will the Fed reduce rates at the June meeting?\nRules: Resolves YES on FOMC June statement reducing the target range.\nCategory: economy"
+    },
+    {
+      "event_id": "poly_oil_above_80",
+      "source": "polymarket",
+      "source_name": "polymarket",
+      "market_id": "poly-oil-above-80",
+      "title": "Will WTI crude close above $80 by end of June?",
+      "category": "commodities",
+      "implied_probability": 0.22,
+      "semantic_text": "Title: Will WTI crude close above $80 by end of June?\nRules: Settles to the WTI front-month NYMEX close on June 30.\nCategory: commodities"
+    }
+  ],
+  "kalshi": [
+    {
+      "event_id": "kalshi_btc_may_high",
+      "source": "kalshi",
+      "source_name": "kalshi",
+      "source_market_id": "BTCMAY-2026",
+      "title": "How high will Bitcoin get in May?",
+      "category": "Crypto",
+      "implied_probability": 0.54,
+      "semantic_text": "Title: How high will Bitcoin get in May?\nRules: Settles to the highest BTC/USD print on Coinbase between 2026-05-01 and 2026-05-31.\nCategory: Crypto"
+    },
+    {
+      "event_id": "kalshi_btc_may_close_150k",
+      "source": "kalshi",
+      "source_name": "kalshi",
+      "source_market_id": "BTCMAY-150K",
+      "title": "Will Bitcoin close above $150k on May 31?",
+      "category": "Crypto",
+      "implied_probability": 0.18,
+      "semantic_text": "Title: Will Bitcoin close above $150k on May 31?\nRules: Settles to BTC/USD close on Coinbase on 2026-05-31.\nCategory: Crypto"
+    },
+    {
+      "event_id": "kalshi_fed_cut_june",
+      "source": "kalshi",
+      "source_name": "kalshi",
+      "source_market_id": "FED-CUT-JUN-2026",
+      "title": "Will the Fed cut rates at the June 2026 meeting?",
+      "category": "Economics",
+      "implied_probability": 0.31,
+      "semantic_text": "Title: Will the Fed cut rates at the June 2026 meeting?\nRules: Resolves YES if the FOMC June 2026 statement reduces the target range.\nCategory: Economics"
+    },
+    {
+      "event_id": "kalshi_brent_above_80",
+      "source": "kalshi",
+      "source_name": "kalshi",
+      "source_market_id": "BRENT-JUN-2026",
+      "title": "Will Brent oil close above $80 by end of June 2026?",
+      "category": "Commodities",
+      "implied_probability": 0.27,
+      "semantic_text": "Title: Will Brent oil close above $80 by end of June 2026?\nRules: Settles to ICE Brent front-month close on June 30.\nCategory: Commodities"
+    },
+    {
+      "event_id": "kalshi_eth_5k",
+      "source": "kalshi",
+      "source_name": "kalshi",
+      "source_market_id": "ETH-5K-2026",
+      "title": "Will Ethereum hit $5k in 2026?",
+      "category": "Crypto",
+      "implied_probability": 0.45,
+      "semantic_text": "Title: Will Ethereum hit $5k in 2026?\nRules: Resolves YES if ETH/USD trades at or above $5,000 at any point in 2026.\nCategory: Crypto"
+    }
+  ]
+}

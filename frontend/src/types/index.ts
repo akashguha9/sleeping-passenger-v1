@@ -721,7 +721,20 @@ export interface DbStatusResponse {
   generated_at: string;
 }
 
-export type LiveSignalSource = 'polymarket' | 'kalshi' | 'gdelt' | 'sec_edgar' | 'newsapi' | 'event_registry' | 'etherscan' | 'grok_xai' | 'market_data' | 'india' | 'global_filings' | 'asia_disclosure';
+export type LiveSignalSource =
+  | 'polymarket'
+  | 'kalshi'
+  | 'prediction_market_disagreement'
+  | 'gdelt'
+  | 'sec_edgar'
+  | 'newsapi'
+  | 'event_registry'
+  | 'etherscan'
+  | 'grok_xai'
+  | 'market_data'
+  | 'india'
+  | 'global_filings'
+  | 'asia_disclosure';
 
 export interface LiveSignalRawPayload {
   event_id?: string;
@@ -826,6 +839,26 @@ export interface LiveSignalRawPayload {
   is_mock_fixture?: boolean;
   advisory_only?: boolean;
   execution_permission?: string;
+  // prediction_market_disagreement (cross-venue advisory alert)
+  pair_id?: string;
+  polymarket_event_id?: string;
+  kalshi_event_id?: string;
+  polymarket_title?: string;
+  kalshi_title?: string;
+  polymarket_probability?: number | null;
+  kalshi_probability?: number | null;
+  probability_gap?: number | null;
+  disagreement_threshold?: number;
+  semantic_similarity?: number;
+  pair_type?: string;
+  disagreement_triggered?: boolean;
+  signal_class?: string;
+  customer_label?: string;
+  resolution_mismatch_reasons?: string[];
+  pair_score_components?: Record<string, number>;
+  probability_source_polymarket?: string;
+  probability_source_kalshi?: string;
+  status?: string;
   [key: string]: unknown;
 }
 

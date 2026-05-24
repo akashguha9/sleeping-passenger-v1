@@ -67,6 +67,53 @@ _THRESHOLD_WORDS: tuple[str, ...] = (
     "close above", "close below",
 )
 
+# Resolution-style families.  A title that includes a "touch" verb
+# (``hit``, ``touch``, ``reach``, ``trade at``, ``anytime``, ``intramonth``)
+# resolves on intra-window contact and is NOT the same resolution as a
+# "close" verb (``close above``, ``settle``, ``end of`` <period>).
+_TOUCH_STYLE_VERBS: frozenset[str] = frozenset(
+    {
+        "hit", "touch", "touches", "reach", "reaches",
+        "trades", "trade", "intramonth", "anytime", "anywhere",
+        "any point",
+    }
+)
+_CLOSE_STYLE_VERBS: frozenset[str] = frozenset(
+    {
+        "close", "closes", "closing", "settle", "settles", "settled",
+        "end of", "year-end", "yearend", "endofmonth", "endofyear",
+        "month-end", "weekly close",
+    }
+)
+
+# Date-precision phrases.  ``before/by <date>`` resolves on any tick
+# before the date; ``on <date>`` resolves only on the named day.  Both
+# must agree for a clean alert.
+_BEFORE_DATE_PHRASES: frozenset[str] = frozenset(
+    {"before", "by", "prior to", "by end of", "before end of", "by year end"}
+)
+_ON_DATE_PHRASES: frozenset[str] = frozenset(
+    {"on ", "at exactly ", "exact date "}
+)
+
+# Direction families — above/below is NOT the same condition as reach/touch
+# even though both might fire on the same price level.
+_DIRECTION_ABOVE: frozenset[str] = frozenset(
+    {"above", "over", "exceed", "exceeds", "greater than", "higher than"}
+)
+_DIRECTION_BELOW: frozenset[str] = frozenset(
+    {"below", "under", "less than", "lower than"}
+)
+
+# Settlement-source markers (e.g. ``Coinbase``, ``CoinDesk``, ``CME``).
+# Pairs that name *different* sources should NOT be promoted to
+# SAME_EVENT_SAME_RESOLUTION even if everything else matches.
+_SETTLEMENT_SOURCE_TOKENS: tuple[str, ...] = (
+    "coinbase", "coindesk", "binance", "kraken", "bitstamp",
+    "cme", "ice", "nymex", "fomc statement", "bloomberg index",
+    "bls report", "treasury close", "yahoo finance",
+)
+
 # Lightweight English stopword set — keep small and deterministic.
 _STOPWORDS: frozenset[str] = frozenset(
     {
@@ -128,18 +175,25 @@ def entity_overlap(a: Any, b: Any) -> set[str]:
 def _extract_thresholds(text: Any) -> set[str]:
     """Extract numeric thresholds from a string.
 
-    Recognises dollar amounts ($100k, $1,000,000), bare numbers in price
-    contexts (e.g. 100k, 5%, 4.5), and percentage values.  Returns a set
-    of canonicalised threshold tokens (e.g. ``{"$100k"}``).
+    Recognises dollar amounts (``$100k``, ``$1,000,000``), percentages
+    (``5%``), and bare numbers that carry an unambiguous magnitude
+    suffix (``k``, ``m``, ``b``, ``bn``).  Date components (``01``,
+    ``05``, ``2026``, ``31``) and other bare integers are deliberately
+    NOT matched — they were a major false-mismatch source in the
+    pre-10/10 scanner.
     """
     if text is None:
         return set()
     raw = str(text).lower()
+    matches: list[str] = []
     # $-prefixed amounts.
-    matches = re.findall(r"\$\s?\d[\d,\.]*\s?(?:k|m|b|bn|million|billion)?", raw)
-    # Bare percentages and numbers.
+    matches += re.findall(r"\$\s?\d[\d,\.]*\s?(?:k|m|b|bn|million|billion)?", raw)
+    # Percentages.
     matches += re.findall(r"\b\d[\d,\.]*\s?%", raw)
-    matches += re.findall(r"\b\d{2,}[\d,\.]*\s?(?:k|m|b|bn)?", raw)
+    # Bare numbers with an unambiguous magnitude suffix (e.g. ``100k``,
+    # ``1.5m``).  The trailing suffix is required so a date component
+    # like ``2026`` or ``05`` can't be promoted to a threshold.
+    matches += re.findall(r"\b\d[\d,\.]*\s?(?:k|m|b|bn|million|billion)\b", raw)
     canonical: set[str] = set()
     for m in matches:
         c = re.sub(r"\s+", "", m)
@@ -165,6 +219,88 @@ def _extract_months(text: Any) -> set[str]:
         "may": "may",
     }
     return {canonical_map.get(m, m) for m in months}
+
+
+def _extract_years(text: Any) -> set[str]:
+    if text is None:
+        return set()
+    raw = str(text).lower()
+    return set(re.findall(r"\b(20\d{2})\b", raw))
+
+
+def _detect_resolution_style(text: Any) -> str | None:
+    """Return ``"touch"`` / ``"close"`` / ``None`` for a market text.
+
+    Mixed signals (text mentions both ``hit`` and ``close``) return ``None``
+    so the pairing layer treats the resolution as ambiguous rather than
+    forcing a wrong family.
+    """
+    if text is None:
+        return None
+    raw = str(text).lower()
+    touch_hit = any(re.search(rf"\b{re.escape(v)}\b", raw) for v in _TOUCH_STYLE_VERBS)
+    close_hit = any(re.search(rf"\b{re.escape(v)}\b", raw) for v in _CLOSE_STYLE_VERBS)
+    if touch_hit and close_hit:
+        return None
+    if touch_hit:
+        return "touch"
+    if close_hit:
+        return "close"
+    return None
+
+
+def _detect_date_precision(text: Any) -> str | None:
+    """Return ``"by"`` (range) / ``"on"`` (exact) / ``None``."""
+    if text is None:
+        return None
+    raw = str(text).lower()
+    by_hit = any(p in raw for p in _BEFORE_DATE_PHRASES)
+    on_hit = any(p in raw for p in _ON_DATE_PHRASES)
+    if by_hit and on_hit:
+        return None  # ambiguous
+    if by_hit:
+        return "by"
+    if on_hit:
+        return "on"
+    return None
+
+
+def _detect_direction(text: Any) -> str | None:
+    """Return ``"above"`` / ``"below"`` / ``None``."""
+    if text is None:
+        return None
+    raw = str(text).lower()
+    above_hit = any(w in raw for w in _DIRECTION_ABOVE)
+    below_hit = any(w in raw for w in _DIRECTION_BELOW)
+    if above_hit and below_hit:
+        return None
+    if above_hit:
+        return "above"
+    if below_hit:
+        return "below"
+    return None
+
+
+def _extract_settlement_sources(text: Any) -> set[str]:
+    """Whole-word match for settlement-source tokens.
+
+    Substring match would let ``"price"`` trigger ``"ice"`` and ``"yahoo"``
+    trigger ``"hoo"`` — both real false-positives seen during the 10/10
+    sprint.  We compile a word-boundary regex per token so the match
+    matches the spirit of the token list.
+    """
+    if text is None:
+        return set()
+    raw = str(text).lower()
+    out: set[str] = set()
+    for token in _SETTLEMENT_SOURCE_TOKENS:
+        # Single tokens like ``coinbase`` need \b boundaries.  Multi-word
+        # tokens like ``fomc statement`` need plain substring match
+        # (``\bfomc statement\b`` is fine since both ends are word chars).
+        pattern = r"\b" + re.escape(token) + r"\b"
+        if re.search(pattern, raw):
+            out.add(token)
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -207,7 +343,26 @@ def cosine_similarity(vec_a: list[float] | None, vec_b: list[float] | None) -> f
 
 @dataclass(slots=True)
 class PairClassification:
-    """Output of :func:`classify_pair_resolution`."""
+    """Output of :func:`classify_pair_resolution`.
+
+    ``pair_score_components`` exposes the per-axis scores that produced
+    the final classification.  Each component lives in ``[0, 1]`` and
+    has a fixed semantic meaning:
+
+      - ``text_score``        — jaccard token overlap between titles
+      - ``entity_score``      — recognised asset/entity overlap
+      - ``category_score``    — 1.0 when categories are compatible, 0.0 otherwise
+      - ``date_score``        — month/year overlap consistency
+      - ``threshold_score``   — numeric threshold agreement
+      - ``resolution_score``  — touch/close + above/below + before/on agreement
+      - ``embedding_score``   — cosine on the swappable embedding fn
+      - ``final_score``       — weighted blend used for sorting/ranking
+
+    ``resolution_mismatch_reasons`` lists the exact axes (threshold,
+    timing, touch-vs-close, settlement-source, entity, event-window,
+    direction) that downgraded the pair.  Empty when the resolution is
+    clean.
+    """
 
     pair_type: str
     semantic_similarity: float
@@ -216,6 +371,8 @@ class PairClassification:
     shared_thresholds: list[str]
     shared_months: list[str]
     reasons: list[str]
+    pair_score_components: dict[str, float] | None = None
+    resolution_mismatch_reasons: list[str] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -226,6 +383,8 @@ class PairClassification:
             "shared_thresholds": list(self.shared_thresholds),
             "shared_months": list(self.shared_months),
             "reasons": list(self.reasons),
+            "pair_score_components": dict(self.pair_score_components or {}),
+            "resolution_mismatch_reasons": list(self.resolution_mismatch_reasons or []),
         }
 
 
@@ -271,6 +430,57 @@ def _categories_compatible(a: dict[str, Any], b: dict[str, Any]) -> bool:
     return a_cat == b_cat
 
 
+def _component_scores(
+    *,
+    semantic: float,
+    emb_sim: float,
+    shared_entities: set[str],
+    poly_thresholds: set[str],
+    kalshi_thresholds: set[str],
+    shared_thresholds: set[str],
+    poly_months: set[str],
+    kalshi_months: set[str],
+    shared_months: set[str],
+    poly_years: set[str],
+    kalshi_years: set[str],
+    category_compatible: bool,
+    resolution_consistent: bool,
+) -> dict[str, float]:
+    """Compute the 0..1 component scores used by ``PairClassification``."""
+    text_score = float(max(0.0, min(1.0, semantic)))
+    entity_score = 1.0 if shared_entities else 0.0
+    category_score = 1.0 if category_compatible else 0.0
+    if poly_thresholds or kalshi_thresholds:
+        threshold_score = 1.0 if shared_thresholds else 0.0
+    else:
+        threshold_score = 0.5  # neither side named a number
+    months_agree = (not poly_months and not kalshi_months) or bool(shared_months)
+    years_agree = (not poly_years and not kalshi_years) or bool(poly_years & kalshi_years)
+    date_score = 1.0 if (months_agree and years_agree) else 0.0
+    resolution_score = 1.0 if resolution_consistent else 0.0
+    embedding_score = float(max(0.0, min(1.0, emb_sim)))
+    final_score = round(
+        0.32 * text_score
+        + 0.18 * entity_score
+        + 0.10 * category_score
+        + 0.08 * date_score
+        + 0.12 * threshold_score
+        + 0.12 * resolution_score
+        + 0.08 * embedding_score,
+        4,
+    )
+    return {
+        "text_score": round(text_score, 4),
+        "entity_score": round(entity_score, 4),
+        "category_score": round(category_score, 4),
+        "date_score": round(date_score, 4),
+        "threshold_score": round(threshold_score, 4),
+        "resolution_score": round(resolution_score, 4),
+        "embedding_score": round(embedding_score, 4),
+        "final_score": final_score,
+    }
+
+
 def classify_pair_resolution(
     polymarket: dict[str, Any],
     kalshi: dict[str, Any],
@@ -308,99 +518,132 @@ def classify_pair_resolution(
     poly_months = _extract_months(poly_text)
     kalshi_months = _extract_months(kalshi_text)
     shared_months = poly_months & kalshi_months
+    poly_years = _extract_years(poly_text)
+    kalshi_years = _extract_years(kalshi_text)
+
+    poly_style = _detect_resolution_style(poly_text)
+    kalshi_style = _detect_resolution_style(kalshi_text)
+    poly_date_precision = _detect_date_precision(poly_text)
+    kalshi_date_precision = _detect_date_precision(kalshi_text)
+    poly_direction = _detect_direction(poly_text)
+    kalshi_direction = _detect_direction(kalshi_text)
+    poly_settlement = _extract_settlement_sources(poly_text)
+    kalshi_settlement = _extract_settlement_sources(kalshi_text)
 
     emb_a = embedding_fn(poly_text)
     emb_b = embedding_fn(kalshi_text)
     emb_sim = cosine_similarity(emb_a, emb_b)
 
+    category_compatible = _categories_compatible(polymarket, kalshi)
     reasons: list[str] = []
+    mismatch_reasons: list[str] = []
 
-    if not _categories_compatible(polymarket, kalshi):
-        reasons.append("incompatible_category")
+    # Resolution-style mismatch detection — used both for the
+    # consistency flag (drives ``resolution_score``) and for the explicit
+    # ``resolution_mismatch_reasons`` block on every PairClassification.
+    if poly_style and kalshi_style and poly_style != kalshi_style:
+        mismatch_reasons.append(
+            f"resolution_style_mismatch:poly={poly_style}/kalshi={kalshi_style}"
+        )
+    if (
+        poly_date_precision
+        and kalshi_date_precision
+        and poly_date_precision != kalshi_date_precision
+    ):
+        mismatch_reasons.append(
+            f"date_precision_mismatch:poly={poly_date_precision}/kalshi={kalshi_date_precision}"
+        )
+    if (
+        poly_direction
+        and kalshi_direction
+        and poly_direction != kalshi_direction
+    ):
+        mismatch_reasons.append(
+            f"direction_mismatch:poly={poly_direction}/kalshi={kalshi_direction}"
+        )
+    if (
+        poly_settlement
+        and kalshi_settlement
+        and not (poly_settlement & kalshi_settlement)
+    ):
+        mismatch_reasons.append(
+            f"settlement_source_mismatch:poly={sorted(poly_settlement)}/"
+            f"kalshi={sorted(kalshi_settlement)}"
+        )
+    if poly_thresholds and kalshi_thresholds and not shared_thresholds:
+        mismatch_reasons.append(
+            f"threshold_mismatch:poly={sorted(poly_thresholds)}/"
+            f"kalshi={sorted(kalshi_thresholds)}"
+        )
+    if poly_months and kalshi_months and not shared_months:
+        mismatch_reasons.append(
+            f"window_mismatch:poly={sorted(poly_months)}/kalshi={sorted(kalshi_months)}"
+        )
+    if poly_years and kalshi_years and not (poly_years & kalshi_years):
+        mismatch_reasons.append(
+            f"year_mismatch:poly={sorted(poly_years)}/kalshi={sorted(kalshi_years)}"
+        )
+
+    resolution_consistent = not mismatch_reasons
+
+    components = _component_scores(
+        semantic=semantic,
+        emb_sim=emb_sim,
+        shared_entities=shared,
+        poly_thresholds=poly_thresholds,
+        kalshi_thresholds=kalshi_thresholds,
+        shared_thresholds=shared_thresholds,
+        poly_months=poly_months,
+        kalshi_months=kalshi_months,
+        shared_months=shared_months,
+        poly_years=poly_years,
+        kalshi_years=kalshi_years,
+        category_compatible=category_compatible,
+        resolution_consistent=resolution_consistent,
+    )
+
+    def _build(pair_type: str, extra_reason: str | None = None) -> PairClassification:
+        if extra_reason:
+            reasons.append(extra_reason)
         return PairClassification(
-            pair_type=FALSE_MATCH,
+            pair_type=pair_type,
             semantic_similarity=semantic,
             embedding_similarity=emb_sim,
             shared_entities=sorted(shared),
             shared_thresholds=sorted(shared_thresholds),
             shared_months=sorted(shared_months),
-            reasons=reasons,
+            reasons=list(reasons),
+            pair_score_components=components,
+            resolution_mismatch_reasons=list(mismatch_reasons),
         )
+
+    if not category_compatible:
+        return _build(FALSE_MATCH, "incompatible_category")
 
     if semantic < ambiguous_floor and emb_sim < ambiguous_floor and not shared:
-        reasons.append("low_semantic_overlap_no_shared_entity")
-        return PairClassification(
-            pair_type=FALSE_MATCH,
-            semantic_similarity=semantic,
-            embedding_similarity=emb_sim,
-            shared_entities=sorted(shared),
-            shared_thresholds=sorted(shared_thresholds),
-            shared_months=sorted(shared_months),
-            reasons=reasons,
-        )
+        return _build(FALSE_MATCH, "low_semantic_overlap_no_shared_entity")
 
     if not shared:
-        reasons.append("no_shared_asset_entity")
-        return PairClassification(
-            pair_type=AMBIGUOUS_MATCH if semantic >= semantic_threshold else SAME_THEME_DIFFERENT_EVENT,
-            semantic_similarity=semantic,
-            embedding_similarity=emb_sim,
-            shared_entities=sorted(shared),
-            shared_thresholds=sorted(shared_thresholds),
-            shared_months=sorted(shared_months),
-            reasons=reasons,
-        )
+        # No shared anchor — degrade.  Still note any resolution-axis
+        # mismatch the operator might want to see.
+        pair_type = AMBIGUOUS_MATCH if semantic >= semantic_threshold else SAME_THEME_DIFFERENT_EVENT
+        return _build(pair_type, "no_shared_asset_entity")
 
-    # Threshold disagreement → SAME_EVENT_DIFFERENT_THRESHOLD only if
-    # both sides explicitly named a number AND they do not overlap.
-    thresholds_disagree = (
-        poly_thresholds and kalshi_thresholds and not shared_thresholds
-    )
-    # Different month names in both titles disagree on window.
-    months_disagree = (
-        poly_months and kalshi_months and not shared_months
-    )
-
-    if thresholds_disagree or months_disagree:
-        reasons.append(
-            "threshold_or_window_mismatch"
-            f" (poly_thresholds={sorted(poly_thresholds)} "
-            f"kalshi_thresholds={sorted(kalshi_thresholds)} "
-            f"poly_months={sorted(poly_months)} "
-            f"kalshi_months={sorted(kalshi_months)})"
-        )
-        return PairClassification(
-            pair_type=SAME_EVENT_DIFFERENT_THRESHOLD,
-            semantic_similarity=semantic,
-            embedding_similarity=emb_sim,
-            shared_entities=sorted(shared),
-            shared_thresholds=sorted(shared_thresholds),
-            shared_months=sorted(shared_months),
-            reasons=reasons,
+    # We have a shared entity.  Any resolution-axis mismatch downgrades
+    # us to SAME_EVENT_DIFFERENT_THRESHOLD (the diagnostic-only bucket)
+    # so the scanner never raises a clean alert when threshold, timing,
+    # touch-vs-close, settlement source, direction, or event window
+    # disagree.  A large probability gap cannot bypass this guard.
+    if mismatch_reasons:
+        return _build(
+            SAME_EVENT_DIFFERENT_THRESHOLD,
+            "resolution_mismatch_blocks_clean_alert:" + ",".join(mismatch_reasons),
         )
 
     if semantic >= semantic_threshold:
-        reasons.append("strong_semantic_match")
-        return PairClassification(
-            pair_type=SAME_EVENT_SAME_RESOLUTION,
-            semantic_similarity=semantic,
-            embedding_similarity=emb_sim,
-            shared_entities=sorted(shared),
-            shared_thresholds=sorted(shared_thresholds),
-            shared_months=sorted(shared_months),
-            reasons=reasons,
-        )
+        return _build(SAME_EVENT_SAME_RESOLUTION, "strong_semantic_match")
 
-    reasons.append("shared_entity_but_below_semantic_threshold")
-    return PairClassification(
-        pair_type=AMBIGUOUS_MATCH,
-        semantic_similarity=semantic,
-        embedding_similarity=emb_sim,
-        shared_entities=sorted(shared),
-        shared_thresholds=sorted(shared_thresholds),
-        shared_months=sorted(shared_months),
-        reasons=reasons,
-    )
+    return _build(AMBIGUOUS_MATCH, "shared_entity_but_below_semantic_threshold")
 
 
 # ---------------------------------------------------------------------------
@@ -425,6 +668,7 @@ __all__ = [
     "AMBIGUOUS_MATCH",
     "FALSE_MATCH",
     "CLASS_LABELS",
+    "EmbeddingFn",
     "PairClassification",
     "jaccard_similarity",
     "entity_overlap",

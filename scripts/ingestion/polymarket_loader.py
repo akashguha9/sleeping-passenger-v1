@@ -9,12 +9,120 @@ Strategy for domain-relevant market retrieval:
 2. Fetch multiple pages of the default active markets listing for additional coverage
 3. Deduplicate by market_id
 4. Apply strict domain gate via classify_market_domain() — blocks sports/entertainment/meme
+5. Normalize a 0..1 ``implied_probability`` from outcomePrices / yes_price /
+   lastTradePrice / bestBid+bestAsk so the cross-venue disagreement scanner
+   does not have to re-derive it at scan time.  The extraction logic is
+   exported as :func:`extract_polymarket_implied_probability` so it can be
+   reused (and tested) without instantiating the loader.
 """
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from scripts.ingestion.base_loader import BaseSourceLoader, LoaderResult, SkipLoader
+
+
+# ---------------------------------------------------------------------------
+# Implied-probability extraction (kept in loader so ingestion is the
+# single source of truth; the scanner imports it for parity).
+# ---------------------------------------------------------------------------
+
+
+def _coerce_float(value: Any) -> float | None:
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    text = str(value).strip()
+    if not text:
+        return None
+    try:
+        return float(text)
+    except ValueError:
+        return None
+
+
+def _normalise_probability(value: float | None) -> float | None:
+    """Coerce a raw price into a 0..1 probability.
+
+    Polymarket sometimes ships YES prices in cents (0..100) or as 0..1
+    decimals — we accept both shapes and clamp.  Probabilities > 1 or
+    < 0 are dropped (not silently clamped) so callers can see the gap.
+    """
+    if value is None:
+        return None
+    if 0.0 <= value <= 1.0:
+        return value
+    if 1.0 < value <= 100.0:
+        return value / 100.0
+    return None
+
+
+def extract_polymarket_implied_probability(market: dict[str, Any]) -> tuple[float | None, str]:
+    """Best-effort YES-side implied probability for a Polymarket market.
+
+    Returns ``(probability, source_field_name)`` so downstream consumers
+    can audit where the number came from.  ``probability`` is None when
+    no field yields a valid 0..1 value.
+
+    Field priority (each entry is checked once; first valid wins):
+
+    1. ``implied_probability``           — already-normalised (canonical)
+    2. ``outcomePrices``                  — Gamma list / JSON-string list
+    3. ``outcome_prices``                 — alternate snake-case field
+    4. ``yes_price``                      — explicit YES leg
+    5. ``lastTradePrice``                 — Polymarket fallback
+    6. ``bestAsk`` + ``bestBid`` midpoint — order-book midpoint as last
+       resort; only when both legs are present and the spread is sane.
+    """
+    if not isinstance(market, dict):
+        return None, ""
+
+    # 1. Canonical.  The ``implied_probability`` field is contract-defined
+    #    as a 0..1 decimal — anything outside that range is rejected
+    #    (NOT silently re-interpreted as cents) so a corrupt upstream
+    #    record cannot fake a probability via the canonical path.
+    direct = _coerce_float(market.get("implied_probability"))
+    if direct is not None and 0.0 <= direct <= 1.0:
+        return direct, "implied_probability"
+
+    # 2. outcomePrices (Gamma).
+    for field in ("outcomePrices", "outcome_prices"):
+        raw = market.get(field)
+        if isinstance(raw, str):
+            try:
+                raw = json.loads(raw)
+            except (ValueError, TypeError):
+                raw = None
+        if isinstance(raw, list) and raw:
+            yes_candidate = _coerce_float(raw[0])
+            norm = _normalise_probability(yes_candidate)
+            if norm is not None:
+                return norm, field
+
+    # 3. Explicit YES leg.
+    yes = _coerce_float(market.get("yes_price"))
+    norm = _normalise_probability(yes)
+    if norm is not None:
+        return norm, "yes_price"
+
+    # 4. lastTradePrice (Polymarket public).
+    last = _coerce_float(market.get("lastTradePrice"))
+    norm = _normalise_probability(last)
+    if norm is not None:
+        return norm, "lastTradePrice"
+
+    # 5. Midpoint of bestBid / bestAsk when both are present.
+    bid = _coerce_float(market.get("bestBid"))
+    ask = _coerce_float(market.get("bestAsk"))
+    if bid is not None and ask is not None and ask >= bid >= 0:
+        mid = (bid + ask) / 2.0
+        norm = _normalise_probability(mid)
+        if norm is not None:
+            return norm, "bestBid_bestAsk_midpoint"
+
+    return None, ""
 
 _GAMMA_BASE = "https://gamma-api.polymarket.com"
 _DATA_BASE = "https://data-api.polymarket.com"
@@ -88,9 +196,11 @@ class PolymarketLoader(BaseSourceLoader):
                 ]
             else:
                 tags = []
+            implied, prob_source = extract_polymarket_implied_probability(m)
             rec: dict[str, Any] = {
                 "market_id": str(m.get("id", "")),
                 "question": str(m.get("question", "")),
+                "title": str(m.get("question", "") or m.get("title", "") or ""),
                 "volume": m.get("volume"),
                 "liquidity": m.get("liquidity"),
                 "end_date": m.get("endDate"),
@@ -99,6 +209,8 @@ class PolymarketLoader(BaseSourceLoader):
                 "tags": tags,
                 "description": str(m.get("description", "") or ""),
                 "source": "polymarket",
+                "implied_probability": implied,
+                "implied_probability_source": prob_source or "missing",
             }
             self._stamp_record(rec)
             records.append(rec)

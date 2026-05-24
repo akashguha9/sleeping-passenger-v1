@@ -70,6 +70,27 @@ preference.
 - [ ] The Moltbook does not contain personally identifying notes that
   shouldn't leave the operator's machine.
 
+## 5b. Commit hygiene — do NOT `git add .` blindly
+
+This repo intentionally keeps several operator-private artefacts out of
+git.  They live in the working tree but are gitignored and must never be
+committed:
+
+- `Prompt_*.txt`  — local LLM prompt drafts (canonical prompts live under `prompts/`).
+- `data/manual_trades_by_date.json`  — operator's real position thesis text.
+- anything under `runtime/`, `backup_local_state/`, `private_backups/`,
+  `moltbook/*raw_response*`, or `moltbook/*report_*.txt`.
+
+Rules of thumb:
+
+- Stage explicit paths (`git add scripts/x.py tests/test_x.py`), not `git add .`.
+- Run `python -m pytest tests/test_repo_hygiene.py -q` before pushing — it
+  fails closed if an operator-private pattern has been re-staged into the
+  tracked file list or if a gitignore rule has been silently removed.
+- If you ever see `Prompt_*.txt` or `data/manual_trades_by_date.json` in
+  `git status` as **staged**, `git restore --staged <path>` and audit
+  before committing.
+
 ## 6. Reset / clean state
 
 To reset the local DB (destructive):
