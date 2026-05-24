@@ -15,6 +15,7 @@ from scripts.kalshi_normalizer import (
     KALSHI_CATEGORY_MAP,
     build_kalshi_semantic_text,
     classify_kalshi_category,
+    infer_kalshi_category,
     is_kalshi_source,
     kalshi_safety_stamps,
     normalize_kalshi_market,
@@ -229,7 +230,37 @@ def test_normalize_rejects_sports():
 
 
 def test_normalize_rejects_missing_category():
-    assert normalize_kalshi_market(_btc_payload(category=None, tags=[])) is None
+    # Live enrichment can rescue markets when the title/ticker carry an
+    # unambiguous category signal — but a market with NO usable metadata
+    # (no category, no tags, no inferable title, no recognised ticker
+    # prefix, no rules text) must still be rejected.
+    inert = _btc_payload(
+        category=None,
+        tags=[],
+        title="Market question",
+        description="",
+        rules="",
+        source_market_id="MISC-001",
+    )
+    assert normalize_kalshi_market(inert) is None
+
+
+def test_normalize_rescues_missing_category_via_title_keyword():
+    """Live enrichment: a Bitcoin-titled market with no category field
+    should be rescued into Crypto via the title keyword anchor."""
+    rec = normalize_kalshi_market(
+        _btc_payload(category=None, tags=[]), fetched_at_utc="2026-05-24T00:00:00Z"
+    )
+    assert rec is not None
+    assert rec["category"] == "Crypto"
+    assert rec["category_source"] == "inferred"
+    assert "keyword_anchor:bitcoin" in rec["category_reason"] or rec[
+        "category_reason"
+    ].startswith("ticker_prefix:BTC")
+    # Safety still intact.
+    assert rec["execution_permission"] == "ADVISORY_ONLY"
+    assert rec["broker_api_called"] is False
+    assert rec["ai_execution_count"] == 0
 
 
 def test_normalize_rejects_non_kalshi_source():
@@ -261,3 +292,114 @@ def test_stable_event_id_is_deterministic():
     b = stable_kalshi_event_id("BTCMAY-2026")
     assert a == b
     assert a.startswith("kalshi_")
+
+
+# ---------------------------------------------------------------------------
+# infer_kalshi_category — evidence-based enrichment
+# ---------------------------------------------------------------------------
+
+
+class TestInferKalshiCategory:
+    def test_explicit_category_wins(self):
+        cat, reason = infer_kalshi_category(
+            {"category": "Economics", "title": "Will the Fed cut rates?"}
+        )
+        assert cat == "Economics"
+        assert reason == "explicit_category"
+
+    def test_explicit_rejected_category_cannot_be_rescued(self):
+        # An explicit "Sports" must hard-reject even when the title looks
+        # like Crypto.  We never let title inference override an upstream
+        # rejection label.
+        cat, reason = infer_kalshi_category(
+            {"category": "Sports", "title": "How high will Bitcoin get in May?"}
+        )
+        assert cat is None
+        assert reason.startswith("explicit_rejected_category:")
+
+    def test_event_lookup_supplies_category(self):
+        cat, reason = infer_kalshi_category(
+            {"event_ticker": "FED-2026-JUN", "title": "June meeting"},
+            event_lookup={
+                "FED-2026-JUN": {"event_ticker": "FED-2026-JUN", "category": "Economics"}
+            },
+        )
+        assert cat == "Economics"
+        assert reason == "event_payload_category"
+
+    def test_tag_match_when_category_missing(self):
+        cat, reason = infer_kalshi_category(
+            {"category": None, "tags": ["crypto"], "title": "Some token thing"}
+        )
+        assert cat == "Crypto"
+        assert reason.startswith("tag_match:")
+
+    def test_ticker_prefix_btc(self):
+        cat, reason = infer_kalshi_category(
+            {"ticker": "BTCMAY-2026", "title": "Random title"}
+        )
+        assert cat == "Crypto"
+        assert reason == "ticker_prefix:BTC"
+
+    def test_ticker_prefix_pres_for_elections(self):
+        cat, reason = infer_kalshi_category(
+            {"ticker": "PRES-2028-D", "title": "Random title"}
+        )
+        assert cat == "Elections"
+        assert reason == "ticker_prefix:PRES"
+
+    def test_keyword_anchor_federal_reserve(self):
+        cat, reason = infer_kalshi_category(
+            {"ticker": "MISC-001", "title": "Will the federal reserve cut rates?"}
+        )
+        assert cat == "Economics"
+        assert reason.startswith("keyword_anchor:federal reserve")
+
+    def test_inert_market_rejected(self):
+        cat, reason = infer_kalshi_category(
+            {"ticker": "MISC-001", "title": "Market question"}
+        )
+        assert cat is None
+        assert reason in ("missing_category", "no_confident_match")
+
+    def test_rejection_keyword_blocks_positive_anchor(self):
+        # A title with a rejection anchor (NBA) must hard-reject even if
+        # another weaker positive anchor would otherwise fire.
+        cat, reason = infer_kalshi_category(
+            {"ticker": "NBA-FINALS-2026",
+             "title": "Will the Lakers win the NBA Finals?"}
+        )
+        assert cat is None
+        assert reason.startswith("rejected_keyword:nba")
+
+
+class TestNormalizerCarriesEnrichmentDiagnostics:
+    def test_explicit_category_source_is_tagged(self):
+        rec = normalize_kalshi_market(
+            {
+                "source": "Kalshi",
+                "source_market_id": "BTCMAY-2026",
+                "title": "How high will Bitcoin get in May?",
+                "category": "Crypto",
+            },
+            fetched_at_utc="2026-05-24T00:00:00Z",
+        )
+        assert rec is not None
+        assert rec["category_source"] == "explicit_category"
+        assert rec["category_reason"].startswith("matched approved category")
+
+    def test_inferred_category_source_is_tagged(self):
+        rec = normalize_kalshi_market(
+            {
+                "source": "Kalshi",
+                "source_market_id": "BTCMAY-2026",
+                "title": "How high will Bitcoin get in May?",
+                "category": None,
+            },
+            fetched_at_utc="2026-05-24T00:00:00Z",
+        )
+        assert rec is not None
+        assert rec["category_source"] == "inferred"
+        assert rec["category_reason"].startswith(
+            ("keyword_anchor:", "ticker_prefix:", "tag_match:", "event_payload_category")
+        )

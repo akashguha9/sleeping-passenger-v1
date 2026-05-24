@@ -71,6 +71,68 @@ def _default_db_path() -> Path:
         return Path(__file__).resolve().parents[1] / "runtime" / "mvp_local.db"
 
 
+def _is_clean_initialised_db(db_path: Path) -> bool:
+    """True when the DB has been initialised but holds NO operator data.
+
+    "Clean" means: the schema exists (the file is a valid SQLite DB the
+    persistence layer accepts) AND every operator-state table is empty:
+
+      - signal_events
+      - manual_trades
+      - moltbook
+      - reconciliations
+
+    A clean DB has no real operational state to risk, so a global
+    runtime artefact like the stress-probe summary (which lives in
+    ``runtime/cockpit_stress_probe/last_run.json``, independent of any
+    specific DB) should not by itself flip readiness to FAIL.  Compliance
+    failures, fake pollution, and unrepaired losses still FAIL.
+    """
+    import sqlite3
+
+    try:
+        if not Path(db_path).exists():
+            return False
+    except Exception:  # pragma: no cover - defensive
+        return False
+    try:
+        conn = sqlite3.connect(str(db_path))
+    except Exception:  # pragma: no cover - defensive
+        return False
+    try:
+        cur = conn.cursor()
+        existing_tables = {
+            row[0]
+            for row in cur.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
+        }
+        # All four canonical operator-state tables must exist (proves
+        # init_schema was run).  If any is missing the DB is not "clean
+        # initialised" — it is broken/partial, and we let the normal
+        # release gate verdict stand.
+        required = {
+            "signal_events",
+            "manual_trades",
+            "moltbook_entries",
+            "reconciliation_results",
+        }
+        if not required.issubset(existing_tables):
+            return False
+        for table in required:
+            row = cur.execute(f"SELECT COUNT(*) FROM {table}").fetchone()
+            if row and row[0] and int(row[0]) > 0:
+                return False
+        return True
+    except Exception:  # pragma: no cover - defensive
+        return False
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
 def _bridge_idempotent(db_path: Path) -> dict[str, Any]:
     """Prove the loss→Moltbook bridge is idempotent via two dry-runs."""
     try:
@@ -198,10 +260,42 @@ def build_readiness_report(
         actions.append("No blocking risk detected — human review still required before acting.")
     report["next_actions"] = actions
 
+    # --- clean-DB demotion --------------------------------------------------
+    # A freshly-initialised DB with zero operator-state rows has no real
+    # operational risk to certify against.  In that state a release-gate
+    # FAIL that originates only from a global, DB-independent artefact
+    # (the stress-probe summary file under runtime/cockpit_stress_probe/)
+    # should not cascade into a hard readiness FAIL — there is nothing
+    # to protect and the operator still needs an actionable next step.
+    # We demote to WARN, surface why, and leave the real failure modes
+    # (compliance FAIL, fake pollution, unrepaired closed losses,
+    # preflight check FAIL) on FAIL where they belong.
+    is_clean_db = _is_clean_initialised_db(path)
+    report["db_clean_initialised"] = is_clean_db
+    if (
+        is_clean_db
+        and release["verdict"] == _release_gate.FAIL
+        and compliance["overall"] != _compliance.FAIL
+        and pollution_status != "FAIL"
+        and unrepaired == 0
+        and bridge_idem.get("idempotent", True)
+        and not release.get("failing_checks")
+    ):
+        report["release_gate"]["clean_db_downgrade"] = True
+        report["release_gate"]["clean_db_downgrade_reason"] = (
+            "Release gate FAIL is only from a global runtime artefact "
+            "(stress-probe summary); the DB is freshly initialised with "
+            "zero operator data, so readiness is downgraded to WARN."
+        )
+        # The downgrade survives the verdict step below.
+        release_for_verdict = _release_gate.WARN
+    else:
+        release_for_verdict = release["verdict"]
+
     # --- readiness verdict + workflow score --------------------------------
-    if release["verdict"] == _release_gate.FAIL or compliance["overall"] == _compliance.FAIL:
+    if release_for_verdict == _release_gate.FAIL or compliance["overall"] == _compliance.FAIL:
         readiness = "FAIL"
-    elif no_new_risk or release["verdict"] == _release_gate.WARN \
+    elif no_new_risk or release_for_verdict == _release_gate.WARN \
             or compliance["overall"] == _compliance.WARN:
         readiness = "WARN"
     else:

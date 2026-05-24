@@ -144,6 +144,13 @@ APPROVED_DOMAINS: tuple[str, ...] = (
     # allowlist + advisory-only signal normalizer.  Read-only end-to-end; no
     # trading endpoints, no auth, no order placement, no broker calls.
     "kalshi",           # kalshi_normalizer.py / kalshi_market_data_adapter.py / kalshi_runner.py
+    # Cross-venue prediction-market sprint — advisory-only information-fracture
+    # detector across Polymarket × Kalshi.  Semantic pairing + disagreement
+    # scanner.  No execution, no broker calls, no order placement, no
+    # arbitrage/buy/sell language.  Persistence reuses signal_events under a
+    # distinct source_name="prediction_market_disagreement"; no new mutation
+    # table; JSONL is not made canonical.
+    "prediction_market",  # prediction_market_semantic_pairing.py / prediction_market_disagreement_scanner.py
 )
 
 # Explicit allowlist for individual files / directories whose name does

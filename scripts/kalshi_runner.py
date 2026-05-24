@@ -137,7 +137,10 @@ def run_kalshi_ingest(
 
     raw_records = loader_result.records
     result.fetched_count = len(raw_records)
-    normalized = normalize_kalshi_records(raw_records, fetched_at_utc=ts)
+    event_lookup = getattr(loader, "last_event_lookup", None) or {}
+    normalized = normalize_kalshi_records(
+        raw_records, fetched_at_utc=ts, event_lookup=event_lookup
+    )
     result.accepted_count = len(normalized)
     result.rejected_count = result.fetched_count - result.accepted_count
     result.is_mock_run = any(rec.get("is_mock_fixture") for rec in raw_records)

@@ -98,3 +98,36 @@ def test_loss_bridge_idempotency_proven_not_hardcoded(clean_db):
 def test_cli_main_returns_nonzero_on_fail_closed(tmp_path, capsys):
     rc = orr.main(["--db-path", str(tmp_path / "nope.db")])
     assert rc == 1
+
+
+def test_clean_db_demotes_stress_probe_fail_to_warn(clean_db):
+    """A freshly-initialised DB with zero operator rows must not be
+    forced into FAIL by a global runtime artefact (stress-probe summary
+    file).  The demotion only fires when there is no operational risk —
+    no fake pollution, no unrepaired losses, no compliance failure."""
+    report = orr.build_readiness_report(clean_db)
+    assert report["db_clean_initialised"] is True
+    # When release gate FAIL is purely stress-probe-driven, the report
+    # should record the downgrade reasoning explicitly.
+    rg = report["release_gate"]
+    if rg["verdict"] == "FAIL":
+        # The clean-DB demotion kicked in.
+        assert rg.get("clean_db_downgrade") is True
+        assert "stress-probe summary" in rg.get("clean_db_downgrade_reason", "")
+    assert report["readiness"] in ("READY", "WARN")
+
+
+def test_clean_db_demotion_does_not_mask_fake_pollution(clean_db):
+    """Even on an otherwise-clean DB, fake Moltbook pollution still
+    forces a hard FAIL — the demotion must never weaken pollution safety."""
+    persistence.insert_moltbook_entry(
+        "MB_FAKE", "FABRIC_SPY_001", "SPY", "Persistence above 0.8", "ai",
+        "reflect", "No trade", "", "outcome", "trade_loss", "lesson",
+        "", "", "", "2026-05-21T00:00:00+00:00", db_path=clean_db,
+    )
+    report = orr.build_readiness_report(clean_db)
+    assert report["readiness"] == "FAIL"
+    # The DB is no longer "clean" because moltbook_entries now has a row.
+    assert report["db_clean_initialised"] is False
+    # And the clean-db downgrade DID NOT fire.
+    assert not report["release_gate"].get("clean_db_downgrade")

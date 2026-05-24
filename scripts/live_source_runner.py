@@ -238,7 +238,11 @@ def _normalize_sec_record(rec: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _normalize_kalshi_record(rec: dict[str, Any]) -> dict[str, Any] | None:
+def _normalize_kalshi_record(
+    rec: dict[str, Any],
+    *,
+    event_lookup: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
     """Normalize a raw Kalshi market record.
 
     Returns None when the market is rejected by the Kalshi category
@@ -248,7 +252,9 @@ def _normalize_kalshi_record(rec: dict[str, Any]) -> dict[str, Any] | None:
     stamps (advisory_status=ADVISORY_ONLY, execution_gate=LOCKED,
     broker_api_called=False, ai_execution_count=0).
     """
-    normalized = normalize_kalshi_market(rec, fetched_at_utc=utc_timestamp())
+    normalized = normalize_kalshi_market(
+        rec, fetched_at_utc=utc_timestamp(), event_lookup=event_lookup
+    )
     if normalized is None:
         return None
     # Project-wide event_id key already set by the normalizer.  Defensive
@@ -305,24 +311,41 @@ def _persist_events(
     source_name: str,
     fetched_at: str,
 ) -> int:
-    """Persist normalized events to SQLite. Returns count of newly inserted rows."""
+    """Persist normalized events to SQLite. Returns count of newly inserted rows.
+
+    ``persistence.DB_PATH`` is resolved at call time and threaded through
+    ``insert_signal_event`` explicitly.  Python's default-argument binding
+    captures ``DB_PATH`` at function-definition time inside persistence,
+    so without an explicit pass-through here tests that monkeypatch
+    ``persistence.DB_PATH`` (including the autouse runtime-isolation
+    fixture in conftest.py) would silently leak writes back into the
+    operator's real ``runtime/mvp_local.db``.  ``get_signal_events`` was
+    already fixed for the same reason — this mirrors that fix on the
+    write side.
+    """
     try:
         try:
+            from scripts import persistence as _persistence
             from scripts.persistence import insert_signal_event
         except ModuleNotFoundError:
+            import persistence as _persistence  # type: ignore[no-redef]
             from persistence import insert_signal_event  # type: ignore[no-redef]
     except Exception:
         return 0
 
+    target_db = getattr(_persistence, "DB_PATH", None)
     count = 0
     for ev in events:
         try:
-            inserted = insert_signal_event(
-                event_id=ev["event_id"],
-                source_name=source_name,
-                raw_payload=ev,
-                fetched_at=fetched_at,
-            )
+            kwargs: dict[str, Any] = {
+                "event_id": ev["event_id"],
+                "source_name": source_name,
+                "raw_payload": ev,
+                "fetched_at": fetched_at,
+            }
+            if target_db is not None:
+                kwargs["db_path"] = target_db
+            inserted = insert_signal_event(**kwargs)
             if inserted:
                 count += 1
         except Exception:
@@ -510,7 +533,14 @@ def run_phase1(
             )
         else:
             raw_count = len(loader_result.records)
-            normalized = [normalizer(rec) for rec in loader_result.records]
+            if source_name == "kalshi":
+                ev_lookup = getattr(loader, "last_event_lookup", None) or {}
+                normalized = [
+                    normalizer(rec, event_lookup=ev_lookup)
+                    for rec in loader_result.records
+                ]
+            else:
+                normalized = [normalizer(rec) for rec in loader_result.records]
             # Filter out None (domain-rejected) records — only applies to Polymarket
             events = [e for e in normalized if e is not None]
             rejected_count = raw_count - len(events)

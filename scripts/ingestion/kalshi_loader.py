@@ -197,12 +197,16 @@ class KalshiLoader(BaseSourceLoader):
             if use_mock_fixtures is not None
             else env_mock in {"1", "true", "TRUE", "yes"}
         )
+        # Populated by ``fetch()`` so callers can pass the lookup into
+        # ``normalize_kalshi_records`` without re-hitting /events.
+        self.last_event_lookup: dict[str, dict[str, Any]] = {}
 
     # ------------------------------------------------------------------
     # Public fetch entry point
     # ------------------------------------------------------------------
 
     def fetch(self) -> LoaderResult:
+        self.last_event_lookup = {}
         if self._use_mock:
             return self._fetch_mock()
 
@@ -232,6 +236,7 @@ class KalshiLoader(BaseSourceLoader):
         except Exception:
             # Event enrichment is purely additive; never fail the run.
             events_by_ticker = {}
+        self.last_event_lookup = events_by_ticker
 
         records: list[dict[str, Any]] = []
         for market in markets_raw:
@@ -393,6 +398,9 @@ class KalshiLoader(BaseSourceLoader):
             "close_time": market.get("close_time") or market.get("expiration_time"),
             "market_url": market.get("market_url"),
             "event_ticker": market.get("event_ticker"),
+            "event_title": str((event or {}).get("title") or "").strip(),
+            "event_sub_title": str((event or {}).get("sub_title") or "").strip(),
+            "series_ticker": str(market.get("series_ticker") or (event or {}).get("series_ticker") or "").strip(),
         }
 
 
@@ -405,16 +413,23 @@ def normalize_kalshi_records(
     records: list[dict[str, Any]],
     *,
     fetched_at_utc: str,
+    event_lookup: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     """Normalize loader records, dropping disallowed categories.
 
     Returns only payloads that pass ``normalize_kalshi_market`` (i.e. that
     survive the category allowlist).  Rejected rows return ``None`` from
     the normalizer and are excluded here.
+
+    ``event_lookup`` (optional) is the ``{event_ticker: event_payload}``
+    map the loader gathered from ``/events``; it lets the inference layer
+    recover the category for live markets that ship without one.
     """
     out: list[dict[str, Any]] = []
     for rec in records or []:
-        normalized = normalize_kalshi_market(rec, fetched_at_utc=fetched_at_utc)
+        normalized = normalize_kalshi_market(
+            rec, fetched_at_utc=fetched_at_utc, event_lookup=event_lookup
+        )
         if normalized is None:
             continue
         out.append(normalized)

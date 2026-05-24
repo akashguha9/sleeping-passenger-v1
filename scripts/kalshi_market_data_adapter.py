@@ -84,24 +84,43 @@ def _build_report(
     persisted: int,
     write_mode: bool,
     is_mock: bool,
+    event_lookup: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    from scripts.kalshi_normalizer import infer_kalshi_category
+
     accepted_categories = Counter(
         str(rec.get("category") or "") for rec in accepted
     )
+    accepted_sources = Counter(
+        str(rec.get("category_source") or "explicit_category") for rec in accepted
+    )
     rejected_summary: dict[str, int] = Counter()
+    rejection_reasons: dict[str, int] = Counter()
+    rejected_sample_titles: list[str] = []
     for rec in raw_records:
-        cls = classify_kalshi_category(
-            rec.get("category"),
-            tags=rec.get("tags"),
-        )
-        if not cls["allowed"]:
-            key = cls["raw_category"] or "<missing>"
-            rejected_summary[key] += 1
+        # First-pass: explicit category match.
+        explicit = classify_kalshi_category(rec.get("category"), tags=rec.get("tags"))
+        if explicit["allowed"]:
+            continue
+        # Second-pass: evidence-based inference (what the normalizer
+        # actually applies).  Anything that fails this pass is the real
+        # rejection set.
+        cat, reason = infer_kalshi_category(rec, event_lookup=event_lookup)
+        if cat is not None:
+            continue  # picked up by inference — counted as accepted via the normalizer
+        raw_key = explicit["raw_category"] or "<missing>"
+        rejected_summary[raw_key] += 1
+        rejection_reasons[reason] += 1
+        title = str(rec.get("title") or "").strip()
+        if title and len(rejected_sample_titles) < 5:
+            rejected_sample_titles.append(title)
 
     sample = [
         {
             "event_id": rec["event_id"],
             "category": rec["category"],
+            "category_source": rec.get("category_source"),
+            "category_reason": rec.get("category_reason"),
             "title": rec["title"],
             "implied_probability": rec.get("implied_probability"),
             "source": rec["source"],
@@ -129,7 +148,10 @@ def _build_report(
         "write_mode": write_mode,
         "allowed_categories": list(CANONICAL_CATEGORIES),
         "accepted_categories": dict(accepted_categories),
+        "accepted_category_sources": dict(accepted_sources),
         "rejected_categories": dict(rejected_summary),
+        "rejected_category_reasons": dict(rejection_reasons),
+        "rejected_sample_titles": rejected_sample_titles,
         "sample": sample,
         "read_only_contract": {
             "advisory_status": "ADVISORY_ONLY",
@@ -159,6 +181,18 @@ def _format_summary(report: dict[str, Any]) -> str:
         f"  - {cat}: {n}"
         for cat, n in sorted(report["rejected_categories"].items())
     ) or "  (none)"
+    sources = report.get("accepted_category_sources") or {}
+    sources_line = ", ".join(
+        f"{src}={n}" for src, n in sorted(sources.items())
+    ) or "(none)"
+    reasons = report.get("rejected_category_reasons") or {}
+    reason_lines = "\n".join(
+        f"  - {r}: {n}" for r, n in sorted(reasons.items())
+    ) or "  (none)"
+    rejected_titles = report.get("rejected_sample_titles") or []
+    sample_lines = "\n".join(
+        f"  - {t[:80]}" for t in rejected_titles
+    ) or "  (none)"
     return "\n".join(
         [
             "Kalshi market-data adapter (read-only, advisory-only)",
@@ -173,8 +207,13 @@ def _format_summary(report: dict[str, Any]) -> str:
             f"  write_mode:        {report['write_mode']}",
             "  accepted_categories:",
             accepted_lines,
+            f"  accepted_category_sources: {sources_line}",
             "  rejected_categories:",
             rejected_lines,
+            "  rejected_category_reasons:",
+            reason_lines,
+            "  rejected_sample_titles:",
+            sample_lines,
             "  read-only contract: ADVISORY_ONLY | HUMAN_REVIEW_REQUIRED | "
             "execution_gate=LOCKED | broker_api_called=False | ai_execution_count=0",
         ]
@@ -243,7 +282,12 @@ def run(argv: list[str] | None = None) -> int:
             print("Kalshi adapter skipped: " + loader_result.skip_reason)
         return 0
 
-    accepted = normalize_kalshi_records(loader_result.records, fetched_at_utc=fetched_at)
+    event_lookup = getattr(loader, "last_event_lookup", None) or {}
+    accepted = normalize_kalshi_records(
+        loader_result.records,
+        fetched_at_utc=fetched_at,
+        event_lookup=event_lookup,
+    )
     persisted = 0
     if args.write:
         persisted = _persist_signal_events(accepted, fetched_at)
@@ -256,6 +300,7 @@ def run(argv: list[str] | None = None) -> int:
         persisted=persisted,
         write_mode=args.write,
         is_mock=is_mock,
+        event_lookup=event_lookup,
     )
 
     if args.json:

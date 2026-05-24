@@ -84,7 +84,7 @@ KALSHI_CATEGORY_MAP: dict[str, str] = {
 EXPLICIT_REJECTED_CATEGORIES: frozenset[str] = frozenset(
     {
         "sports", "culture", "climate", "social", "entertainment",
-        "world", "weather",
+        "lifestyle", "world", "weather",
     }
 )
 
@@ -211,6 +211,373 @@ def classify_kalshi_category(
         "raw_category": raw,
         "reason": f"category '{raw}' is not in the approved Kalshi allowlist",
     }
+
+
+# ---------------------------------------------------------------------------
+# Evidence-based category inference (live Kalshi enrichment)
+# ---------------------------------------------------------------------------
+#
+# Conservative heuristics layered on top of ``classify_kalshi_category``.
+# Used when the raw payload's ``category`` field is missing or unmapped — a
+# common reality on the public Kalshi API where many markets only carry an
+# ``event_ticker`` reference and tags.  Each heuristic is unambiguous and
+# documented; if no rule fires the market is REJECTED (not guessed at), so
+# the strict allowlist stays intact.
+#
+# Order of precedence (first hit wins):
+#   1. explicit ``category`` field
+#   2. event payload ``category`` (joined via /events)
+#   3. tag exact-match
+#   4. series/event/ticker prefix exact-match (PRES, FED, BTC, ...)
+#   5. ticker/title/description/rules keyword anchor (whole-word match)
+#   6. reject with reason
+#
+# We intentionally do not chain partial matches: "stock-price" alone is not
+# enough to claim "Finance" without a Finance-anchor keyword.  The point of
+# this layer is to *recover real metadata*, not to expand the allowlist.
+
+# Ticker-prefix → canonical category.  Each prefix is an unambiguous Kalshi
+# series identifier; anything else falls through to keyword inference.
+_TICKER_PREFIX_MAP: tuple[tuple[str, str], ...] = (
+    # Elections / Politics
+    ("PRES", "Elections"),
+    ("ELECT", "Elections"),
+    ("ELXN", "Elections"),
+    ("SENATE", "Politics"),
+    ("HOUSE", "Politics"),
+    ("GOV", "Politics"),
+    ("CONGRESS", "Politics"),
+    ("POTUS", "Politics"),
+    # Crypto
+    ("BTC", "Crypto"),
+    ("ETH", "Crypto"),
+    ("SOL", "Crypto"),
+    ("DOGE", "Crypto"),
+    ("XRP", "Crypto"),
+    ("CRYPTO", "Crypto"),
+    # Commodities
+    ("WTI", "Commodities"),
+    ("BRENT", "Commodities"),
+    ("OIL", "Commodities"),
+    ("GAS", "Commodities"),
+    ("NGAS", "Commodities"),
+    ("NATGAS", "Commodities"),
+    ("GOLD", "Commodities"),
+    ("XAU", "Commodities"),
+    ("SILVER", "Commodities"),
+    ("CORN", "Commodities"),
+    ("WHEAT", "Commodities"),
+    ("SOYB", "Commodities"),
+    # Economics — macro prints
+    ("CPI", "Economics"),
+    ("PPI", "Economics"),
+    ("GDP", "Economics"),
+    ("PCE", "Economics"),
+    ("FED", "Economics"),
+    ("FOMC", "Economics"),
+    ("UNEMP", "Economics"),
+    ("JOBS", "Economics"),
+    ("NFP", "Economics"),
+    ("PAYROLL", "Economics"),
+    ("RATEHIKE", "Economics"),
+    ("RATECUT", "Economics"),
+    # Finance — equity benchmarks
+    ("SPX", "Finance"),
+    ("SP500", "Finance"),
+    ("NDX", "Finance"),
+    ("NASDAQ", "Finance"),
+    ("DJI", "Finance"),
+    ("DOW", "Finance"),
+    ("RUT", "Finance"),
+    ("VIX", "Finance"),
+    ("TNX", "Finance"),
+    ("YIELD", "Finance"),
+    # Tech & Science
+    ("AI", "Tech & Science"),
+    ("OPENAI", "Tech & Science"),
+    ("NVDA", "Tech & Science"),
+    ("SEMI", "Tech & Science"),
+    ("CHIP", "Tech & Science"),
+    ("SPACE", "Tech & Science"),
+    ("NASA", "Tech & Science"),
+    ("SPX-AI", "Tech & Science"),
+)
+
+# Keyword anchors used for title/rules inference.  Each keyword is a
+# whole-word match (word boundaries) — substring matches would be too
+# loose.  Keywords are deliberately narrow: a generic word like "market"
+# is NOT here (it would over-classify Finance).
+_KEYWORD_ANCHORS: tuple[tuple[str, str], ...] = (
+    # Elections
+    ("presidential election", "Elections"),
+    ("presidential primary", "Elections"),
+    ("election", "Elections"),
+    ("electoral college", "Elections"),
+    ("primary election", "Elections"),
+    ("ballot measure", "Elections"),
+    # Politics
+    ("senator", "Politics"),
+    ("congressional", "Politics"),
+    ("impeach", "Politics"),
+    ("supreme court", "Politics"),
+    ("scotus", "Politics"),
+    ("white house", "Politics"),
+    ("vice president", "Politics"),
+    ("governor", "Politics"),
+    # Crypto
+    ("bitcoin", "Crypto"),
+    ("ethereum", "Crypto"),
+    ("solana", "Crypto"),
+    ("ether", "Crypto"),
+    ("dogecoin", "Crypto"),
+    ("cryptocurrency", "Crypto"),
+    # Commodities
+    ("crude oil", "Commodities"),
+    ("wti crude", "Commodities"),
+    ("brent crude", "Commodities"),
+    ("natural gas", "Commodities"),
+    ("gold price", "Commodities"),
+    ("silver price", "Commodities"),
+    ("wheat futures", "Commodities"),
+    ("corn futures", "Commodities"),
+    # Economics
+    ("inflation rate", "Economics"),
+    ("cpi report", "Economics"),
+    ("core cpi", "Economics"),
+    ("ppi report", "Economics"),
+    ("unemployment rate", "Economics"),
+    ("nonfarm payroll", "Economics"),
+    ("jobs report", "Economics"),
+    ("recession", "Economics"),
+    ("federal reserve", "Economics"),
+    ("fed cut", "Economics"),
+    ("fed hike", "Economics"),
+    ("fomc meeting", "Economics"),
+    ("interest rate", "Economics"),
+    ("rate cut", "Economics"),
+    ("rate hike", "Economics"),
+    ("treasury yield", "Finance"),
+    # Finance
+    ("s&p 500", "Finance"),
+    ("nasdaq composite", "Finance"),
+    ("dow jones", "Finance"),
+    ("stock market", "Finance"),
+    ("equity index", "Finance"),
+    # Tech & Science
+    ("artificial intelligence", "Tech & Science"),
+    ("openai", "Tech & Science"),
+    ("gpt model", "Tech & Science"),
+    ("semiconductor", "Tech & Science"),
+    ("nvidia chip", "Tech & Science"),
+    ("starlink", "Tech & Science"),
+    ("spacex", "Tech & Science"),
+    ("space launch", "Tech & Science"),
+    ("rocket launch", "Tech & Science"),
+)
+
+# Rejection anchors — title keywords that are SO strongly off-allowlist
+# (sports, weather, entertainment, etc.) that they should hard-reject the
+# market even if a weaker positive anchor might otherwise fire.  This is
+# an extra safety belt; the allowlist gate already excludes unknown
+# categories, so this list need not be exhaustive.
+_REJECTION_KEYWORDS: tuple[str, ...] = (
+    "nba", "nfl", "mlb", "nhl", "fifa", "world cup", "premier league",
+    "super bowl", "world series", "olympics", "oscars", "grammy",
+    "emmy", "tony award", "billboard", "academy award", "hurricane",
+    "tornado", "wildfire", "snowstorm", "snowfall", "weather",
+    "celebrity", "kardashian", "taylor swift",
+)
+
+
+def _normalize_text(value: Any) -> str:
+    if value is None:
+        return ""
+    text = str(value).strip().lower()
+    text = re.sub(r"\s+", " ", text)
+    return text
+
+
+def _ticker_prefix_category(ticker: Any) -> tuple[str | None, str | None]:
+    """Return (canonical_category, matched_prefix) or (None, None)."""
+    if not ticker:
+        return None, None
+    raw = str(ticker).strip().upper()
+    if not raw:
+        return None, None
+    # Tickers are typically prefix-delimited by ``-`` or ``_`` (e.g.
+    # ``BTCMAY-2026``, ``FED-CUT-JUN-2026``, ``KXPRES-2028``).  Examine
+    # the first 2-3 alphanumeric segments and try the longest prefix
+    # first so ``PRES-2028`` is preferred over a bare ``P`` lookup.
+    segments = re.split(r"[-_]+", raw)
+    if not segments or not segments[0]:
+        return None, None
+    head = segments[0]
+    # Probe progressively-shorter prefixes of the first segment so
+    # "BTCMAY" still matches the BTC prefix and "KXPRES" still matches
+    # the PRES prefix (Kalshi uses KX-prefixed series for many events).
+    candidates: list[str] = []
+    for length in range(len(head), 1, -1):
+        candidates.append(head[:length])
+    # Also try with leading ``KX`` / ``X`` removed (common Kalshi prefix).
+    if head.startswith("KX") and len(head) > 2:
+        for length in range(len(head) - 2, 1, -1):
+            candidates.append(head[2 : 2 + length])
+    for cand in candidates:
+        for prefix, category in _TICKER_PREFIX_MAP:
+            if cand == prefix:
+                return category, prefix
+    # If no first-segment match, try the leading ``head`` token literally.
+    for prefix, category in _TICKER_PREFIX_MAP:
+        if head == prefix:
+            return category, prefix
+    return None, None
+
+
+def _keyword_anchor_category(text: str) -> tuple[str | None, str | None]:
+    """Return (canonical_category, matched_keyword) or (None, None).
+
+    Matches are whole-token: the keyword must appear as a contiguous
+    substring framed by either start-of-string, end-of-string, whitespace,
+    or punctuation.  This avoids ``"ai"`` matching ``"chair"``.
+    """
+    if not text:
+        return None, None
+    haystack = f" {text} "
+    for keyword, category in _KEYWORD_ANCHORS:
+        needle = f" {keyword} "
+        if needle in haystack:
+            return category, keyword
+        # Allow punctuation-bounded matches as well (e.g. "BTC,").
+        for pattern in (f" {keyword},", f" {keyword}.", f" {keyword}?", f" {keyword}!"):
+            if pattern in haystack:
+                return category, keyword
+    return None, None
+
+
+def _matches_rejection_anchor(text: str) -> str | None:
+    if not text:
+        return None
+    haystack = f" {text} "
+    for keyword in _REJECTION_KEYWORDS:
+        if f" {keyword} " in haystack:
+            return keyword
+    return None
+
+
+def infer_kalshi_category(
+    raw_market: dict[str, Any],
+    event_lookup: dict[str, Any] | None = None,
+) -> tuple[str | None, str]:
+    """Evidence-based Kalshi category inference.
+
+    Layered enrichment for live Kalshi markets that arrive without a
+    populated ``category`` field.  Each layer is conservative: heuristics
+    only ever map to the canonical allowlist, and a missing layer falls
+    through to the next rather than guessing.
+
+    Parameters
+    ----------
+    raw_market:
+        Raw Kalshi market dict (as returned by ``GET /markets``).
+    event_lookup:
+        Optional ``{event_ticker: event_payload}`` map of pre-fetched
+        ``/events`` rows — used to recover the category when a market
+        only carries an ``event_ticker`` back-reference.
+
+    Returns
+    -------
+    ``(canonical_category | None, reason)``.
+
+    ``canonical_category`` is one of :data:`CANONICAL_CATEGORIES` or
+    ``None`` when no layer matches.  ``reason`` is a short
+    machine-readable tag (e.g. ``"explicit_category"``,
+    ``"event_payload_category"``, ``"ticker_prefix:BTC"``,
+    ``"keyword_anchor:federal reserve"``, ``"missing_category"``).
+
+    Safety
+    ------
+    This function NEVER weakens the allowlist.  It only emits a value
+    when a positive rule fires; otherwise it returns ``(None, reason)``.
+    Rejection anchors (sports/weather/entertainment keywords in the
+    title) hard-reject the market even if a weaker positive anchor would
+    otherwise fire.
+    """
+    if not isinstance(raw_market, dict):
+        return None, "invalid_input"
+
+    # An explicit category in the rejected list (Sports/Climate/etc.) is a
+    # *stronger* signal than any title heuristic: respect it and never let
+    # downstream inference override the upstream label.
+    raw_explicit_key = _normalize_category_key(raw_market.get("category"))
+    if raw_explicit_key and raw_explicit_key in EXPLICIT_REJECTED_CATEGORIES:
+        return None, f"explicit_rejected_category:{raw_explicit_key}"
+
+    title = _normalize_text(raw_market.get("title") or raw_market.get("question"))
+    subtitle = _normalize_text(raw_market.get("subtitle") or raw_market.get("event_title"))
+    description = _normalize_text(raw_market.get("description") or raw_market.get("event_description"))
+    rules = _normalize_text(
+        raw_market.get("rules")
+        or raw_market.get("rules_primary")
+        or raw_market.get("resolution_criteria")
+    )
+    combined_text = " ".join(t for t in (title, subtitle, description, rules) if t)
+
+    # Hard-reject before any positive inference if a rejection anchor fires.
+    rejection_hit = _matches_rejection_anchor(combined_text)
+    if rejection_hit:
+        return None, f"rejected_keyword:{rejection_hit}"
+
+    # 1. Explicit category field.
+    cls = classify_kalshi_category(raw_market.get("category"))
+    if cls["allowed"]:
+        return cls["display_category"], "explicit_category"
+
+    # 2. Event payload category (joined via /events).
+    if event_lookup:
+        ev_ticker = str(raw_market.get("event_ticker") or "").strip()
+        if ev_ticker and ev_ticker in event_lookup:
+            event = event_lookup[ev_ticker]
+            if isinstance(event, dict):
+                ev_cls = classify_kalshi_category(event.get("category"))
+                if ev_cls["allowed"]:
+                    return ev_cls["display_category"], "event_payload_category"
+                # Sub-title / title text on the event row counts as
+                # description-grade signal for the keyword pass below.
+                if not combined_text:
+                    combined_text = _normalize_text(
+                        event.get("title") or event.get("sub_title")
+                    )
+
+    # 3. Tag exact-match.
+    raw_tags = raw_market.get("tags") or []
+    if isinstance(raw_tags, list):
+        tags = [
+            (t.get("label") if isinstance(t, dict) else str(t))
+            for t in raw_tags
+            if t
+        ]
+    else:
+        tags = []
+    for tag in tags:
+        tag_key = _normalize_category_key(tag)
+        if tag_key in KALSHI_CATEGORY_MAP:
+            return KALSHI_CATEGORY_MAP[tag_key], f"tag_match:{tag_key}"
+
+    # 4. Series/event/ticker prefix exact-match.
+    for source_field in ("ticker", "market_ticker", "series_ticker", "event_ticker"):
+        cat, prefix = _ticker_prefix_category(raw_market.get(source_field))
+        if cat is not None:
+            return cat, f"ticker_prefix:{prefix}"
+
+    # 5. Title/rules/description keyword anchor.
+    cat, keyword = _keyword_anchor_category(combined_text)
+    if cat is not None:
+        return cat, f"keyword_anchor:{keyword}"
+
+    # 6. Give up — explicit reason so the diagnostics report can show it.
+    if not combined_text and not tags:
+        return None, "missing_category"
+    return None, "no_confident_match"
 
 
 # ---------------------------------------------------------------------------
@@ -369,6 +736,7 @@ def normalize_kalshi_market(
     *,
     fetched_at_utc: str | None = None,
     source_hint: str | None = None,
+    event_lookup: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     """Normalize a raw Kalshi market dict into the canonical signal shape.
 
@@ -378,6 +746,11 @@ def normalize_kalshi_market(
 
     The returned dict is suitable to pass to ``persistence.insert_signal_event``
     as ``raw_payload``.  It carries every safety stamp.
+
+    ``event_lookup`` is an optional ``{event_ticker: event_dict}`` map used
+    by :func:`infer_kalshi_category` to recover the category for live
+    markets that ship without one — purely additive, never weakens the
+    allowlist.
     """
     if not isinstance(raw, dict):
         return None
@@ -395,12 +768,38 @@ def normalize_kalshi_market(
     if not is_kalshi_source(source_candidate):
         return None
 
+    # First try the explicit-category path so test fixtures and adapters
+    # that ship a canonical category keep behaving as before.
     classification = classify_kalshi_category(
         raw.get("category"),
         tags=raw.get("tags") or raw.get("asset_tags") or raw.get("event_tags"),
     )
-    if not classification["allowed"]:
-        return None
+    inferred_category: str | None = None
+    inference_reason = ""
+    if classification["allowed"]:
+        display_category = classification["display_category"]
+        raw_category = classification["raw_category"]
+        category_source = "explicit_category"
+        category_reason = classification["reason"]
+    else:
+        # Evidence-based inference for live markets without a populated
+        # category field (or with one outside the allowlist *that the
+        # inference layer can rescue via stronger metadata*).
+        inferred_category, inference_reason = infer_kalshi_category(
+            raw, event_lookup=event_lookup
+        )
+        if inferred_category is None:
+            return None
+        display_category = inferred_category
+        raw_category = _normalize_category_key(raw.get("category"))
+        category_source = "inferred"
+        category_reason = inference_reason
+        classification = {
+            "allowed": True,
+            "display_category": display_category,
+            "raw_category": raw_category,
+            "reason": inference_reason,
+        }
 
     source_market_id = str(
         raw.get("source_market_id")
@@ -471,6 +870,8 @@ def normalize_kalshi_market(
         "rules": rules,
         "category": classification["display_category"],
         "category_raw": classification["raw_category"],
+        "category_source": category_source,
+        "category_reason": category_reason,
         "market_url": market_url,
         "implied_probability": implied,
         "yes_price": yes_price,
@@ -506,6 +907,7 @@ __all__ = [
     "normalize_kalshi_source_name",
     "is_kalshi_source",
     "classify_kalshi_category",
+    "infer_kalshi_category",
     "build_kalshi_semantic_text",
     "stable_kalshi_event_id",
     "kalshi_safety_stamps",
