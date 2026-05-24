@@ -163,6 +163,11 @@ APPROVED_DOMAINS: tuple[str, ...] = (
     "snapshot_key",         # diagnostics_snapshot_key.py — deterministic key
     "tail_metrics",         # diagnostics_tail_metrics.py — p95/p99/max/tail
     "compliance_registers",  # compliance_registers.py — privacy + license JSON
+    # Kanté defensive batch 2 — advisory-only release-gate readiness layer.
+    # Scores/gates only; no broker execution, no order placement, no API
+    # trading writes.
+    "ai_integration",       # ai_integration_readiness.py — AI/API readiness
+    "five_model",           # five_model_independence.py — model_runs independence
 )
 
 # Explicit allowlist for individual files / directories whose name does

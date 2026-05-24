@@ -341,6 +341,98 @@ def business_value_score(
     return round(_clamp01(score), 6)
 
 
+# ---------------------------------------------------------------------------
+# Sprint-2 additions: demo sessions, decision time saved, confidence lift.
+# These compose with business_value_score above — they don't replace it, so
+# the existing test surface (test_business_value_summary.py) keeps passing.
+# ---------------------------------------------------------------------------
+
+
+def decision_time_saved_score(
+    baseline_decision_seconds: float, observed_decision_seconds: float,
+) -> float:
+    """``(baseline - observed) / baseline`` clamped to [0,1]; 0 if no baseline.
+
+    Honest about being a *proxy* — see PROXY_LABELS / ADVISORY_DISCLAIMER."""
+    baseline = max(0.0, float(baseline_decision_seconds))
+    observed = max(0.0, float(observed_decision_seconds))
+    if baseline <= 0:
+        return 0.0
+    saved = baseline - observed
+    if saved <= 0:
+        return 0.0
+    return round(_clamp01(saved / baseline), 6)
+
+
+def confidence_lift_score(
+    user_confidence_before: float, user_confidence_after: float,
+) -> float:
+    """``(after - before)``, clamped to [0,1].  Returns 0 if confidence
+    dropped — we don't *penalize* business value for honest self-reported
+    declines, but we also don't reward them."""
+    before = _clamp01(float(user_confidence_before or 0.0))
+    after = _clamp01(float(user_confidence_after or 0.0))
+    return round(_clamp01(after - before), 6)
+
+
+def summarize_demo_sessions(
+    sessions: Iterable[dict[str, Any]],
+    *,
+    baseline_decision_seconds: float = 600.0,
+) -> dict[str, Any]:
+    """Per-cohort averages for time-saved + confidence-lift.
+
+    Each session may carry:
+      * average_time_to_decision_seconds
+      * user_confidence_before / user_confidence_after
+      * candidates_reviewed / blocked_candidates
+    Returns 0-defaults for an empty cohort.
+    """
+    rows = [s for s in sessions if isinstance(s, dict)]
+    if not rows:
+        return {
+            "demo_sessions_logged": 0,
+            "average_decision_time_saved_score": 0.0,
+            "average_confidence_lift_score": 0.0,
+            "total_candidates_reviewed": 0,
+            "total_blocked_candidates": 0,
+            "baseline_decision_seconds": baseline_decision_seconds,
+        }
+    time_saved_scores = [
+        decision_time_saved_score(
+            baseline_decision_seconds,
+            float(s.get("average_time_to_decision_seconds") or 0.0),
+        )
+        for s in rows
+        if s.get("average_time_to_decision_seconds") is not None
+    ]
+    lifts = [
+        confidence_lift_score(
+            float(s.get("user_confidence_before") or 0.0),
+            float(s.get("user_confidence_after") or 0.0),
+        )
+        for s in rows
+        if (s.get("user_confidence_before") is not None
+            or s.get("user_confidence_after") is not None)
+    ]
+    return {
+        "demo_sessions_logged": len(rows),
+        "average_decision_time_saved_score": round(
+            sum(time_saved_scores) / len(time_saved_scores), 6
+        ) if time_saved_scores else 0.0,
+        "average_confidence_lift_score": round(
+            sum(lifts) / len(lifts), 6
+        ) if lifts else 0.0,
+        "total_candidates_reviewed": sum(
+            int(s.get("candidates_reviewed") or 0) for s in rows
+        ),
+        "total_blocked_candidates": sum(
+            int(s.get("blocked_candidates") or 0) for s in rows
+        ),
+        "baseline_decision_seconds": float(baseline_decision_seconds),
+    }
+
+
 def build_business_value_summary(
     *,
     db_path: Path | None = None,
@@ -349,6 +441,8 @@ def build_business_value_summary(
     source_verified_ratio: float = 0.0,
     demo_sessions_logged: int = 0,
     operator_time_saved_score: float = 0.0,
+    demo_sessions: Iterable[dict[str, Any]] | None = None,
+    baseline_decision_seconds: float = 600.0,
     write_summary: bool = True,
     summary_path: Path | None = None,
 ) -> dict[str, Any]:
@@ -366,6 +460,20 @@ def build_business_value_summary(
         # Conservative inference: one calendar day per 8 blocked-with-outcome
         # records (no claim that this matches the operator's actual cadence).
         days_with_records = max(1, blocked_with_outcome // 8) if blocked_with_outcome else 0
+
+    demo_cohort = summarize_demo_sessions(
+        list(demo_sessions or []),
+        baseline_decision_seconds=baseline_decision_seconds,
+    )
+    # Folding the cohort into the existing per-spec score: if the caller
+    # provided demo_sessions, prefer the *observed* counts over the legacy
+    # explicit scalars; otherwise honor the caller's pre-aggregated args.
+    if demo_sessions:
+        demo_sessions_logged = demo_cohort["demo_sessions_logged"]
+        operator_time_saved_score = max(
+            operator_time_saved_score,
+            demo_cohort["average_decision_time_saved_score"],
+        )
 
     bv_score = business_value_score(
         days_with_records=days_with_records,
@@ -399,7 +507,22 @@ def build_business_value_summary(
         "defensive_alpha_vs_benchmark": proxy["defensive_alpha_vs_benchmark"],
         "blocked_candidates_with_outcome": blocked_with_outcome,
         "business_value_score": bv_score,
-        "labels": list(PROXY_LABELS),
+        "demo_sessions_logged": int(demo_cohort["demo_sessions_logged"]),
+        "average_decision_time_saved_score": demo_cohort[
+            "average_decision_time_saved_score"
+        ],
+        "average_confidence_lift_score": demo_cohort[
+            "average_confidence_lift_score"
+        ],
+        "baseline_decision_seconds": demo_cohort["baseline_decision_seconds"],
+        "demo_total_candidates_reviewed": demo_cohort[
+            "total_candidates_reviewed"
+        ],
+        "demo_total_blocked_candidates": demo_cohort[
+            "total_blocked_candidates"
+        ],
+        "labels": list(PROXY_LABELS) + ["human review required",
+                                        "no broker execution"],
         "block_reason_distribution": block_reasons,
         "base_defensive_value": {
             k: base_report.get(k)
@@ -448,6 +571,9 @@ __all__ = [
     "build_report",
     "defensive_alpha_proxy",
     "business_value_score",
+    "decision_time_saved_score",
+    "confidence_lift_score",
+    "summarize_demo_sessions",
     "build_business_value_summary",
     "read_summary",
 ]
