@@ -151,6 +151,18 @@ APPROVED_DOMAINS: tuple[str, ...] = (
     # distinct source_name="prediction_market_disagreement"; no new mutation
     # table; JSONL is not made canonical.
     "prediction_market",  # prediction_market_semantic_pairing.py / prediction_market_disagreement_scanner.py
+    # Integrated sprint — advisory-only LPQ + promotion downgrade + AI report
+    # ingestion + per-provider verification.  Scores/gates only; no broker
+    # execution, no order placement, no API trading writes.
+    "live_payload",         # live_payload_quality.py — LPQ + M_live
+    "promotion_downgrade",  # promotion_downgrade.py — candidate state decider
+    "ai_report",            # ai_report_ingestion.py — AIReportSignal normalizer
+    "provider_verification",  # provider_verification.py — source-health classifier
+    "typed_config",         # typed_config.py — typed config schema
+    "prewarm",              # prewarm_diagnostics_snapshot.py — diagnostics warm
+    "snapshot_key",         # diagnostics_snapshot_key.py — deterministic key
+    "tail_metrics",         # diagnostics_tail_metrics.py — p95/p99/max/tail
+    "compliance_registers",  # compliance_registers.py — privacy + license JSON
 )
 
 # Explicit allowlist for individual files / directories whose name does

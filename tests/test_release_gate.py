@@ -60,6 +60,10 @@ def _pin_fresh_stress_summary(tmp_path, monkeypatch):
     summary would cause every PASS-expecting test to WARN.  Tests that want
     to exercise STALE/MISSING/MALFORMED/BLOCK overwrite or delete this file
     after the fixture seeds a fresh PASS.
+
+    Integrated-sprint extension: also pin the prewarm + business-value
+    summary paths to fresh in-tmp artifacts so the new gate checks do not
+    downgrade legacy PASS tests due to missing sprint artifacts.
     """
     summary_dir = tmp_path / "_stress_probe_summary"
     summary_dir.mkdir(parents=True, exist_ok=True)
@@ -69,6 +73,45 @@ def _pin_fresh_stress_summary(tmp_path, monkeypatch):
     )
     monkeypatch.setattr(probe, "SUMMARY_DIR", summary_dir)
     monkeypatch.setattr(probe, "SUMMARY_FILE", summary_file)
+
+    # Integrated Sprint artifacts.  Seed both summaries so the gate's new
+    # checks have something fresh to read; tests that want to exercise
+    # missing-artifact warnings overwrite/delete these files themselves.
+    from scripts import prewarm_diagnostics_snapshot as _prewarm
+    from scripts import business_value_report as _bvr
+    sprint_dir = tmp_path / "_release"
+    sprint_dir.mkdir(parents=True, exist_ok=True)
+    prewarm_path = sprint_dir / "diagnostics_prewarm_summary.json"
+    bv_path = sprint_dir / "business_value_summary.json"
+    prewarm_path.write_text(json.dumps({
+        "report": "diagnostics_prewarm_summary",
+        "ok": True,
+        "row_count": 0,
+        "snapshot_key": "deadbeef" * 8,
+        "ttl_seconds": 300,
+        "prewarm_latency_ms": 100.0,
+        "cache_hit_after_prewarm": True,
+        "post_prewarm_latency_ms": 5.0,
+        "generated_at_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "cold_recompute_count": 1,
+        "cold_recompute_count_after_prewarm": 0,
+        "advisory_only": True,
+        "execution_gate": "LOCKED",
+    }), encoding="utf-8")
+    bv_path.write_text(json.dumps({
+        "report": "business_value_summary",
+        "ok": True,
+        "days_covered": 1,
+        "candidates_reviewed": 1,
+        "blocked_count": 0,
+        "defensive_alpha_proxy": 0.0,
+        "labels": ["paper/advisory proxy", "not realized PnL"],
+        "advisory_only": True,
+        "execution_gate": "LOCKED",
+    }), encoding="utf-8")
+    monkeypatch.setattr(_prewarm, "SUMMARY_FILE", prewarm_path, raising=False)
+    monkeypatch.setattr(_bvr, "DEFAULT_SUMMARY_PATH", bv_path, raising=False)
+
     yield summary_file
 
 

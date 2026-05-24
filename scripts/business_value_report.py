@@ -2,13 +2,16 @@
 
 A read-only, advisory-only summary of the *defensive* value the MVP provides:
 stale signals detected, duplicate AI theses detected, closed losses repaired
-into Moltbook, fake demo pollution prevented, operator overload flagged, and
-the unreconciled-risk backlog.
+into Moltbook, fake demo pollution prevented, operator overload flagged, the
+unreconciled-risk backlog, and (Integrated Sprint Part 6) a *defensive-alpha
+proxy* + ``business_value_summary.json`` artifact the release gate consumes.
 
 Honesty contract (Kanté "no unlogged loss")
 -------------------------------------------
 * This report NEVER claims a P/L improvement, a return, or a profit. It counts
-  *risk-prevention* events, not gains.
+  *risk-prevention* events; any computed defensive-alpha proxy is labelled
+  *paper/advisory proxy*, *not realized PnL*, *not investment advice*, *not
+  proof of future returns*.
 * It always carries the advisory-only disclaimer and "human execution
   required".
 * Missing data is reported honestly (``db_available=False`` + a note) rather
@@ -20,9 +23,11 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import sqlite3
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable
 
 try:
     from scripts import advisory_contract as _contract
@@ -31,6 +36,14 @@ except ModuleNotFoundError:  # pragma: no cover - script-style fallback
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_DB = REPO_ROOT / "runtime" / "mvp_local.db"
+DEFAULT_SUMMARY_PATH = REPO_ROOT / "runtime" / "release" / "business_value_summary.json"
+
+PROXY_LABELS: tuple[str, ...] = (
+    "paper/advisory proxy",
+    "not realized PnL",
+    "not investment advice",
+    "not proof of future returns",
+)
 
 ADVISORY_DISCLAIMER = (
     "Advisory-only. This report counts risk-prevention and record-keeping "
@@ -178,6 +191,9 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
     p.add_argument("--db-path", type=Path, default=None)
+    p.add_argument("--write-summary", action="store_true",
+                   help="also write runtime/release/business_value_summary.json "
+                        "(includes defensive-alpha proxy + business_value_score)")
     p.add_argument("--json", action="store_true")
     return p
 
@@ -185,8 +201,20 @@ def _build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
     rep = build_report(args.db_path)
+    summary = None
+    if args.write_summary:
+        # Empty candidate outcomes is OK — the summary will simply report
+        # the proxy as 0.0 with the proxy labels, never as realized PnL.
+        summary = build_business_value_summary(
+            db_path=args.db_path,
+            candidate_outcomes=[],
+            write_summary=True,
+        )
     if args.json:
-        print(json.dumps(rep, indent=2, default=str))
+        payload = {"report": rep}
+        if summary is not None:
+            payload["summary"] = summary
+        print(json.dumps(payload, indent=2, default=str))
     else:
         print("Business / Demo Value Report (advisory-only)")
         print("=" * 44)
@@ -199,11 +227,230 @@ def main(argv: list[str] | None = None) -> int:
         print(f"  unreconciled risk count     : {rep['unreconciled_risk_count']}")
         for note in rep["notes"]:
             print(f"  note: {note}")
+        if summary is not None:
+            print(f"  summary written           : {summary.get('summary_path')}")
+            print(f"  defensive_alpha_proxy     : {summary['defensive_alpha_proxy']}")
+            print(f"  business_value_score      : {summary['business_value_score']}")
         print(f"\n  {rep['advisory_disclaimer']}")
     return 0
 
 
-__all__ = ["ADVISORY_DISCLAIMER", "build_report"]
+# ---------------------------------------------------------------------------
+# Defensive-alpha proxy + business-value summary (Integrated Sprint — Part 6).
+# These functions are pure and operate on records the caller assembles; they
+# never claim realized PnL.  When passed an empty list they return zeros and
+# the proxy-label list — never a hidden "we made money" inference.
+# ---------------------------------------------------------------------------
+
+
+def _utc_iso() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _clamp01(value: float) -> float:
+    if value is None or math.isnan(value):
+        return 0.0
+    if value < 0.0:
+        return 0.0
+    if value > 1.0:
+        return 1.0
+    return value
+
+
+def defensive_alpha_proxy(
+    candidates: Iterable[dict[str, Any]],
+    *,
+    loss_threshold: float = 0.05,
+) -> dict[str, Any]:
+    """Compute the defensive-alpha proxy from candidate-outcome records.
+
+    Each candidate row supports the keys:
+      * ``blocked``  (bool/0|1) — MVP blocked this candidate
+      * ``block_reason`` (str) — for diagnostic counts
+      * ``r_candidate`` (float) — subsequent return if it had been taken
+      * ``r_benchmark`` (float) — benchmark return over same horizon
+
+    Returns the proxy values with explicit *paper/advisory proxy* labels.
+    """
+    rows = list(candidates)
+    n = len(rows)
+    if n == 0:
+        return {
+            "candidate_count": 0,
+            "blocked_count": 0,
+            "blocked_with_outcome": 0,
+            "avoided_loss_sum": 0.0,
+            "defensive_alpha_proxy": 0.0,
+            "defensive_alpha_vs_benchmark": 0.0,
+            "labels": list(PROXY_LABELS),
+        }
+
+    avoided_loss_sum = 0.0
+    blocked_count = 0
+    blocked_with_outcome = 0
+    benchmark_sum = 0.0
+    benchmark_blocked_outcomes = 0
+
+    for r in rows:
+        blocked = bool(r.get("blocked"))
+        r_cand = r.get("r_candidate")
+        r_bench = r.get("r_benchmark")
+        if blocked:
+            blocked_count += 1
+        if blocked and isinstance(r_cand, (int, float)):
+            blocked_with_outcome += 1
+            bad = float(r_cand) < -float(loss_threshold)
+            if bad:
+                avoided_loss_sum += abs(float(r_cand))
+            if isinstance(r_bench, (int, float)):
+                benchmark_sum += max(0.0, float(r_bench) - float(r_cand))
+                benchmark_blocked_outcomes += 1
+
+    proxy = avoided_loss_sum / max(n, 1)
+    bench_proxy = (
+        benchmark_sum / benchmark_blocked_outcomes
+        if benchmark_blocked_outcomes else 0.0
+    )
+    return {
+        "candidate_count": n,
+        "blocked_count": blocked_count,
+        "blocked_with_outcome": blocked_with_outcome,
+        "avoided_loss_sum": round(avoided_loss_sum, 6),
+        "defensive_alpha_proxy": round(proxy, 6),
+        "defensive_alpha_vs_benchmark": round(bench_proxy, 6),
+        "labels": list(PROXY_LABELS),
+    }
+
+
+def business_value_score(
+    *,
+    days_with_records: int,
+    blocked_candidates_with_outcome: int,
+    source_verified_ratio: float,
+    demo_sessions_logged: int,
+    operator_time_saved_score: float,
+) -> float:
+    """``business_value_score`` per the sprint spec; clamped to [0,1] then * 10."""
+    score = (
+        0.30 * min(1.0, days_with_records / 30.0)
+        + 0.25 * min(1.0, blocked_candidates_with_outcome / 25.0)
+        + 0.20 * _clamp01(source_verified_ratio)
+        + 0.15 * min(1.0, demo_sessions_logged / 5.0)
+        + 0.10 * _clamp01(operator_time_saved_score)
+    )
+    return round(_clamp01(score), 6)
+
+
+def build_business_value_summary(
+    *,
+    db_path: Path | None = None,
+    candidate_outcomes: Iterable[dict[str, Any]] | None = None,
+    days_with_records: int | None = None,
+    source_verified_ratio: float = 0.0,
+    demo_sessions_logged: int = 0,
+    operator_time_saved_score: float = 0.0,
+    write_summary: bool = True,
+    summary_path: Path | None = None,
+) -> dict[str, Any]:
+    """Top-level: combine defensive-value counts with the defensive-alpha proxy.
+
+    Persists ``runtime/release/business_value_summary.json`` so the release
+    gate can read it; the artifact is always tagged with the proxy labels.
+    """
+    base_report = build_report(db_path)
+    proxy = defensive_alpha_proxy(list(candidate_outcomes or []))
+
+    blocked_with_outcome = int(proxy.get("blocked_with_outcome", 0))
+    candidates_reviewed = int(proxy.get("candidate_count", 0))
+    if days_with_records is None:
+        # Conservative inference: one calendar day per 8 blocked-with-outcome
+        # records (no claim that this matches the operator's actual cadence).
+        days_with_records = max(1, blocked_with_outcome // 8) if blocked_with_outcome else 0
+
+    bv_score = business_value_score(
+        days_with_records=days_with_records,
+        blocked_candidates_with_outcome=blocked_with_outcome,
+        source_verified_ratio=source_verified_ratio,
+        demo_sessions_logged=demo_sessions_logged,
+        operator_time_saved_score=operator_time_saved_score,
+    )
+
+    block_reasons: dict[str, int] = {}
+    for r in candidate_outcomes or []:
+        reason = str(r.get("block_reason") or "").upper()
+        if not reason:
+            continue
+        block_reasons[reason] = block_reasons.get(reason, 0) + 1
+
+    summary = {
+        "report": "business_value_summary",
+        "ok": True,
+        "generated_at_utc": _utc_iso(),
+        "days_covered": int(days_with_records),
+        "candidates_reviewed": candidates_reviewed,
+        "blocked_count": int(proxy.get("blocked_count", 0)),
+        "stale_blocks": int(block_reasons.get("STALE", 0)
+                            + block_reasons.get("PRICE_SOURCE_STALE", 0)
+                            + block_reasons.get("FILINGS_SOURCE_STALE", 0)
+                            + block_reasons.get("NEWS_SOURCE_STALE", 0)),
+        "disagreement_blocks": int(block_reasons.get("MODEL_DISAGREEMENT_HIGH", 0)),
+        "diablo_blocks": int(block_reasons.get("DIABLO_MODEL_VETO", 0)),
+        "defensive_alpha_proxy": proxy["defensive_alpha_proxy"],
+        "defensive_alpha_vs_benchmark": proxy["defensive_alpha_vs_benchmark"],
+        "blocked_candidates_with_outcome": blocked_with_outcome,
+        "business_value_score": bv_score,
+        "labels": list(PROXY_LABELS),
+        "block_reason_distribution": block_reasons,
+        "base_defensive_value": {
+            k: base_report.get(k)
+            for k in (
+                "stale_signals_detected",
+                "duplicate_ai_thesis_detected",
+                "closed_losses_repaired_into_moltbook",
+                "fake_demo_pollution_active",
+                "fake_demo_pollution_prevented",
+                "operator_overload_flagged",
+                "unreconciled_risk_count",
+            )
+        },
+        "advisory_only": True,
+        "human_review_required": True,
+        "claims_pl_improvement": False,
+        "advisory_disclaimer": ADVISORY_DISCLAIMER,
+        **_contract.advisory_safety_stamps(),
+    }
+
+    if write_summary:
+        target = summary_path or DEFAULT_SUMMARY_PATH
+        target.parent.mkdir(parents=True, exist_ok=True)
+        tmp = target.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(summary, indent=2, default=str),
+                       encoding="utf-8")
+        tmp.replace(target)
+        summary["summary_path"] = str(target)
+    return summary
+
+
+def read_summary(path: Path | None = None) -> dict[str, Any] | None:
+    target = path or DEFAULT_SUMMARY_PATH
+    if not target.exists():
+        return None
+    try:
+        return json.loads(target.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return None
+
+
+__all__ = [
+    "ADVISORY_DISCLAIMER",
+    "PROXY_LABELS",
+    "DEFAULT_SUMMARY_PATH",
+    "build_report",
+    "defensive_alpha_proxy",
+    "business_value_score",
+    "build_business_value_summary",
+    "read_summary",
+]
 
 
 if __name__ == "__main__":

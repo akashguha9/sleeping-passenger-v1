@@ -32,6 +32,65 @@ try:
 except ModuleNotFoundError:  # pragma: no cover - script-style fallback
     import local_deploy_preflight as _preflight  # type: ignore[no-redef]
 
+# Integrated Sprint integrations — each import is wrapped in a try block so the
+# release gate still runs in stripped environments (each missing block becomes a
+# WARN, never silently a PASS).
+try:
+    from scripts import typed_config as _typed_config  # type: ignore
+except ModuleNotFoundError:  # pragma: no cover - script-style fallback
+    try:
+        import typed_config as _typed_config  # type: ignore[no-redef]
+    except ModuleNotFoundError:
+        _typed_config = None  # type: ignore[assignment]
+
+try:
+    from scripts import prewarm_diagnostics_snapshot as _prewarm  # type: ignore
+except ModuleNotFoundError:  # pragma: no cover - script-style fallback
+    try:
+        import prewarm_diagnostics_snapshot as _prewarm  # type: ignore[no-redef]
+    except ModuleNotFoundError:
+        _prewarm = None  # type: ignore[assignment]
+
+try:
+    from scripts import diagnostics_tail_metrics as _tail  # type: ignore
+except ModuleNotFoundError:  # pragma: no cover - script-style fallback
+    try:
+        import diagnostics_tail_metrics as _tail  # type: ignore[no-redef]
+    except ModuleNotFoundError:
+        _tail = None  # type: ignore[assignment]
+
+try:
+    from scripts import live_payload_quality as _lpq  # type: ignore
+except ModuleNotFoundError:  # pragma: no cover - script-style fallback
+    try:
+        import live_payload_quality as _lpq  # type: ignore[no-redef]
+    except ModuleNotFoundError:
+        _lpq = None  # type: ignore[assignment]
+
+try:
+    from scripts import business_value_report as _bvr  # type: ignore
+except ModuleNotFoundError:  # pragma: no cover - script-style fallback
+    try:
+        import business_value_report as _bvr  # type: ignore[no-redef]
+    except ModuleNotFoundError:
+        _bvr = None  # type: ignore[assignment]
+
+try:
+    from scripts import compliance_registers as _comp_reg  # type: ignore
+except ModuleNotFoundError:  # pragma: no cover - script-style fallback
+    try:
+        import compliance_registers as _comp_reg  # type: ignore[no-redef]
+    except ModuleNotFoundError:
+        _comp_reg = None  # type: ignore[assignment]
+
+try:
+    from scripts import ai_report_ingestion as _ai_ingest  # type: ignore
+except ModuleNotFoundError:  # pragma: no cover - script-style fallback
+    try:
+        import ai_report_ingestion as _ai_ingest  # type: ignore[no-redef]
+    except ModuleNotFoundError:
+        _ai_ingest = None  # type: ignore[assignment]
+
 PASS, WARN, FAIL = "PASS", "WARN", "FAIL"
 
 # Default TTL for the persisted cockpit stress summary, in hours.  Beyond this
@@ -266,6 +325,176 @@ def evaluate(
                 f"(score={stress['stress_score']}); WARN."
             )
 
+    # ------------------------------------------------------------------
+    # Integrated Sprint checks.  Each is OPTIONAL: a missing artifact is a
+    # WARN (and downgrades a PASS), never a silent PASS.  Safety-breaking
+    # config (typed_config) FAILS the gate outright.
+    # ------------------------------------------------------------------
+    integrated: dict[str, Any] = {}
+    warnings: list[str] = []
+    blocking: list[str] = []
+
+    # Typed config — safety-floor violation FAILS the gate immediately.
+    if _typed_config is not None:
+        cfg_status = _typed_config.validate_typed_config()
+        integrated["typed_config_ok"] = bool(cfg_status.get("typed_config_ok"))
+        integrated["typed_config_reason"] = cfg_status.get("reason")
+        if not cfg_status.get("typed_config_ok"):
+            verdict = FAIL
+            blocking.append(
+                f"typed_config: {cfg_status.get('reason')}; FAIL.")
+    else:
+        integrated["typed_config_ok"] = False
+        integrated["typed_config_reason"] = "module_not_available"
+        if verdict == PASS:
+            verdict = WARN
+        warnings.append("typed_config module unavailable; WARN.")
+
+    # Diagnostics prewarm summary + tail metrics.
+    prewarm_summary_path = None
+    prewarm_summary = None
+    if _prewarm is not None:
+        prewarm_summary_path = _prewarm.SUMMARY_FILE
+        prewarm_summary = _prewarm.read_summary(prewarm_summary_path)
+    integrated["diagnostics_prewarm_summary_path"] = (
+        str(prewarm_summary_path) if prewarm_summary_path else None
+    )
+    if prewarm_summary:
+        # Pass the persisted prewarm summary into the tail metrics check.
+        prewarm_ok = bool(prewarm_summary.get("ok")) and bool(
+            prewarm_summary.get("cache_hit_after_prewarm"))
+        integrated["diagnostics_prewarm_ok"] = prewarm_ok
+        latencies = [
+            prewarm_summary.get("prewarm_latency_ms") or 0.0,
+            prewarm_summary.get("post_prewarm_latency_ms") or 0.0,
+        ]
+        cold_count = int(prewarm_summary.get("cold_recompute_count_after_prewarm")
+                         or 0)
+        if _tail is not None:
+            tail = _tail.compute_tail_metrics(
+                [float(v) for v in latencies if isinstance(v, (int, float))],
+                cold_recompute_count_after_prewarm=cold_count,
+            )
+            integrated["performance_tail"] = {
+                "p95_ms": tail["p95_ms"],
+                "p99_ms": tail["p99_ms"],
+                "max_ms": tail["max_ms"],
+                "tail_ratio": tail["tail_ratio"],
+                "cold_recompute_count_after_prewarm": cold_count,
+                "performance_tail_score": tail["performance_tail_score"],
+                "release_thresholds_ok": tail["release_thresholds_ok"],
+            }
+            # Only escalate to WARN; the tail metric is informational unless
+            # the operator made the prewarm summary stale.
+            if not tail["release_thresholds_ok"] and verdict == PASS:
+                verdict = WARN
+                warnings.append(
+                    f"performance_tail: thresholds failed "
+                    f"(p95={tail['p95_ms']}ms p99={tail['p99_ms']}ms "
+                    f"max={tail['max_ms']}ms tail_ratio={tail['tail_ratio']}); WARN."
+                )
+        if not prewarm_ok and verdict == PASS:
+            verdict = WARN
+            warnings.append("diagnostics_prewarm_summary: ok=false; WARN.")
+    else:
+        integrated["diagnostics_prewarm_ok"] = False
+        if verdict == PASS:
+            verdict = WARN
+        warnings.append(
+            "diagnostics_prewarm_summary missing; run "
+            "`python scripts/prewarm_diagnostics_snapshot.py --write-summary`. WARN."
+        )
+
+    # Live Payload Quality — we expose the module presence (no fixture
+    # data persisted by default; the integration is in the candidate
+    # pipeline at runtime).
+    integrated["live_payload_quality_module_available"] = _lpq is not None
+
+    # AI ingestion summary — optional artifact.
+    if _ai_ingest is not None:
+        ai_path = _ai_ingest.DEFAULT_SUMMARY_PATH
+        ai_summary = None
+        if ai_path.exists():
+            try:
+                ai_summary = json.loads(ai_path.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, OSError):
+                ai_summary = None
+        integrated["ai_ingestion_summary_path"] = str(ai_path)
+        integrated["ai_ingestion_ok"] = bool(
+            (ai_summary or {}).get("ai_ingestion_ok"))
+    else:
+        integrated["ai_ingestion_summary_path"] = None
+        integrated["ai_ingestion_ok"] = False
+
+    # Model reliability ledger — module presence + ledger path exists.
+    try:
+        from scripts import model_reliability_ledger as _mrl  # type: ignore
+        integrated["model_reliability_ledger_ok"] = True
+    except ModuleNotFoundError:  # pragma: no cover - module always present
+        integrated["model_reliability_ledger_ok"] = False
+        if verdict == PASS:
+            verdict = WARN
+        warnings.append("model_reliability_ledger module missing; WARN.")
+
+    # Business value summary.
+    if _bvr is not None:
+        bv_path = _bvr.DEFAULT_SUMMARY_PATH
+        integrated["business_value_summary_path"] = str(bv_path)
+        bv_summary = _bvr.read_summary(bv_path)
+        integrated["business_value_ok"] = bool(
+            (bv_summary or {}).get("ok"))
+        if not integrated["business_value_ok"]:
+            if verdict == PASS:
+                verdict = WARN
+            warnings.append(
+                "business_value_summary missing; run "
+                "`python scripts/business_value_report.py --write-summary`. WARN."
+            )
+    else:
+        integrated["business_value_ok"] = False
+        if verdict == PASS:
+            verdict = WARN
+        warnings.append("business_value_report module unavailable; WARN.")
+
+    # Compliance surface: registers must exist + claim no broken safety floor.
+    if _comp_reg is not None:
+        priv_path = _comp_reg.PRIVACY_INVENTORY_PATH
+        reg_path = _comp_reg.SOURCE_LICENSE_REGISTER_PATH
+        priv_present = priv_path.exists()
+        reg_present = reg_path.exists()
+        register_data = _comp_reg.read_register(reg_path) if reg_present else None
+        missing = _comp_reg.missing_config_enabled_providers(
+            register=register_data
+        )
+        integrated["privacy_inventory_path"] = str(priv_path)
+        integrated["source_license_register_path"] = str(reg_path)
+        integrated["compliance_privacy_present"] = priv_present
+        integrated["compliance_register_present"] = reg_present
+        integrated["compliance_missing_config_enabled_providers"] = missing
+        integrated["compliance_surface_ok"] = bool(priv_present and reg_present
+                                                   and not missing)
+        if not integrated["compliance_surface_ok"] and verdict == PASS:
+            verdict = WARN
+            why = []
+            if not priv_present:
+                why.append("privacy_inventory.json missing")
+            if not reg_present:
+                why.append("source_license_register.json missing")
+            if missing:
+                why.append(f"config-enabled providers missing from register: {missing}")
+            warnings.append(
+                "compliance_surface: " + "; ".join(why)
+                + ". Run `python scripts/compliance_registers.py --write`. WARN."
+            )
+    else:
+        integrated["compliance_surface_ok"] = False
+        if verdict == PASS:
+            verdict = WARN
+        warnings.append("compliance_registers module unavailable; WARN.")
+
+    reasons.extend(blocking)
+    reasons.extend(warnings)
+
     return {
         "report": "release_gate",
         "verdict": verdict,
@@ -275,6 +504,9 @@ def evaluate(
         "fail_count": len(fails),
         "warn_count": len(warns),
         "reasons": reasons,
+        "integrated_sprint": integrated,
+        "blocking_reasons": blocking,
+        "warnings": warnings,
         "failing_checks": [c["name"] for c in fails],
         "warning_checks": [c["name"] for c in warns],
         # Kanté-defensive mutation-guard enforcement (now affects the verdict).
