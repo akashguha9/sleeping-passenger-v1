@@ -16,6 +16,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -31,22 +34,92 @@ except ModuleNotFoundError:  # pragma: no cover - script-style fallback
 
 PASS, WARN, FAIL = "PASS", "WARN", "FAIL"
 
+# Default TTL for the persisted cockpit stress summary, in hours.  Beyond this
+# age the summary is treated as ``STALE`` and downgrades the release verdict
+# to WARN — a stale PASS must never be allowed to produce a release PASS.
+DEFAULT_STRESS_SUMMARY_TTL_HOURS = 24
+# Hard-cap on the env override so a typo (e.g. "100000") can't silently
+# disable the freshness check.
+MAX_STRESS_SUMMARY_TTL_HOURS = 24 * 30  # 30 days
+
+STRESS_PROBE_RECOMMENDED_CMD = (
+    "python scripts/cockpit_concurrency_stress_probe.py "
+    "--workers 4 --iterations 25 --json"
+)
+
+
+def _stress_summary_ttl_seconds() -> int:
+    """Read ``MVP_STRESS_SUMMARY_TTL_HOURS`` (clamped) → seconds.
+
+    Invalid / negative / absurdly-large values fall back to the default; this
+    keeps a bad env var from silently disabling the freshness check.
+    """
+    raw = os.environ.get("MVP_STRESS_SUMMARY_TTL_HOURS", "").strip()
+    if not raw:
+        return DEFAULT_STRESS_SUMMARY_TTL_HOURS * 3600
+    try:
+        hours = float(raw)
+    except ValueError:
+        return DEFAULT_STRESS_SUMMARY_TTL_HOURS * 3600
+    if hours <= 0 or hours > MAX_STRESS_SUMMARY_TTL_HOURS:
+        return DEFAULT_STRESS_SUMMARY_TTL_HOURS * 3600
+    return int(hours * 3600)
+
+
+def _parse_iso_utc(value: Any) -> float | None:
+    """Parse a ``YYYY-MM-DDTHH:MM:SSZ`` UTC string into an epoch float.
+
+    Returns None on any parse failure so the freshness check treats the
+    summary as malformed (which downgrades to WARN, never PASS).
+    """
+    if not value:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    # Accept both ``...Z`` and ``...+00:00`` forms.
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        return datetime.fromisoformat(text).astimezone(timezone.utc).timestamp()
+    except (ValueError, TypeError):
+        return None
+
 
 def _stress_probe_summary() -> dict[str, Any]:
-    """Read the last persisted stress-probe summary (Kanté Task C), WARN-only.
+    """Read the last persisted stress-probe summary with TTL validation.
 
     Read-only and cheap: the release gate never *runs* the probe (that is a
     deliberate, separate operator action) — it only surfaces the last run's
-    derived, non-canonical ``last_run.json`` summary if present.  Maps the
-    probe's stress gate to a release impact that is WARN-only by default and
-    only escalates to FAIL on a real reliability disaster the probe itself
-    flagged (a DB-lock under concurrent reads).
+    derived, non-canonical ``last_run.json`` summary if present, *and* enforces
+    a freshness TTL so a stale PASS cannot mislead the operator.
+
+    Freshness contract (each branch sets ``stress_release_impact``)::
+
+        missing summary       → UNKNOWN  / WARN
+        unreadable / malformed → DEGRADED / WARN
+        stale (age > TTL)     → STALE    / WARN  (regardless of stored gate)
+        fresh + stress PASS   → PASS     / PASS
+        fresh + stress WARN   → WARN     / WARN
+        fresh + stress BLOCK  → BLOCK    / FAIL  (a stale BLOCK can never PASS)
+
+    The TTL is the env-overridable ``MVP_STRESS_SUMMARY_TTL_HOURS`` (default
+    24h, clamped at 30 days).  The recommended command is surfaced for the
+    operator so a stale/missing summary has an obvious fix.
     """
+    ttl_seconds = _stress_summary_ttl_seconds()
     out: dict[str, Any] = {
         "stress_probe_available": False,
         "stress_gate_status": "UNKNOWN",
         "stress_score": None,
-        "stress_release_impact": PASS,
+        "stress_release_impact": WARN,
+        "stress_summary_path": None,
+        "stress_summary_generated_at_utc": None,
+        "stress_summary_age_seconds": None,
+        "stress_summary_ttl_seconds": ttl_seconds,
+        "stress_summary_fresh": False,
+        "stress_recommended_command": STRESS_PROBE_RECOMMENDED_CMD,
+        "stress_summary_runtime_db_polluted": False,
     }
     try:
         try:
@@ -54,28 +127,70 @@ def _stress_probe_summary() -> dict[str, Any]:
         except ModuleNotFoundError:  # pragma: no cover - script-style fallback
             import cockpit_concurrency_stress_probe as probe  # type: ignore[no-redef]
         out["stress_probe_available"] = True
+        out["stress_summary_path"] = str(probe.SUMMARY_FILE)
     except Exception:  # pragma: no cover - defensive
+        # The probe module itself is missing — surface as UNKNOWN/WARN.
+        return out
+
+    summary_path: Path = probe.SUMMARY_FILE
+    if not summary_path.exists():
+        # Probe exists but has not been run yet — operator must run it before
+        # release.  WARN, not silent PASS.
+        out["stress_gate_status"] = "UNKNOWN"
+        out["stress_release_impact"] = WARN
         return out
 
     summary = probe.read_summary()
     if not summary:
-        # Probe exists but has not been run — advisory only, no impact.
-        out["stress_gate_status"] = "NOT_RUN"
+        # The file exists but is unreadable / malformed — never assume PASS.
+        out["stress_gate_status"] = "DEGRADED"
+        out["stress_release_impact"] = WARN
         return out
 
-    status = str(summary.get("stress_gate_status") or "UNKNOWN").upper()
-    out["stress_gate_status"] = status
+    out["stress_summary_runtime_db_polluted"] = bool(
+        summary.get("runtime_db_polluted", False)
+    )
+    generated_at_utc = summary.get("generated_at_utc")
+    out["stress_summary_generated_at_utc"] = generated_at_utc
+    generated_epoch = _parse_iso_utc(generated_at_utc)
+    if generated_epoch is None:
+        # No parseable timestamp → treat as malformed.  This also catches the
+        # case of a hand-edited summary missing ``generated_at_utc``.
+        out["stress_gate_status"] = "DEGRADED"
+        out["stress_release_impact"] = WARN
+        return out
+
+    age_seconds = max(0.0, time.time() - generated_epoch)
+    out["stress_summary_age_seconds"] = round(age_seconds, 3)
+    out["stress_summary_fresh"] = age_seconds <= ttl_seconds
+
+    raw_status = str(summary.get("stress_gate_status") or "UNKNOWN").upper()
     out["stress_score"] = summary.get("stress_score")
     db_locked = int(summary.get("db_locked_errors", 0) or 0)
 
-    if status == "BLOCK" and db_locked > 0:
-        # The only condition allowed to FAIL the release: a DB-lock disaster the
-        # probe directly observed under concurrent reads.
-        out["stress_release_impact"] = FAIL
-    elif status in {"BLOCK", "WARN"}:
+    # Stale (age > TTL) — STALE/WARN regardless of stored gate.  A stale PASS
+    # *must not* be allowed to produce a release PASS.
+    if not out["stress_summary_fresh"]:
+        out["stress_gate_status"] = "STALE"
         out["stress_release_impact"] = WARN
-    else:
+        return out
+
+    # Fresh.  Map directly.
+    out["stress_gate_status"] = raw_status
+    if raw_status == "BLOCK":
+        # Any fresh BLOCK now fails the release (stricter than the prior
+        # "only db_locked BLOCK fails" rule); the db_locked flag is surfaced
+        # in the reason text so the operator knows *why* it failed.
+        out["stress_release_impact"] = FAIL
+        out["stress_summary_db_locked_errors"] = db_locked
+    elif raw_status == "WARN":
+        out["stress_release_impact"] = WARN
+    elif raw_status == "PASS":
         out["stress_release_impact"] = PASS
+    else:
+        # Unknown gate status word in an otherwise fresh summary — degrade
+        # to WARN rather than trust it.
+        out["stress_release_impact"] = WARN
     return out
 
 
@@ -122,23 +237,34 @@ def evaluate(
             f"{kante.get('mutation_scripts_unguarded_names')}; WARN."
         )
 
-    # Concurrency/stress probe (Kanté Task C).  WARN-only by default; only a
-    # DB-lock disaster the probe itself observed can FAIL the gate.
+    # Concurrency/stress probe (Kanté Task C + large-scale TTL).  Freshness
+    # is enforced via ``MVP_STRESS_SUMMARY_TTL_HOURS`` (default 24h): a stale
+    # PASS now WARNs (never silently passes), and any fresh BLOCK FAILs.
     stress = _stress_probe_summary()
     stress_impact = stress["stress_release_impact"]
+    stress_status = stress["stress_gate_status"]
     if stress_impact == FAIL:
         verdict = FAIL
-        reasons.append(
-            "stress_probe: db_locked_errors under concurrent reads "
-            f"(stress_gate_status={stress['stress_gate_status']}); FAIL."
-        )
+        why = f"stress_probe: fresh BLOCK (stress_gate_status={stress_status}"
+        if stress.get("stress_summary_db_locked_errors"):
+            why += f", db_locked_errors={stress['stress_summary_db_locked_errors']}"
+        why += f"); FAIL. Re-run: {stress['stress_recommended_command']}"
+        reasons.append(why)
     elif stress_impact == WARN and verdict == PASS:
         verdict = WARN
-        reasons.append(
-            "stress_probe: last run "
-            f"stress_gate_status={stress['stress_gate_status']} "
-            f"(score={stress['stress_score']}); WARN."
-        )
+        if stress_status in {"UNKNOWN", "STALE", "DEGRADED"}:
+            age = stress.get("stress_summary_age_seconds")
+            reasons.append(
+                f"stress_probe: {stress_status} (age={age}s, ttl="
+                f"{stress['stress_summary_ttl_seconds']}s); WARN. "
+                f"Re-run: {stress['stress_recommended_command']}"
+            )
+        else:
+            reasons.append(
+                "stress_probe: last run "
+                f"stress_gate_status={stress_status} "
+                f"(score={stress['stress_score']}); WARN."
+            )
 
     return {
         "report": "release_gate",
@@ -166,11 +292,22 @@ def evaluate(
         "diagnostics_service_available": kante.get("diagnostics_service_available"),
         "diagnostics_service_status": kante.get("diagnostics_service_status"),
         "release_gate_impact": kante.get("release_gate_impact"),
-        # Concurrency/stress probe surface (Kanté Task C; WARN-only by default).
+        # Concurrency/stress probe surface (Kanté Task C + TTL).  A stale or
+        # missing or malformed summary now WARNs (never silently passes), and
+        # any fresh BLOCK FAILs the gate.
         "stress_probe_available": stress["stress_probe_available"],
         "stress_gate_status": stress["stress_gate_status"],
         "stress_score": stress["stress_score"],
         "stress_release_impact": stress_impact,
+        "stress_summary_path": stress.get("stress_summary_path"),
+        "stress_summary_generated_at_utc": stress.get("stress_summary_generated_at_utc"),
+        "stress_summary_age_seconds": stress.get("stress_summary_age_seconds"),
+        "stress_summary_ttl_seconds": stress.get("stress_summary_ttl_seconds"),
+        "stress_summary_fresh": stress.get("stress_summary_fresh"),
+        "stress_recommended_command": stress.get("stress_recommended_command"),
+        "stress_summary_runtime_db_polluted": stress.get(
+            "stress_summary_runtime_db_polluted", False
+        ),
         "preflight": preflight,
         **_contract.advisory_safety_stamps(),
     }
@@ -205,6 +342,11 @@ def main(argv: list[str] | None = None) -> int:
         print(f"  mutation_scripts_unguarded   : {result['mutation_scripts_unguarded']} "
               f"{result['mutation_scripts_unguarded_names']}")
         print(f"  mutation_guard_release_impact: {result['mutation_guard_release_impact']}")
+        print(f"  stress_gate_status           : {result['stress_gate_status']} "
+              f"(impact={result['stress_release_impact']}, fresh="
+              f"{result['stress_summary_fresh']}, "
+              f"age={result['stress_summary_age_seconds']}s/"
+              f"ttl={result['stress_summary_ttl_seconds']}s)")
         for reason in result["reasons"]:
             print(f"  - {reason}")
         if result["verdict"] == PASS:
@@ -213,7 +355,13 @@ def main(argv: list[str] | None = None) -> int:
     return 1 if result["verdict"] == FAIL else 0
 
 
-__all__ = ["PASS", "WARN", "FAIL", "evaluate"]
+__all__ = [
+    "PASS", "WARN", "FAIL",
+    "DEFAULT_STRESS_SUMMARY_TTL_HOURS",
+    "MAX_STRESS_SUMMARY_TTL_HOURS",
+    "STRESS_PROBE_RECOMMENDED_CMD",
+    "evaluate",
+]
 
 
 if __name__ == "__main__":

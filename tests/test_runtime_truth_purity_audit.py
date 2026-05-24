@@ -179,3 +179,62 @@ def test_advisory_only_stamps_present(tmp_path):
     assert rep["advisory_status"] == "ADVISORY_ONLY"
     assert rep["broker_api_called"] is False
     assert rep["ai_execution_count"] == 0
+
+
+# ---------------------------------------------------------------------------
+# Large-scale performance proof sprint — synthetic fixture leak detection
+# ---------------------------------------------------------------------------
+
+
+def test_clean_db_has_no_perf_fixture_markers(tmp_path):
+    db = tmp_path / "clean.db"
+    persistence.init_schema(db)
+    rep = tpa.build_audit(db)
+    assert rep["perf_fixture_pollution_detected"] == 0
+    assert rep["perf_fixture_markers"] == []
+    assert rep["release_gate_passed"] is True
+
+
+def test_detects_perf_fixture_event_id_in_canonical_db(tmp_path):
+    """A leaked PERF_FIXTURE_ event_id MUST fail the truth-purity gate."""
+    db = tmp_path / "leaked.db"
+    persistence.init_schema(db)
+    # Simulate a leaked synthetic row landing in canonical truth.
+    conn = sqlite3.connect(str(db))
+    try:
+        conn.execute(
+            "INSERT INTO signal_events (event_id, source_name, raw_payload, "
+            "fetched_at, advisory_status, human_review_required, "
+            "execution_gate, ai_execution_count) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            ("PERF_FIXTURE_0000001_SPY", "rss",
+             '{"fixture_role":"synthetic_performance_fixture"}',
+             "2026-05-24T00:00:00Z",
+             "ADVISORY_ONLY", 1, "LOCKED", 0),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    rep = tpa.build_audit(db)
+    assert rep["perf_fixture_pollution_detected"] >= 1
+    assert any("PERF_FIXTURE_" in m for m in rep["perf_fixture_markers"])
+    assert "signal_events" in rep["affected_tables"]
+    assert rep["release_gate_passed"] is False
+
+
+def test_detects_perf_fixture_metadata_table_in_canonical_db(tmp_path):
+    """A leaked ``_perf_fixture_metadata`` table MUST fail the gate too."""
+    db = tmp_path / "leaked.db"
+    persistence.init_schema(db)
+    conn = sqlite3.connect(str(db))
+    try:
+        conn.executescript(
+            "CREATE TABLE _perf_fixture_metadata "
+            "(key TEXT PRIMARY KEY, value TEXT NOT NULL);"
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    rep = tpa.build_audit(db)
+    assert any("_perf_fixture_metadata" in m for m in rep["perf_fixture_markers"])
+    assert rep["release_gate_passed"] is False

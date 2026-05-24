@@ -91,6 +91,15 @@ FAKE_THESIS_FRAGMENTS: tuple[str, ...] = (
     "thesis a",
 )
 
+# Synthetic performance-fixture markers.  A canonical runtime DB must never
+# carry any of these: an ``event_id`` starting with ``PERF_FIXTURE_`` or a
+# sidecar ``_perf_fixture_metadata`` table is a leaked stress-probe fixture
+# and counts as canonical-truth pollution.  Kept in lock-step with
+# ``tests/helpers/large_signal_events_fixture.py``.
+PERF_FIXTURE_EVENT_ID_PREFIXES: tuple[str, ...] = ("PERF_FIXTURE_",)
+PERF_FIXTURE_METADATA_TABLE = "_perf_fixture_metadata"
+PERF_FIXTURE_CONTENTION_TABLE = "_perf_contention_writes"
+
 ADVISORY_DISCLAIMER = (
     "Advisory-only, read-only truth-purity gate. It detects but never deletes; "
     "cleanup is a separate, explicit, role-gated command. No broker calls."
@@ -157,6 +166,8 @@ def build_audit(db_path: Path | None = None) -> dict[str, Any]:
         "truth_purity_score": 1.0,
         "fake_rows_detected": 0,
         "quarantined_rows_excluded": 0,
+        "perf_fixture_pollution_detected": 0,
+        "perf_fixture_markers": [],
         "affected_tables": [],
         "pollution_examples": [],
         "release_gate_passed": True,
@@ -201,6 +212,62 @@ def build_audit(db_path: Path | None = None) -> dict[str, Any]:
                         "ticker": row.get("ticker"),
                         "reason": reason,
                     })
+
+        # --- performance-fixture leak detection -------------------------
+        # The cockpit stress probe / large-fixture helper write event_ids
+        # prefixed PERF_FIXTURE_* and a sidecar _perf_fixture_metadata table.
+        # These must NEVER appear in the canonical runtime DB.  If one shows
+        # up here, the operator has somehow run the fixture against the
+        # canonical DB (which the helper refuses) or has restored a fixture
+        # backup over operator truth — either way, FAIL the gate loudly.
+        perf_markers: list[str] = []
+        for table in (PERF_FIXTURE_METADATA_TABLE, PERF_FIXTURE_CONTENTION_TABLE):
+            row = conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
+                (table,),
+            ).fetchone()
+            if row is not None:
+                perf_markers.append(f"table:{table}")
+        # Scan signal_events for fixture event-id prefixes.  This catches the
+        # signal_events leakage path even if the metadata table was dropped.
+        try:
+            has_se = conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='signal_events'"
+            ).fetchone() is not None
+        except sqlite3.Error:
+            has_se = False
+        perf_fixture_rows = 0
+        if has_se:
+            for prefix in PERF_FIXTURE_EVENT_ID_PREFIXES:
+                try:
+                    n = conn.execute(
+                        "SELECT COUNT(*) FROM signal_events WHERE event_id LIKE ?",
+                        (prefix + "%",),
+                    ).fetchone()[0]
+                except sqlite3.Error:
+                    n = 0
+                if n:
+                    perf_fixture_rows += int(n)
+                    perf_markers.append(f"event_id_prefix:{prefix}({n})")
+                    if len(examples) < 20:
+                        examples.append({
+                            "table": "signal_events",
+                            "id": None,
+                            "event_id": prefix + "*",
+                            "ticker": None,
+                            "reason": f"perf_fixture_event_id_prefix:{prefix}",
+                        })
+                    affected.add("signal_events")
+        report["perf_fixture_pollution_detected"] = perf_fixture_rows + (
+            1 if perf_markers and not perf_fixture_rows else 0
+        )
+        report["perf_fixture_markers"] = perf_markers
+        # Roll perf-fixture pollution into the fake count so the existing
+        # release_gate_passed logic naturally fails on a leak.  This is the
+        # whole point of the marker: leaked synthetic fixture rows must be
+        # treated as canonical-truth poisoning.
+        if perf_fixture_rows or perf_markers:
+            fake_count += max(perf_fixture_rows, 1)
 
         # --- manual trades ----------------------------------------------
         trades = _rows(conn, "SELECT * FROM manual_trades")
@@ -300,6 +367,9 @@ __all__ = [
     "ADVISORY_DISCLAIMER",
     "KNOWN_DEMO_TICKERS",
     "FAKE_THESIS_FRAGMENTS",
+    "PERF_FIXTURE_EVENT_ID_PREFIXES",
+    "PERF_FIXTURE_METADATA_TABLE",
+    "PERF_FIXTURE_CONTENTION_TABLE",
     "build_audit",
 ]
 

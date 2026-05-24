@@ -178,11 +178,13 @@ def test_report_carries_safety_stamps(empty_db):
 
 
 def test_workers_and_iterations_are_bounded(empty_db):
-    # Absurd inputs are clamped, never launched verbatim.
+    # Absurd inputs are clamped, never launched verbatim.  The iteration
+    # ceiling was lifted from 1000 to 5000 for the large-fixture path; the
+    # worker ceiling is unchanged.
     report = probe.run_stress_probe(
         db_path=empty_db, workers=10_000, iterations=10_000_000)
-    assert report["workers"] <= 64
-    assert report["iterations"] <= 1000
+    assert report["workers"] <= probe.MAX_WORKERS == 64
+    assert report["iterations"] <= probe.MAX_ITERATIONS == 5000
 
 
 def test_json_mode_emits_valid_json(empty_db, capsys):
@@ -205,3 +207,137 @@ def test_summary_round_trip(empty_db, tmp_path, monkeypatch):
     assert summary is not None
     assert summary["stress_gate_status"] == report["stress_gate_status"]
     assert summary["cache_role"] == "derived_non_canonical"
+
+
+# ---------------------------------------------------------------------------
+# Large-scale performance proof sprint — fixture / contention / refusal
+# ---------------------------------------------------------------------------
+
+
+def test_report_stamps_runtime_db_not_polluted(empty_db):
+    """Every stress report stamps ``runtime_db_polluted=False`` for the gate."""
+    report = probe.run_stress_probe(db_path=empty_db, workers=1, iterations=2)
+    assert report["runtime_db_polluted"] is False
+
+
+def test_iteration_bound_lifted_to_5000(empty_db):
+    """The large-fixture path needs more iterations — the ceiling is 5000."""
+    report = probe.run_stress_probe(
+        db_path=empty_db, workers=1, iterations=10_000_000)
+    assert report["iterations"] <= probe.MAX_ITERATIONS == 5000
+
+
+def test_refuses_canonical_for_large_fixture(monkeypatch):
+    """``--large-fixture --db-path runtime/mvp_local.db`` must refuse."""
+    canonical = probe.CANONICAL_RUNTIME_DB
+    with pytest.raises(ValueError, match="refuse_to_pollute_canonical_runtime_db"):
+        probe.main([
+            "--large-fixture", "--db-path", str(canonical),
+            "--no-summary", "--json", "--fixture-rows", "100",
+        ])
+
+
+def test_refuses_canonical_for_write_contention():
+    """``--include-write-contention --db-path runtime/mvp_local.db`` must refuse."""
+    with pytest.raises(ValueError, match="refuse_to_pollute_canonical_runtime_db"):
+        probe.main([
+            "--include-write-contention", "--db-path",
+            str(probe.CANONICAL_RUNTIME_DB), "--no-summary", "--json",
+        ])
+
+
+def test_refuses_canonical_for_output(tmp_path, monkeypatch):
+    """``--output`` to the canonical runtime DB must refuse as well."""
+    with pytest.raises(ValueError, match="refuse_to_pollute_canonical_runtime_db"):
+        probe.main([
+            "--no-summary", "--json",
+            "--output", str(probe.CANONICAL_RUNTIME_DB),
+        ])
+
+
+def test_large_fixture_creates_non_canonical_db_and_runs_probe(tmp_path, capsys, monkeypatch):
+    """``--large-fixture --db-path tmp.db`` builds a fixture + runs the probe."""
+    # Redirect the summary to tmp so we don't touch the real runtime/.
+    monkeypatch.setattr(probe, "SUMMARY_DIR", tmp_path / "stress")
+    monkeypatch.setattr(probe, "SUMMARY_FILE", tmp_path / "stress" / "last_run.json")
+    fixture_path = tmp_path / "small_fixture.db"
+    rc = probe.main([
+        "--large-fixture",
+        "--db-path", str(fixture_path),
+        "--fixture-rows", "2000",
+        "--workers", "2",
+        "--iterations", "4",
+        "--json",
+    ])
+    payload = json.loads(capsys.readouterr().out)
+    assert rc == 0
+    assert payload["large_fixture_used"] is True
+    assert payload["large_fixture_rows"] == 2000
+    assert payload["large_fixture_path"] == str(fixture_path)
+    assert payload["runtime_db_polluted"] is False
+    assert payload["fixture_role"] == "synthetic_performance_fixture"
+    assert payload["derived_non_canonical"] is True
+    # Sidecar metadata travels through to the report.
+    assert payload["large_fixture_sidecar"]["safe_to_delete"] is True
+
+
+def test_write_contention_uses_temp_db_and_recovers(tmp_path, capsys, monkeypatch):
+    """The write-contention scenario runs against a TEMP DB and recovers."""
+    monkeypatch.setattr(probe, "SUMMARY_DIR", tmp_path / "stress")
+    monkeypatch.setattr(probe, "SUMMARY_FILE", tmp_path / "stress" / "last_run.json")
+    rc = probe.main([
+        "--include-write-contention",
+        "--workers", "2", "--iterations", "2",
+        "--json",
+    ])
+    payload = json.loads(capsys.readouterr().out)
+    assert rc in (0, 1)  # PASS or WARN both fine; only a hard BLOCK is RC=1
+    assert payload["write_contention_enabled"] is True
+    cr = payload["write_contention_report"]
+    assert cr["temp_db_only"] is True
+    assert cr["reads_during_lock"] > 0
+    assert cr["runtime_db_polluted"] is False
+    assert cr["fixture_role"] == "synthetic_performance_fixture"
+    assert cr["derived_non_canonical"] is True
+    # The contention gate is one of the recognised statuses, not crash.
+    assert cr["contention_gate_status"] in {"PASS", "WARN", "BLOCK"}
+    # Stress + contention metrics are mirrored onto the main report so the
+    # release gate / summary can read them at top level.
+    assert payload["contention_gate_status"] == cr["contention_gate_status"]
+    assert payload["contention_recovery_score"] == cr["contention_recovery_score"]
+
+
+def test_run_write_contention_scenario_refuses_canonical():
+    with pytest.raises(ValueError, match="refuse_to_pollute_canonical_runtime_db"):
+        probe.run_write_contention_scenario(db_path=probe.CANONICAL_RUNTIME_DB)
+
+
+def test_run_write_contention_scenario_handles_clean_temp(tmp_path):
+    """Direct API: temp DB only, classified result, no crash."""
+    db = tmp_path / "contention.db"
+    rep = probe.run_write_contention_scenario(
+        db_path=db,
+        writer_lock_hold_ms=50,
+        reads_during_lock=8,
+        target_recovery_ms=2000,
+        reader_workers=2,
+    )
+    assert rep["temp_db_only"] is False  # caller-provided path
+    assert rep["db_path"] == str(db)
+    assert rep["runtime_db_polluted"] is False
+    assert rep["fixture_role"] == "synthetic_performance_fixture"
+    assert rep["contention_gate_status"] in {"PASS", "WARN", "BLOCK"}
+    assert rep["reads_during_lock"] == 8
+    assert rep["reads_successful_during_lock"] + rep["db_locked_errors"] <= 8
+
+
+def test_write_contention_bounds():
+    """Writer lock hold and reads_during_lock are clamped to safe ceilings."""
+    rep = probe.run_write_contention_scenario(
+        writer_lock_hold_ms=10**9,
+        reads_during_lock=10**9,
+        target_recovery_ms=1000,
+        reader_workers=2,
+    )
+    assert rep["writer_lock_hold_ms"] <= probe.MAX_WRITER_LOCK_HOLD_MS
+    assert rep["reads_during_lock"] <= probe.MAX_CONTENTION_READS

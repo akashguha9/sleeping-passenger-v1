@@ -35,7 +35,10 @@ import argparse
 import concurrent.futures
 import json
 import math
+import os
 import sqlite3
+import tempfile
+import threading
 import time
 from pathlib import Path
 from typing import Any, Callable
@@ -54,6 +57,11 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 SUMMARY_DIR = REPO_ROOT / "runtime" / "cockpit_stress_probe"
 SUMMARY_FILE = SUMMARY_DIR / "last_run.json"
 
+# Canonical runtime DB — the probe must NEVER ask the large fixture or the
+# write-contention scenario to touch this path.  Used by ``_refuse_canonical``
+# below to fail loudly instead of silently polluting operator truth.
+CANONICAL_RUNTIME_DB = REPO_ROOT / "runtime" / "mvp_local.db"
+
 PASS, WARN, BLOCK = "PASS", "WARN", "BLOCK"
 
 # Safe defaults — small, bounded, fast.
@@ -62,6 +70,25 @@ DEFAULT_ITERATIONS = 25
 DEFAULT_TIMEOUT_SECONDS = 30
 DEFAULT_MAX_ROWS = 500
 DEFAULT_TARGET_P95_MS = 500
+
+# Large-fixture defaults (only used when --large-fixture is requested).
+DEFAULT_FIXTURE_ROW_COUNT = 122_000
+MAX_FIXTURE_ROW_COUNT = 250_000
+MAX_FIXTURE_ROW_COUNT_ALLOW_LARGE = 500_000
+DEFAULT_LARGE_TARGET_P95_MS = 750
+
+# Iteration ceiling lifted from 1000 to 5000 for the large-fixture path; small
+# default runs stay tiny.  Workers stay capped at 64.
+MAX_WORKERS = 64
+MAX_ITERATIONS = 5_000
+
+# Write-contention defaults.  Writer lock hold is bounded so the probe can't
+# wedge itself by accident.
+DEFAULT_WRITER_LOCK_HOLD_MS = 200
+MAX_WRITER_LOCK_HOLD_MS = 5_000
+DEFAULT_CONTENTION_READS = 32
+MAX_CONTENTION_READS = 1_000
+DEFAULT_CONTENTION_TARGET_RECOVERY_MS = 250
 
 # Any of these verbs appearing in a probe statement is a bug — the probe is
 # strictly read-only and asserts against this set before executing SQL.
@@ -85,6 +112,36 @@ class StressOpResult:
         self.db_locked = False
         self.cache_error = False
         self.full_scans = 0
+
+
+def _resolve(path: Path) -> Path:
+    try:
+        return path.expanduser().resolve()
+    except OSError:
+        return path
+
+
+def _is_canonical_runtime_db(path: Path) -> bool:
+    """True iff ``path`` resolves to ``runtime/mvp_local.db``."""
+    try:
+        return _resolve(path) == _resolve(CANONICAL_RUNTIME_DB)
+    except Exception:  # noqa: BLE001 - defensive; treat as not-canonical only on resolve failure
+        return False
+
+
+def _refuse_canonical_for_fixture(path: Path, *, reason: str) -> None:
+    """Hard-stop if ``path`` is the canonical runtime DB.
+
+    Used by the large-fixture / write-contention paths.  The probe is
+    advisory-only and must never seed synthetic rows into operator truth.
+    """
+    if _is_canonical_runtime_db(path):
+        raise ValueError(
+            f"refuse_to_pollute_canonical_runtime_db: db_path={path} resolves "
+            f"to the canonical runtime DB ({CANONICAL_RUNTIME_DB}); refusing "
+            f"{reason}. Use --large-fixture without --db-path to auto-create "
+            "a temp fixture, or pass an explicit non-canonical path."
+        )
 
 
 def _assert_read_only(sql: str) -> None:
@@ -308,8 +365,8 @@ def run_stress_probe(
     """
     target = _runtime_config.get_db_path() if db_path is None else Path(db_path)
     # Clamp to safe bounds so a bad CLI arg can never launch an unbounded run.
-    workers = max(1, min(int(workers), 64))
-    iterations = max(1, min(int(iterations), 1000))
+    workers = max(1, min(int(workers), MAX_WORKERS))
+    iterations = max(1, min(int(iterations), MAX_ITERATIONS))
     timeout_seconds = max(1, min(int(timeout_seconds), 600))
     max_rows = max(1, min(int(max_rows), 100_000))
     total_operations = workers * iterations
@@ -389,6 +446,11 @@ def run_stress_probe(
         uncaught_exception=uncaught_exception,
     )
 
+    # The probe NEVER writes to ``target`` (every connection is opened
+    # ``mode=ro`` and ``_assert_read_only`` rejects mutation verbs).  Stamping
+    # ``runtime_db_polluted=False`` explicitly here makes that invariant
+    # machine-readable: the release gate, the truth-purity audit, and
+    # downstream tooling can all assert this field instead of inferring it.
     return {
         "report": "cockpit_concurrency_stress_probe",
         "db_path": str(target),
@@ -424,6 +486,7 @@ def run_stress_probe(
         "human_execution_required": True,
         "canonical_truth_source": _contract.CANONICAL_STORE,
         "read_only": True,
+        "runtime_db_polluted": False,
         "broker_api_called": False,
         "ai_execution_count": _contract.AI_EXECUTION_COUNT,
         "execution_gate": _contract.EXECUTION_GATE_LOCKED,
@@ -479,6 +542,380 @@ def _stress_gate(
     return WARN, rec
 
 
+def _write_contention_score(
+    *,
+    reads_during_lock: int,
+    reads_successful_during_lock: int,
+    db_locked_errors: int,
+    post_lock_recovery_ms: float,
+    target_recovery_ms: int,
+) -> tuple[float, str, list[str]]:
+    """Score + gate the write-contention scenario.
+
+    PASS: no uncaught exception, no db-locked errors, recovery within target.
+    WARN: some db-locked errors but reads recovered and no crash.
+    BLOCK: probe crashed (caller signals via gate=BLOCK separately).
+    """
+    rec: list[str] = []
+    read_success_rate = (reads_successful_during_lock / max(reads_during_lock, 1))
+    locked_rate = db_locked_errors / max(reads_during_lock, 1)
+    recovery_score = min(1.0, target_recovery_ms / max(post_lock_recovery_ms, 1.0))
+    score = round(10.0 * (
+        0.40 * read_success_rate + 0.30 * (1 - locked_rate) + 0.30 * recovery_score
+    ), 3)
+    if db_locked_errors == 0 and reads_successful_during_lock == reads_during_lock \
+            and post_lock_recovery_ms <= target_recovery_ms:
+        return score, PASS, ["reads remained clean under writer lock; recovery within target."]
+    if db_locked_errors > 0 and reads_successful_during_lock + db_locked_errors >= reads_during_lock:
+        rec.append(
+            f"db_locked_errors={db_locked_errors} observed but classified and "
+            "recovered; verify WAL journal_mode + busy_timeout on production DB."
+        )
+        return score, WARN, rec
+    if post_lock_recovery_ms > target_recovery_ms:
+        rec.append(
+            f"post_lock_recovery_ms={post_lock_recovery_ms} > target "
+            f"{target_recovery_ms}ms; readers took longer than expected to recover."
+        )
+        return score, WARN, rec
+    rec.append("reads did not all recover cleanly under writer lock; investigate.")
+    return score, WARN, rec
+
+
+def run_write_contention_scenario(
+    *,
+    db_path: Path | None = None,
+    writer_lock_hold_ms: int = DEFAULT_WRITER_LOCK_HOLD_MS,
+    reads_during_lock: int = DEFAULT_CONTENTION_READS,
+    target_recovery_ms: int = DEFAULT_CONTENTION_TARGET_RECOVERY_MS,
+    reader_workers: int = 4,
+    keep_db: bool = False,
+) -> dict[str, Any]:
+    """Run a bounded write-contention scenario against a TEMP DB only.
+
+    Hard safety rules:
+    * The canonical runtime DB is *refused* outright — synthetic writes must
+      never land in operator truth.
+    * If ``db_path`` is None, a temp file is created under the system temp dir
+      and removed at the end (unless ``keep_db=True``).
+    * Writer holds a bounded ``BEGIN IMMEDIATE`` lock then COMMITs; the lock
+      mutates a tiny ``_perf_contention_writes`` table local to the temp DB.
+    * Readers issue SELECTs against ``signal_events``; missing-table is a
+      benign "no rows" result, not an error.
+    """
+    # 1) Resolve target DB.  Either explicit (must be non-canonical) or temp.
+    created_temp = False
+    if db_path is None:
+        tmp_fd, tmp_name = tempfile.mkstemp(
+            prefix="cockpit_contention_", suffix=".db",
+        )
+        os.close(tmp_fd)
+        db_path = Path(tmp_name)
+        created_temp = True
+    else:
+        db_path = Path(db_path)
+        _refuse_canonical_for_fixture(
+            db_path, reason="write-contention scenario (mutates a synthetic table)"
+        )
+
+    # Bound the parameters so a bad CLI arg can't wedge the probe.
+    writer_lock_hold_ms = max(1, min(int(writer_lock_hold_ms), MAX_WRITER_LOCK_HOLD_MS))
+    reads_during_lock = max(1, min(int(reads_during_lock), MAX_CONTENTION_READS))
+    target_recovery_ms = max(1, int(target_recovery_ms))
+    reader_workers = max(1, min(int(reader_workers), MAX_WORKERS))
+
+    # 2) Initialise schema and a small marker payload on the temp DB.
+    #    WAL is important: it matches the production busy-timeout + WAL posture
+    #    so this scenario actually exercises the prod-relevant case (readers
+    #    succeed during writer transactions; writers serialise).
+    conn = sqlite3.connect(str(db_path), timeout=5.0)
+    try:
+        conn.execute("PRAGMA journal_mode = WAL")
+        conn.execute("PRAGMA busy_timeout = 2000")
+        conn.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS signal_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                event_id TEXT NOT NULL UNIQUE,
+                source_name TEXT NOT NULL,
+                raw_payload TEXT NOT NULL,
+                fetched_at TEXT NOT NULL,
+                advisory_status TEXT NOT NULL DEFAULT 'ADVISORY_ONLY',
+                human_review_required INTEGER NOT NULL DEFAULT 1,
+                execution_gate TEXT NOT NULL DEFAULT 'LOCKED',
+                ai_execution_count INTEGER NOT NULL DEFAULT 0
+            );
+            CREATE INDEX IF NOT EXISTS idx_se_source ON signal_events(source_name);
+            CREATE INDEX IF NOT EXISTS idx_se_fetched ON signal_events(fetched_at);
+            CREATE TABLE IF NOT EXISTS _perf_contention_writes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                written_at TEXT NOT NULL,
+                marker TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS _perf_fixture_metadata (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            );
+            """
+        )
+        conn.executemany(
+            "INSERT OR REPLACE INTO _perf_fixture_metadata (key, value) VALUES (?, ?)",
+            (
+                ("fixture_role", "synthetic_performance_fixture"),
+                ("derived_non_canonical", "true"),
+                ("safe_to_delete", "true"),
+                ("runtime_db_polluted", "false"),
+                ("canonical_truth_source", "sqlite_runtime_not_used"),
+                ("scenario", "write_contention"),
+            ),
+        )
+        # Seed a few rows so SELECTs return something realistic; these are
+        # synthetic markers (PERF_FIXTURE_*), not operator truth.
+        seed_rows = [
+            (f"PERF_FIXTURE_CONTENTION_{i:04d}", "rss",
+             '{"fixture_role":"synthetic_performance_fixture"}',
+             time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+             "ADVISORY_ONLY", 1, "LOCKED", 0)
+            for i in range(64)
+        ]
+        conn.executemany(
+            "INSERT OR IGNORE INTO signal_events "
+            "(event_id, source_name, raw_payload, fetched_at, advisory_status, "
+            " human_review_required, execution_gate, ai_execution_count) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            seed_rows,
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    # 3) Writer thread: hold a brief lock, then commit.  Synchronisation events
+    #    coordinate the start of reads with the moment the lock is held.
+    lock_acquired = threading.Event()
+    lock_released = threading.Event()
+    writer_error: list[str] = []
+
+    def _writer() -> None:
+        try:
+            wconn = sqlite3.connect(str(db_path), timeout=5.0)
+            try:
+                wconn.execute("PRAGMA busy_timeout = 2000")
+                wconn.isolation_level = None  # manual BEGIN/COMMIT
+                wconn.execute("BEGIN IMMEDIATE")
+                wconn.execute(
+                    "INSERT INTO _perf_contention_writes (written_at, marker) "
+                    "VALUES (?, ?)",
+                    (time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                     "synthetic_contention_marker"),
+                )
+                lock_acquired.set()
+                time.sleep(writer_lock_hold_ms / 1000.0)
+                wconn.execute("COMMIT")
+            finally:
+                wconn.close()
+        except Exception as exc:  # noqa: BLE001 - classify, don't crash
+            writer_error.append(f"{type(exc).__name__}: {exc}")
+        finally:
+            lock_released.set()
+            lock_acquired.set()  # ensure waiters unblock even on writer error
+
+    # 4) Reader workers: do SELECTs during the lock window.  We classify
+    #    successes vs ``database is locked`` errors so a busy_timeout that
+    #    handles the lock gracefully shows up as PASS, while a timed-out
+    #    or crashing reader shows up as WARN/BLOCK.
+    successes = 0
+    locked_errors = 0
+    other_errors: list[str] = []
+    read_lock = threading.Lock()
+
+    def _reader(_n: int) -> None:
+        nonlocal successes, locked_errors
+        try:
+            rconn = sqlite3.connect(
+                f"file:{db_path.as_posix()}?mode=ro", uri=True, timeout=2.0,
+            )
+            try:
+                rows = rconn.execute(
+                    "SELECT id FROM signal_events ORDER BY fetched_at DESC LIMIT 50"
+                ).fetchall()
+                with read_lock:
+                    successes += 1 if rows is not None else 0
+            finally:
+                rconn.close()
+        except sqlite3.OperationalError as exc:
+            msg = str(exc).lower()
+            if "locked" in msg or "busy" in msg:
+                with read_lock:
+                    locked_errors += 1
+            else:
+                with read_lock:
+                    other_errors.append(type(exc).__name__)
+        except Exception as exc:  # noqa: BLE001 - classify, don't crash
+            with read_lock:
+                other_errors.append(type(exc).__name__)
+
+    writer_thread = threading.Thread(target=_writer, name="contention-writer")
+    writer_thread.start()
+    # Wait until the writer is actually holding the lock before launching reads;
+    # otherwise we'd be measuring an empty contention window.
+    if not lock_acquired.wait(timeout=5.0):
+        # Writer never reported lock acquisition — abort cleanly.
+        writer_thread.join(timeout=5.0)
+        return {
+            "report": "cockpit_write_contention_scenario",
+            "write_contention_enabled": True,
+            "temp_db_only": created_temp,
+            "db_path": str(db_path),
+            "writer_lock_hold_ms": writer_lock_hold_ms,
+            "reads_during_lock": 0,
+            "reads_successful_during_lock": 0,
+            "db_locked_errors": 0,
+            "post_lock_recovery_ms": 0.0,
+            "contention_gate_status": BLOCK,
+            "contention_recovery_score": 0.0,
+            "writer_errors": writer_error,
+            "recommendations": ["writer never acquired lock — investigate."],
+            "runtime_db_polluted": False,
+            "fixture_role": "synthetic_performance_fixture",
+            "derived_non_canonical": True,
+        }
+
+    # 5) Fire `reads_during_lock` reader operations across `reader_workers`.
+    with concurrent.futures.ThreadPoolExecutor(max_workers=reader_workers) as pool:
+        list(pool.map(_reader, range(reads_during_lock)))
+
+    # 6) Wait for writer to release; measure recovery wall time until a fresh
+    #    SELECT succeeds (or until a hard ceiling).
+    lock_released.wait(timeout=(writer_lock_hold_ms / 1000.0) + 5.0)
+    writer_thread.join(timeout=5.0)
+    recovery_start = time.perf_counter()
+    recovery_ok = False
+    recovery_attempts = 0
+    while time.perf_counter() - recovery_start < 5.0:
+        recovery_attempts += 1
+        try:
+            rconn = sqlite3.connect(
+                f"file:{db_path.as_posix()}?mode=ro", uri=True, timeout=2.0,
+            )
+            try:
+                rconn.execute("SELECT COUNT(*) FROM signal_events").fetchone()
+                recovery_ok = True
+                break
+            finally:
+                rconn.close()
+        except sqlite3.OperationalError:
+            time.sleep(0.01)
+    post_lock_recovery_ms = round((time.perf_counter() - recovery_start) * 1000, 3)
+
+    score, gate, recommendations = _write_contention_score(
+        reads_during_lock=reads_during_lock,
+        reads_successful_during_lock=successes,
+        db_locked_errors=locked_errors,
+        post_lock_recovery_ms=post_lock_recovery_ms,
+        target_recovery_ms=target_recovery_ms,
+    )
+    if writer_error or not recovery_ok or other_errors:
+        gate = BLOCK
+        if writer_error:
+            recommendations.append(f"writer_error={writer_error}")
+        if not recovery_ok:
+            recommendations.append("readers never recovered after writer lock release.")
+        if other_errors:
+            recommendations.append(f"unexpected reader errors: {sorted(set(other_errors))}")
+
+    report = {
+        "report": "cockpit_write_contention_scenario",
+        "write_contention_enabled": True,
+        "temp_db_only": created_temp,
+        "db_path": str(db_path),
+        "writer_lock_hold_ms": writer_lock_hold_ms,
+        "reads_during_lock": reads_during_lock,
+        "reads_successful_during_lock": successes,
+        "db_locked_errors": locked_errors,
+        "post_lock_recovery_ms": post_lock_recovery_ms,
+        "recovery_attempts": recovery_attempts,
+        "target_recovery_ms": target_recovery_ms,
+        "contention_gate_status": gate,
+        "contention_recovery_score": score,
+        "writer_errors": writer_error,
+        "other_reader_errors": sorted(set(other_errors)),
+        "recommendations": recommendations,
+        "runtime_db_polluted": False,
+        "fixture_role": "synthetic_performance_fixture",
+        "derived_non_canonical": True,
+        "canonical_truth_source": _contract.CANONICAL_STORE,
+        **_contract.advisory_safety_stamps(),
+    }
+
+    # 7) Best-effort cleanup of the temp DB unless caller asked to keep it.
+    if created_temp and not keep_db:
+        for suffix in ("", "-wal", "-shm"):
+            p = Path(str(db_path) + suffix)
+            try:
+                if p.exists():
+                    p.unlink()
+            except OSError:  # pragma: no cover - best-effort cleanup
+                pass
+
+    return report
+
+
+def _import_fixture_helper():
+    """Import the large signal_events fixture helper.
+
+    The helper lives under ``tests/helpers/`` (not ``scripts/``), so the CLI
+    entry-point — which runs without the repo root on ``sys.path`` — needs to
+    insert the repo root before importing.  pytest already adds the repo root
+    to ``sys.path``, so the import succeeds directly there.
+    """
+    try:
+        from tests.helpers import large_signal_events_fixture as fix  # noqa: I001
+        return fix
+    except ModuleNotFoundError:
+        import sys
+        if str(REPO_ROOT) not in sys.path:
+            sys.path.insert(0, str(REPO_ROOT))
+        try:
+            from tests.helpers import large_signal_events_fixture as fix  # noqa: I001
+            return fix
+        except ModuleNotFoundError as exc:  # pragma: no cover - import failure
+            raise RuntimeError(
+                "large_signal_events_fixture helper not importable; ensure "
+                "tests/helpers/large_signal_events_fixture.py exists."
+            ) from exc
+
+
+def _build_large_fixture(
+    *,
+    fixture_rows: int,
+    output_dir: Path | None,
+    allow_large_local_test: bool,
+) -> tuple[Path, dict[str, Any]]:
+    """Create a non-canonical large signal_events fixture; return (path, sidecar).
+
+    Delegated to ``tests.helpers.large_signal_events_fixture`` so the fixture
+    code path is shared between CLI proof and pytest helper.  This is the only
+    write the probe ever performs, and it is hard-guarded against the
+    canonical runtime DB by the helper itself.
+    """
+    fix = _import_fixture_helper()
+
+    if output_dir is None:
+        tmp_dir = Path(tempfile.mkdtemp(prefix="cockpit_large_fixture_"))
+    else:
+        tmp_dir = Path(output_dir)
+        tmp_dir.mkdir(parents=True, exist_ok=True)
+    fixture_path = tmp_dir / f"large_signal_events_{fixture_rows}.db"
+    fix.create_large_signal_events_db(
+        fixture_path,
+        row_count=fixture_rows,
+        create_indexes=True,
+        allow_large_local_test=allow_large_local_test,
+    )
+    meta = fix.read_sidecar_metadata(fixture_path) or {}
+    return fixture_path, meta
+
+
 def write_summary(report: dict[str, Any]) -> Path:
     """Persist a derived, non-canonical stress summary for the release gate."""
     SUMMARY_DIR.mkdir(parents=True, exist_ok=True)
@@ -496,6 +933,13 @@ def write_summary(report: dict[str, Any]) -> Path:
         "error_rate": report.get("error_rate"),
         "timeout_rate": report.get("timeout_rate"),
         "canonical_truth_source": report.get("canonical_truth_source"),
+        "large_fixture_used": report.get("large_fixture_used", False),
+        "large_fixture_rows": report.get("large_fixture_rows"),
+        "large_fixture_path": report.get("large_fixture_path"),
+        "runtime_db_polluted": bool(report.get("runtime_db_polluted", False)),
+        "write_contention_enabled": report.get("write_contention_enabled", False),
+        "contention_gate_status": report.get("contention_gate_status"),
+        "contention_recovery_score": report.get("contention_recovery_score"),
         "cache_role": "derived_non_canonical",
         "advisory_only": True,
     }
@@ -530,6 +974,36 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--timeout-seconds", type=int, default=DEFAULT_TIMEOUT_SECONDS)
     p.add_argument("--max-rows", type=int, default=DEFAULT_MAX_ROWS)
     p.add_argument("--target-p95-ms", type=int, default=DEFAULT_TARGET_P95_MS)
+    # Large-fixture / write-contention / output / keep-fixture / large-local.
+    p.add_argument(
+        "--large-fixture", action="store_true",
+        help=("create a non-canonical signal_events fixture DB (refuses the "
+              "canonical runtime DB) and run the probe against it."),
+    )
+    p.add_argument(
+        "--fixture-rows", type=int, default=DEFAULT_FIXTURE_ROW_COUNT,
+        help=f"row count for --large-fixture (default {DEFAULT_FIXTURE_ROW_COUNT}, "
+             f"max {MAX_FIXTURE_ROW_COUNT} without --allow-large-local-test)",
+    )
+    p.add_argument(
+        "--allow-large-local-test", action="store_true",
+        help=f"raise the fixture row ceiling from {MAX_FIXTURE_ROW_COUNT} to "
+             f"{MAX_FIXTURE_ROW_COUNT_ALLOW_LARGE} (local proof only).",
+    )
+    p.add_argument(
+        "--include-write-contention", action="store_true",
+        help=("also run a temp-DB-only write-contention scenario (refuses the "
+              "canonical runtime DB)."),
+    )
+    p.add_argument(
+        "--keep-fixture", action="store_true",
+        help="do not delete the large fixture / contention temp DB on exit.",
+    )
+    p.add_argument(
+        "--output", type=Path, default=None,
+        help="write the full JSON report to this path (in addition to the "
+             "stress summary).  Must be non-canonical.",
+    )
     p.add_argument("--no-summary", action="store_true",
                    help="do not persist the derived last_run.json summary")
     p.add_argument("--json", action="store_true")
@@ -538,19 +1012,166 @@ def _build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
-    db = Path(args.db_path) if args.db_path else None
+    requested_db = Path(args.db_path) if args.db_path else None
+
+    # --- safety gates on the path the user typed --------------------------
+    # The two cases that touch *writes* are the large-fixture creation and
+    # the write-contention scenario.  Both must refuse the canonical runtime
+    # DB outright — otherwise the probe would seed synthetic rows into
+    # operator truth, exactly the scenario the prompt forbids.
+    if args.large_fixture and requested_db is not None:
+        _refuse_canonical_for_fixture(
+            requested_db, reason="--large-fixture (synthetic seed)"
+        )
+    if args.include_write_contention and requested_db is not None:
+        _refuse_canonical_for_fixture(
+            requested_db, reason="--include-write-contention (writer transaction)"
+        )
+    if args.output is not None:
+        _refuse_canonical_for_fixture(
+            args.output, reason="--output (JSON report write)"
+        )
+
+    # --- optional: build a large non-canonical fixture, probe against it --
+    fixture_path: Path | None = None
+    fixture_meta: dict[str, Any] = {}
+    fixture_used = False
+    fixture_creation_seconds: float | None = None
+    if args.large_fixture:
+        # If --db-path was supplied alongside --large-fixture, it is treated
+        # as the fixture's *output* DB path; the refusal above already proved
+        # it is non-canonical.
+        if requested_db is not None:
+            fixture_path = requested_db
+            fix = _import_fixture_helper()
+            t0 = time.perf_counter()
+            fix.create_large_signal_events_db(
+                fixture_path,
+                row_count=args.fixture_rows,
+                create_indexes=True,
+                allow_large_local_test=args.allow_large_local_test,
+            )
+            fixture_creation_seconds = round(time.perf_counter() - t0, 3)
+            fixture_meta = fix.read_sidecar_metadata(fixture_path) or {}
+        else:
+            t0 = time.perf_counter()
+            fixture_path, fixture_meta = _build_large_fixture(
+                fixture_rows=args.fixture_rows,
+                output_dir=None,
+                allow_large_local_test=args.allow_large_local_test,
+            )
+            fixture_creation_seconds = round(time.perf_counter() - t0, 3)
+        fixture_used = True
+        target_db: Path | None = fixture_path
+        target_p95 = (
+            DEFAULT_LARGE_TARGET_P95_MS
+            if args.target_p95_ms == DEFAULT_TARGET_P95_MS
+            else args.target_p95_ms
+        )
+    else:
+        target_db = requested_db
+        target_p95 = args.target_p95_ms
+
+    # --- run the read-only stress probe -----------------------------------
     report = run_stress_probe(
-        db_path=db,
+        db_path=target_db,
         workers=args.workers,
         iterations=args.iterations,
         timeout_seconds=args.timeout_seconds,
         max_rows=args.max_rows,
-        target_p95_ms=args.target_p95_ms,
+        target_p95_ms=target_p95,
     )
+
+    # --- optional: write-contention scenario (TEMP DB ONLY) ---------------
+    contention_report: dict[str, Any] | None = None
+    if args.include_write_contention:
+        # Contention always uses a *dedicated* temp DB, even when --large-fixture
+        # is set — recovery measurements are cleaner against a small DB, and
+        # the prompt's "temp DB only" rule is then trivially satisfied.
+        contention_report = run_write_contention_scenario(
+            db_path=None,
+            keep_db=args.keep_fixture,
+        )
+
+    # --- stitch the large-fixture / contention metrics onto the main report
+    report["large_fixture_used"] = fixture_used
+    report["large_fixture_rows"] = (
+        int(fixture_meta.get("row_count", args.fixture_rows)) if fixture_used else 0
+    )
+    report["large_fixture_path"] = str(fixture_path) if fixture_path else None
+    report["large_fixture_creation_seconds"] = fixture_creation_seconds
+    report["large_fixture_sidecar"] = fixture_meta if fixture_used else None
+    report["fixture_role"] = (
+        fixture_meta.get("fixture_role") if fixture_used else None
+    )
+    report["derived_non_canonical"] = (
+        bool(fixture_meta.get("derived_non_canonical")) if fixture_used else False
+    )
+    if contention_report is not None:
+        report["write_contention_enabled"] = True
+        report["write_contention_report"] = contention_report
+        report["contention_gate_status"] = contention_report.get("contention_gate_status")
+        report["contention_recovery_score"] = contention_report.get("contention_recovery_score")
+        report["writer_lock_hold_ms"] = contention_report.get("writer_lock_hold_ms")
+        report["reads_during_lock"] = contention_report.get("reads_during_lock")
+        report["reads_successful_during_lock"] = contention_report.get(
+            "reads_successful_during_lock"
+        )
+        report["post_lock_recovery_ms"] = contention_report.get("post_lock_recovery_ms")
+        # The whole-run stress gate is downgraded if contention BLOCKed.
+        cgate = contention_report.get("contention_gate_status")
+        if cgate == BLOCK:
+            report["stress_gate_status"] = BLOCK
+            report["recommendations"] = list(report.get("recommendations") or []) + [
+                "write_contention scenario BLOCK — see write_contention_report."
+            ]
+        elif cgate == WARN and report.get("stress_gate_status") == PASS:
+            report["stress_gate_status"] = WARN
+            report["recommendations"] = list(report.get("recommendations") or []) + [
+                "write_contention scenario WARN — see write_contention_report."
+            ]
+    else:
+        report["write_contention_enabled"] = False
+    # Reaffirm: the probe (with or without fixture/contention) never writes
+    # into the canonical runtime DB.
+    report["runtime_db_polluted"] = False
+
     if not args.no_summary:
         try:
             write_summary(report)
         except OSError:  # pragma: no cover - summary is best-effort
+            pass
+
+    if args.output is not None:
+        try:
+            args.output.parent.mkdir(parents=True, exist_ok=True)
+            args.output.write_text(
+                json.dumps(report, indent=2, default=str), encoding="utf-8"
+            )
+        except OSError:  # pragma: no cover - --output is best-effort
+            pass
+
+    # --- best-effort fixture cleanup (unless --keep-fixture) --------------
+    if fixture_used and fixture_path is not None and not args.keep_fixture and requested_db is None:
+        # Only auto-cleanup when *we* created the temp dir; explicit --db-path
+        # fixtures are the caller's to manage.
+        for suffix in ("", "-wal", "-shm"):
+            p = Path(str(fixture_path) + suffix)
+            try:
+                if p.exists():
+                    p.unlink()
+            except OSError:  # pragma: no cover - best-effort
+                pass
+        sidecar = Path(str(fixture_path) + ".meta.json")
+        try:
+            if sidecar.exists():
+                sidecar.unlink()
+        except OSError:  # pragma: no cover - best-effort
+            pass
+        try:
+            if fixture_path.parent.exists() and not any(fixture_path.parent.iterdir()):
+                fixture_path.parent.rmdir()
+        except OSError:  # pragma: no cover - best-effort
             pass
 
     if args.json:
@@ -575,6 +1196,19 @@ def main(argv: list[str] | None = None) -> int:
         print(f"  stress_gate_status  : {report['stress_gate_status']}")
         for rec in report["recommendations"]:
             print(f"    - {rec}")
+        if report.get("large_fixture_used"):
+            print(f"  large_fixture_rows  : {report.get('large_fixture_rows')}")
+            print(f"  large_fixture_path  : {report.get('large_fixture_path')}")
+            print(f"  fixture_role        : {report.get('fixture_role')}")
+            print(f"  creation_seconds    : {report.get('large_fixture_creation_seconds')}")
+        if report.get("write_contention_enabled"):
+            print(f"  contention gate     : {report.get('contention_gate_status')} "
+                  f"(score={report.get('contention_recovery_score')})")
+            print(f"  writer_lock_hold_ms : {report.get('writer_lock_hold_ms')}")
+            print(f"  reads/locked/recov  : {report.get('reads_during_lock')} / "
+                  f"{report.get('reads_successful_during_lock')} / "
+                  f"{report.get('post_lock_recovery_ms')}ms")
+        print(f"  runtime_db_polluted : {report.get('runtime_db_polluted')}")
         print(f"  [safety] advisory_only={report['advisory_only']} "
               f"read_only={report['read_only']} "
               f"canonical={report['canonical_truth_source']}")
@@ -587,8 +1221,15 @@ __all__ = [
     "PASS", "WARN", "BLOCK",
     "DEFAULT_WORKERS", "DEFAULT_ITERATIONS", "DEFAULT_TIMEOUT_SECONDS",
     "DEFAULT_MAX_ROWS", "DEFAULT_TARGET_P95_MS",
-    "SUMMARY_FILE",
+    "DEFAULT_FIXTURE_ROW_COUNT", "MAX_FIXTURE_ROW_COUNT",
+    "MAX_FIXTURE_ROW_COUNT_ALLOW_LARGE", "DEFAULT_LARGE_TARGET_P95_MS",
+    "DEFAULT_WRITER_LOCK_HOLD_MS", "DEFAULT_CONTENTION_READS",
+    "DEFAULT_CONTENTION_TARGET_RECOVERY_MS",
+    "MAX_WORKERS", "MAX_ITERATIONS",
+    "CANONICAL_RUNTIME_DB",
+    "SUMMARY_FILE", "SUMMARY_DIR",
     "run_stress_probe",
+    "run_write_contention_scenario",
     "write_summary",
     "read_summary",
 ]
