@@ -126,11 +126,20 @@ APPROVED_DOMAINS: tuple[str, ...] = (
     # that sources holdings truth from data/daily_payload/ and produces fresh
     # candidates without letting phantom positions block discovery.  Scores and
     # gates only; no broker execution, no order placement, no API trading writes.
-    "daily",            # daily_payload.py / daily_synthesis_pipeline.py / daily_discovery_config.py
+    "daily",            # daily_payload.py / daily_synthesis_pipeline.py / daily_discovery_config.py / daily_scoring.py
     "portfolio_truth",  # portfolio_truth_gate.py — H = V \ (C ∪ S ∪ D)
     "discovery",        # fresh_market_discovery.py — null-safe candidate quality score
     "candidate_executable",  # candidate_executable_split.py — CQS/EQS classification
     "anti_staleness",   # anti_staleness.py — freshness labels + novelty enforcement
+    # Daily fresh-data sprint — advisory-only payload builders + scoring signals
+    # that feed (never execute) the five-model synthesis. Scores/gates only; no
+    # broker execution, no order placement, no API trading writes.
+    "build_today",      # build_today_market_snapshot/price_movers/news_events/filings_events.py
+    "build_yesterday",  # build_yesterday_final_candidates.py — anti-staleness set Y
+    "universe",         # minimum_daily_universe.py — minimum viable fresh universe (U_static)
+    "why_today",        # why_today.py — "why today, not yesterday?" executable gate
+    "memory_decay",     # candidate_memory_decay.py — exp(-lambda*d) candidate decay
+    "disagreement",     # model_disagreement.py — cross-model variance / consensus quality
 )
 
 # Explicit allowlist for individual files / directories whose name does

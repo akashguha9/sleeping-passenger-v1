@@ -1,0 +1,68 @@
+# Minimum viable fresh daily universe (set U_static).
+#
+# Operator-editable mirror of scripts/minimum_daily_universe.py:DEFAULT_UNIVERSE.
+# When this file is present and valid it is merged over the embedded defaults;
+# if it is missing or unparseable the embedded universe is used so discovery is
+# never starved.
+#
+# These names are DISCOVERY CANDIDATES ONLY. Universe membership NEVER implies
+# portfolio ownership. Portfolio-management permission comes solely from the
+# Portfolio Truth Gate: H = V \ (C ∪ S ∪ D). A ticker can be in U_static and
+# still be DO_NOT_TREAT_AS_OPEN / CLOSED_OR_SOLD (e.g. GLD, TLT, TIP).
+#
+# Per-ticker required metadata (backfilled from bucket defaults when omitted):
+#   ticker, name, bucket, market, country, asset_type, default_risk_band, notes
+
+buckets:
+  US_MEGA_CAP:
+    - {ticker: AAPL,  name: "Apple Inc.",            market: US, country: "United States", asset_type: equity, default_risk_band: core, notes: "Mega-cap tech bellwether"}
+    - {ticker: MSFT,  name: "Microsoft Corp",        market: US, country: "United States", asset_type: equity, default_risk_band: core, notes: "Mega-cap software/AI"}
+    - {ticker: NVDA,  name: "NVIDIA Corp",           market: US, country: "United States", asset_type: equity, default_risk_band: core, notes: "AI/semiconductor leadership"}
+    - {ticker: AMZN,  name: "Amazon.com Inc.",       market: US, country: "United States", asset_type: equity, default_risk_band: core, notes: "Consumer/cloud mega-cap"}
+    - {ticker: META,  name: "Meta Platforms",        market: US, country: "United States", asset_type: equity, default_risk_band: core, notes: "Ad/AI mega-cap"}
+    - {ticker: GOOGL, name: "Alphabet Inc.",         market: US, country: "United States", asset_type: equity, default_risk_band: core, notes: "Search/AI mega-cap"}
+    - {ticker: TSLA,  name: "Tesla Inc.",            market: US, country: "United States", asset_type: equity, default_risk_band: high_beta, notes: "High-beta EV/AI"}
+  DEFENSE:
+    - {ticker: RTX, name: "RTX Corp",                market: US, country: "United States", asset_type: equity, default_risk_band: core, notes: "Defense/geopolitical sensitivity"}
+    - {ticker: LMT, name: "Lockheed Martin",         market: US, country: "United States", asset_type: equity, default_risk_band: core, notes: "Defense prime"}
+    - {ticker: NOC, name: "Northrop Grumman",        market: US, country: "United States", asset_type: equity, default_risk_band: core, notes: "Defense prime"}
+    - {ticker: GD,  name: "General Dynamics",        market: US, country: "United States", asset_type: equity, default_risk_band: core, notes: "Defense prime"}
+    - {ticker: LHX, name: "L3Harris Technologies",   market: US, country: "United States", asset_type: equity, default_risk_band: core, notes: "Defense/comms"}
+  ENERGY:
+    - {ticker: XOM,  name: "Exxon Mobil",            market: US, country: "United States",  asset_type: equity, default_risk_band: core, notes: "Integrated oil major"}
+    - {ticker: CVX,  name: "Chevron Corp",           market: US, country: "United States",  asset_type: equity, default_risk_band: core, notes: "Integrated oil major"}
+    - {ticker: SHEL, name: "Shell plc (ADR)",        market: US, country: "United Kingdom", asset_type: equity, default_risk_band: core, notes: "Oil major ADR"}
+    - {ticker: TTE,  name: "TotalEnergies (ADR)",    market: US, country: "France",         asset_type: equity, default_risk_band: core, notes: "Oil major ADR"}
+    - {ticker: BP,   name: "BP plc (ADR)",           market: US, country: "United Kingdom", asset_type: equity, default_risk_band: core, notes: "Oil major ADR"}
+  SEMIS:
+    - {ticker: TSM,  name: "Taiwan Semiconductor (ADR)", market: US, country: "Taiwan",      asset_type: equity, default_risk_band: core, notes: "Foundry leader ADR"}
+    - {ticker: ASML, name: "ASML Holding (ADR)",     market: US, country: "Netherlands",     asset_type: equity, default_risk_band: core, notes: "EUV litho ADR"}
+    - {ticker: AMD,  name: "Advanced Micro Devices", market: US, country: "United States",   asset_type: equity, default_risk_band: core, notes: "CPU/GPU"}
+    - {ticker: AVGO, name: "Broadcom Inc.",          market: US, country: "United States",   asset_type: equity, default_risk_band: core, notes: "Semis/networking"}
+    - {ticker: INTC, name: "Intel Corp",             market: US, country: "United States",   asset_type: equity, default_risk_band: core, notes: "CPU/foundry turnaround"}
+    - {ticker: MU,   name: "Micron Technology",      market: US, country: "United States",   asset_type: equity, default_risk_band: core, notes: "Memory cycle"}
+  INDIA_LARGE_CAP:
+    - {ticker: RELIANCE.NS,   name: "Reliance Industries",          market: India, country: India, asset_type: equity, default_risk_band: core, notes: "India conglomerate"}
+    - {ticker: HDFCBANK.NS,   name: "HDFC Bank",                    market: India, country: India, asset_type: equity, default_risk_band: core, notes: "India private bank"}
+    - {ticker: ICICIBANK.NS,  name: "ICICI Bank",                   market: India, country: India, asset_type: equity, default_risk_band: core, notes: "India private bank"}
+    - {ticker: BHARTIARTL.NS, name: "Bharti Airtel",                market: India, country: India, asset_type: equity, default_risk_band: core, notes: "India telecom"}
+    - {ticker: INFY.NS,       name: "Infosys",                      market: India, country: India, asset_type: equity, default_risk_band: core, notes: "India IT services"}
+    - {ticker: TCS.NS,        name: "Tata Consultancy Services",    market: India, country: India, asset_type: equity, default_risk_band: core, notes: "India IT services"}
+  EUROPE_LARGE_CAP:
+    - {ticker: SAP.DE,  name: "SAP SE",         market: Germany,     country: Germany,     asset_type: equity, default_risk_band: core, notes: "EU enterprise software"}
+    - {ticker: ASML.AS, name: "ASML Holding",   market: Netherlands, country: Netherlands, asset_type: equity, default_risk_band: core, notes: "EUV litho (Amsterdam line)"}
+    - {ticker: SIE.DE,  name: "Siemens AG",     market: Germany,     country: Germany,     asset_type: equity, default_risk_band: core, notes: "EU industrials"}
+    - {ticker: RHM.DE,  name: "Rheinmetall AG", market: Germany,     country: Germany,     asset_type: equity, default_risk_band: core, notes: "EU defense/geopolitical"}
+    - {ticker: AIR.PA,  name: "Airbus SE",      market: France,      country: France,      asset_type: equity, default_risk_band: core, notes: "EU aerospace/defense"}
+  MACRO_ETFS:
+    - {ticker: GLD,  name: "SPDR Gold Shares",          market: US, country: "United States", asset_type: etf, default_risk_band: macro_proxy, notes: "Gold safe-haven proxy"}
+    - {ticker: TLT,  name: "20+ Year Treasury ETF",     market: US, country: "United States", asset_type: etf, default_risk_band: macro_proxy, notes: "Long-duration proxy"}
+    - {ticker: TIP,  name: "TIPS Bond ETF",             market: US, country: "United States", asset_type: etf, default_risk_band: macro_proxy, notes: "Inflation-protected bonds proxy"}
+    - {ticker: EWG,  name: "Germany ETF",               market: US, country: "United States", asset_type: etf, default_risk_band: macro_proxy, notes: "Germany equity proxy"}
+    - {ticker: INDA, name: "India ETF",                 market: US, country: "United States", asset_type: etf, default_risk_band: macro_proxy, notes: "India equity proxy"}
+    - {ticker: FXI,  name: "China Large-Cap ETF",       market: US, country: "United States", asset_type: etf, default_risk_band: macro_proxy, notes: "China equity proxy"}
+  HIGH_BETA_WATCH:
+    - {ticker: ZIM,  name: "ZIM Integrated Shipping",   market: US, country: "United States", asset_type: equity, default_risk_band: high_beta, notes: "High-beta shipping"}
+    - {ticker: ANET, name: "Arista Networks",           market: US, country: "United States", asset_type: equity, default_risk_band: high_beta, notes: "High-beta networking/AI"}
+    - {ticker: PLTR, name: "Palantir Technologies",     market: US, country: "United States", asset_type: equity, default_risk_band: high_beta, notes: "High-beta software"}
+    - {ticker: SMCI, name: "Super Micro Computer",      market: US, country: "United States", asset_type: equity, default_risk_band: high_beta, notes: "High-beta AI hardware"}

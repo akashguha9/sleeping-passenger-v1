@@ -24,12 +24,14 @@ try:
     from scripts.advisory_contract import advisory_safety_stamps
     from scripts.daily_discovery_config import load_discovery_thresholds
     from scripts.daily_payload import load_daily_payload, normalize_ticker
+    from scripts.minimum_daily_universe import minimum_universe_tickers
     from scripts.portfolio_truth_gate import build_portfolio_truth_gate, classify_ticker
     from scripts.runtime_common import SIGNAL_LEDGER_PATH, load_json_file
 except ModuleNotFoundError:  # pragma: no cover - script-style env
     from advisory_contract import advisory_safety_stamps
     from daily_discovery_config import load_discovery_thresholds
     from daily_payload import load_daily_payload, normalize_ticker
+    from minimum_daily_universe import minimum_universe_tickers
     from portfolio_truth_gate import build_portfolio_truth_gate, classify_ticker
     from runtime_common import SIGNAL_LEDGER_PATH, load_json_file
 
@@ -135,8 +137,18 @@ def build_discovery_universe(
     payload: dict[str, Any],
     model_candidates: list[str] | None = None,
     signal_ledger_path: Path | None = None,
+    include_static_universe: bool = True,
 ) -> list[str]:
-    """Ordered union U of all discovery sources."""
+    """Ordered union U_today of all discovery sources.
+
+        U_today = U_static ∪ U_price ∪ U_news ∪ U_filings
+                  ∪ U_yesterday ∪ U_old ∪ U_model
+
+    ``U_static`` is the minimum viable fresh universe — it guarantees the
+    discovery gate is never starved even when no live feed is wired. Universe
+    membership NEVER implies portfolio ownership (that comes only from the
+    Portfolio Truth Gate).
+    """
     universe: list[str] = []
 
     def add(tickers: list[str]) -> None:
@@ -145,6 +157,8 @@ def build_discovery_universe(
             if norm and norm not in universe:
                 universe.append(norm)
 
+    if include_static_universe:
+        add(minimum_universe_tickers())
     add(payload["price_movers"]["tickers"])
     add(payload["news_events"]["tickers"])
     add(payload["filings_events"]["tickers"])
@@ -213,7 +227,10 @@ def build_fresh_market_discovery(
         m.get("freshness") not in (None, "UNVERIFIED")
         for m in payload["price_movers"]["movers"]
     )
-    underpowered = source_health in {"MISSING_OR_UNVERIFIED", "STALE", "COLLAPSED"} or not live_movers
+    underpowered = (
+        source_health in {"MISSING_OR_UNVERIFIED", "UNVERIFIED", "STALE", "COLLAPSED", "MISSING"}
+        or not live_movers
+    )
     discovery_notes: list[str] = []
     if underpowered:
         discovery_notes.append(

@@ -39,13 +39,20 @@ thresholds:
 # split. They are advisory thresholds only — they NEVER authorize execution.
 daily_discovery:
   cqs_min: 0.70            # Candidate Quality Score floor to be a BUY-CANDIDATE
+  acqs_min: 0.60           # decay-adjusted CQS floor (CQS * exp(-lambda*d))
   eqs_min: 0.75            # Execution Quality Score floor to be EXECUTABLE
   fcs_min: 0.70            # Final Candidate Score floor in cross-model synthesis
   ers_min: 0.75            # Execution Readiness Score floor in synthesis
   watchlist_fcs_min: 0.55  # below cqs_min but worth watching
   source_health_min: 0.70  # live-data health floor for executable status
+  why_today_min_for_executable: 0.70  # WHY_TODAY_SCORE floor for EXECUTABLE
   novelty_ratio_min: 0.30  # |T\Y| / |T| floor before STALE_DISCOVERY_WARNING
+  minimum_novelty_ratio: 0.30  # alias of novelty_ratio_min (spec naming)
   min_new_ticker_count: 10 # target fresh tickers not seen yesterday
+  minimum_new_tickers: 10  # alias of min_new_ticker_count (spec naming)
+  memory_decay_lambda: 0.25  # exp(-lambda*d) candidate memory decay rate
+  disagreement_low_max: 0.15   # normalized disagreement < this => low/clean
+  disagreement_high_min: 0.35  # normalized disagreement >= this => high
   staleness_penalty:
     STALE_24H: 0.20
     STALE_48H: 0.35

@@ -94,17 +94,26 @@ def classify_candidate(
     source_health: float,
     chaos_risk: float = 0.0,
     staleness_label: str | None = None,
+    why_today_score: float = 1.0,
     thresholds: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Return classification + human-readable reason for one candidate."""
+    """Return classification + human-readable reason for one candidate.
+
+    ``why_today_score`` gates EXECUTABLE: a strong candidate with a weak
+    why-today (< why_today_min_for_executable) stays a BUY-CANDIDATE /
+    NOT-EXECUTABLE. Defaults to 1.0 so callers that do not supply it keep
+    their prior behaviour.
+    """
     thresholds = thresholds or load_discovery_thresholds()
     cqs_min = float(thresholds["cqs_min"])
     eqs_min = float(thresholds["eqs_min"])
     watchlist_min = float(thresholds["watchlist_fcs_min"])
     source_health_min = float(thresholds["source_health_min"])
+    why_today_min = float(thresholds.get("why_today_min_for_executable", 0.70))
 
     invalidation_ok = eqs_components.get("invalidation_defined", 0) >= 1.0
     sizing_ok = eqs_components.get("position_sizing_defined", 0) >= 1.0
+    why_today_ok = float(why_today_score) >= why_today_min
     label = (staleness_label or "").upper()
 
     reason: str
@@ -137,19 +146,20 @@ def classify_candidate(
             cqs, eqs, executable=False,
         )
 
-    # Executable requires both quality and hygiene gates.
+    # Executable requires both quality and hygiene gates AND a fresh why-today.
     executable = (
         cqs >= cqs_min
         and eqs >= eqs_min
         and source_health >= source_health_min
         and invalidation_ok
         and sizing_ok
+        and why_today_ok
     )
     if executable:
         return _result(
             "EXECUTABLE-PAPER-BUY",
             "Clears CQS and EQS, source health adequate, invalidation + sizing "
-            "defined. Advisory-only paper buy for human execution.",
+            "defined, fresh why-today trigger. Advisory-only paper buy for human execution.",
             cqs, eqs, executable=True,
         )
 
@@ -163,6 +173,11 @@ def classify_candidate(
             missing.append("invalidation not defined")
         if not sizing_ok:
             missing.append("position sizing not defined")
+        if not why_today_ok:
+            missing.append(
+                f"Missing sufficient why-today trigger (why_today_score "
+                f"{float(why_today_score):.2f} < {why_today_min:.2f})"
+            )
         reason = "Good candidate, not executable because " + "; ".join(missing) + "."
         return _result("BUY-CANDIDATE / NOT-EXECUTABLE", reason, cqs, eqs, executable=False)
 
@@ -194,11 +209,19 @@ def build_candidate_executable_split(
     truth_gate: dict[str, Any],
     eqs_features: dict[str, dict[str, Any]] | None = None,
     staleness_labels: dict[str, str] | None = None,
+    why_today_scores: dict[str, float] | None = None,
 ) -> dict[str, Any]:
-    """Classify every discovered candidate into candidate/executable buckets."""
+    """Classify every discovered candidate into candidate/executable buckets.
+
+    ``why_today_scores`` maps normalized-ticker -> WHY_TODAY_SCORE. A ticker
+    without an entry defaults to 1.0 (no why-today penalty) to preserve
+    backward-compatible behaviour; the daily pipeline passes real scores so the
+    WHY_TODAY gate can block stale executables.
+    """
     thresholds = load_discovery_thresholds()
     eqs_features = {normalize_ticker(k): v for k, v in (eqs_features or {}).items()}
     staleness_labels = {normalize_ticker(k): v for k, v in (staleness_labels or {}).items()}
+    why_today_scores = {normalize_ticker(k): v for k, v in (why_today_scores or {}).items()}
 
     rows: list[dict[str, Any]] = []
     for score in discovery["scored_candidates"]:
@@ -208,6 +231,7 @@ def build_candidate_executable_split(
         feats.setdefault("liquidity_quality", score["components"].get("liquidity_quality", 0.0))
         feats.setdefault("portfolio_truth_clean", 0 if score["forbidden_for_execution"] else 1)
         source_health = _clamp01(feats.get("source_health"))
+        why_today = float(why_today_scores.get(ticker, 1.0))
         eqs_obj = compute_eqs(feats)
         verdict = classify_candidate(
             cqs=score["cqs"],
@@ -218,6 +242,7 @@ def build_candidate_executable_split(
             source_health=source_health,
             chaos_risk=score.get("chaos_risk", 0.0),
             staleness_label=staleness_labels.get(ticker),
+            why_today_score=why_today,
             thresholds=thresholds,
         )
         rows.append(
@@ -227,6 +252,7 @@ def build_candidate_executable_split(
                 "cqs": score["cqs"],
                 "eqs": eqs_obj["eqs"],
                 "eqs_components": eqs_obj["components"],
+                "why_today_score": round(why_today, 4),
                 "classification": verdict["classification"],
                 "executable": verdict["executable"],
                 "reason": verdict["reason"],

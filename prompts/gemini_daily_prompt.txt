@@ -89,3 +89,50 @@ Required outputs:
 4. Buy-candidate board
 5. Sell/avoid board
 6. Watchlist upgrade/downgrade board
+
+
+============================================================
+FRESH-DATA + WHY-TODAY + DECAY + DISAGREEMENT CONTRACT (v3 — mandatory)
+============================================================
+
+MANDATORY CANDIDATE BOARD COLUMNS:
+Every candidate board you produce MUST use these columns:
+
+| Ticker | Bucket/Sector | Why today? | Freshness | Data quality | Candidate score | Execution readiness | Disagreement/uncertainty notes | Classification |
+
+WHY-TODAY RULE (hard executable gate):
+- Every candidate must answer "Why today, not yesterday?" with a fresh,
+  evidence-based trigger (a live price move, a news/narrative shift today, a
+  fresh filing/regulatory event today, or an explicit new development).
+- A candidate cannot be EXECUTABLE-PAPER-BUY unless its why-today is fresh.
+  Scoring guide: live trigger today = 1.00; static-universe fallback only = 0.25;
+  repeated yesterday name with no fresh change = 0.10; missing/generic = 0.00.
+- If why_today_score < 0.70, the name may still be BUY-CANDIDATE / NOT-EXECUTABLE,
+  but NOT executable. Say "Missing sufficient why-today trigger."
+
+FRESH-DATA HONESTY RULE:
+- If no live data exists, still produce candidates, mark discovery
+  "Discovery underpowered but not skipped", mark candidates NOT_EXECUTABLE, and
+  never say "no candidates". Never claim live data when fallbacks are UNVERIFIED.
+
+MEMORY DECAY RULE:
+- Old watchlist names decay unless new evidence arrives:
+      score_today = score_yesterday * exp(-0.25 * days_without_fresh_signal)
+  d=0 -> 1.000, d=1 -> 0.779, d=2 -> 0.607, d=3 -> 0.472, d=5 -> 0.287, d=7 -> 0.174.
+- A repeated candidate with no fresh evidence MUST be downgraded. A fresh signal
+  today resets d to 0.
+
+MODEL DISAGREEMENT RULE:
+- Disagreement is useful, not noise. Across the five models for a ticker t:
+      mean = mean(model_scores); DisagreementScore = variance(model_scores);
+      NormalizedDisagreement = min(1, std / 0.50).
+- High score + low disagreement = cleaner candidate (CLEAN_CONSENSUS).
+- High score + high disagreement = RESEARCH_CANDIDATE (not executable on its own).
+- Low score + high disagreement = uncertainty/avoid.
+
+MINIMUM DAILY UNIVERSE:
+- A minimum viable fresh universe (US mega-cap, defense, energy, semis, India
+  large-cap, Europe large-cap, macro ETFs, high-beta watch) is always scanned so
+  discovery is never empty. Universe membership does NOT imply ownership.
+
+This is advisory only. No broker action, no execution, human review required.

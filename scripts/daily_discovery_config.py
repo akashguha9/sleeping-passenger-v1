@@ -18,13 +18,20 @@ except ModuleNotFoundError:  # pragma: no cover - script-style env
 
 DEFAULTS: dict[str, Any] = {
     "cqs_min": 0.70,
+    "acqs_min": 0.60,
     "eqs_min": 0.75,
     "fcs_min": 0.70,
     "ers_min": 0.75,
     "watchlist_fcs_min": 0.55,
     "source_health_min": 0.70,
+    "why_today_min_for_executable": 0.70,
     "novelty_ratio_min": 0.30,
+    "minimum_novelty_ratio": 0.30,
     "min_new_ticker_count": 10,
+    "minimum_new_tickers": 10,
+    "memory_decay_lambda": 0.25,
+    "disagreement_low_max": 0.15,
+    "disagreement_high_min": 0.35,
     "staleness_penalty": {
         "STALE_24H": 0.20,
         "STALE_48H": 0.35,

@@ -31,22 +31,77 @@ try:
     from scripts.advisory_contract import advisory_safety_stamps, human_only_stamp
     from scripts.anti_staleness import build_anti_staleness
     from scripts.candidate_executable_split import build_candidate_executable_split
-    from scripts.daily_payload import load_daily_payload
+    from scripts.daily_payload import load_daily_payload, normalize_ticker
     from scripts.fresh_market_discovery import build_fresh_market_discovery
     from scripts.portfolio_truth_gate import build_portfolio_truth_gate
     from scripts.runtime_common import REPO_ROOT
+    from scripts.why_today import why_today_score
 except ModuleNotFoundError:  # pragma: no cover - script-style env
     from advisory_contract import advisory_safety_stamps, human_only_stamp
     from anti_staleness import build_anti_staleness
     from candidate_executable_split import build_candidate_executable_split
-    from daily_payload import load_daily_payload
+    from daily_payload import load_daily_payload, normalize_ticker
     from fresh_market_discovery import build_fresh_market_discovery
     from portfolio_truth_gate import build_portfolio_truth_gate
     from runtime_common import REPO_ROOT
+    from why_today import why_today_score
 
 
 CONTEXT_MD_PATH = REPO_ROOT / "runtime" / "daily_portfolio_truth_context.md"
 CONTEXT_JSON_PATH = REPO_ROOT / "runtime" / "daily_synthesis_context.json"
+
+
+def _compute_why_today_scores(
+    payload: dict[str, Any], discovery: dict[str, Any]
+) -> dict[str, float]:
+    """Derive WHY_TODAY_SCORE per discovered ticker from the daily payload.
+
+    A live news/filing event today is a fresh trigger (1.0). A mover row carries
+    its own ``why_today``/``freshness``/``provider``. Yesterday's repeats with no
+    fresh change decay toward the stale-repeat floor.
+    """
+    movers_by_ticker: dict[str, dict[str, Any]] = {}
+    for mover in payload["price_movers"]["movers"]:
+        ticker = normalize_ticker(mover.get("ticker") or mover.get("symbol"))
+        if ticker:
+            movers_by_ticker[ticker] = mover
+
+    def _live_event_tickers(rows: list[dict[str, Any]]) -> set[str]:
+        out: set[str] = set()
+        for row in rows:
+            if row.get("is_live") or str(row.get("freshness") or "").upper() in {
+                "FRESH_TODAY",
+                "UPDATED_TODAY",
+            }:
+                ticker = normalize_ticker(row.get("ticker") or row.get("symbol"))
+                if ticker:
+                    out.add(ticker)
+        return out
+
+    live_event_tickers = _live_event_tickers(payload["news_events"]["events"]) | _live_event_tickers(
+        payload["filings_events"]["events"]
+    )
+    yesterday = set(payload["yesterday_candidates"]["final_candidates"]) | set(
+        payload["yesterday_candidates"]["watchlist"]
+    )
+
+    scores: dict[str, float] = {}
+    for score in discovery["scored_candidates"]:
+        ticker = score["ticker"]
+        mover = movers_by_ticker.get(ticker, {})
+        provider = str(mover.get("provider") or "").upper()
+        is_static = provider == "STATIC_UNIVERSE_FALLBACK" or not mover
+        scores[ticker] = round(
+            why_today_score(
+                mover.get("why_today"),
+                freshness=mover.get("freshness"),
+                has_live_event_today=ticker in live_event_tickers,
+                in_yesterday=ticker in yesterday,
+                is_static_universe_only=is_static and ticker not in live_event_tickers,
+            ),
+            4,
+        )
+    return scores
 
 
 def run_daily_synthesis(
@@ -63,7 +118,11 @@ def run_daily_synthesis(
         payload=payload, truth_gate=truth_gate,
         model_candidates=model_candidates, features=features,
     )
-    split = build_candidate_executable_split(discovery, truth_gate, eqs_features=eqs_features)
+    why_today_scores = _compute_why_today_scores(payload, discovery)
+    split = build_candidate_executable_split(
+        discovery, truth_gate, eqs_features=eqs_features,
+        why_today_scores=why_today_scores,
+    )
 
     today_candidates = [
         s["ticker"] for s in discovery["buy_candidate_board"]
@@ -81,6 +140,7 @@ def run_daily_synthesis(
         "fresh_market_discovery": discovery,
         "candidate_executable_split": split,
         "anti_staleness": anti_staleness,
+        "why_today_scores": why_today_scores,
         "safety": advisory_safety_stamps(),
         "execution": human_only_stamp(),
     }
@@ -148,6 +208,17 @@ def render_portfolio_truth_context(result: dict[str, Any]) -> str:
     lines.append(f"  stale_discovery_warning: {stale['stale_discovery_warning']}")
     for warning in stale.get("warnings", []):
         lines.append(f"  * {warning}")
+    lines.append("")
+    lines.append("WHY-TODAY GATE (executable requires why_today_score >= 0.70):")
+    why_scores = result.get("why_today_scores", {})
+    weak = sorted(t for t, s in why_scores.items() if s < 0.70)
+    strong = sorted(t for t, s in why_scores.items() if s >= 0.70)
+    lines.append(f"  strong_why_today (>=0.70): {strong or 'NONE'}")
+    lines.append(f"  weak_why_today (<0.70, not executable): {weak or 'NONE'}")
+    lines.append(
+        "  Note: a weak why-today blocks EXECUTABLE but NOT discovery — such names "
+        "stay BUY-CANDIDATE / NOT-EXECUTABLE."
+    )
     lines.append("")
     lines.append("Reminder: advisory only. No broker action. No execution. Human review required.")
     lines.append("============================================================")

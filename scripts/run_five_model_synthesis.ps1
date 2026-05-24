@@ -709,19 +709,27 @@ contaminated, but do NOT discard its fresh-discovery section unless that section
 also relies on false holdings.
 
 Fresh Cross-Model Candidate Board — rank by:
-  FCS(t) = 0.35*mean_model_candidate_score + 0.20*cross_model_agreement
-           + 0.15*freshness + 0.10*data_quality + 0.10*narrative_or_event_strength
-           + 0.10*liquidity_quality - 0.10*chaos_risk - 0.10*staleness_penalty
-           - 0.15*portfolio_contamination_penalty
+  ACQS(t) = CQS(t) * exp(-0.25 * days_without_fresh_signal)   (memory decay)
+  FCS(t) = 0.25*ACQS + 0.20*mean_model_score + 0.15*cross_model_agreement
+           + 0.15*why_today_score + 0.10*data_quality + 0.10*freshness
+           + 0.05*liquidity_quality - 0.10*chaos_risk
+           - 0.10*normalized_disagreement - 0.15*portfolio_contamination_penalty
   cross_model_agreement(t) = models_mentioning_t / 5
+  normalized_disagreement(t) = min(1, std(model_scores[t]) / 0.50)
 Execution Readiness:
-  ERS(t) = 0.30*data_quality + 0.20*source_health + 0.15*invalidation_defined
-           + 0.15*sizing_defined + 0.10*portfolio_truth_clean + 0.10*human_review_ready
-Classification:
-  FCS>=0.70 and ERS>=0.75  -> EXECUTABLE-PAPER-BUY
-  FCS>=0.70 and ERS<0.75   -> BUY-CANDIDATE / NOT-EXECUTABLE (say why)
+  ERS(t) = 0.25*data_quality + 0.20*source_health + 0.15*invalidation_defined
+           + 0.15*sizing_defined + 0.10*portfolio_truth_clean + 0.10*why_today_score
+           + 0.05*human_review_ready
+Classification (EXECUTABLE is the strictest tier — all must hold):
+  EXECUTABLE-PAPER-BUY iff FCS>=0.70 AND ERS>=0.75 AND why_today_score>=0.70
+    AND source_health>=0.70 AND invalidation_defined AND position_sizing_defined
+    AND normalized_disagreement<0.35 AND t NOT in (closed/sold/do_not_treat_as_open)
+    AND advisory_only AND human_execution_required
+  FCS>=0.70 but any executable condition fails -> BUY-CANDIDATE / NOT-EXECUTABLE (say why)
+  FCS>=0.65 and normalized_disagreement>=0.35   -> RESEARCH_CANDIDATE
   0.55<=FCS<0.70           -> WATCHLIST
-  FCS<0.55                 -> WAIT or AVOID (per chaos/bear signal)
+  0.40<=FCS<0.55           -> WAIT
+  FCS<0.40 or chaos>=0.80  -> AVOID
 
 ============================================================
 OUTPUT FORMAT
@@ -734,7 +742,37 @@ OUTPUT FORMAT
 Show H, closed/sold, do-not-treat-as-open, phantom mentions, and which model
 sections were contaminated by phantom management. Then continue.
 
+## 0a. Fresh Payload + Universe + Why-Today + Memory-Decay + Disagreement Audit
+
+Before the candidate board, run these five audits using the daily payload and
+the five model reports:
+
+1. Fresh Payload Health Audit — for each of today_market_snapshot, today_price_movers,
+   today_news_events, today_filings_events: report source_health, provider, is_live,
+   record count. If is_live=false / source_health=UNVERIFIED, say discovery is
+   UNDERPOWERED and candidates are research-grade. Never claim live data on a fallback.
+2. Minimum Daily Universe Coverage Audit — confirm the minimum viable universe
+   (US mega-cap, defense, energy, semis, India large-cap, Europe large-cap, macro
+   ETFs, high-beta watch) was scanned. U_today = U_static ∪ U_price ∪ U_news ∪
+   U_filings ∪ U_yesterday ∪ U_old ∪ U_model. Membership does NOT imply ownership.
+3. Why-Today Audit — every candidate must answer "Why today, not yesterday?".
+   why_today_score < 0.70 => cannot be EXECUTABLE (still may be BUY-CANDIDATE /
+   NOT-EXECUTABLE). Flag names whose why-today is static-fallback (0.25) or stale
+   repeat (0.10).
+4. Memory Decay Audit — repeated yesterday names with no fresh evidence decay by
+   score_today = score_yesterday * exp(-0.25 * days_without_fresh_signal)
+   (d=3 -> 0.472). A fresh signal today resets d=0.
+5. Model Disagreement Audit — DisagreementScore(t) = variance(model_scores[t]);
+   NormalizedDisagreement = min(1, std/0.50). High score + low disagreement =
+   CLEAN_CONSENSUS; high score + high disagreement = RESEARCH_CANDIDATE; low score
+   + high disagreement = uncertainty/avoid.
+
 ## 0b. Fresh Cross-Model Candidate Board
+
+| Ticker | Bucket/Sector | Why today? | Freshness | Data quality | Candidate score | Execution readiness | Disagreement/uncertainty notes | Classification |
+|---|---|---|---|---|---:|---:|---|---|
+
+Also keep the FCS/ERS view:
 
 | Ticker | Models Mentioning | Freshness | FCS | ERS | Candidate Quality | Execution Quality | Classification | Why |
 |---|---|---:|---:|---|---|---|---|---|
