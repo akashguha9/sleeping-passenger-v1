@@ -147,3 +147,12 @@ moltbook/*report_*.txt
 moltbook/five_model_synthesis_report_*.txt
 moltbook/five_model_synthesis_raw_response_*.json
 
+# =========================
+# LOCAL OPERATOR-PRIVATE FILES (never commit)
+# =========================
+# Personal manual-trade log used by scripts/bulk_log_manual_trades.py.
+# Contains real position thesis text — operator-private, not project state.
+data/manual_trades_by_date.json
+# Local-only LLM prompt drafts. Canonical prompts live under prompts/.
+Prompt_*.txt
+
