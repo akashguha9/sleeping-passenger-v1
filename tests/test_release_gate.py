@@ -64,6 +64,16 @@ def _pin_fresh_stress_summary(tmp_path, monkeypatch):
     Integrated-sprint extension: also pin the prewarm + business-value
     summary paths to fresh in-tmp artifacts so the new gate checks do not
     downgrade legacy PASS tests due to missing sprint artifacts.
+
+    Compliance-surface extension: seed deterministic
+    ``privacy_inventory.json`` and ``source_license_register.json`` under
+    ``tmp_path`` (via the real :mod:`scripts.compliance_registers`
+    writer) and monkeypatch the module-level path constants so the gate's
+    compliance check reads from tmp.  CI clean checkouts do not have the
+    gitignored ``runtime/compliance/`` files; without this fixture the
+    PASS-expecting tests WARN on GitHub.  The negative-coverage test
+    ``test_release_gate_warns_when_compliance_artifacts_missing`` proves
+    the real check is still wired and was not weakened.
     """
     summary_dir = tmp_path / "_stress_probe_summary"
     summary_dir.mkdir(parents=True, exist_ok=True)
@@ -79,6 +89,7 @@ def _pin_fresh_stress_summary(tmp_path, monkeypatch):
     # missing-artifact warnings overwrite/delete these files themselves.
     from scripts import prewarm_diagnostics_snapshot as _prewarm
     from scripts import business_value_report as _bvr
+    from scripts import compliance_registers as _comp_reg
     sprint_dir = tmp_path / "_release"
     sprint_dir.mkdir(parents=True, exist_ok=True)
     prewarm_path = sprint_dir / "diagnostics_prewarm_summary.json"
@@ -111,6 +122,25 @@ def _pin_fresh_stress_summary(tmp_path, monkeypatch):
     }), encoding="utf-8")
     monkeypatch.setattr(_prewarm, "SUMMARY_FILE", prewarm_path, raising=False)
     monkeypatch.setattr(_bvr, "DEFAULT_SUMMARY_PATH", bv_path, raising=False)
+
+    # Compliance registers — write *real* artifacts via the canonical
+    # writer so the schema stays in lockstep with the script.  The
+    # release gate reads via _comp_reg.PRIVACY_INVENTORY_PATH /
+    # _comp_reg.SOURCE_LICENSE_REGISTER_PATH; monkeypatch both so tests
+    # are independent of the developer's local runtime tree.
+    compliance_dir = tmp_path / "_compliance"
+    compliance_dir.mkdir(parents=True, exist_ok=True)
+    privacy_path = compliance_dir / "privacy_inventory.json"
+    register_path = compliance_dir / "source_license_register.json"
+    _comp_reg.write_registers(
+        privacy_path=privacy_path, register_path=register_path
+    )
+    monkeypatch.setattr(
+        _comp_reg, "PRIVACY_INVENTORY_PATH", privacy_path, raising=False
+    )
+    monkeypatch.setattr(
+        _comp_reg, "SOURCE_LICENSE_REGISTER_PATH", register_path, raising=False
+    )
 
     yield summary_file
 
@@ -510,3 +540,62 @@ def test_no_stale_pass_can_yield_release_pass(tmp_path, _pin_fresh_stress_summar
         result = release_gate.evaluate(db, check_backend=False)
         assert result["verdict"] != "PASS", (hours_ago, result["reasons"])
         assert result["stress_gate_status"] == "STALE"
+
+
+# ---------------------------------------------------------------------------
+# Compliance-surface artifact discipline — proves the gate still WARNs when
+# the registers are missing (the real check is not weakened), and PASSes
+# when the canonical writer has run.  These are the inverse pair that
+# documents the CI fix: tmp-seeded artifacts make the autouse fixture's
+# PASS-expectation deterministic on a clean clone.
+# ---------------------------------------------------------------------------
+
+
+def test_release_gate_warns_when_compliance_artifacts_missing(
+    tmp_path, monkeypatch
+):
+    """Point the gate at an empty compliance dir and assert WARN + reasons.
+
+    This proves the compliance-surface check is real: with no
+    privacy_inventory.json and no source_license_register.json present,
+    the gate downgrades PASS -> WARN and surfaces both missing files
+    in ``reasons`` along with the recommended remediation command.
+    """
+    from scripts import compliance_registers as _comp_reg
+    empty_dir = tmp_path / "_empty_compliance"
+    empty_dir.mkdir(parents=True, exist_ok=True)
+    missing_priv = empty_dir / "privacy_inventory.json"
+    missing_reg = empty_dir / "source_license_register.json"
+    assert not missing_priv.exists()
+    assert not missing_reg.exists()
+    monkeypatch.setattr(
+        _comp_reg, "PRIVACY_INVENTORY_PATH", missing_priv, raising=False
+    )
+    monkeypatch.setattr(
+        _comp_reg, "SOURCE_LICENSE_REGISTER_PATH", missing_reg, raising=False
+    )
+
+    db = _clean_db(tmp_path)
+    result = release_gate.evaluate(db, check_backend=False)
+    assert result["verdict"] == "WARN", result["reasons"]
+    block = result["integrated_sprint"]
+    assert block["compliance_surface_ok"] is False
+    assert block["compliance_privacy_present"] is False
+    assert block["compliance_register_present"] is False
+    joined = " ".join(result["reasons"])
+    assert "privacy_inventory.json missing" in joined
+    assert "source_license_register.json missing" in joined
+    assert "compliance_registers.py --write" in joined
+
+
+def test_release_gate_passes_when_compliance_artifacts_seeded(tmp_path):
+    """Inverse: the autouse fixture seeds the artifacts via the real writer,
+    so the compliance check is PASS and the gate is PASS overall."""
+    db = _clean_db(tmp_path)
+    result = release_gate.evaluate(db, check_backend=False)
+    assert result["verdict"] == "PASS", result["reasons"]
+    block = result["integrated_sprint"]
+    assert block["compliance_surface_ok"] is True
+    assert block["compliance_privacy_present"] is True
+    assert block["compliance_register_present"] is True
+    assert block["compliance_missing_config_enabled_providers"] == []
