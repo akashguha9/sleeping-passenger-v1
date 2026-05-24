@@ -223,3 +223,62 @@ def test_show_rejected_default_zero_omits_diagnostics(capsys) -> None:
     out, _err = capsys.readouterr()
     report = json.loads(out)
     assert report.get("rejected_diagnostics", []) == []
+
+
+# ---------------------------------------------------------------------------
+# Closeout invariant — low accepted_count is correct when the live universe
+# is dominated by rejected categories.  Success is *safe* acceptance plus
+# *reasoned* rejection, not a high acceptance ratio.
+# ---------------------------------------------------------------------------
+
+
+def test_sports_dominated_universe_yields_low_accepted_count(capsys) -> None:
+    """Hand the adapter a payload made almost entirely of sports markets.
+    Expectation: a tiny accepted_count alongside an honest rejection
+    summary — never a forced acceptance.  This guards against future
+    'recall tuning' that quietly loosens the allowlist to pump numbers."""
+    from scripts import kalshi_market_data_adapter as adapter
+    from unittest.mock import MagicMock, patch
+
+    universe = {
+        "markets": [
+            {"ticker": "NBA-FINALS-2026", "title": "Will the Lakers win?", "category": "Sports", "yes_ask": 0.2},
+            {"ticker": "NFL-MVP-2026", "title": "Will Mahomes win MVP?", "category": "Sports", "yes_ask": 0.3},
+            {"ticker": "MLB-WS-2026", "title": "Will the Yankees win World Series?", "category": "Sports", "yes_ask": 0.1},
+            {"ticker": "HUR-CAT5-2026", "title": "Will a hurricane be Category 5?", "category": "Weather", "yes_ask": 0.15},
+            {"ticker": "OSCAR-PIC-2026", "title": "Will the Best Picture be a sequel?", "category": "Entertainment", "yes_ask": 0.4},
+            # ONE bona-fide approved market so accepted_count > 0 stays
+            # achievable — this is the operator's "did the allowlist still
+            # accept the right kind of thing" sanity check.
+            {"ticker": "FED-CUT-JUN-2026", "title": "Will the Fed cut at June FOMC?", "category": "Economics", "yes_ask": 0.31},
+        ]
+    }
+    resp = MagicMock()
+    resp.status_code = 200
+    resp.json.return_value = universe
+    resp.raise_for_status.return_value = None
+
+    with patch("requests.get", return_value=resp):
+        rc = adapter.run(["--json", "--limit", "10", "--show-rejected", "10"])
+    assert rc == 0
+    out, _err = capsys.readouterr()
+    report = json.loads(out)
+
+    # Low acceptance is the *correct* outcome, not a bug.
+    assert report["fetched_count"] == 6
+    assert report["accepted_count"] == 1, (
+        "only the Economics row should pass the allowlist — a higher number "
+        "means the allowlist has silently loosened"
+    )
+    assert report["rejected_count"] == 5
+    # Rejection reasons must be present and itemised so operators can audit
+    # *why* nothing else was accepted.
+    reasons = report.get("rejected_category_reasons") or {}
+    assert reasons, "rejected category reasons must be itemised"
+    # And the per-row diagnostics must surface ticker/title/reason for each
+    # rejection so the operator can verify the call.
+    diagnostics = report.get("rejected_diagnostics") or []
+    assert len(diagnostics) == 5
+    for entry in diagnostics:
+        assert entry.get("rejection_reason"), entry
+        assert entry.get("title") or entry.get("ticker"), entry

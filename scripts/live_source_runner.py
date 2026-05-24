@@ -550,8 +550,16 @@ def run_phase1(
                 if source_name == "polymarket":
                     _cleanup_rejected_polymarket_events()
                 persisted = _persist_events(events, source_name, ts)
-            # Set OK_FILTERED when source responded but all records were domain-rejected
-            if source_name in ("polymarket", "kalshi") and raw_count > 0 and len(events) == 0:
+            # Status taxonomy for the prediction-market sources:
+            #   ok_empty    — adapter responded but returned zero rows
+            #   ok_filtered — adapter returned rows but every one was rejected
+            #                 by the category/domain allowlist
+            #   ok          — at least one row passed the allowlist
+            # The taxonomy lets /source-health/summary surface a healthy
+            # but-quiet source distinctly from a healthy-and-flowing one.
+            if source_name in ("polymarket", "kalshi") and raw_count == 0:
+                run_status = "ok_empty"
+            elif source_name in ("polymarket", "kalshi") and len(events) == 0:
                 run_status = "ok_filtered"
             else:
                 run_status = "ok"

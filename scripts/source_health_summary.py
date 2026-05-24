@@ -86,6 +86,12 @@ def classify_source_status(
             "category": "OK_FILTERED",
             "human_message": "Source healthy (filtered out off-domain rows).",
         }
+    if s == "OK_EMPTY":
+        return {
+            "severity": "ok",
+            "category": "OK_EMPTY",
+            "human_message": "Source healthy (no markets returned this run).",
+        }
     if s == "PLACEHOLDER":
         return {
             "severity": "info",

@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import time
 from pathlib import Path
@@ -49,7 +50,9 @@ from scripts.live_source_registry import (
     ALL_SOURCE_KEYS,
     DEFAULT_REFRESH_HOURS,
     EXECUTION_GATE_LOCKED,
+    FRESHNESS_FRESH,
     build_refresh_plan,
+    compute_source_freshness,
     detect_source_credential_state,
     get_source_family,
 )
@@ -73,6 +76,15 @@ _PHASE2_KEYS = (
 # They are driven by their own scanner scripts (e.g. the Polymarket ×
 # Kalshi disagreement scanner runs only after fresh inputs exist).
 _DERIVED_SIGNAL_KEYS: frozenset[str] = frozenset({"prediction_market_disagreement"})
+
+# Inputs the prediction-market-disagreement scanner depends on.  Both must
+# be ``FRESHNESS_FRESH`` before the orchestrator invokes the derived hook
+# — anything else (stale, never_run, failed) results in a clean skip with
+# ``skipped_reason='inputs_not_fresh'``.
+_PREDICTION_MARKET_DISAGREEMENT_INPUTS: tuple[str, ...] = ("polymarket", "kalshi")
+_PREDICTION_MARKET_DISAGREEMENT_ENV_FLAG = (
+    "ENABLE_PREDICTION_MARKET_DISAGREEMENT_AFTER_REFRESH"
+)
 
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -123,10 +135,29 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Emit the report as JSON instead of human-readable text.",
     )
+    parser.add_argument(
+        "--run-derived-disagreements",
+        action="store_true",
+        dest="run_derived_disagreements",
+        help=(
+            "After the per-source ingestion pass, run the Polymarket × Kalshi "
+            "disagreement scanner — but only if BOTH inputs are 'fresh' per "
+            "the source_run_log. Falls back to a clean skip otherwise. "
+            "Equivalent to setting "
+            f"{_PREDICTION_MARKET_DISAGREEMENT_ENV_FLAG}=1 in the environment. "
+            "Default off (advisory-only; never executes trades)."
+        ),
+    )
     args = parser.parse_args(argv)
     if not args.write:
         # Default mode is dry-run.
         args.dry_run = True
+    # Env var acts as an opt-in fallback so a scheduler can enable the hook
+    # without changing every call-site.
+    if not args.run_derived_disagreements:
+        env_value = (os.environ.get(_PREDICTION_MARKET_DISAGREEMENT_ENV_FLAG) or "").strip().lower()
+        if env_value in {"1", "true", "yes", "on"}:
+            args.run_derived_disagreements = True
     return args
 
 
@@ -227,12 +258,183 @@ def _classify_for_execution(
     )
 
 
+def _load_latest_source_runs() -> list[dict[str, Any]]:
+    """Best-effort fetch of latest ``source_run_log`` rows.
+
+    Never raises into the caller — when persistence is unavailable (CI
+    without an initialised DB, missing module) we return an empty list and
+    the derived hook degrades to a clean ``never_run`` skip.
+    """
+    try:
+        from scripts import persistence as _persistence
+        from scripts.persistence import get_latest_source_run_per_source
+    except Exception:
+        return []
+    try:
+        target_db = getattr(_persistence, "DB_PATH", None)
+        if target_db is not None:
+            return get_latest_source_run_per_source(db_path=target_db)
+        return get_latest_source_run_per_source()
+    except Exception:
+        return []
+
+
+def _invoke_disagreement_scanner(*, write_mode: bool) -> dict[str, Any]:
+    """Run the disagreement scanner in-process and return a result summary.
+
+    Returns a dict suitable to embed in the orchestrator report.  Captures
+    exceptions so a scanner failure cannot propagate into the orchestrator
+    contract — derived-source failure is always advisory.
+    """
+    try:
+        from scripts import prediction_market_disagreement_scanner as scanner
+    except Exception as exc:  # pragma: no cover - import error path
+        return {
+            "status": "ERROR",
+            "error_message": f"scanner_import_failed: {exc}",
+            "persisted_count": 0,
+            "total_pairs": 0,
+        }
+    argv = ["--limit", "50", "--embedding-provider", "deterministic", "--json"]
+    if write_mode:
+        argv.append("--write")
+    else:
+        argv.append("--dry-run")
+    # The scanner emits its JSON summary on stdout; we capture it so the
+    # orchestrator can re-emit a compact derived-signal block without
+    # double-printing or breaking --json mode.
+    import contextlib
+    import io as _io
+
+    buf = _io.StringIO()
+    try:
+        with contextlib.redirect_stdout(buf):
+            rc = scanner.run(argv)
+    except Exception as exc:  # pragma: no cover - defensive
+        return {
+            "status": "ERROR",
+            "error_message": f"scanner_raised: {exc}",
+            "persisted_count": 0,
+            "total_pairs": 0,
+        }
+    raw = buf.getvalue().strip()
+    parsed: dict[str, Any] = {}
+    if raw:
+        try:
+            parsed = json.loads(raw.splitlines()[-1])
+        except Exception:
+            parsed = {}
+    if not isinstance(parsed, dict):
+        parsed = {}
+    total = int(parsed.get("total_pairs", 0) or 0)
+    triggered = int(parsed.get("triggered_count", 0) or 0)
+    persisted = int(parsed.get("persisted_count", 0) or 0)
+    status = "OK" if rc == 0 else "ERROR"
+    if rc == 0 and total == 0:
+        status = "OK_EMPTY"
+    return {
+        "status": status,
+        "exit_code": int(rc or 0),
+        "total_pairs": total,
+        "triggered_count": triggered,
+        "persisted_count": persisted,
+        "write_mode": bool(write_mode),
+        "embedding_provider": (parsed.get("embedding_provider") or {}).get("name", "deterministic"),
+    }
+
+
+def _evaluate_derived_disagreement_hook(
+    *,
+    enabled: bool,
+    write_mode: bool,
+    plan_only: bool,
+    cadence_hours: int,
+    latest_runs: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Decide whether to run the disagreement scanner and (optionally) run it.
+
+    Contract
+    --------
+    - When ``enabled`` is False: emit a single ``not_requested`` entry, do
+      NOT call the scanner, do NOT touch the network.
+    - When ``enabled`` but either Polymarket or Kalshi is NOT fresh: emit a
+      ``skipped`` entry with ``reason='inputs_not_fresh'`` plus per-input
+      detail.  Never invokes the scanner.
+    - When ``plan_only`` is True: emit a ``would_run`` entry without
+      invocation, even if inputs are fresh.
+    - When ``enabled`` AND both inputs are fresh AND not plan-only: invoke
+      the scanner.  Honours ``write_mode`` (dry-run vs write).
+
+    The return value is ADVISORY_ONLY and carries the canonical safety
+    fields the rest of the orchestrator surface uses.
+    """
+    base: dict[str, Any] = {
+        "source_key": "prediction_market_disagreement",
+        "display_name": "Prediction Market Disagreement",
+        "enabled": bool(enabled),
+        "required_inputs": list(_PREDICTION_MARKET_DISAGREEMENT_INPUTS),
+        "advisory_status": ADVISORY_STATUS,
+        "execution_gate": EXECUTION_GATE_LOCKED,
+        "broker_api_called": False,
+        "ai_execution_count": 0,
+        "human_review_required": True,
+        "write_mode": bool(write_mode and enabled and not plan_only),
+    }
+    if not enabled:
+        base.update({
+            "action": "not_requested",
+            "reason": "flag_not_set",
+            "scanner_invoked": False,
+        })
+        return base
+
+    rows = latest_runs if latest_runs is not None else _load_latest_source_runs()
+    freshness = compute_source_freshness(rows, cadence_hours=cadence_hours)
+    input_states = {
+        key: (freshness.get(key) or {}).get("freshness_state", "never_run")
+        for key in _PREDICTION_MARKET_DISAGREEMENT_INPUTS
+    }
+    not_fresh = [
+        f"{k}={state}" for k, state in input_states.items() if state != FRESHNESS_FRESH
+    ]
+    base["input_freshness"] = input_states
+
+    if not_fresh:
+        base.update({
+            "action": "skipped",
+            "reason": "inputs_not_fresh",
+            "skipped_reason_detail": ", ".join(sorted(not_fresh)),
+            "scanner_invoked": False,
+        })
+        return base
+
+    if plan_only:
+        base.update({
+            "action": "would_run",
+            "reason": "",
+            "scanner_invoked": False,
+        })
+        return base
+
+    # All gates pass — actually run the scanner.
+    summary = _invoke_disagreement_scanner(write_mode=bool(write_mode))
+    base.update({
+        "action": "ran",
+        "reason": "",
+        "scanner_invoked": True,
+        "scanner_result": summary,
+    })
+    return base
+
+
 def build_orchestrator_report(
     source_keys: list[str],
     *,
     write_mode: bool,
     plan_only: bool,
     cadence_hours: int,
+    run_derived_disagreements: bool = False,
+    latest_runs: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Compute the orchestrator report.
 
@@ -255,6 +457,17 @@ def build_orchestrator_report(
     would_run = sum(1 for e in entries if e["action"] == "would_run")
     would_write = sum(1 for e in entries if e["action"] == "would_write")
 
+    derived_entries: list[dict[str, Any]] = []
+    derived_entries.append(
+        _evaluate_derived_disagreement_hook(
+            enabled=bool(run_derived_disagreements),
+            write_mode=bool(write_mode),
+            plan_only=bool(plan_only),
+            cadence_hours=int(cadence_hours),
+            latest_runs=latest_runs,
+        )
+    )
+
     return {
         "started_at_epoch": started_at,
         "cadence_hours": int(cadence_hours),
@@ -262,11 +475,18 @@ def build_orchestrator_report(
         "plan_only": bool(plan_only),
         "requested_source_keys": plan["requested_source_keys"],
         "entries": entries,
+        "derived_signal_entries": derived_entries,
         "summary": {
             "total": len(entries),
             "skipped": skipped,
             "would_run": would_run,
             "would_write": would_write,
+            "derived_scanner_invoked": any(
+                e.get("scanner_invoked") for e in derived_entries
+            ),
+            "derived_scanner_skipped": any(
+                e.get("action") == "skipped" for e in derived_entries
+            ),
         },
         "advisory_status": ADVISORY_STATUS,
         "execution_gate": EXECUTION_GATE_LOCKED,
@@ -303,11 +523,35 @@ def _format_text_report(report: dict[str, Any]) -> str:
             f"cred={'yes' if entry['credential_configured'] else 'no':<3} "
             + (f"reason={entry['reason']}" if entry["reason"] else "")
         )
+    derived = report.get("derived_signal_entries") or []
+    if derived:
+        lines.append("")
+        lines.append("Derived signals:")
+        for entry in derived:
+            extras = ""
+            if entry.get("action") == "skipped":
+                extras = f" reason={entry.get('reason')}({entry.get('skipped_reason_detail','')})"
+            elif entry.get("action") == "ran":
+                sr = entry.get("scanner_result") or {}
+                extras = (
+                    f" status={sr.get('status')} pairs={sr.get('total_pairs')} "
+                    f"triggered={sr.get('triggered_count')} persisted={sr.get('persisted_count')}"
+                )
+            elif entry.get("action") == "would_run":
+                extras = " (plan_only)"
+            elif entry.get("action") == "not_requested":
+                extras = " (flag_off)"
+            lines.append(
+                f"  - {entry['source_key']:<32} action={entry.get('action','?'):<13}"
+                f" enabled={'yes' if entry.get('enabled') else 'no':<3}"
+                + extras
+            )
     s = report["summary"]
     lines.append("")
     lines.append(
         f"Summary: total={s['total']}  skipped={s['skipped']}  "
-        f"would_run={s['would_run']}  would_write={s['would_write']}"
+        f"would_run={s['would_run']}  would_write={s['would_write']}  "
+        f"derived_invoked={s.get('derived_scanner_invoked', False)}"
     )
     if report["mode"] == "write":
         lines.append("")
@@ -343,6 +587,7 @@ def main(argv: list[str] | None = None) -> int:
         write_mode=bool(args.write),
         plan_only=bool(args.plan_only),
         cadence_hours=int(args.cadence_hours),
+        run_derived_disagreements=bool(args.run_derived_disagreements),
     )
 
     if args.json:

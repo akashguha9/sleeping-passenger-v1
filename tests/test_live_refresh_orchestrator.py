@@ -19,6 +19,7 @@ import pytest
 
 from scripts.live_source_registry import ADVISORY_STATUS, EXECUTION_GATE_LOCKED
 from scripts.run_live_refresh import (
+    _evaluate_derived_disagreement_hook,
     build_orchestrator_report,
     main as orchestrator_main,
 )
@@ -238,3 +239,252 @@ def test_orchestrator_plan_only_route(monkeypatch, capsys) -> None:
     assert payload["plan_only"] is True
     assert payload["mode"] == "dry_run"
     assert payload["summary"]["total"] == len(ALL_KEYS)
+
+
+# ---------------------------------------------------------------------------
+# Derived-disagreement orchestration hook
+# ---------------------------------------------------------------------------
+
+
+def _fresh_run(source_name: str, *, hours_ago: float = 0.5) -> dict:
+    """Build a source_run_log row that compute_source_freshness reads as FRESH."""
+    import datetime as _dt
+
+    now = _dt.datetime.now(_dt.timezone.utc)
+    ts = (now - _dt.timedelta(hours=hours_ago)).isoformat(timespec="seconds")
+    return {
+        "source_name": source_name,
+        "status": "OK",
+        "timestamp_utc": ts,
+    }
+
+
+def _stale_run(source_name: str, *, hours_ago: float = 200.0) -> dict:
+    import datetime as _dt
+
+    now = _dt.datetime.now(_dt.timezone.utc)
+    ts = (now - _dt.timedelta(hours=hours_ago)).isoformat(timespec="seconds")
+    return {
+        "source_name": source_name,
+        "status": "OK",
+        "timestamp_utc": ts,
+    }
+
+
+class TestDerivedDisagreementHook:
+    """The hook only runs when both Polymarket AND Kalshi are fresh, and it
+    must always be safely skipped otherwise.  These tests pass synthetic
+    latest_runs so they never touch real persistence or the network."""
+
+    def test_disabled_by_default_emits_not_requested(self) -> None:
+        report = build_orchestrator_report(
+            ["polymarket", "kalshi"],
+            write_mode=False,
+            plan_only=False,
+            cadence_hours=6,
+            latest_runs=[],
+        )
+        derived = report["derived_signal_entries"]
+        assert len(derived) == 1
+        entry = derived[0]
+        assert entry["source_key"] == "prediction_market_disagreement"
+        assert entry["action"] == "not_requested"
+        assert entry["scanner_invoked"] is False
+        assert report["summary"]["derived_scanner_invoked"] is False
+
+    def test_enabled_with_fresh_inputs_runs_scanner_in_dry_run(self, monkeypatch):
+        called: list[dict] = []
+
+        def _fake_invoke(*, write_mode):
+            called.append({"write_mode": write_mode})
+            return {
+                "status": "OK_EMPTY",
+                "exit_code": 0,
+                "total_pairs": 0,
+                "triggered_count": 0,
+                "persisted_count": 0,
+                "write_mode": write_mode,
+                "embedding_provider": "deterministic",
+            }
+
+        import scripts.run_live_refresh as orch
+        monkeypatch.setattr(orch, "_invoke_disagreement_scanner", _fake_invoke)
+
+        latest_runs = [_fresh_run("polymarket"), _fresh_run("kalshi")]
+        report = build_orchestrator_report(
+            ["polymarket", "kalshi"],
+            write_mode=False,
+            plan_only=False,
+            cadence_hours=6,
+            run_derived_disagreements=True,
+            latest_runs=latest_runs,
+        )
+        derived = report["derived_signal_entries"][0]
+        assert derived["enabled"] is True
+        assert derived["action"] == "ran"
+        assert derived["scanner_invoked"] is True
+        assert called == [{"write_mode": False}]
+        assert report["summary"]["derived_scanner_invoked"] is True
+
+    def test_polymarket_stale_skips_scanner_cleanly(self, monkeypatch):
+        invocations: list[dict] = []
+
+        def _fake_invoke(*, write_mode):
+            invocations.append({"write_mode": write_mode})
+            return {}
+
+        import scripts.run_live_refresh as orch
+        monkeypatch.setattr(orch, "_invoke_disagreement_scanner", _fake_invoke)
+
+        latest_runs = [_stale_run("polymarket"), _fresh_run("kalshi")]
+        report = build_orchestrator_report(
+            ["polymarket", "kalshi"],
+            write_mode=False,
+            plan_only=False,
+            cadence_hours=6,
+            run_derived_disagreements=True,
+            latest_runs=latest_runs,
+        )
+        derived = report["derived_signal_entries"][0]
+        assert derived["action"] == "skipped"
+        assert derived["reason"] == "inputs_not_fresh"
+        assert "polymarket" in derived["skipped_reason_detail"]
+        assert derived["scanner_invoked"] is False
+        assert invocations == []
+
+    def test_kalshi_stale_skips_scanner_cleanly(self, monkeypatch):
+        import scripts.run_live_refresh as orch
+        monkeypatch.setattr(
+            orch,
+            "_invoke_disagreement_scanner",
+            lambda *, write_mode: pytest.fail("scanner must not run"),
+        )
+        latest_runs = [_fresh_run("polymarket"), _stale_run("kalshi")]
+        report = build_orchestrator_report(
+            ["polymarket", "kalshi"],
+            write_mode=False,
+            plan_only=False,
+            cadence_hours=6,
+            run_derived_disagreements=True,
+            latest_runs=latest_runs,
+        )
+        derived = report["derived_signal_entries"][0]
+        assert derived["action"] == "skipped"
+        assert "kalshi" in derived["skipped_reason_detail"]
+
+    def test_both_missing_skips_scanner_cleanly(self, monkeypatch):
+        import scripts.run_live_refresh as orch
+        monkeypatch.setattr(
+            orch,
+            "_invoke_disagreement_scanner",
+            lambda *, write_mode: pytest.fail("scanner must not run"),
+        )
+        report = build_orchestrator_report(
+            ["polymarket", "kalshi"],
+            write_mode=False,
+            plan_only=False,
+            cadence_hours=6,
+            run_derived_disagreements=True,
+            latest_runs=[],  # nothing has run
+        )
+        derived = report["derived_signal_entries"][0]
+        assert derived["action"] == "skipped"
+        assert "polymarket" in derived["skipped_reason_detail"]
+        assert "kalshi" in derived["skipped_reason_detail"]
+
+    def test_plan_only_emits_would_run_not_invocation(self, monkeypatch):
+        import scripts.run_live_refresh as orch
+        monkeypatch.setattr(
+            orch,
+            "_invoke_disagreement_scanner",
+            lambda *, write_mode: pytest.fail("plan_only must not run scanner"),
+        )
+        latest_runs = [_fresh_run("polymarket"), _fresh_run("kalshi")]
+        report = build_orchestrator_report(
+            ["polymarket", "kalshi"],
+            write_mode=False,
+            plan_only=True,
+            cadence_hours=6,
+            run_derived_disagreements=True,
+            latest_runs=latest_runs,
+        )
+        derived = report["derived_signal_entries"][0]
+        assert derived["action"] == "would_run"
+        assert derived["scanner_invoked"] is False
+
+    def test_write_mode_forwarded_to_scanner(self, monkeypatch):
+        captured: list[dict] = []
+
+        def _fake_invoke(*, write_mode):
+            captured.append({"write_mode": write_mode})
+            return {"status": "OK", "exit_code": 0, "total_pairs": 0, "triggered_count": 0, "persisted_count": 0, "write_mode": write_mode}
+
+        import scripts.run_live_refresh as orch
+        monkeypatch.setattr(orch, "_invoke_disagreement_scanner", _fake_invoke)
+
+        latest_runs = [_fresh_run("polymarket"), _fresh_run("kalshi")]
+        report = build_orchestrator_report(
+            ["polymarket", "kalshi"],
+            write_mode=True,
+            plan_only=False,
+            cadence_hours=6,
+            run_derived_disagreements=True,
+            latest_runs=latest_runs,
+        )
+        assert captured == [{"write_mode": True}]
+        derived = report["derived_signal_entries"][0]
+        assert derived["write_mode"] is True
+        assert derived["action"] == "ran"
+
+    def test_derived_entry_carries_safety_stamps(self) -> None:
+        # Even when skipped, the entry must look like the rest of the
+        # orchestrator surface (advisory, locked, no broker).
+        entry = _evaluate_derived_disagreement_hook(
+            enabled=True,
+            write_mode=False,
+            plan_only=False,
+            cadence_hours=6,
+            latest_runs=[],
+        )
+        assert entry["advisory_status"] == ADVISORY_STATUS
+        assert entry["execution_gate"] == EXECUTION_GATE_LOCKED
+        assert entry["broker_api_called"] is False
+        assert entry["ai_execution_count"] == 0
+        assert entry["human_review_required"] is True
+
+    def test_env_flag_enables_hook_when_cli_flag_absent(self, monkeypatch, capsys):
+        # Setting the env var should be equivalent to passing the CLI flag.
+        monkeypatch.setenv("ENABLE_PREDICTION_MARKET_DISAGREEMENT_AFTER_REFRESH", "1")
+        _clear_live_keys(monkeypatch)
+        # Stub the scanner so the test does not depend on persistence state.
+        import scripts.run_live_refresh as orch
+        monkeypatch.setattr(
+            orch, "_load_latest_source_runs", lambda: []
+        )
+        monkeypatch.setattr(
+            orch,
+            "_invoke_disagreement_scanner",
+            lambda *, write_mode: pytest.fail("inputs never fresh — scanner must not run"),
+        )
+        rc = orchestrator_main(["--source", "all", "--dry-run", "--json"])
+        assert rc == 0
+        payload = json.loads(capsys.readouterr().out)
+        derived = payload["derived_signal_entries"][0]
+        # Flag respected (enabled=True), but inputs not fresh so skipped.
+        assert derived["enabled"] is True
+        assert derived["action"] == "skipped"
+
+    def test_orchestrator_excludes_derived_from_default_all_sweep(self, monkeypatch):
+        _clear_live_keys(monkeypatch)
+        report = build_orchestrator_report(
+            list(ALL_KEYS),
+            write_mode=False,
+            plan_only=False,
+            cadence_hours=6,
+            latest_runs=[],
+        )
+        per_source_keys = {e["source_key"] for e in report["entries"]}
+        assert "prediction_market_disagreement" not in per_source_keys
+        # But still surfaced in the derived block as a first-class advisory.
+        derived_keys = {e["source_key"] for e in report["derived_signal_entries"]}
+        assert "prediction_market_disagreement" in derived_keys
