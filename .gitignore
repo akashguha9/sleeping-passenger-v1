@@ -156,3 +156,5 @@ data/manual_trades_by_date.json
 # Local-only LLM prompt drafts. Canonical prompts live under prompts/.
 Prompt_*.txt
 
+
+secrets/

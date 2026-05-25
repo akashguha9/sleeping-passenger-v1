@@ -1,0 +1,57 @@
+{
+  "manifest_kind": "runtime_artifact_manifest",
+  "manifest_version": "1.0",
+  "generated_at_utc": "2026-05-25T00:00:00Z",
+  "advisory_status": "ADVISORY_ONLY",
+  "execution_gate": "LOCKED",
+  "broker_api_called": false,
+  "ai_execution_count": 0,
+  "canonical_store": "sqlite",
+  "jsonl_is_canonical": false,
+  "purpose": "Coherence manifest for runtime/release/*.json artifacts.  Every artifact must either carry the canonical stamp set OR be listed below with a reason.  The 'tests/test_runtime_artifact_coherence.py' test asserts this.",
+  "canonical_stamp_keys": {
+    "primary": ["advisory_status", "execution_gate", "broker_api_called", "ai_execution_count"],
+    "legacy_equivalents": {
+      "advisory_status": ["advisory_only", "advisory_only_ok"],
+      "execution_gate": ["execution_locked"]
+    }
+  },
+  "non_dict_artifacts": [
+    {
+      "path": "ai_reports_empty.json",
+      "shape": "list",
+      "reason": "Empty-AI-reports sentinel file persisted as a JSON list; no body-level stamps applicable.  Tests rely on the empty list as a presence sentinel."
+    }
+  ],
+  "legacy_stamped_artifacts": [
+    {
+      "path": "kalshi_source_health.json",
+      "uses_keys": ["advisory_only", "execution_locked", "broker_api_called", "ai_execution_count"],
+      "reason": "Kalshi source-health summary writer predates the canonical-stamp helper; existing tests pin the legacy field names.  Coherence is preserved (no execution implied)."
+    },
+    {
+      "path": "kalshi_watchdog_summary.json",
+      "uses_keys": ["advisory_only", "execution_locked", "broker_api_called", "ai_execution_count"],
+      "reason": "Same writer as above.  Legacy field names retained for backwards compatibility with existing operator-truth panel tests."
+    },
+    {
+      "path": "release_gate_proof.json",
+      "uses_keys": ["advisory_only_ok", "generated_at_utc"],
+      "reason": "Release-gate proof emits a boolean confirmation rather than the full stamp dict.  The boolean is itself the advisory affirmation."
+    }
+  ],
+  "ignored_artifacts": [
+    {
+      "path": "kalshi_quarantine.jsonl",
+      "reason": "JSONL audit log; per-line stamping is enforced by ingestion writer tests, not by this coherence gate."
+    },
+    {
+      "path": "kalshi_quarantine_migration.jsonl",
+      "reason": "JSONL audit log."
+    },
+    {
+      "path": "kalshi_source_health_history.jsonl",
+      "reason": "JSONL audit log."
+    }
+  ]
+}

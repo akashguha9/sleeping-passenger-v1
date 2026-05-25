@@ -200,6 +200,10 @@ KNOWN_OUT_OF_SCOPE: frozenset[str] = frozenset({
     # local operator helper for advisory-only five-model synthesis prompt
     # recovery; no broker execution, no order placement, no API trading writes.
     "run_five_model_synthesis.ps1",
+    # Identity Collapse + First-Day Operator sprint (Phase 2): legacy /
+    # metaphor layer inventory.  Contains only README.md (no code) and is
+    # advisory-documentation-only — not part of the MVP runtime surface.
+    "_legacy_layers",
 })
 
 # Quarantined non-MVP tool directories.  These live under ``tools/`` so

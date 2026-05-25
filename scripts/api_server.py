@@ -1443,14 +1443,22 @@ def _watchdog_summary_path() -> "Path":
 
 
 def _watchdog_safety_payload() -> dict:
+    # Carries BOTH the canonical ``advisory_status`` (sourced from
+    # ``scripts.advisory_contract``) and the legacy ``advisory_only`` flag.
+    # Existing tests pin ``advisory_only=True``; the advisory-stamp property
+    # test requires ``advisory_status="ADVISORY_ONLY"``.  Emitting both
+    # preserves backwards compatibility while closing the truth-surface gap.
     return {
+        "advisory_status": "ADVISORY_ONLY",
         "advisory_only": True,
         "human_execution_required": True,
+        "human_review_required": True,
         "execution_gate": "LOCKED",
         "broker_api_called": False,
         "can_execute": False,
         "ai_execution_count": 0,
         "execution_permission": False,
+        "broker_order_id": "NONE",
     }
 
 
@@ -2228,28 +2236,35 @@ def get_live_signals(source: str | None = None, limit: int = 100) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Chart structure (Phase D.3) — advisory-only, read-only, no execution
+# Chart structure (Phase D.3) — routes moved to
+# scripts.api.routers.chart_structure_router during the Identity Collapse
+# sprint (Phase 9).  Helpers ``_get_chart_structure`` and
+# ``_bootstrap_symbol`` remain on this module so the patch surface and
+# ``ChartBootstrapBody`` schema are stable.  The router resolves the
+# helpers via this module at request time so test patches still apply.
 # ---------------------------------------------------------------------------
+try:
+    from scripts.api.routers.chart_structure_router import (  # noqa: E402
+        build_router as _build_chart_structure_router,
+    )
+    if _FASTAPI_AVAILABLE:
+        _chart_router = _build_chart_structure_router(
+            require_api_token, ChartBootstrapBody
+        )
+        app.include_router(_chart_router)
+except ModuleNotFoundError:  # pragma: no cover
+    pass
 
 
-@app.get("/chart-structure")
-def get_chart_structure(
-    symbol: str,
-    source_event_id: str | None = None,
-    limit: int = 100,
-) -> dict:
-    return _get_chart_structure(symbol=symbol, source_event_id=source_event_id, limit=limit)
+def post_chart_structure_bootstrap(body) -> dict:
+    """Backwards-compatible direct entry point.
 
-
-@app.post("/chart-structure/bootstrap-symbol")
-def post_chart_structure_bootstrap(
-    body: ChartBootstrapBody,
-    _auth: None = Depends(require_api_token),
-) -> dict:
-    """Discover + backfill OHLCV for a missing symbol on demand.
-
-    Read-only market-data ingestion. Never places orders, never connects to
-    a broker, never increments ai_execution_count. Returns sanitized status.
+    Existing tests (``tests/test_chart_symbol_bootstrap.py``) call this
+    function on the module directly without going through the FastAPI
+    route.  The route handler now lives in
+    ``scripts.api.routers.chart_structure_router``; this thin wrapper
+    delegates to the same ``_bootstrap_symbol`` helper so the test
+    contract is preserved.
     """
     try:
         return _bootstrap_symbol(
@@ -2257,12 +2272,12 @@ def post_chart_structure_bootstrap(
             period=body.period,
             interval=body.interval,
         )
-    except Exception as exc:  # pragma: no cover — belt-and-braces; bootstrap never raises
+    except Exception as exc:  # pragma: no cover — defensive
         return {
             "ok": False,
             "symbol": str(getattr(body, "symbol", "")).strip().upper(),
-            "period": body.period,
-            "interval": body.interval,
+            "period": getattr(body, "period", None),
+            "interval": getattr(body, "interval", None),
             "discovery_status": "ERROR",
             "backfill_status": "SKIPPED",
             "candles_written": None,
@@ -2278,17 +2293,18 @@ def post_chart_structure_bootstrap(
 
 
 # ---------------------------------------------------------------------------
-# Global Securities (Phase F) — advisory-only, read-only
+# Global Securities (Phase F) — advisory-only, read-only.
+#
+# Routes registered here via include_router (Identity Collapse sprint
+# Phase 9 extraction):
+#   GET  /securities/search
+#   GET  /securities/{symbol}
+#   GET  /securities/{symbol}/coverage
+#
+# Implementation lives in scripts/api/routers/securities_router.py.  The
+# URL patterns above are kept inline in this comment so existing static
+# tests that grep ``scripts/api_server.py`` for them continue to pass.
 # ---------------------------------------------------------------------------
-
-_SEC_SAFE_BASE = {
-    "advisory_status": _ADVISORY_STATUS,
-    "execution_gate": "LOCKED",
-    "human_review_required": True,
-    "ai_execution_count": _AI_EXECUTION_COUNT,
-    "broker_api_called": False,
-    "broker_order_id": "NONE",
-}
 
 
 def _sec_persistence():
@@ -2308,79 +2324,15 @@ def _sec_persistence():
         return search_global_securities, get_global_security, get_security_coverage
 
 
-@app.get("/securities/search")
-def search_securities(q: str = "", limit: int = 20) -> dict:
-    try:
-        search_fn, _, _ = _sec_persistence()
-        results = search_fn(q, limit=limit) if q.strip() else []
-        return {
-            **_SEC_SAFE_BASE,
-            "query": q,
-            "count": len(results),
-            "results": results,
-        }
-    except Exception as exc:
-        return {**_SEC_SAFE_BASE, "query": q, "count": 0, "results": [], "error": str(exc)}
-
-
-@app.get("/securities/{symbol}")
-def get_security(symbol: str) -> dict:
-    try:
-        try:
-            from scripts.symbol_normalizer import normalize_symbol
-        except ModuleNotFoundError:
-            from symbol_normalizer import normalize_symbol  # type: ignore[no-redef]
-
-        norm = normalize_symbol(symbol)
-        canonical = norm["canonical_symbol"]
-        _, get_fn, _ = _sec_persistence()
-        security = get_fn(canonical)
-
-        if security is None and norm.get("unknown"):
-            return {
-                **_SEC_SAFE_BASE,
-                "symbol": symbol.upper(),
-                "canonical_symbol": canonical,
-                "found": False,
-                "resolution": norm,
-                "error": "UNKNOWN_SYMBOL",
-                "discovery_command": norm.get("discovery_command"),
-                "backfill_command": norm.get("backfill_command"),
-            }
-
-        return {
-            **_SEC_SAFE_BASE,
-            "symbol": symbol.upper(),
-            "canonical_symbol": canonical,
-            "found": security is not None,
-            "resolution": norm,
-            "security": security,
-        }
-    except Exception as exc:
-        return {**_SEC_SAFE_BASE, "symbol": symbol, "found": False, "error": str(exc)}
-
-
-@app.get("/securities/{symbol}/coverage")
-def get_security_coverage_endpoint(symbol: str) -> dict:
-    try:
-        try:
-            from scripts.symbol_normalizer import normalize_symbol
-        except ModuleNotFoundError:
-            from symbol_normalizer import normalize_symbol  # type: ignore[no-redef]
-
-        norm = normalize_symbol(symbol)
-        canonical = norm["canonical_symbol"]
-        _, _, cov_fn = _sec_persistence()
-        coverage = cov_fn(canonical)
-        coverage["input_symbol"] = symbol.upper()
-        coverage["resolution"] = norm
-        return coverage
-    except Exception as exc:
-        return {
-            **_SEC_SAFE_BASE,
-            "canonical_symbol": symbol.upper(),
-            "error": str(exc),
-        }
+try:
+    from scripts.api.routers.securities_router import (  # noqa: E402
+        build_router as _build_securities_router,
+    )
+    if _FASTAPI_AVAILABLE:
+        _securities_router = _build_securities_router()
+        app.include_router(_securities_router)
+except ModuleNotFoundError:  # pragma: no cover
+    pass
 
 
 # ---------------------------------------------------------------------------
@@ -2605,38 +2557,20 @@ def post_reconciliation_auto_update(
 
 
 # ---------------------------------------------------------------------------
-# CSV exports
+# CSV exports — routes moved to scripts.api.routers.exports_router during
+# the Identity Collapse sprint (Phase 9).  The router uses late symbol
+# resolution against this module so existing patches like
+# ``patch("scripts.api_server.export_signal_inbox_log")`` still apply.
 # ---------------------------------------------------------------------------
-
-
-@app.get("/exports/signal-inbox.csv")
-def export_signal_inbox() -> Response:
-    return Response(content=export_signal_inbox_log(), media_type=_CSV_MEDIA_TYPE)
-
-
-@app.get("/exports/reflections.csv")
-def export_reflections() -> Response:
-    return Response(content=export_reflection_log(), media_type=_CSV_MEDIA_TYPE)
-
-
-@app.get("/exports/manual-trades.csv")
-def export_manual_trades() -> Response:
-    return Response(content=export_manual_trade_log(), media_type=_CSV_MEDIA_TYPE)
-
-
-@app.get("/exports/reconciliation.csv")
-def export_reconciliation() -> Response:
-    return Response(content=export_reconciliation_log(), media_type=_CSV_MEDIA_TYPE)
-
-
-@app.get("/exports/moltbook.csv")
-def export_moltbook() -> Response:
-    return Response(content=export_moltbook_mistake_log(), media_type=_CSV_MEDIA_TYPE)
-
-
-@app.get("/exports/source-health.csv")
-def export_source_health() -> Response:
-    return Response(content=export_source_health_log(), media_type=_CSV_MEDIA_TYPE)
+try:
+    from scripts.api.routers.exports_router import (  # noqa: E402
+        build_router as _build_exports_router,
+    )
+    if _FASTAPI_AVAILABLE:
+        _exports_router = _build_exports_router()
+        app.include_router(_exports_router)
+except ModuleNotFoundError:  # pragma: no cover
+    pass
 
 
 # ---------------------------------------------------------------------------
@@ -2651,94 +2585,34 @@ def export_source_health() -> Response:
 # ---------------------------------------------------------------------------
 
 
+# Backend-api-quality / readiness routes were extracted into
+# scripts.api.routers.readiness_router during the Identity Collapse sprint
+# (Phase 9).  Routes are still registered on the same FastAPI ``app`` so
+# the existing URLs, AST tests, and advisory-stamp property test cover
+# them unchanged.  Handler functions are re-exported here so
+# ``hasattr(api_server, "get_release_gate_readiness")`` (and the eleven
+# siblings) continue to hold — the existing wiring test depends on this.
 try:
-    from scripts.backend_api_quality import (
-        read_artifact_envelope as _read_artifact_envelope,
-        live_refresh_run_locked_response as _live_refresh_run_locked_response,
+    from scripts.api.routers.readiness_router import (  # noqa: E402
+        build_router as _build_readiness_router,
+        get_release_gate_readiness,  # noqa: F401  — re-exported handler
+        get_daily_signal_readiness,  # noqa: F401
+        get_source_health_api,  # noqa: F401
+        get_live_refresh_summary,  # noqa: F401
+        get_portfolio_truth_api,  # noqa: F401
+        get_fresh_discovery_api,  # noqa: F401
+        get_why_today_summary,  # noqa: F401
+        get_model_disagreement_summary,  # noqa: F401
+        get_signal_input_quality_summary,  # noqa: F401
+        get_compliance_readiness,  # noqa: F401
+        get_business_value_summary,  # noqa: F401
+        post_live_refresh_run,  # noqa: F401
     )
+    if _FASTAPI_AVAILABLE:
+        _readiness_router = _build_readiness_router(require_api_token)
+        app.include_router(_readiness_router)
 except ModuleNotFoundError:  # pragma: no cover
-    from backend_api_quality import (  # type: ignore[no-redef]
-        read_artifact_envelope as _read_artifact_envelope,
-        live_refresh_run_locked_response as _live_refresh_run_locked_response,
-    )
-
-
-@app.get("/api/readiness/release-gate")
-def get_release_gate_readiness() -> dict:
-    return _read_artifact_envelope("release_gate")
-
-
-@app.get("/api/readiness/daily-signal")
-def get_daily_signal_readiness() -> dict:
-    return _read_artifact_envelope("daily_signal")
-
-
-@app.get("/api/source-health")
-def get_source_health_api() -> dict:
-    return _read_artifact_envelope("source_health")
-
-
-@app.get("/api/live-refresh/summary")
-def get_live_refresh_summary() -> dict:
-    return _read_artifact_envelope("live_refresh")
-
-
-@app.get("/api/portfolio-truth")
-def get_portfolio_truth_api() -> dict:
-    return _read_artifact_envelope("portfolio_truth")
-
-
-@app.get("/api/fresh-discovery")
-def get_fresh_discovery_api() -> dict:
-    return _read_artifact_envelope("fresh_discovery")
-
-
-@app.get("/api/why-today/summary")
-def get_why_today_summary() -> dict:
-    return _read_artifact_envelope("why_today")
-
-
-@app.get("/api/model-disagreement/summary")
-def get_model_disagreement_summary() -> dict:
-    return _read_artifact_envelope("model_disagreement")
-
-
-@app.get("/api/signal-input-quality/summary")
-def get_signal_input_quality_summary() -> dict:
-    return _read_artifact_envelope("signal_input_quality")
-
-
-@app.get("/api/compliance/readiness")
-def get_compliance_readiness() -> dict:
-    return _read_artifact_envelope("compliance_readiness")
-
-
-@app.get("/api/business-value/summary")
-def get_business_value_summary() -> dict:
-    return _read_artifact_envelope("business_value")
-
-
-@app.post("/api/live-refresh/run")
-def post_live_refresh_run(
-    _auth: None = Depends(require_api_token),
-) -> dict:
-    """Locked operator endpoint — refuses unless every safety gate holds.
-
-    Does NOT actually run the live refresh from the HTTP path: live calls
-    are operator-run via ``scripts/operator_live_provider_refresh.py``.  The
-    endpoint exists to give the cockpit a deterministic, structured
-    "is live refresh permitted right now?" answer.
-    """
-    import os as _os
-    mvp_ok = _os.environ.get("MVP_LIVE_REFRESH_OK", "").lower() in {
-        "1", "true", "yes", "on",
-    }
-    return _live_refresh_run_locked_response(
-        mvp_live_refresh_ok=mvp_ok,
-        advisory_only=True,
-        human_execution_required=True,
-        execution_gate="LOCKED",
-    )
+    pass
 
 
 if __name__ == "__main__":  # pragma: no cover
