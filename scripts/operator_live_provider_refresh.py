@@ -658,6 +658,7 @@ def refresh_providers(
     cfg: _typed_config.TypedConfig | None = None,
     yfinance_module: Any = None,
     requests_module: Any = None,
+    previous_summary_path: Path | None = None,
 ) -> dict[str, Any]:
     """Run the operator-mode refresh for ``providers``.
 
@@ -743,7 +744,9 @@ def refresh_providers(
         if e.verification_status == VERIF_LIVE_VERIFIED
         and e.latest_provider_timestamp_utc
     ]
-    previous_lpq_score = _read_previous_lpq_score(default=8.2)
+    previous_lpq_score = _read_previous_lpq_score(
+        default=8.2, summary_path=previous_summary_path,
+    )
     new_lpq_score, uplift_meta = lpq_uplift_score(evidences, previous_lpq_score)
 
     summary = {
@@ -771,7 +774,11 @@ def refresh_providers(
 FIXTURE_LPQ_HONEST_CAP = 8.2
 
 
-def _read_previous_lpq_score(default: float = FIXTURE_LPQ_HONEST_CAP) -> float:
+def _read_previous_lpq_score(
+    default: float = FIXTURE_LPQ_HONEST_CAP,
+    *,
+    summary_path: Path | None = None,
+) -> float:
     """Return the *honest* prior LPQ floor before this operator refresh.
 
     The existing fixture-mode artifact at
@@ -781,8 +788,12 @@ def _read_previous_lpq_score(default: float = FIXTURE_LPQ_HONEST_CAP) -> float:
     *live/fresh* payload quality score is capped at 8.2.  We only lift
     above 8.2 when the prior artifact itself was a successful operator-run
     with at least one LIVE_VERIFIED provider.
+
+    ``summary_path`` lets callers (and tests) redirect the lookup away
+    from the module-level ``OPERATOR_SUMMARY_PATH`` so a stale or
+    real on-disk artifact cannot contaminate an isolated refresh.
     """
-    prior_operator = OPERATOR_SUMMARY_PATH
+    prior_operator = summary_path if summary_path is not None else OPERATOR_SUMMARY_PATH
     if prior_operator.exists():
         try:
             data = json.loads(prior_operator.read_text(encoding="utf-8"))

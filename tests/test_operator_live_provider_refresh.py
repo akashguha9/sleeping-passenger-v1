@@ -7,10 +7,31 @@ from __future__ import annotations
 import json
 import types
 from datetime import datetime, timezone
+from pathlib import Path
 
 import pytest
 
 from scripts import operator_live_provider_refresh as olpr
+
+
+@pytest.fixture(autouse=True)
+def _isolated_runtime_release(tmp_path, monkeypatch):
+    """Redirect operator-refresh artifact paths into ``tmp_path`` for every test.
+
+    The real repo-level ``runtime/release/operator_live_provider_refresh_summary.json``
+    can carry a successful 2-provider LIVE_VERIFIED run (LPQ 8.45). If the
+    test process reads that artifact as the *previous* LPQ floor, refusal
+    and one-provider-mock tests would inherit 8.45 instead of asserting
+    their honest baselines (8.2 / 8.35). Each test gets its own clean
+    release dir; nothing on disk can leak in.
+    """
+    release_dir = tmp_path / "runtime" / "release"
+    release_dir.mkdir(parents=True, exist_ok=True)
+    isolated_summary = release_dir / "operator_live_provider_refresh_summary.json"
+    isolated_evidence = release_dir / "live_provider_evidence.json"
+    monkeypatch.setattr(olpr, "OPERATOR_SUMMARY_PATH", isolated_summary)
+    monkeypatch.setattr(olpr, "LIVE_EVIDENCE_PATH", isolated_evidence)
+    yield release_dir
 
 
 class _FakeResponse:
@@ -252,6 +273,95 @@ def test_operator_artifact_valid_marks_stale(monkeypatch):
     info = olpr.operator_artifact_valid(old_summary)
     assert info["fresh"] is False
     assert info["valid"] is False
+
+
+def test_existing_repo_runtime_artifact_does_not_contaminate_isolated_live_refresh_tests(
+    tmp_path, monkeypatch,
+):
+    """A repo-level 2-provider artifact (LPQ 8.45) outside the isolated dir
+    must NOT lift a one-provider mock-only run above 8.35."""
+    # Place a fake "real" 2-provider artifact at a path the test does NOT
+    # inject — i.e. somewhere the function would only see if the
+    # module-level constant were honored.
+    contam_dir = tmp_path / "repo_contam" / "runtime" / "release"
+    contam_dir.mkdir(parents=True, exist_ok=True)
+    contam_path = contam_dir / "operator_live_provider_refresh_summary.json"
+    contam_path.write_text(json.dumps({
+        "ok": True,
+        "operator_run": True,
+        "generated_at_utc": olpr._utc_iso(),
+        "providers_live_verified": ["yfinance", "sec_edgar"],
+        "previous_live_payload_quality_score": 8.2,
+        "live_payload_quality_score": 8.45,
+        "ttl_hours": 24,
+    }), encoding="utf-8")
+
+    # Isolated yfinance-only run, pointing previous_summary_path at a
+    # non-existent file inside the isolated dir.
+    monkeypatch.setenv("MVP_LIVE_REFRESH_OK", "1")
+    monkeypatch.setenv("SEC_USER_AGENT", "")
+    monkeypatch.setenv("YFINANCE_LIVE_ENABLED", "true")
+
+    class _GdeltFail:
+        @staticmethod
+        def get(url, params=None, headers=None, timeout=None):
+            return _FakeResponse({}, status_code=503)
+
+    isolated_prev = tmp_path / "isolated_no_prior.json"
+    summary = olpr.refresh_providers(
+        yfinance_module=_fake_yfinance(),
+        requests_module=_GdeltFail,
+        previous_summary_path=isolated_prev,
+    )
+    assert summary["providers_live_verified"] == ["yfinance"]
+    assert summary["live_payload_quality_score"] == 8.35
+
+
+def test_two_provider_live_verified_lifts_lpq_to_8_45(monkeypatch):
+    """Honest two-provider run: yfinance + sec_edgar LIVE_VERIFIED -> LPQ 8.45."""
+    monkeypatch.setenv("MVP_LIVE_REFRESH_OK", "1")
+    monkeypatch.setenv("SEC_USER_AGENT", "test test@example.com")
+
+    class _GdeltFail:
+        @staticmethod
+        def get(url, params=None, headers=None, timeout=None):
+            if "gdelt" in url:
+                return _FakeResponse({}, status_code=503)
+            return _FakeRequests.get(url, params=params, headers=headers,
+                                     timeout=timeout)
+
+    summary = olpr.refresh_providers(
+        yfinance_module=_fake_yfinance(),
+        requests_module=_GdeltFail,
+    )
+    assert set(summary["providers_live_verified"]) == {"yfinance", "sec_edgar"}
+    assert summary["live_payload_quality_score"] == 8.45
+    # Safety invariants still hold.
+    assert summary["advisory_only"] is True
+    assert summary["broker_api_called"] is False
+
+
+def test_previous_summary_path_loads_real_two_provider_artifact(tmp_path, monkeypatch):
+    """Release-gate parity: when an explicit fresh 2-provider artifact is
+    provided as the previous summary, a refused run still surfaces the
+    honest 8.45 floor (it was already achieved earlier)."""
+    prior = tmp_path / "prior_summary.json"
+    prior.write_text(json.dumps({
+        "ok": True,
+        "operator_run": True,
+        "generated_at_utc": olpr._utc_iso(),
+        "providers_live_verified": ["yfinance", "sec_edgar"],
+        "previous_live_payload_quality_score": 8.2,
+        "live_payload_quality_score": 8.45,
+        "ttl_hours": 24,
+    }), encoding="utf-8")
+
+    monkeypatch.delenv("MVP_LIVE_REFRESH_OK", raising=False)
+    summary = olpr.refresh_providers(previous_summary_path=prior)
+    # No new LIVE_VERIFIED in this run, but the prior floor is honored.
+    assert summary["providers_live_verified"] == []
+    assert summary["previous_live_payload_quality_score"] == 8.45
+    assert summary["live_payload_quality_score"] == 8.45
 
 
 def test_no_broker_api_calls_anywhere():
