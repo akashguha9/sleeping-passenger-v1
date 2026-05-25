@@ -75,7 +75,48 @@ function getTitle(ev: LiveSignalEvent): string {
     // operator-facing headline; ``title`` may be absent.
     return (p.customer_label as string) || 'Prediction Market Disagreement Alert';
   }
+  if (ev.source_name === 'kalshi') {
+    // Prefer the deterministic display_title written by the Kalshi
+    // normalizer — it has already rejected raw "yes X, yes Y" outcome
+    // dumps and applied the priority chain (event_title → market_title
+    // → title → question → subtitle → ticker label).
+    return (
+      (p.display_title as string) ||
+      (p.primary_title as string) ||
+      (p.title as string) ||
+      ev.event_id
+    );
+  }
   return p.title || p.question as string || ev.event_id;
+}
+
+function isKalshiQuarantined(ev: LiveSignalEvent): boolean {
+  if (ev.source_name !== 'kalshi') return false;
+  const p = ev.raw_payload;
+  if (p.visible_in_kalshi_feed === false) return true;
+  if (p.category_allowed === false) return true;
+  return false;
+}
+
+const KALSHI_DISPLAY_LABEL_BY_SLUG: Record<string, string> = {
+  elections: 'Elections',
+  politics: 'Politics',
+  crypto: 'Crypto',
+  commodities: 'Commodities',
+  economics: 'Economics',
+  finance: 'Finance',
+  tech_science: 'Tech & Science',
+};
+
+function kalshiDisplayCategory(ev: LiveSignalEvent): string {
+  const p = ev.raw_payload;
+  if (typeof p.display_category === 'string' && p.display_category.trim()) {
+    return p.display_category;
+  }
+  if (typeof p.mvp_category === 'string' && KALSHI_DISPLAY_LABEL_BY_SLUG[p.mvp_category]) {
+    return KALSHI_DISPLAY_LABEL_BY_SLUG[p.mvp_category];
+  }
+  return String(p.category || '');
 }
 
 function getSubtitle(ev: LiveSignalEvent): string {
@@ -99,7 +140,8 @@ function getSubtitle(ev: LiveSignalEvent): string {
   }
   if (ev.source_name === 'kalshi') {
     const parts: string[] = [];
-    if (p.category) parts.push(String(p.category).toUpperCase());
+    const cat = kalshiDisplayCategory(ev);
+    if (cat) parts.push(cat.toUpperCase());
     if (p.source_market_id) parts.push(`Market ${p.source_market_id}`);
     if (p.implied_probability != null) {
       parts.push(`Implied: ${(Number(p.implied_probability) * 100).toFixed(1)}%`);
@@ -274,6 +316,20 @@ function formatTs(ts: string): string {
   }
 }
 
+const KALSHI_FRESHNESS_LABEL: Record<string, string> = {
+  LIVE_VERIFIED: 'Source · LIVE_VERIFIED',
+  SOURCE_STALE: 'Source · SOURCE_STALE',
+  UNVERIFIED: 'Source · UNVERIFIED',
+  SOURCE_ERROR: 'Source · SOURCE_ERROR',
+};
+
+const KALSHI_ACTIVITY_LABEL: Record<string, string> = {
+  MARKET_OPEN: 'Market · OPEN',
+  MARKET_CLOSED: 'Market · CLOSED',
+  MARKET_EXPIRED: 'Market · EXPIRED',
+  MARKET_UNKNOWN: 'Market · UNKNOWN',
+};
+
 function SignalEventCard({
   ev,
   displayState,
@@ -288,7 +344,25 @@ function SignalEventCard({
     displayState === 'optional_unconfigured_with_archive' ||
     displayState === 'planned_coverage' ||
     displayState === 'optional_unconfigured_with_coverage';
-  const isStaleRow = displayState === 'stale_active';
+  // Kalshi rows carry per-record freshness + activity status; suppress
+  // the generic STALE_ACTIVE chip for Kalshi in favour of the two
+  // explicit badges so the operator never conflates source staleness
+  // with market activity.
+  const isStaleRow =
+    displayState === 'stale_active' && ev.source_name !== 'kalshi';
+  const isKalshi = ev.source_name === 'kalshi';
+  const kFreshness =
+    isKalshi && typeof ev.raw_payload.source_freshness_status === 'string'
+      ? ev.raw_payload.source_freshness_status
+      : '';
+  const kActivity =
+    isKalshi && typeof ev.raw_payload.market_activity_status === 'string'
+      ? ev.raw_payload.market_activity_status
+      : '';
+  const kBadge =
+    isKalshi && typeof ev.raw_payload.ui_badge_status === 'string'
+      ? ev.raw_payload.ui_badge_status
+      : '';
 
   return (
     <div
@@ -298,6 +372,9 @@ function SignalEventCard({
       data-row-classification={
         isArchived ? 'archived' : isStaleRow ? 'stale' : 'current_live'
       }
+      data-kalshi-source-freshness={kFreshness || undefined}
+      data-kalshi-market-activity={kActivity || undefined}
+      data-kalshi-ui-badge={kBadge || undefined}
     >
       {/* Header row */}
       <div className="flex items-start justify-between gap-3">
@@ -339,6 +416,44 @@ function SignalEventCard({
               title="Stale active source — refresh failed or rate-limited"
             >
               STALE_ACTIVE
+            </span>
+          )}
+          {isKalshi && kFreshness && (
+            <span
+              className="text-[10px] font-mono uppercase tracking-widest px-1.5 py-0.5 rounded"
+              data-testid="kalshi-source-freshness-badge"
+              style={{
+                color:
+                  kFreshness === 'LIVE_VERIFIED'
+                    ? 'var(--sp-cyan)'
+                    : kFreshness === 'SOURCE_ERROR'
+                    ? '#d57b6a'
+                    : 'var(--sp-gold)',
+                border: '1px solid rgba(214, 168, 90, 0.35)',
+                background: 'rgba(13, 16, 21, 0.6)',
+              }}
+              title="How fresh the source's last successful fetch is — independent of whether the market itself is open."
+            >
+              {KALSHI_FRESHNESS_LABEL[kFreshness] || `Source · ${kFreshness}`}
+            </span>
+          )}
+          {isKalshi && kActivity && (
+            <span
+              className="text-[10px] font-mono uppercase tracking-widest px-1.5 py-0.5 rounded"
+              data-testid="kalshi-market-activity-badge"
+              style={{
+                color:
+                  kActivity === 'MARKET_OPEN'
+                    ? 'var(--sp-cyan)'
+                    : kActivity === 'MARKET_EXPIRED'
+                    ? '#d57b6a'
+                    : 'var(--sp-gold)',
+                border: '1px solid rgba(125, 211, 252, 0.28)',
+                background: 'rgba(13, 16, 21, 0.6)',
+              }}
+              title="Whether the Kalshi market itself is still open — independent of source freshness."
+            >
+              {KALSHI_ACTIVITY_LABEL[kActivity] || `Market · ${kActivity}`}
             </span>
           )}
         </div>
@@ -881,8 +996,15 @@ export default function LiveSignalsPage() {
 
   const filtered = useMemo(() => {
     if (!data) return [];
-    return data.live_signal_events.filter((ev) => matchesSearch(ev, searchQuery));
+    return data.live_signal_events
+      .filter((ev) => !isKalshiQuarantined(ev))
+      .filter((ev) => matchesSearch(ev, searchQuery));
   }, [data, searchQuery]);
+
+  const kalshiQuarantinedCount = useMemo(() => {
+    if (!data) return 0;
+    return data.live_signal_events.filter((ev) => isKalshiQuarantined(ev)).length;
+  }, [data]);
 
   const sourceCounts = useMemo(() => {
     if (!data) return {} as Record<string, number>;
@@ -1024,8 +1146,19 @@ export default function LiveSignalsPage() {
         <PerSourceEmptyState sourceFilter={sourceFilter} data={data} health={health} />
       ) : (
         <>
-          <div className="text-[10px] font-mono uppercase tracking-widest" style={{ color: 'var(--sp-mist)' }}>
-            {filtered.length} of {data?.count ?? 0} signal{filtered.length !== 1 ? 's' : ''}
+          <div className="text-[10px] font-mono uppercase tracking-widest flex items-center gap-3 flex-wrap" style={{ color: 'var(--sp-mist)' }}>
+            <span>
+              {filtered.length} of {data?.count ?? 0} signal{filtered.length !== 1 ? 's' : ''}
+            </span>
+            {kalshiQuarantinedCount > 0 && (sourceFilter === '' || sourceFilter === 'kalshi') && (
+              <span
+                data-testid="kalshi-quarantine-count"
+                title="Out-of-scope Kalshi markets hidden from the main feed (esports / sports / unknown / etc.)."
+                style={{ color: 'var(--sp-gold)' }}
+              >
+                Quarantined: {kalshiQuarantinedCount} out-of-scope Kalshi market{kalshiQuarantinedCount === 1 ? '' : 's'}
+              </span>
+            )}
           </div>
           <div className="space-y-3">
             {filtered.map((ev) => {

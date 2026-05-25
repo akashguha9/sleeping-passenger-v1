@@ -376,6 +376,24 @@ class KalshiLoader(BaseSourceLoader):
         else:
             tags = []
 
+        # Outcomes pass-through so the title normalizer can quarantine
+        # raw "yes <player>, yes <player>" outcome leaks before they
+        # become primary card titles.
+        outcomes_raw = (
+            market.get("outcomes")
+            or market.get("response_options")
+            or market.get("yes_no_outcomes")
+            or (event or {}).get("outcomes")
+            or []
+        )
+        if isinstance(outcomes_raw, list):
+            outcomes = [
+                str(o.get("label") if isinstance(o, dict) else o).strip()
+                for o in outcomes_raw
+                if o
+            ]
+        else:
+            outcomes = []
         return {
             "source": CANONICAL_SOURCE,
             "ticker": ticker,
@@ -388,7 +406,9 @@ class KalshiLoader(BaseSourceLoader):
             ).strip(),
             "rules_primary": str(market.get("rules_primary") or "").strip(),
             "category": category,
+            "subcategory": str(market.get("subcategory") or (event or {}).get("subcategory") or "").strip(),
             "tags": tags,
+            "outcomes": outcomes,
             "yes_ask": market.get("yes_ask"),
             "no_ask": market.get("no_ask"),
             "last_price": market.get("last_price"),
@@ -425,15 +445,57 @@ def normalize_kalshi_records(
     map the loader gathered from ``/events``; it lets the inference layer
     recover the category for live markets that ship without one.
     """
-    out: list[dict[str, Any]] = []
+    accepted, _ = partition_kalshi_records(
+        records, fetched_at_utc=fetched_at_utc, event_lookup=event_lookup
+    )
+    return accepted
+
+
+def partition_kalshi_records(
+    records: list[dict[str, Any]],
+    *,
+    fetched_at_utc: str,
+    event_lookup: dict[str, Any] | None = None,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Partition loader records into ``(accepted, quarantined)``.
+
+    Accepted records are full ``normalize_kalshi_market`` payloads ready
+    for persistence.  Quarantined records are operator-facing audit
+    blobs (see :func:`scripts.kalshi_normalizer.build_kalshi_quarantine_record`)
+    that capture *why* an out-of-scope market was rejected so the UI can
+    surface a count and the operator can drill in.
+    """
+    try:
+        from scripts.kalshi_category_governance import normalize_kalshi_category
+        from scripts.kalshi_normalizer import build_kalshi_quarantine_record
+    except ModuleNotFoundError:  # pragma: no cover
+        from kalshi_category_governance import normalize_kalshi_category  # type: ignore[no-redef]
+        from kalshi_normalizer import build_kalshi_quarantine_record  # type: ignore[no-redef]
+
+    accepted: list[dict[str, Any]] = []
+    quarantined: list[dict[str, Any]] = []
     for rec in records or []:
         normalized = normalize_kalshi_market(
             rec, fetched_at_utc=fetched_at_utc, event_lookup=event_lookup
         )
-        if normalized is None:
+        if normalized is not None:
+            accepted.append(normalized)
             continue
-        out.append(normalized)
-    return out
+        # Build a decision purely for the audit record — never opens the gate.
+        decision = normalize_kalshi_category(
+            rec.get("category"),
+            raw_subcategory=rec.get("subcategory"),
+            ticker=rec.get("ticker") or rec.get("market_ticker"),
+            event_metadata=(event_lookup or {}).get(
+                str(rec.get("event_ticker") or "").strip(), {}
+            ),
+        )
+        quarantined.append(
+            build_kalshi_quarantine_record(
+                rec, decision=decision, fetched_at_utc=fetched_at_utc
+            )
+        )
+    return accepted, quarantined
 
 
-__all__ = ["KalshiLoader", "normalize_kalshi_records"]
+__all__ = ["KalshiLoader", "normalize_kalshi_records", "partition_kalshi_records"]

@@ -85,6 +85,13 @@ EXPLICIT_REJECTED_CATEGORIES: frozenset[str] = frozenset(
     {
         "sports", "culture", "climate", "social", "entertainment",
         "lifestyle", "world", "weather",
+        # Sprint-Kante hardening: esports/gaming and meta tabs (trending,
+        # mentions, other) must NEVER enter the seven-tab Kalshi feed.
+        "esports", "esport", "e-sports", "e_sports", "gaming", "videogames",
+        "video games", "multi-game", "multi game", "multigame", "fantasy",
+        "tennis", "golf", "soccer", "football", "basketball", "baseball",
+        "hockey", "racing", "f1", "formula 1", "boxing", "mma",
+        "trending", "mentions", "other", "unknown", "uncategorized",
     }
 )
 
@@ -436,6 +443,16 @@ _REJECTION_KEYWORDS: tuple[str, ...] = (
     "super bowl", "world series", "olympics", "ncaa", "ncaaf", "ncaab",
     "stanley cup", "ufc", "f1 race", "formula 1 race", "indycar",
     "wimbledon", "us open tennis", "french open", "pga tour", "masters golf",
+    # Sprint-Kante hardening: esports + multi-game tennis tickers leaked
+    # into the CRYPTO tab in the screenshot bug.  Hard-reject any title
+    # bearing these tokens regardless of an otherwise-positive anchor.
+    "esports", "esport", "e-sports", "multi-game", "multigame",
+    "atp tour", "wta tour", "atp finals", "wta finals", "grand slam",
+    "tennis match", "tennis player", "tennis open",
+    "fortnite", "valorant", "league of legends", "counter-strike",
+    "dota", "overwatch", "rocket league", "starcraft",
+    "taylor fritz", "hamad medjedovic", "joao fonseca", "peyton stearns",
+    "carlos alcaraz", "jannik sinner", "novak djokovic", "iga swiatek",
     # Entertainment / awards / culture
     "oscars", "grammy", "grammys", "emmy", "emmys", "tony award",
     "billboard", "academy award", "box office", "movie release",
@@ -643,6 +660,330 @@ def infer_kalshi_category(
 
 
 # ---------------------------------------------------------------------------
+# Title normalization
+# ---------------------------------------------------------------------------
+#
+# Live Kalshi multi-outcome events sometimes return ``title`` as a raw
+# comma-joined list of ``yes <outcome>`` strings (the screenshot bug:
+# ``"yes Taylor Fritz, yes Hamad Medjedovic, ..."``).  We never let such
+# a raw outcome dump become the primary display title.  Instead we
+# detect the leak, preserve the outcomes separately, and fall through to
+# a higher-quality source — official event_title, market_title, title,
+# question, subtitle, short_name, ticker-derived label.
+
+TITLE_OFFICIAL_TITLE = "official_title"
+TITLE_OFFICIAL_QUESTION = "official_question"
+TITLE_OFFICIAL_SUBTITLE = "official_subtitle"
+TITLE_CLEANED_OUTCOMES = "cleaned_outcomes_fallback"
+TITLE_TICKER_FALLBACK = "ticker_fallback"
+TITLE_UNUSABLE = "unusable"
+
+_TITLE_MAX_LEN = 240
+_YES_LEAK_PATTERN = re.compile(r"(?i)(^|[\s,;|])yes\s+[A-Za-z][^,;|]{1,80}(,\s*yes\s+[A-Za-z])")
+
+
+def _looks_like_yes_outcome_leak(text: str) -> bool:
+    if not text:
+        return False
+    if _YES_LEAK_PATTERN.search(text):
+        return True
+    # Count comma-separated "yes <something>" segments — three or more
+    # is a multi-outcome dump masquerading as a title.
+    chunks = [c.strip().lower() for c in text.split(",") if c.strip()]
+    yes_chunks = sum(1 for c in chunks if c.startswith("yes "))
+    return yes_chunks >= 2
+
+
+def _strip_yes_prefix(text: str) -> str:
+    s = text.strip()
+    low = s.lower()
+    if low.startswith("yes "):
+        return s[4:].strip()
+    if low.startswith("no "):
+        return s[3:].strip()
+    return s
+
+
+def _outcomes_from(raw: dict[str, Any]) -> list[str]:
+    candidates: list[Any] = []
+    for key in ("outcomes", "response_options", "yes_no_outcomes", "legs", "options", "contracts"):
+        value = raw.get(key)
+        if value:
+            candidates.append(value)
+    out: list[str] = []
+    for v in candidates:
+        if isinstance(v, str):
+            parts = [p.strip() for p in v.split(",") if p.strip()]
+            out.extend(parts)
+        elif isinstance(v, (list, tuple, set)):
+            for item in v:
+                if isinstance(item, str) and item.strip():
+                    out.append(item.strip())
+                elif isinstance(item, dict):
+                    label = item.get("label") or item.get("name") or item.get("title")
+                    if isinstance(label, str) and label.strip():
+                        out.append(label.strip())
+    # De-dupe order-preserving.
+    seen: set[str] = set()
+    deduped: list[str] = []
+    for o in out:
+        key = o.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(o)
+    return deduped
+
+
+def _cleaned_ticker_label(ticker: Any) -> str:
+    if not ticker:
+        return ""
+    raw = str(ticker).strip()
+    if not raw:
+        return ""
+    cleaned = re.sub(r"[-_]+", " ", raw)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    return cleaned[:80]
+
+
+def normalize_kalshi_title(raw: dict[str, Any]) -> dict[str, Any]:
+    """Build a deterministic title decision for a raw Kalshi market dict.
+
+    Returns a ``TitleDecision`` mapping::
+
+        {
+          "primary_title":   str,        # what the UI card shows
+          "display_title":   str,        # alias of primary_title
+          "raw_title":       str,        # original payload title (unchanged)
+          "title_source":    str,        # which field won the priority race
+          "title_quality":   str,        # official_title / cleaned_outcomes_fallback / ...
+          "title_warnings":  list[str],  # e.g. ["yes_outcome_leak_detected"]
+          "outcomes":        list[str],  # preserved separately, NEVER joined into the title
+        }
+
+    Pure function.  Never raises.  Never weakens the seven-category gate.
+    """
+    if not isinstance(raw, dict):
+        return {
+            "primary_title": "",
+            "display_title": "",
+            "raw_title": "",
+            "title_source": "",
+            "title_quality": TITLE_UNUSABLE,
+            "title_warnings": ["invalid_input"],
+            "outcomes": [],
+        }
+
+    raw_title = str(raw.get("title") or "").strip()
+    warnings: list[str] = []
+    outcomes = _outcomes_from(raw)
+
+    # Priority chain, skipping anything that looks like a "yes X, yes Y" leak.
+    priority: list[tuple[str, Any, str]] = [
+        (TITLE_OFFICIAL_TITLE, raw.get("event_title"), "event_title"),
+        (TITLE_OFFICIAL_TITLE, raw.get("market_title"), "market_title"),
+        (TITLE_OFFICIAL_TITLE, raw.get("title"), "title"),
+        (TITLE_OFFICIAL_QUESTION, raw.get("question"), "question"),
+        (TITLE_OFFICIAL_SUBTITLE, raw.get("subtitle"), "subtitle"),
+        (TITLE_OFFICIAL_TITLE, raw.get("short_name"), "short_name"),
+        (TITLE_OFFICIAL_TITLE, raw.get("name"), "name"),
+    ]
+    for quality, value, source_field in priority:
+        if not value:
+            continue
+        candidate = str(value).strip()
+        if not candidate:
+            continue
+        if _looks_like_yes_outcome_leak(candidate):
+            warnings.append(f"yes_outcome_leak_detected:{source_field}")
+            # Treat as outcome leak: pull individual yes-options into the
+            # outcomes list and skip to the next priority entry.
+            for chunk in candidate.split(","):
+                option = _strip_yes_prefix(chunk)
+                if option and option.lower() not in {o.lower() for o in outcomes}:
+                    outcomes.append(option)
+            continue
+        if len(candidate) > _TITLE_MAX_LEN:
+            candidate = candidate[: _TITLE_MAX_LEN - 1].rstrip() + "…"
+        return {
+            "primary_title": candidate,
+            "display_title": candidate,
+            "raw_title": raw_title,
+            "title_source": source_field,
+            "title_quality": quality,
+            "title_warnings": warnings,
+            "outcomes": outcomes,
+        }
+
+    # No usable field — try a cleaned outcomes fallback (only if there
+    # are concrete outcomes to summarise).
+    if outcomes:
+        joined = ", ".join(outcomes[:6])
+        candidate = f"Kalshi multi-outcome market: {joined}"
+        if len(candidate) > _TITLE_MAX_LEN:
+            candidate = candidate[: _TITLE_MAX_LEN - 1].rstrip() + "…"
+        return {
+            "primary_title": candidate,
+            "display_title": candidate,
+            "raw_title": raw_title,
+            "title_source": "outcomes",
+            "title_quality": TITLE_CLEANED_OUTCOMES,
+            "title_warnings": warnings,
+            "outcomes": outcomes,
+        }
+
+    # Final fallback: derive from ticker so the card never renders blank.
+    ticker_label = _cleaned_ticker_label(
+        raw.get("ticker") or raw.get("market_ticker") or raw.get("id")
+    )
+    if ticker_label:
+        return {
+            "primary_title": ticker_label,
+            "display_title": ticker_label,
+            "raw_title": raw_title,
+            "title_source": "ticker",
+            "title_quality": TITLE_TICKER_FALLBACK,
+            "title_warnings": warnings + ["no_official_title"],
+            "outcomes": outcomes,
+        }
+
+    return {
+        "primary_title": "",
+        "display_title": "",
+        "raw_title": raw_title,
+        "title_source": "",
+        "title_quality": TITLE_UNUSABLE,
+        "title_warnings": warnings + ["no_official_title", "no_ticker_fallback"],
+        "outcomes": outcomes,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Source-freshness vs market-activity semantics
+# ---------------------------------------------------------------------------
+#
+# The screenshot bug collapsed "source last-fetch age" and "market still
+# open/closed" into one vague STALE_ACTIVE chip.  These are independent
+# axes and must be computed independently.
+
+SOURCE_LIVE_VERIFIED = "LIVE_VERIFIED"
+SOURCE_STALE = "SOURCE_STALE"
+SOURCE_UNVERIFIED = "UNVERIFIED"
+SOURCE_ERROR = "SOURCE_ERROR"
+
+MARKET_OPEN = "MARKET_OPEN"
+MARKET_CLOSED = "MARKET_CLOSED"
+MARKET_EXPIRED = "MARKET_EXPIRED"
+MARKET_UNKNOWN = "MARKET_UNKNOWN"
+
+UI_BADGE_LIVE_OPEN = "LIVE_MARKET_OPEN"
+UI_BADGE_STALE_OPEN = "SOURCE_STALE_MARKET_OPEN"
+UI_BADGE_UNVERIFIED_OPEN = "UNVERIFIED_MARKET_OPEN"
+UI_BADGE_ERROR_OPEN = "SOURCE_ERROR_MARKET_OPEN"
+UI_BADGE_LIVE_CLOSED = "LIVE_MARKET_CLOSED"
+UI_BADGE_STALE_CLOSED = "SOURCE_STALE_MARKET_CLOSED"
+UI_BADGE_MARKET_EXPIRED = "MARKET_EXPIRED"
+UI_BADGE_UNKNOWN = "UNKNOWN"
+
+DEFAULT_SOURCE_FRESHNESS_TTL_SECONDS = 6 * 60 * 60  # 6h, matches scheduler cadence
+MARKET_EXPIRED_GRACE_SECONDS = 7 * 24 * 60 * 60     # 7 days past close → EXPIRED
+
+
+def _parse_utc(ts: Any):
+    """Parse an ISO-8601 UTC timestamp.  Returns ``None`` on failure."""
+    from datetime import datetime, timezone
+
+    if ts is None:
+        return None
+    if hasattr(ts, "tzinfo"):
+        # Already a datetime.
+        dt = ts
+        if dt.tzinfo is None:
+            return dt.replace(tzinfo=timezone.utc)
+        return dt
+    text = str(ts).strip()
+    if not text:
+        return None
+    # Tolerate trailing Z.
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        dt = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt
+
+
+def compute_source_freshness(
+    last_successful_fetch_at_utc: Any,
+    now_utc: Any,
+    ttl_seconds: int = DEFAULT_SOURCE_FRESHNESS_TTL_SECONDS,
+    *,
+    error_state: bool = False,
+) -> str:
+    """Classify how fresh the source's last successful fetch is.
+
+    Returns one of LIVE_VERIFIED / SOURCE_STALE / UNVERIFIED / SOURCE_ERROR.
+    ``error_state`` should be True only when the last refresh attempt
+    raised or returned a non-OK upstream status — UNVERIFIED is the
+    fallback for "no fetch on record yet".
+    """
+    if error_state:
+        return SOURCE_ERROR
+    last = _parse_utc(last_successful_fetch_at_utc)
+    now = _parse_utc(now_utc)
+    if last is None or now is None:
+        return SOURCE_UNVERIFIED
+    age = (now - last).total_seconds()
+    if age < 0:
+        # Clock skew — treat as fresh to avoid spurious staleness.
+        return SOURCE_LIVE_VERIFIED
+    if age > int(ttl_seconds):
+        return SOURCE_STALE
+    return SOURCE_LIVE_VERIFIED
+
+
+def compute_market_activity(close_time_utc: Any, now_utc: Any) -> str:
+    """Classify whether the underlying market is open / closed / expired."""
+    close = _parse_utc(close_time_utc)
+    now = _parse_utc(now_utc)
+    if close is None or now is None:
+        return MARKET_UNKNOWN
+    if close > now:
+        return MARKET_OPEN
+    age = (now - close).total_seconds()
+    if age > MARKET_EXPIRED_GRACE_SECONDS:
+        return MARKET_EXPIRED
+    return MARKET_CLOSED
+
+
+def compute_kalshi_ui_badge(
+    source_freshness_status: str,
+    market_activity_status: str,
+) -> str:
+    """Combine the two axes into a single explicit UI badge."""
+    if market_activity_status == MARKET_EXPIRED:
+        return UI_BADGE_MARKET_EXPIRED
+    if market_activity_status == MARKET_OPEN:
+        if source_freshness_status == SOURCE_LIVE_VERIFIED:
+            return UI_BADGE_LIVE_OPEN
+        if source_freshness_status == SOURCE_STALE:
+            return UI_BADGE_STALE_OPEN
+        if source_freshness_status == SOURCE_UNVERIFIED:
+            return UI_BADGE_UNVERIFIED_OPEN
+        if source_freshness_status == SOURCE_ERROR:
+            return UI_BADGE_ERROR_OPEN
+    if market_activity_status == MARKET_CLOSED:
+        if source_freshness_status == SOURCE_LIVE_VERIFIED:
+            return UI_BADGE_LIVE_CLOSED
+        if source_freshness_status == SOURCE_STALE:
+            return UI_BADGE_STALE_CLOSED
+    return UI_BADGE_UNKNOWN
+
+
+# ---------------------------------------------------------------------------
 # Composite semantic-text builder
 # ---------------------------------------------------------------------------
 
@@ -793,12 +1134,60 @@ def _coerce_int(value: Any) -> int | None:
         return None
 
 
+def build_kalshi_quarantine_record(
+    raw: dict[str, Any],
+    *,
+    decision: dict[str, Any] | None = None,
+    fetched_at_utc: str | None = None,
+    extra: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Build an operator-facing quarantine record for an out-of-scope market.
+
+    Used by the loader/runner to write to ``runtime/release/kalshi_quarantine.jsonl``.
+    Never persisted into ``signal_events``.  Carries every safety stamp.
+    """
+    raw_dict = raw if isinstance(raw, dict) else {}
+    title = str(raw_dict.get("title") or raw_dict.get("question") or "").strip()
+    ticker = str(
+        raw_dict.get("ticker")
+        or raw_dict.get("market_ticker")
+        or raw_dict.get("id")
+        or ""
+    ).strip()
+    record: dict[str, Any] = {
+        "source_name": CANONICAL_SOURCE,
+        "ticker": ticker,
+        "event_ticker": str(raw_dict.get("event_ticker") or "").strip(),
+        "title": title,
+        "subtitle": str(raw_dict.get("subtitle") or "").strip(),
+        "raw_category": str(raw_dict.get("category") or "").strip(),
+        "raw_subcategory": str(raw_dict.get("subcategory") or "").strip(),
+        "tags": list(raw_dict.get("tags") or []),
+        "category_decision": decision or {},
+        "mvp_category": None,
+        "category_allowed": False,
+        "visible_in_kalshi_feed": False,
+        "quarantine_reason": (decision or {}).get("quarantine_reason", ""),
+        "fetched_at_utc": fetched_at_utc,
+    }
+    if extra:
+        for k, v in extra.items():
+            if k not in record:
+                record[k] = v
+    record.update(kalshi_safety_stamps())
+    return record
+
+
 def normalize_kalshi_market(
     raw: dict[str, Any],
     *,
     fetched_at_utc: str | None = None,
     source_hint: str | None = None,
     event_lookup: dict[str, Any] | None = None,
+    now_utc: str | None = None,
+    source_freshness_status: str | None = None,
+    last_successful_fetch_at_utc: str | None = None,
+    source_freshness_ttl_seconds: int = DEFAULT_SOURCE_FRESHNESS_TTL_SECONDS,
 ) -> dict[str, Any] | None:
     """Normalize a raw Kalshi market dict into the canonical signal shape.
 
@@ -873,7 +1262,8 @@ def normalize_kalshi_market(
     if not source_market_id:
         return None
 
-    title = str(raw.get("title") or raw.get("question") or raw.get("name") or "").strip()
+    title_decision = normalize_kalshi_title(raw)
+    title = title_decision["primary_title"]
     if not title:
         return None
 
@@ -921,6 +1311,23 @@ def normalize_kalshi_market(
         }
     )
 
+    # Round-trip display label back to canonical slug for mvp_category.
+    try:
+        from scripts.kalshi_category_governance import DISPLAY_TO_SLUG  # local
+    except ModuleNotFoundError:  # pragma: no cover
+        from kalshi_category_governance import DISPLAY_TO_SLUG  # type: ignore[no-redef]
+    mvp_category = DISPLAY_TO_SLUG.get(classification["display_category"])
+
+    # Source freshness + market activity decomposition.
+    now_ref = now_utc or fetched_at_utc
+    fresh = source_freshness_status or compute_source_freshness(
+        last_successful_fetch_at_utc or fetched_at_utc,
+        now_ref,
+        source_freshness_ttl_seconds,
+    )
+    activity = compute_market_activity(close_time_utc, now_ref)
+    ui_badge = compute_kalshi_ui_badge(fresh, activity)
+
     payload: dict[str, Any] = {
         "event_id": stable_kalshi_event_id(source_market_id),
         "source": CANONICAL_SOURCE,
@@ -928,12 +1335,24 @@ def normalize_kalshi_market(
         "source_label": CANONICAL_SOURCE_LABEL,
         "source_market_id": source_market_id,
         "title": title,
+        "primary_title": title_decision["primary_title"],
+        "display_title": title_decision["display_title"],
+        "raw_title": title_decision["raw_title"],
+        "title_source": title_decision["title_source"],
+        "title_quality": title_decision["title_quality"],
+        "title_warnings": title_decision["title_warnings"],
+        "outcomes": title_decision["outcomes"],
         "description": description,
         "rules": rules,
         "category": classification["display_category"],
+        "display_category": classification["display_category"],
+        "mvp_category": mvp_category,
         "category_raw": classification["raw_category"],
         "category_source": category_source,
         "category_reason": category_reason,
+        "category_allowed": True,
+        "quarantine_reason": "",
+        "visible_in_kalshi_feed": True,
         "market_url": market_url,
         "implied_probability": implied,
         "yes_price": yes_price,
@@ -946,6 +1365,13 @@ def normalize_kalshi_market(
         "asset_tags": asset_tags,
         "event_tags": event_tags,
         "semantic_text": semantic_text,
+        # Source freshness vs market activity — split intentionally so the
+        # UI can render two badges instead of one misleading STALE_ACTIVE.
+        "source_freshness_status": fresh,
+        "market_activity_status": activity,
+        "ui_badge_status": ui_badge,
+        "source_freshness_ttl_seconds": int(source_freshness_ttl_seconds),
+        "last_successful_fetch_at_utc": last_successful_fetch_at_utc,
         # Future cross-venue matching label slot.  Left empty until the
         # disagreement layer lands; declared here so the schema is stable.
         "cross_venue_match_label": None,
@@ -966,6 +1392,35 @@ __all__ = [
     "CANONICAL_CATEGORIES",
     "KALSHI_CATEGORY_MAP",
     "EXPLICIT_REJECTED_CATEGORIES",
+    "TITLE_OFFICIAL_TITLE",
+    "TITLE_OFFICIAL_QUESTION",
+    "TITLE_OFFICIAL_SUBTITLE",
+    "TITLE_CLEANED_OUTCOMES",
+    "TITLE_TICKER_FALLBACK",
+    "TITLE_UNUSABLE",
+    "SOURCE_LIVE_VERIFIED",
+    "SOURCE_STALE",
+    "SOURCE_UNVERIFIED",
+    "SOURCE_ERROR",
+    "MARKET_OPEN",
+    "MARKET_CLOSED",
+    "MARKET_EXPIRED",
+    "MARKET_UNKNOWN",
+    "UI_BADGE_LIVE_OPEN",
+    "UI_BADGE_STALE_OPEN",
+    "UI_BADGE_UNVERIFIED_OPEN",
+    "UI_BADGE_ERROR_OPEN",
+    "UI_BADGE_LIVE_CLOSED",
+    "UI_BADGE_STALE_CLOSED",
+    "UI_BADGE_MARKET_EXPIRED",
+    "UI_BADGE_UNKNOWN",
+    "DEFAULT_SOURCE_FRESHNESS_TTL_SECONDS",
+    "MARKET_EXPIRED_GRACE_SECONDS",
+    "normalize_kalshi_title",
+    "compute_source_freshness",
+    "compute_market_activity",
+    "compute_kalshi_ui_badge",
+    "build_kalshi_quarantine_record",
     "normalize_kalshi_source_name",
     "is_kalshi_source",
     "classify_kalshi_category",
