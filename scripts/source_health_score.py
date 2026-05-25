@@ -631,3 +631,200 @@ __all__ = [
     "score_source",
     "aggregate_health",
 ]
+
+
+# ---------------------------------------------------------------------------
+# Operator-visible CLI
+# ---------------------------------------------------------------------------
+#
+# Without this CLI block ``python scripts/source_health_score.py`` exits
+# silently from PowerShell because the module is purely a library.  The CLI
+# below loads the same per-source state the API uses, runs ``score_source``
+# + ``aggregate_health`` against it, and prints an operator-readable
+# scorecard.  Read-only — no DB writes, no broker code.
+
+
+def _gather_per_source_entries() -> dict[str, dict[str, Any]]:
+    """Build the per-source dicts ``score_source`` expects.
+
+    Mirrors the shape produced by ``api_server._build_live_sources_status``
+    but without the FastAPI dependency: we merge freshness + refresh-run
+    metadata directly from persistence and the registry.
+    """
+    try:
+        try:
+            from scripts.live_source_registry import (
+                compute_source_freshness,
+                detect_source_credential_state,
+                get_source_family,
+                list_live_source_families,
+            )
+            from scripts.persistence import (
+                get_latest_refresh_run_per_source,
+                get_latest_source_run_per_source,
+            )
+        except ModuleNotFoundError:  # pragma: no cover
+            from live_source_registry import (  # type: ignore[no-redef]
+                compute_source_freshness,
+                detect_source_credential_state,
+                get_source_family,
+                list_live_source_families,
+            )
+            from persistence import (  # type: ignore[no-redef]
+                get_latest_refresh_run_per_source,
+                get_latest_source_run_per_source,
+            )
+        latest_runs = get_latest_source_run_per_source()
+        freshness = compute_source_freshness(latest_runs)
+        try:
+            refresh_runs = get_latest_refresh_run_per_source()
+        except Exception:
+            refresh_runs = {}
+        cred = detect_source_credential_state()
+    except Exception:
+        return {}
+
+    entries: dict[str, dict[str, Any]] = {}
+    for fam in list_live_source_families():
+        key = fam["source_key"]
+        fresh = freshness.get(key, {}) or {}
+        rrow = refresh_runs.get(key, {}) or {}
+        c = cred.get(key, {}) or {}
+        entry = dict(fresh)
+        entry.setdefault("source_key", key)
+        entry["tier"] = fam.get("tier") or fresh.get("tier") or "optional"
+        entry["adapter_status"] = fam.get("adapter_status")
+        entry["requires_api_key"] = bool(fam.get("requires_api_key"))
+        entry["credential_configured"] = bool(c.get("configured"))
+        entry["missing_env_keys"] = list(c.get("missing_env_keys") or [])
+        entry["last_refresh_success"] = bool(int(rrow.get("success", 0) or 0))
+        entry["last_refresh_skipped"] = bool(int(rrow.get("skipped", 0) or 0))
+        entry["last_refresh_error"] = str(rrow.get("error_message") or "")
+        entry["last_refresh_skipped_reason"] = str(rrow.get("skipped_reason") or "")
+        entries[key] = entry
+    return entries
+
+
+def _format_scorecard(per_source: dict[str, dict[str, Any]], rolled: dict[str, Any]) -> str:
+    import datetime as _dt
+
+    lines: list[str] = []
+    lines.append("=" * 72)
+    lines.append("Sleeping Passenger — Source Health Scorecard")
+    lines.append("=" * 72)
+    lines.append(f"generated_at_utc: {_dt.datetime.now(_dt.timezone.utc).isoformat(timespec='seconds')}")
+    lines.append(
+        f"advisory_status={rolled.get('advisory_status')}  "
+        f"execution_gate={rolled.get('execution_gate')}  "
+        f"broker_api_called={rolled.get('broker_api_called')}  "
+        f"ai_execution_count={rolled.get('ai_execution_count')}"
+    )
+    avg = rolled.get("average_scored_health")
+    lines.append(
+        f"core_health_label={rolled.get('core_health_label')}  "
+        f"average_scored_health={avg if avg is not None else '-'}  "
+        f"scored={rolled.get('scored_count', 0)}  "
+        f"planned={rolled.get('planned_count', 0)}  "
+        f"optional_missing_config={rolled.get('optional_missing_config_count', 0)}"
+    )
+    dist = rolled.get("health_label_distribution") or {}
+    if dist:
+        lines.append("label_distribution: " + ", ".join(f"{k}={v}" for k, v in dist.items()))
+    cls = rolled.get("issue_classification") or {}
+    if cls:
+        lines.append(
+            "issue_classification: "
+            + ", ".join(f"{k}={v}" for k, v in cls.items())
+        )
+
+    lines.append("")
+    lines.append("Per-source scores:")
+    for key, entry in per_source.items():
+        score = entry.get("health_score")
+        label = entry.get("health_label") or "-"
+        tier = entry.get("tier") or "-"
+        fs = entry.get("freshness_state") or "-"
+        cfg = entry.get("config_state") or "-"
+        stale = entry.get("stale_severity") or "-"
+        lines.append(
+            f"  - {str(key):<32} "
+            f"score={(round(float(score), 3) if isinstance(score, (int, float)) else 'n/a'):<6} "
+            f"label={str(label):<22} "
+            f"tier={str(tier):<10} "
+            f"freshness={str(fs):<10} "
+            f"config={str(cfg):<18} "
+            f"stale_severity={str(stale)}"
+        )
+        action = entry.get("actionable_next_step") or entry.get("operator_message")
+        if action:
+            lines.append(f"      action: {action}")
+
+    steps = rolled.get("actionable_next_steps") or []
+    if steps:
+        lines.append("")
+        lines.append("Top operator actions:")
+        for s in steps[:10]:
+            lines.append(f"  - {s}")
+    return "\n".join(lines)
+
+
+def _cli(argv: list[str] | None = None) -> int:
+    import argparse
+    import json as _json
+    import sys
+
+    parser = argparse.ArgumentParser(
+        description=(
+            "Print live-source reliability scores derived from source_run_log "
+            "plus refresh metadata. Read-only. ADVISORY_ONLY."
+        ),
+    )
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit machine-readable JSON to stdout instead of the human text view.",
+    )
+    parser.add_argument(
+        "--quiet",
+        action="store_true",
+        help="Suppress per-source rows; only print the top-level aggregate.",
+    )
+    args = parser.parse_args(argv)
+
+    entries = _gather_per_source_entries()
+    scored: dict[str, dict[str, Any]] = {}
+    for key, raw in entries.items():
+        try:
+            scored[key] = score_source(raw)
+        except Exception:
+            continue
+    rolled = aggregate_health(scored)
+
+    if args.json:
+        payload = {
+            "per_source": scored,
+            "aggregate": rolled,
+            "advisory_status": ADVISORY_STATUS,
+            "execution_gate": EXECUTION_GATE_LOCKED,
+            "broker_api_called": False,
+            "ai_execution_count": 0,
+            "can_execute": False,
+        }
+        sys.stdout.write(_json.dumps(payload, indent=2, ensure_ascii=False, default=str) + "\n")
+        return 0
+    if args.quiet:
+        avg = rolled.get("average_scored_health")
+        sys.stdout.write(
+            f"core_health_label={rolled.get('core_health_label')} "
+            f"average={avg if avg is not None else '-'} "
+            f"scored={rolled.get('scored_count', 0)} "
+            f"planned={rolled.get('planned_count', 0)} "
+            f"optional_missing_config={rolled.get('optional_missing_config_count', 0)}\n"
+        )
+        return 0
+    sys.stdout.write(_format_scorecard(scored, rolled) + "\n")
+    return 0
+
+
+if __name__ == "__main__":  # pragma: no cover - exercised via test_source_health_cli
+    raise SystemExit(_cli())

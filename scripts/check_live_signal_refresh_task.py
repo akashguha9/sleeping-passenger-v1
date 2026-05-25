@@ -235,3 +235,113 @@ __all__ = [
     "STATUS_UNSUPPORTED",
     "check_live_signal_refresh_task",
 ]
+
+
+# ---------------------------------------------------------------------------
+# Operator-visible CLI
+# ---------------------------------------------------------------------------
+#
+# Adds a ``__main__`` block so ``python scripts/check_live_signal_refresh_task.py``
+# prints a diagnostic table from PowerShell instead of exiting silently.
+# Read-only — never registers/modifies/deletes a task.
+
+
+def _format_task_diagnostic(payload: dict[str, Any]) -> str:
+    import datetime as _dt
+    from pathlib import Path
+
+    repo = Path(__file__).resolve().parents[1]
+    lines: list[str] = []
+    lines.append("=" * 72)
+    lines.append("Sleeping Passenger — Scheduled Task Diagnostic")
+    lines.append("=" * 72)
+    lines.append(f"generated_at_utc: {_dt.datetime.now(_dt.timezone.utc).isoformat(timespec='seconds')}")
+    lines.append(
+        f"advisory_only={payload.get('advisory_only')}  "
+        f"execution_gate={payload.get('execution_gate')}  "
+        f"broker_api_called={payload.get('broker_api_called')}  "
+        f"ai_execution_count={payload.get('ai_execution_count')}"
+    )
+    lines.append("")
+    lines.append(f"task_name:               {payload.get('task_name')}")
+    lines.append(f"installed:               {payload.get('installed')}")
+    lines.append(f"enabled:                 {payload.get('enabled')}")
+    lines.append(f"status:                  {payload.get('status')}")
+    lines.append(f"status_reason:           {payload.get('status_reason')}")
+    lines.append(f"last_run_time:           {payload.get('last_run_time')}")
+    lines.append(f"next_run_time:           {payload.get('next_run_time')}")
+    ltr = payload.get("last_task_result")
+    if isinstance(ltr, int):
+        interp = "clean last run" if ltr == 0 else ("currently running" if ltr == 267009 else "prior nonzero/failed run")
+        lines.append(f"last_task_result:        {ltr} ({interp})")
+    else:
+        lines.append(f"last_task_result:        {ltr}")
+    lines.append(f"cadence_hours:           {payload.get('cadence_hours')}")
+    lines.append(f"suggested_command:       {payload.get('suggested_command') or '-'}")
+    lines.append(f"manual_refresh_command:  {payload.get('manual_refresh_command')}")
+
+    wrapper_rel = "scripts/windows/run_live_signal_refresh_once.ps1"
+    wrapper_abs = repo / "scripts" / "windows" / "run_live_signal_refresh_once.ps1"
+    log = repo / "logs" / "live_signal_refresh.log"
+    summary = repo / "logs" / "live_signal_refresh_summary.json"
+    lines.append("")
+    lines.append("Local artefacts:")
+    lines.append(f"  wrapper_expected:     {wrapper_rel} (exists={wrapper_abs.exists()})")
+    lines.append(f"  refresh_log:          {log} (exists={log.exists()})")
+    lines.append(f"  refresh_summary_json: {summary} (exists={summary.exists()})")
+    return "\n".join(lines)
+
+
+def _cli(argv: list[str] | None = None) -> int:
+    import argparse
+    import json as _json
+    import sys
+
+    parser = argparse.ArgumentParser(
+        description=(
+            "Print scheduled-task status for the 6-hour live refresh. "
+            "Read-only diagnostic — never registers, modifies, or deletes "
+            "a task. ADVISORY_ONLY."
+        ),
+    )
+    parser.add_argument(
+        "--task-name",
+        default=DEFAULT_TASK_NAME,
+        help=f"Scheduled task name. Default: {DEFAULT_TASK_NAME}",
+    )
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit machine-readable JSON to stdout.",
+    )
+    parser.add_argument(
+        "--quiet",
+        action="store_true",
+        help="Suppress per-line detail; print a single-line summary.",
+    )
+    args = parser.parse_args(argv)
+
+    payload = check_live_signal_refresh_task(task_name=str(args.task_name))
+    status = str(payload.get("status") or "")
+
+    if args.json:
+        sys.stdout.write(_json.dumps(payload, indent=2, ensure_ascii=False, default=str) + "\n")
+    elif args.quiet:
+        sys.stdout.write(
+            f"task={payload.get('task_name')} status={status} "
+            f"installed={payload.get('installed')} enabled={payload.get('enabled')} "
+            f"last_run={payload.get('last_run_time')}\n"
+        )
+    else:
+        sys.stdout.write(_format_task_diagnostic(payload) + "\n")
+
+    # Exit-code rule per the watchdog spec: nonzero only when the task is
+    # missing or broken in a way the operator must fix.  A prior FAILING
+    # run with a now-valid registration is a warning, not a hard failure.
+    if status in {STATUS_NOT_INSTALLED, STATUS_UNKNOWN, STATUS_DISABLED}:
+        return 1
+    return 0
+
+
+if __name__ == "__main__":  # pragma: no cover - exercised via test_live_signal_refresh_task_cli
+    raise SystemExit(_cli())

@@ -307,3 +307,179 @@ def empty_summary(error: str | None = None) -> dict[str, Any]:
     if error:
         payload["error"] = error
     return payload
+
+
+# ---------------------------------------------------------------------------
+# Operator-visible CLI
+# ---------------------------------------------------------------------------
+#
+# This module is consumed by ``scripts.api_server`` as a pure library, but
+# operators frequently want a single command they can run from PowerShell to
+# inspect freshness.  Without a ``__main__`` block the file simply imported
+# and exited silently, which made the "auto-refresh enabled but sources
+# stale" failure mode opaque.  The CLI below is read-only — no DB writes,
+# no network calls, no broker access.
+
+
+def _gather_summary_payload() -> dict[str, Any]:
+    """Load latest source-run rows + signal_events counts and build the
+    classifier summary.  Never raises into the caller — on any failure the
+    returned payload uses the canonical ``empty_summary`` shape with an
+    ``error`` field populated."""
+    try:
+        try:
+            from scripts.persistence import (
+                count_signal_events_by_source,
+                get_latest_source_run_per_source,
+            )
+        except ModuleNotFoundError:  # pragma: no cover - script-style env
+            from persistence import (  # type: ignore[no-redef]
+                count_signal_events_by_source,
+                get_latest_source_run_per_source,
+            )
+        latest = get_latest_source_run_per_source()
+        counts = count_signal_events_by_source()
+    except Exception as exc:  # noqa: BLE001 — diagnostic CLI must not crash
+        return empty_summary(error=f"{type(exc).__name__}: {exc}")
+    return build_source_health_summary(latest, counts)
+
+
+def _gather_freshness_snapshot() -> dict[str, Any]:
+    """Best-effort current-freshness snapshot used by the human-readable
+    CLI to display per-source `freshness_state`, derived-source dependency
+    state, and the active stale list."""
+    try:
+        try:
+            from scripts.live_source_registry import compute_source_freshness
+            from scripts.persistence import get_latest_source_run_per_source
+        except ModuleNotFoundError:  # pragma: no cover
+            from live_source_registry import compute_source_freshness  # type: ignore[no-redef]
+            from persistence import get_latest_source_run_per_source  # type: ignore[no-redef]
+        latest = get_latest_source_run_per_source()
+        freshness = compute_source_freshness(latest)
+        return freshness
+    except Exception:
+        return {}
+
+
+def _format_text_summary(summary: dict[str, Any], freshness: dict[str, Any]) -> str:
+    import datetime as _dt
+
+    lines: list[str] = []
+    lines.append("=" * 72)
+    lines.append("Sleeping Passenger — Source Health Summary")
+    lines.append("=" * 72)
+    lines.append(f"generated_at_utc: {_dt.datetime.now(_dt.timezone.utc).isoformat(timespec='seconds')}")
+    lines.append(
+        f"advisory_status={summary.get('advisory_status')}  "
+        f"execution_mode={summary.get('execution_mode')}  "
+        f"ai_execution_count={summary.get('ai_execution_count')}  "
+        f"broker_api_called={summary.get('broker_api_called')}"
+    )
+    lines.append(
+        f"ok={summary.get('ok_count', 0)}  "
+        f"warning={summary.get('warning_count', 0)}  "
+        f"error={summary.get('error_count', 0)}  "
+        f"total={summary.get('total_count', 0)}"
+    )
+
+    # Stale-active list — the truthful "what's broken right now" call.
+    active_stale: list[str] = []
+    excluded_optional: list[str] = []
+    for key, state in (freshness or {}).items():
+        fs = str(state.get("freshness_state") or "")
+        tier = str(state.get("tier") or "")
+        cred = bool(state.get("credential_configured"))
+        if tier == "optional" and not cred:
+            excluded_optional.append(key)
+            continue
+        if fs in {"stale", "overdue", "never_run", "failed"}:
+            active_stale.append(key)
+    if active_stale:
+        lines.append("")
+        lines.append("Stale active sources (NOT excluded — must improve):")
+        for key in active_stale:
+            lines.append(f"  - {key}")
+    else:
+        lines.append("")
+        lines.append("Stale active sources: none")
+    if excluded_optional:
+        lines.append("")
+        lines.append("Excluded (optional / not configured):")
+        for key in excluded_optional:
+            lines.append(f"  - {key}")
+
+    lines.append("")
+    lines.append("Per-source detail:")
+    for entry in summary.get("sources", []):
+        key = entry.get("source_name", "")
+        fresh = freshness.get(key) or {}
+        line = (
+            f"  - {str(key):<32} "
+            f"status={str(entry.get('status') or 'NO_RUNS'):<14} "
+            f"severity={str(entry.get('severity') or ''):<8} "
+            f"category={str(entry.get('category') or ''):<22} "
+            f"freshness={str(fresh.get('freshness_state') or '-'):<10} "
+            f"last_run={str(entry.get('last_run_at') or '-'):<28} "
+            f"event_rows={int(entry.get('event_row_count') or 0)}"
+        )
+        lines.append(line)
+        reason = str(entry.get("human_message") or "").strip()
+        if reason:
+            lines.append(f"      reason: {reason}")
+        sk_reason = str(entry.get("skipped_reason") or "").strip()
+        if sk_reason:
+            lines.append(f"      skipped_reason: {sk_reason}")
+        err = str(entry.get("error_message") or "").strip()
+        if err:
+            lines.append(f"      error: {err}")
+        cmd = str(entry.get("suggested_command") or "").strip()
+        if cmd:
+            lines.append(f"      next: {cmd}")
+    return "\n".join(lines)
+
+
+def _cli(argv: list[str] | None = None) -> int:
+    import argparse
+    import json as _json
+    import sys
+
+    parser = argparse.ArgumentParser(
+        description=(
+            "Print live-source health summary derived from source_run_log "
+            "and signal_events. Read-only. ADVISORY_ONLY."
+        ),
+    )
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit machine-readable JSON to stdout instead of the human text view.",
+    )
+    parser.add_argument(
+        "--quiet",
+        action="store_true",
+        help="Suppress per-source detail; only print the top-level counts banner.",
+    )
+    args = parser.parse_args(argv)
+
+    summary = _gather_summary_payload()
+    freshness = _gather_freshness_snapshot()
+    if args.json:
+        payload = dict(summary)
+        payload["freshness_snapshot"] = freshness
+        sys.stdout.write(_json.dumps(payload, indent=2, ensure_ascii=False, default=str) + "\n")
+        return 0
+    if args.quiet:
+        sys.stdout.write(
+            f"ok={summary.get('ok_count', 0)} "
+            f"warning={summary.get('warning_count', 0)} "
+            f"error={summary.get('error_count', 0)} "
+            f"total={summary.get('total_count', 0)}\n"
+        )
+        return 0
+    sys.stdout.write(_format_text_summary(summary, freshness) + "\n")
+    return 0
+
+
+if __name__ == "__main__":  # pragma: no cover - exercised via test_source_health_cli
+    raise SystemExit(_cli())
