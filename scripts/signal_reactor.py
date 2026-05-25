@@ -253,6 +253,29 @@ def evaluate_signal_reactor(
     except Exception:
         components["geometry_reflection"] = {}
 
+    # Complex-systems doctrine layer — advisory-only diagnostics from
+    # docs/COMPLEX_SYSTEMS_SIGNAL_DOCTRINE.md. Pure module, degrades
+    # safely on missing inputs; never returns a BUY/SELL. This is a
+    # *parallel* diagnostic surface — it is NOT fed into the reactor's
+    # criticality/decision-grade math, only attached for human review.
+    try:
+        try:
+            from scripts.complex_systems_diagnostics import (
+                build_complex_systems_diagnostics,
+            )
+        except ModuleNotFoundError:
+            from complex_systems_diagnostics import (
+                build_complex_systems_diagnostics,
+            )
+        components["complex_systems"] = _safe_call(
+            build_complex_systems_diagnostics,
+            cluster,
+            context=event_context,
+            operator_state=operator_state,
+        )
+    except Exception:
+        components["complex_systems"] = {}
+
     field_geometry = components.get("field_geometry") or {}
     echo_quality = components.get("echo_quality") or {}
     waste_load = components.get("waste_load") or {}
@@ -263,6 +286,8 @@ def evaluate_signal_reactor(
     lead_trace = components.get("lead_trace") or {}
     lead_waste = components.get("lead_waste") or {}
     geometry_reflection = components.get("geometry_reflection") or {}
+    complex_systems = components.get("complex_systems") or {}
+    complex_diag = complex_systems.get("complex_systems_diagnostics") or {}
     geometry_diag = geometry_reflection.get("signal_geometry_diagnostics") or {}
     geometry_vetoes = list(geometry_reflection.get("vetoes") or [])
     chaos_attractor = geometry_diag.get("chaos_attractor") or {}
@@ -455,6 +480,25 @@ def evaluate_signal_reactor(
             "leverage_within_policy": leverage_policy.get(
                 "leverage_within_policy", True
             ),
+            "human_review_required": True,
+        },
+        "complex_systems_summary": {
+            "advisory_decision_bias": complex_systems.get(
+                "advisory_decision_bias", "insufficient_data"
+            ),
+            "hard_blocks": list(complex_systems.get("hard_blocks") or []),
+            "feedback_multiplier": _clamp(
+                complex_diag.get("feedback_multiplier"), 0.0, 1.5
+            ),
+            "phase_transition_state": (
+                complex_diag.get("phase_transition_state") or {}
+            ).get("phase_transition_state"),
+            "chaos_state": (
+                complex_diag.get("chaos_regime_state") or {}
+            ).get("chaos_state"),
+            "moltbook_repair_complete": (
+                complex_diag.get("moltbook_repair_state") or {}
+            ).get("moltbook_repair_complete_boolean"),
             "human_review_required": True,
         },
     })

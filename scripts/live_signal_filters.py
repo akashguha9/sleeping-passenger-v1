@@ -145,6 +145,7 @@ _DOMAIN_PRIORITY: list[str] = ["geopolitics", "politics", "economy", "finance"]
 # ---------------------------------------------------------------------------
 _SOURCE_NAME_MAP: dict[str, str] = {
     "polymarket": "Polymarket",
+    "kalshi": "Kalshi",
     "gdelt": "GDELT",
     "sec": "SEC EDGAR",
     "sec_edgar": "SEC EDGAR",
@@ -162,6 +163,7 @@ _SOURCE_NAME_MAP: dict[str, str] = {
     "india": "India",
     "global_filings": "Global Filings",
     "asia_disclosure": "Asia Disclosure",
+    "prediction_market_disagreement": "Prediction Market Disagreement",
 }
 
 

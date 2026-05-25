@@ -265,6 +265,12 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Alias for --yes.",
     )
     parser.add_argument(
+        "--operator-role",
+        default=None,
+        help="VIEWER|OPERATOR|ADMIN (default: MVP_OPERATOR_ROLE env). "
+             "Applying a restore requires ADMIN.",
+    )
+    parser.add_argument(
         "--json",
         action="store_true",
         help="Emit a single JSON object on stdout instead of human text.",
@@ -279,6 +285,25 @@ def main(argv: list[str] | None = None) -> int:
     explicit_yes = bool(args.yes or args.force)
     # default is dry-run; if neither --yes/--force nor explicit --dry-run, treat as dry-run.
     dry_run = (not explicit_yes) or bool(args.dry_run)
+
+    # A real (non-dry-run) restore overwrites the canonical DB — ADMIN only.
+    # The dry-run validation path stays open to any role.
+    if not dry_run:
+        try:
+            try:
+                from scripts.operator_audit_log import enforce as _enforce
+            except ModuleNotFoundError:  # pragma: no cover - script-style fallback
+                from operator_audit_log import enforce as _enforce  # type: ignore[no-redef]
+            _enforce("restore_db", role=args.operator_role,
+                     resource=str(args.db_path or "runtime/mvp_local.db"))
+        except PermissionError as exc:
+            msg = str(exc)
+            if args.json:
+                print(json.dumps({"ok": False, "error": msg, "denied": True}))
+            else:
+                print(f"[DENY] {msg}")
+                print("RESULT: FAIL")
+            return 2
 
     db_path = (args.db_path or _default_db_path()).expanduser()
     result = perform_restore(

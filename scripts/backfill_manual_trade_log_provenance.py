@@ -48,6 +48,17 @@ try:
 except ModuleNotFoundError:
     from persistence import DB_PATH as _DEFAULT_DB_PATH  # type: ignore[no-redef]
 
+try:
+    from scripts import operator_permission_guard as _guard
+except ModuleNotFoundError:  # pragma: no cover - script-style fallback
+    import operator_permission_guard as _guard  # type: ignore[no-redef]
+
+# Operation identity for the central permission guard.  Stamping provenance on
+# a fixed, fingerprinted set of operator rows is a REPAIR_WRITE (OPERATOR+) —
+# never a delete, never schema change, never an execution action.
+OPERATION_NAME = "backfill_manual_trade_log_provenance"
+OPERATION_CLASS = _guard.OperationClass.REPAIR_WRITE
+
 
 # Each entry is a fingerprint of one legitimate row.  All four fields
 # must match the DB row exactly (within the price tolerance) before this
@@ -99,7 +110,31 @@ def _matches(row: sqlite3.Row, fp: dict[str, Any]) -> bool:
     return True
 
 
-def run(db_path: Path, apply: bool) -> dict[str, Any]:
+def run(
+    db_path: Path,
+    apply: bool,
+    *,
+    permission_decision: "_guard.PermissionDecision | None" = None,
+) -> dict[str, Any]:
+    """Scan (and, when ``apply``, stamp) the fixed legitimate-row set.
+
+    Function-level guard (Kanté Task 4 / collapsed Task B): the ``apply`` write
+    branch calls the shared :func:`operator_permission_guard.assert_guarded_mutation`
+    helper (the same enforcement the decorator/context manager use).  A direct
+    importer that calls ``run(db, apply=True)`` without a guard-validated decision
+    raises ``PermissionError`` before any UPDATE.  This dual-mode function calls
+    the helper directly because its scan/write logic is interleaved in one loop
+    and does not fit a single ``with`` block.  The dry-run (``apply=False``) scan
+    needs no decision.
+    """
+    if apply:
+        _guard.assert_guarded_mutation(
+            permission_decision,
+            operation_name=OPERATION_NAME,
+            operation_class=OPERATION_CLASS,
+            expected_role_floor=_guard.OperatorRole.OPERATOR,
+            require_dry_run=True,
+        )
     report: dict[str, Any] = {
         "operation": "backfill_manual_trade_log_provenance",
         "db_path": str(db_path),
@@ -214,13 +249,57 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument(
         "--apply",
         action="store_true",
-        help="Actually write the change.  Without this flag, prints the plan.",
+        help="Actually write the change (requires MVP_OPERATOR_ROLE=OPERATOR "
+             "or ADMIN and a recent dry-run receipt).  Without this flag, "
+             "prints the plan.",
+    )
+    p.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Explicit dry-run (default behaviour); writes a permission "
+             "dry-run receipt so a subsequent --apply can proceed. Read-only.",
+    )
+    p.add_argument(
+        "--operator-role",
+        default=None,
+        help="VIEWER|OPERATOR|ADMIN (default: MVP_OPERATOR_ROLE env, else "
+             "VIEWER).  --apply requires OPERATOR or ADMIN.",
     )
     p.add_argument("--json", action="store_true")
     args = p.parse_args(argv)
     db_path = Path(args.db_path) if args.db_path else Path(_DEFAULT_DB_PATH)
-    report = run(db_path, apply=bool(args.apply))
-    if args.json:
+
+    if not args.apply:
+        # Dry-run: read-only scan, open to any role.  Record a receipt so a
+        # later --apply (by an authorized role) can prove a dry-run happened.
+        report = run(db_path, apply=False)
+        try:
+            matched = len(report.get("matched", []))
+            receipt = _guard.write_dry_run_receipt(
+                OPERATION_NAME, target_count=matched, db_path=str(db_path))
+            report["dry_run_receipt"] = receipt.name
+        except Exception:  # pragma: no cover - receipt is best-effort
+            pass
+        _emit(report, json_mode=args.json, applied=False)
+        return 0 if "error" not in report else 1
+
+    # --apply path: central permission guard (fails closed; audits allow/deny).
+    # CLI request/role/receipt boilerplate collapsed into build_apply_decision.
+    try:
+        decision = _guard.build_apply_decision(
+            OPERATION_NAME, OPERATION_CLASS, str(db_path),
+            operator_role=args.operator_role)
+    except PermissionError as exc:
+        print(f"[backfill] [DENY] {exc}")
+        return 2
+
+    report = run(db_path, apply=True, permission_decision=decision)
+    _emit(report, json_mode=args.json, applied=True)
+    return 0 if "error" not in report else 1
+
+
+def _emit(report: dict[str, Any], *, json_mode: bool, applied: bool) -> None:
+    if json_mode:
         print(json.dumps(report, sort_keys=True, indent=2, default=str))
     else:
         print(f"db_path: {report['db_path']}")
@@ -232,7 +311,6 @@ def main(argv: list[str] | None = None) -> int:
         print(f"stamped_count: {report['stamped_count']}")
         if "error" in report:
             print(f"error: {report['error']}")
-    return 0 if "error" not in report else 1
 
 
 if __name__ == "__main__":

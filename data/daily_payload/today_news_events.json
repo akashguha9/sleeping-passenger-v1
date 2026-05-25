@@ -1,0 +1,9 @@
+{
+  "run_date": "2026-05-24",
+  "generated_at_utc": "2026-05-24T07:41:59+00:00",
+  "source_health": "UNVERIFIED",
+  "provider": "STATIC_OR_EMPTY_FALLBACK",
+  "is_live": false,
+  "events": [],
+  "records": []
+}

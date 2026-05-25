@@ -93,6 +93,17 @@ try:
 except ModuleNotFoundError:  # pragma: no cover
     from persistence import DB_PATH as _DEFAULT_DB_PATH  # type: ignore[no-redef]
 
+try:
+    from scripts import operator_permission_guard as _guard
+except ModuleNotFoundError:  # pragma: no cover - script-style fallback
+    import operator_permission_guard as _guard  # type: ignore[no-redef]
+
+# Operation identity for the central permission guard.  Quarantining bogus rows
+# + normalising India currency is a REPAIR_WRITE (OPERATOR+); it never deletes
+# rows, never alters schema, and never issues an execution action.
+OPERATION_NAME = "repair_manual_trade_reconciliation"
+OPERATION_CLASS = _guard.OperationClass.REPAIR_WRITE
+
 
 # India NSE suffix and the currency contract.  Anything ending in ``.NS``
 # trades on NSE in INR; the operator's capital input may be EUR but the
@@ -453,11 +464,27 @@ def run(
     *,
     apply: bool = False,
     repair_india_scale: bool = False,
+    permission_decision: "_guard.PermissionDecision | None" = None,
 ) -> RepairReport:
-    """Public entry point used by tests.  Returns the assembled report."""
+    """Public entry point used by tests.  Returns the assembled report.
+
+    Function-level guard (Kanté Task 4 / collapsed Task B): the ``apply`` write
+    branch calls the shared :func:`operator_permission_guard.assert_guarded_mutation`
+    helper (the same enforcement the decorator/context manager use).  A direct
+    importer calling ``run(db, apply=True)`` without a guard-validated decision
+    raises ``PermissionError`` before any backup/UPDATE.  The dry-run
+    (``apply=False``) scan needs none.
+    """
     report = _scan(db_path)
     if not apply:
         return report
+    _guard.assert_guarded_mutation(
+        permission_decision,
+        operation_name=OPERATION_NAME,
+        operation_class=OPERATION_CLASS,
+        expected_role_floor=_guard.OperatorRole.OPERATOR,
+        require_dry_run=True,
+    )
     if not db_path.exists():
         report.warnings.append("apply_skipped_db_missing")
         return report
@@ -512,7 +539,21 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--apply",
         action="store_true",
-        help="Apply the repair (quarantine bogus rows + India currency fix).",
+        help="Apply the repair (quarantine bogus rows + India currency fix). "
+             "Requires MVP_OPERATOR_ROLE=OPERATOR or ADMIN and a recent "
+             "dry-run receipt.",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Explicit dry-run (default behaviour); writes a permission "
+             "dry-run receipt so a subsequent --apply can proceed. Read-only.",
+    )
+    parser.add_argument(
+        "--operator-role",
+        default=None,
+        help="VIEWER|OPERATOR|ADMIN (default: MVP_OPERATOR_ROLE env, else "
+             "VIEWER).  --apply requires OPERATOR or ADMIN.",
     )
     parser.add_argument(
         "--repair-india-scale",
@@ -534,7 +575,40 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
     db_path = Path(args.db).expanduser()
-    report = run(db_path, apply=args.apply, repair_india_scale=args.repair_india_scale)
+
+    if not args.apply:
+        # Dry-run: read-only scan, open to any role.  Record a receipt so a
+        # later --apply (by an authorized role) can prove a dry-run happened.
+        report = run(db_path, apply=False,
+                     repair_india_scale=args.repair_india_scale)
+        target_count = (len(report.bogus_to_quarantine)
+                        + len(report.india_currency_fixes))
+        try:
+            receipt = _guard.write_dry_run_receipt(
+                OPERATION_NAME, target_count=target_count, db_path=str(db_path))
+            print(f"[repair] dry-run receipt written: {receipt.name}")
+        except Exception:  # pragma: no cover - receipt is best-effort
+            pass
+        payload = _serialise(report)
+        if args.json:
+            print(json.dumps(payload, indent=2, sort_keys=True))
+        else:
+            _print_human(report)
+        return 0
+
+    # --apply path: central permission guard (fails closed; audits allow/deny).
+    # CLI request/role/receipt boilerplate collapsed into build_apply_decision.
+    try:
+        decision = _guard.build_apply_decision(
+            OPERATION_NAME, OPERATION_CLASS, str(db_path),
+            operator_role=args.operator_role)
+    except PermissionError as exc:
+        print(f"[repair] [DENY] {exc}", file=sys.stderr)
+        return 2
+
+    report = run(db_path, apply=True,
+                 repair_india_scale=args.repair_india_scale,
+                 permission_decision=decision)
     payload = _serialise(report)
     if args.json:
         print(json.dumps(payload, indent=2, sort_keys=True))

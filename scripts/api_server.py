@@ -159,6 +159,13 @@ except ModuleNotFoundError:  # pragma: no cover
         security_headers,
     )
 
+# Read-only diagnostics service — the single backend source for the cockpit.
+# Bound at module level so tests can patch ``scripts.api_server.get_diagnostics_snapshot``.
+try:
+    from scripts.diagnostics_service import get_diagnostics_snapshot
+except ModuleNotFoundError:  # pragma: no cover - script-style fallback
+    from diagnostics_service import get_diagnostics_snapshot  # type: ignore[no-redef]
+
 
 _logger = logging.getLogger("sleeping_passenger.api")
 if not _logger.handlers:
@@ -1211,6 +1218,173 @@ def get_learning_completeness(limit: int | None = 50) -> dict:
     payload.setdefault("incomplete_count", payload.get("learning_incomplete_count", 0))
     payload.setdefault("complete_count", payload.get("learning_complete_count", 0))
     return payload
+
+
+# ---------------------------------------------------------------------------
+# Operator cockpit — read-only aggregate of the closed-loop diagnostics.
+#
+# Backed by the single read-only ``diagnostics_service`` (which reuses a fresh
+# derived snapshot or recomputes once).  This replaced the previous per-hit
+# fail-soft aggregation that recomputed every heavy audit and could collapse a
+# crashed subreport into fake-clean zeros.  Now a failed subreport surfaces as
+# DEGRADED in ``partial_failures`` and escalates the top-level ``status`` — it
+# can never read as "clean".  Strictly read-only: no DB writes, no broker
+# calls, no execution endpoint.
+# ---------------------------------------------------------------------------
+
+
+def _cockpit_panel_data(subreports: dict, name: str) -> dict:
+    """Return a subreport's raw ``data`` dict, or ``{}`` when degraded/absent.
+
+    A DEGRADED (crashed) subreport carries ``data = None``; the empty-dict
+    fallback keeps the frontend panels renderable, but the failure is NOT
+    hidden — it is surfaced explicitly via the top-level ``status`` and the
+    ``partial_failures`` list so the cockpit can never read a crash as clean.
+    """
+    sub = subreports.get(name)
+    if isinstance(sub, dict) and isinstance(sub.get("data"), dict):
+        return sub["data"]
+    return {}
+
+
+@app.get("/diagnostics/cockpit")
+def get_diagnostics_cockpit() -> dict:
+    """Aggregate the advisory closed-loop diagnostics for the operator cockpit.
+
+    Sourced from ``scripts.diagnostics_service.get_diagnostics_snapshot`` —
+    cache-first, recompute-once, explicit degraded taxonomy.  Read-only: never
+    grants execution permission; never places a broker order.
+    """
+    try:
+        snapshot = get_diagnostics_snapshot(
+            use_cache=True,
+            refresh=False,
+            include_heavy=True,
+            max_age_seconds=300,
+        )
+    except Exception as exc:  # pragma: no cover - defensive: never 500 the cockpit
+        _logger.warning("diagnostics_service unavailable: %s", type(exc).__name__)
+        snapshot = {
+            "status": "UNKNOWN",
+            "degraded_state": "UNKNOWN",
+            "generated_at_utc": None,
+            "cache_status": "unavailable",
+            "partial_failures": [{
+                "subreport": "diagnostics_service",
+                "error_type": type(exc).__name__,
+                "safe_recovery_command": "python scripts/diagnostics_service.py",
+            }],
+            "subreports": {},
+            "diagnostics_health": 0.0,
+            "canonical_truth_source": "sqlite",
+            "cache_role": "derived_non_canonical",
+            "safety_stamps": {
+                "advisory_status": _ADVISORY_STATUS,
+                "execution_gate": "LOCKED",
+                "broker_api_called": False,
+                "ai_execution_count": _AI_EXECUTION_COUNT,
+            },
+        }
+
+    # Operator-guard coverage (cheap static scan; advisory, never crashes the
+    # cockpit).  Lets the UI show guard-coverage + mutation-guard release impact
+    # alongside the diagnostics integrity state.
+    guard_summary: dict = {}
+    try:
+        try:
+            from scripts.local_deploy_preflight import build_kante_defensive_summary
+        except ModuleNotFoundError:  # pragma: no cover - script-style fallback
+            from local_deploy_preflight import build_kante_defensive_summary  # type: ignore
+        guard_summary = build_kante_defensive_summary()
+    except Exception as exc:  # pragma: no cover - defensive
+        _logger.warning("guard summary unavailable: %s", type(exc).__name__)
+        guard_summary = {}
+
+    subreports = snapshot.get("subreports", {})
+    closed_loop = _cockpit_panel_data(subreports, "closed_loop")
+    truth_purity = _cockpit_panel_data(subreports, "truth_purity")
+    source_independence = _cockpit_panel_data(subreports, "source_independence")
+    broken_windows = _cockpit_panel_data(subreports, "broken_windows")
+    defensive_alpha = _cockpit_panel_data(subreports, "defensive_alpha")
+
+    return {
+        "report": "operator_cockpit",
+        "advisory_disclaimer": (
+            "Advisory diagnostics only. Human execution required. No broker "
+            "action is performed. These panels measure system integrity and "
+            "learning quality; they never place, modify, or cancel an order."
+        ),
+        # --- diagnostics_service: explicit health / degraded taxonomy ----------
+        "status": snapshot.get("status", "UNKNOWN"),
+        "degraded_state": snapshot.get("degraded_state", snapshot.get("status", "UNKNOWN")),
+        "generated_at_utc": snapshot.get("generated_at_utc"),
+        "cache_status": snapshot.get("cache_status", "unavailable"),
+        "cache_role": snapshot.get("cache_role", "derived_non_canonical"),
+        "canonical_truth_source": snapshot.get("canonical_truth_source", "sqlite"),
+        "diagnostics_health": snapshot.get("diagnostics_health"),
+        "partial_failures": snapshot.get("partial_failures", []),
+        "subreports": {
+            name: {k: v for k, v in sub.items() if k != "data"}
+            for name, sub in subreports.items()
+            if isinstance(sub, dict)
+        },
+        "safety_stamps": snapshot.get("safety_stamps", {}),
+        # --- operator-guard coverage (advisory) -------------------------------
+        "auth_guard_status": guard_summary.get("auth_guard_status"),
+        "mutation_guard_coverage": guard_summary.get("mutation_guard_coverage"),
+        "mutation_guard_release_impact": guard_summary.get(
+            "mutation_guard_release_impact"),
+        "mutation_scripts_unguarded_count": guard_summary.get(
+            "mutation_scripts_unguarded_count"),
+        # --- frontend-compatible panel projection (unchanged shape) -----------
+        "closed_loop": {
+            "closed_loop_coverage": closed_loop.get("closed_loop_coverage", 0.0),
+            "signals_without_outcomes": closed_loop.get("signals_without_outcomes", 0),
+            "manual_trades_without_reconciliation": closed_loop.get(
+                "manual_trades_without_reconciliation", 0),
+            "closed_losses_without_moltbook": closed_loop.get(
+                "closed_losses_without_moltbook", 0),
+            "unresolved_repair_debt": closed_loop.get("unresolved_repair_debt", 0),
+        },
+        "learning_efficiency": closed_loop.get("learning_efficiency", {}),
+        "truth_purity": {
+            "truth_purity_score": truth_purity.get("truth_purity_score", 1.0),
+            "fake_rows_detected": truth_purity.get("fake_rows_detected", 0),
+            "release_gate_passed": truth_purity.get("release_gate_passed", False),
+        },
+        "source_independence": {
+            "cohort_count": source_independence.get("cohort_count", 0),
+            "flagged_cohorts": source_independence.get("flagged_cohorts", []),
+        },
+        "broken_windows": {
+            "repair_debt_score": broken_windows.get("repair_debt_score", 0.0),
+            "release_gate_impact": broken_windows.get("release_gate_impact", "CLEAR"),
+            "recommended_next_repair": broken_windows.get("recommended_next_repair", ""),
+        },
+        "defensive_alpha": {
+            "total_defensive_events": defensive_alpha.get("total_defensive_events", 0),
+            "fake_data_rows_blocked": defensive_alpha.get("fake_data_rows_blocked", 0),
+            "closed_losses_captured_as_lessons": defensive_alpha.get(
+                "closed_losses_captured_as_lessons", 0),
+        },
+        "invariants": {
+            "advisory_only_verified": closed_loop.get("advisory_only_verified", True),
+            "human_execution_verified": closed_loop.get("human_execution_verified", True),
+            "broker_api_called_false_verified": closed_loop.get(
+                "broker_api_called_false_verified", True),
+            "ai_execution_count_zero_verified": closed_loop.get(
+                "ai_execution_count_zero_verified", True),
+        },
+        # --- safety stamps (top-level shorthands, unchanged) ------------------
+        "advisory_only": True,
+        "advisory_status": _ADVISORY_STATUS,
+        "human_review_required": True,
+        "execution_gate": "LOCKED",
+        "broker_api_called": False,
+        "ai_execution_count": _AI_EXECUTION_COUNT,
+        "execution_permission": False,
+        "can_execute": False,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -2278,6 +2452,108 @@ def export_moltbook() -> Response:
 @app.get("/exports/source-health.csv")
 def export_source_health() -> Response:
     return Response(content=export_source_health_log(), media_type=_CSV_MEDIA_TYPE)
+
+
+# ---------------------------------------------------------------------------
+# Sprint 3 — Backend / API quality readiness surface.
+#
+# Each endpoint reads a release artifact under runtime/release/ and returns
+# the structured envelope contract documented in
+# scripts/backend_api_quality.py.  Read-only, advisory-only, never grants
+# execution permission.  The POST /api/live-refresh/run route is locked
+# behind MVP_LIVE_REFRESH_OK + the safety floor; it never actually issues
+# network calls from the HTTP path (the operator runs the script).
+# ---------------------------------------------------------------------------
+
+
+try:
+    from scripts.backend_api_quality import (
+        read_artifact_envelope as _read_artifact_envelope,
+        live_refresh_run_locked_response as _live_refresh_run_locked_response,
+    )
+except ModuleNotFoundError:  # pragma: no cover
+    from backend_api_quality import (  # type: ignore[no-redef]
+        read_artifact_envelope as _read_artifact_envelope,
+        live_refresh_run_locked_response as _live_refresh_run_locked_response,
+    )
+
+
+@app.get("/api/readiness/release-gate")
+def get_release_gate_readiness() -> dict:
+    return _read_artifact_envelope("release_gate")
+
+
+@app.get("/api/readiness/daily-signal")
+def get_daily_signal_readiness() -> dict:
+    return _read_artifact_envelope("daily_signal")
+
+
+@app.get("/api/source-health")
+def get_source_health_api() -> dict:
+    return _read_artifact_envelope("source_health")
+
+
+@app.get("/api/live-refresh/summary")
+def get_live_refresh_summary() -> dict:
+    return _read_artifact_envelope("live_refresh")
+
+
+@app.get("/api/portfolio-truth")
+def get_portfolio_truth_api() -> dict:
+    return _read_artifact_envelope("portfolio_truth")
+
+
+@app.get("/api/fresh-discovery")
+def get_fresh_discovery_api() -> dict:
+    return _read_artifact_envelope("fresh_discovery")
+
+
+@app.get("/api/why-today/summary")
+def get_why_today_summary() -> dict:
+    return _read_artifact_envelope("why_today")
+
+
+@app.get("/api/model-disagreement/summary")
+def get_model_disagreement_summary() -> dict:
+    return _read_artifact_envelope("model_disagreement")
+
+
+@app.get("/api/signal-input-quality/summary")
+def get_signal_input_quality_summary() -> dict:
+    return _read_artifact_envelope("signal_input_quality")
+
+
+@app.get("/api/compliance/readiness")
+def get_compliance_readiness() -> dict:
+    return _read_artifact_envelope("compliance_readiness")
+
+
+@app.get("/api/business-value/summary")
+def get_business_value_summary() -> dict:
+    return _read_artifact_envelope("business_value")
+
+
+@app.post("/api/live-refresh/run")
+def post_live_refresh_run(
+    _auth: None = Depends(require_api_token),
+) -> dict:
+    """Locked operator endpoint — refuses unless every safety gate holds.
+
+    Does NOT actually run the live refresh from the HTTP path: live calls
+    are operator-run via ``scripts/operator_live_provider_refresh.py``.  The
+    endpoint exists to give the cockpit a deterministic, structured
+    "is live refresh permitted right now?" answer.
+    """
+    import os as _os
+    mvp_ok = _os.environ.get("MVP_LIVE_REFRESH_OK", "").lower() in {
+        "1", "true", "yes", "on",
+    }
+    return _live_refresh_run_locked_response(
+        mvp_live_refresh_ok=mvp_ok,
+        advisory_only=True,
+        human_execution_required=True,
+        execution_gate="LOCKED",
+    )
 
 
 if __name__ == "__main__":  # pragma: no cover

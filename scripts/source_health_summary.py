@@ -25,6 +25,8 @@ AI_EXECUTION_COUNT = 0
 # runner module names.
 SOURCE_LABELS: dict[str, str] = {
     "polymarket": "Polymarket",
+    "kalshi": "Kalshi",
+    "prediction_market_disagreement": "Prediction Market Disagreement",
     "gdelt": "GDELT",
     "sec_edgar": "SEC EDGAR",
     "newsapi": "NewsAPI",
@@ -44,6 +46,14 @@ _PHASE_1_SOURCES: set[str] = {"polymarket", "gdelt", "sec_edgar"}
 
 
 def _phase_command_for(source_name: str) -> str:
+    # The disagreement scanner is a derived signal — it doesn't route
+    # through phase1/phase2 ingestion.  Surface its own CLI so the
+    # operator copy-pastes the right command from the empty-state card.
+    if source_name == "prediction_market_disagreement":
+        return (
+            "python scripts/prediction_market_disagreement_scanner.py "
+            "--dry-run --limit 50 --embedding-provider deterministic"
+        )
     if source_name in _PHASE_1_SOURCES:
         return (
             f"python scripts/run_live_sources_phase1.py "
@@ -75,6 +85,12 @@ def classify_source_status(
             "severity": "ok",
             "category": "OK_FILTERED",
             "human_message": "Source healthy (filtered out off-domain rows).",
+        }
+    if s == "OK_EMPTY":
+        return {
+            "severity": "ok",
+            "category": "OK_EMPTY",
+            "human_message": "Source healthy (no markets returned this run).",
         }
     if s == "PLACEHOLDER":
         return {

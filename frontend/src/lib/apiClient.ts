@@ -384,6 +384,69 @@ export async function getLearningCompleteness(
   }
 }
 
+export interface CockpitPartialFailure {
+  subreport: string;
+  status?: string;
+  error_type: string;
+  safe_recovery_command?: string | null;
+}
+
+export interface CockpitResponse {
+  report: string;
+  advisory_disclaimer: string;
+  // Diagnostics integrity / degraded-state taxonomy (Kanté Task 6).  All
+  // optional so older mock fixtures still type-check.
+  status?: 'CLEAN' | 'WARN' | 'BLOCK' | 'DEGRADED' | 'UNKNOWN' | string;
+  degraded_state?: string;
+  cache_status?: string;
+  cache_role?: string;
+  canonical_truth_source?: string;
+  generated_at_utc?: string | null;
+  diagnostics_health?: number | null;
+  partial_failures?: CockpitPartialFailure[];
+  // Operator-guard coverage (advisory).
+  auth_guard_status?: string | null;
+  mutation_guard_coverage?: number | null;
+  mutation_guard_release_impact?: string | null;
+  mutation_scripts_unguarded_count?: number | null;
+  closed_loop: {
+    closed_loop_coverage: number;
+    signals_without_outcomes: number;
+    manual_trades_without_reconciliation: number;
+    closed_losses_without_moltbook: number;
+    unresolved_repair_debt: number;
+  };
+  learning_efficiency: Record<string, number | boolean>;
+  truth_purity: {
+    truth_purity_score: number;
+    fake_rows_detected: number;
+    release_gate_passed: boolean;
+  };
+  source_independence: { cohort_count: number; flagged_cohorts: string[] };
+  broken_windows: {
+    repair_debt_score: number;
+    release_gate_impact: string;
+    recommended_next_repair: string;
+  };
+  defensive_alpha: {
+    total_defensive_events: number;
+    fake_data_rows_blocked: number;
+    closed_losses_captured_as_lessons: number;
+  };
+  invariants: Record<string, boolean>;
+  advisory_status: string;
+  broker_api_called: boolean;
+  ai_execution_count: number;
+}
+
+export async function getDiagnosticsCockpit(): Promise<CockpitResponse | null> {
+  try {
+    return await apiFetch<CockpitResponse>('/diagnostics/cockpit');
+  } catch {
+    return null;
+  }
+}
+
 export async function getReconciliationQueue(
   limit = 100,
 ): Promise<ReconciliationQueueResponse | null> {
@@ -401,8 +464,12 @@ export async function getReconciliationQueue(
 export async function getMoltbook(): Promise<ApiResult<MoltbookListResponse>> {
   try {
     const raw = await apiFetch<Record<string, unknown>>('/moltbook');
-    const items = (raw.items as MoltbookEntry[]) ?? [];
-    return { data: { items, item_count: items.length }, isMock: false };
+    const items =
+      ((raw.items as MoltbookEntry[] | undefined) ??
+        (raw.entries as MoltbookEntry[] | undefined) ??
+        []);
+    const item_count = Number(raw.item_count ?? raw.entry_count ?? items.length);
+    return { data: { items, item_count }, isMock: false };
   } catch {
     return {
       data: { items: MOCK_MOLTBOOK_ENTRIES, item_count: MOCK_MOLTBOOK_ENTRIES.length },

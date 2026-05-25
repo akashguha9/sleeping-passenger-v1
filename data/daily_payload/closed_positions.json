@@ -1,0 +1,15 @@
+{
+  "run_date": "2026-05-22",
+  "operator_note": "Positions previously open but now closed. Historical context only. Never treat as OPEN, never generate exit/TP/stop/hold actions for these unless they are re-opened in verified_current_holdings.json.",
+  "positions": [
+    {
+      "ticker": "GLD",
+      "normalized_ticker": "GLD",
+      "asset_name": "SPDR Gold Shares",
+      "status": "CLOSED",
+      "closed_at": "2026-05-22T00:00:00Z",
+      "reason": "sold_by_human",
+      "created_via": "manual_override"
+    }
+  ]
+}

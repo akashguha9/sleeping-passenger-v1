@@ -45,10 +45,25 @@ from scripts.manual_trade_origin import (
     is_visible_manual_trade,
 )
 from scripts.quarantine_fake_manual_trades import (
+    OPERATION_CLASS as _QUARANTINE_OP_CLASS,
     apply_quarantine,
     find_candidates,
     main as quarantine_main,
 )
+from scripts import operator_permission_guard as _guard
+
+
+def _allowed_quarantine_decision(db: Path) -> "_guard.PermissionDecision":
+    """A clean OPERATOR REPAIR_WRITE allow for the function-level write guard."""
+    return _guard.evaluate_permission(_guard.PermissionRequest(
+        operation_name="quarantine_fake_manual_trades",
+        operation_class=_QUARANTINE_OP_CLASS,
+        operator_role=_guard.OperatorRole.OPERATOR,
+        apply_requested=True,
+        dry_run_completed=True,
+        db_path=str(db),
+        safety_stamps=_guard.caller_safety_stamps(),
+    ))
 
 
 def _rebind_defaults(fn, new_db: Path) -> None:
@@ -101,6 +116,16 @@ def tmp_db(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
             fn = getattr(persistence, name)
             fn.__defaults__ = defs
             fn.__kwdefaults__ = kwdefs or None
+
+
+@pytest.fixture(autouse=True)
+def _guard_isolation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """Redirect the permission guard's receipt dir + audit log to tmp, and
+    clear the operator-role env so each test starts from the safe default."""
+    from scripts import operator_permission_guard as guard
+    monkeypatch.setenv(guard.RECEIPT_DIR_ENV_VAR, str(tmp_path / "guard_receipts"))
+    monkeypatch.setenv(guard.AUDIT_PATH_ENV_VAR, str(tmp_path / "guard_audit.jsonl"))
+    monkeypatch.delenv(guard.ROLE_ENV_VAR, raising=False)
 
 
 # ---------------------------------------------------------------------------
@@ -428,7 +453,9 @@ def test_quarantine_apply_yes_hides_row_without_deleting(tmp_db: Path) -> None:
     assert "MT_6b11745fc3f3" in pre_audit_ids
 
     candidates = find_candidates(tmp_db)
-    updated = apply_quarantine(tmp_db, candidates)
+    updated = apply_quarantine(
+        tmp_db, candidates,
+        permission_decision=_allowed_quarantine_decision(tmp_db))
     assert updated >= 1
 
     # After: row STILL exists in DB (no deletes) but provenance changed.
@@ -469,10 +496,14 @@ def test_quarantine_main_default_is_dry_run(tmp_db: Path, capsys) -> None:
     assert row[0] == "manual_trade_log"  # untouched
 
 
-def test_quarantine_main_yes_applies(tmp_db: Path) -> None:
+def test_quarantine_main_yes_applies(tmp_db: Path,
+                                     monkeypatch: pytest.MonkeyPatch) -> None:
     _plant_fake_row(tmp_db, "MT_6b11745fc3f3", "no currency given")
     _plant_real_row(tmp_db)
-    rc = quarantine_main(["--db", str(tmp_db), "--yes"])
+    # Apply is now guarded: needs an OPERATOR role and a recent dry-run receipt.
+    monkeypatch.setenv("MVP_OPERATOR_ROLE", "OPERATOR")
+    assert quarantine_main(["--db", str(tmp_db), "--dry-run"]) == 0  # writes receipt
+    rc = quarantine_main(["--db", str(tmp_db), "--apply"])
     assert rc == 0
     # Fake row re-stamped.
     conn = sqlite3.connect(str(tmp_db))
@@ -509,7 +540,9 @@ def test_quarantine_does_not_touch_genuine_rows(tmp_db: Path) -> None:
     assert resp["status"] == "logged"
     candidates = find_candidates(tmp_db)
     assert candidates == []
-    updated = apply_quarantine(tmp_db, candidates)
+    updated = apply_quarantine(
+        tmp_db, candidates,
+        permission_decision=_allowed_quarantine_decision(tmp_db))
     assert updated == 0
 
 

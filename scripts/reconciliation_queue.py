@@ -63,8 +63,15 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
-ADVISORY_STATUS = "ADVISORY_ONLY"
-EXECUTION_GATE_LOCKED = "LOCKED"
+# Safety constants sourced from the single shared advisory contract so this
+# read-only queue cannot drift to an inconsistent stamp.  Values unchanged.
+try:
+    from scripts import advisory_contract as _contract
+except ModuleNotFoundError:  # pragma: no cover - script-style fallback
+    import advisory_contract as _contract  # type: ignore[no-redef]
+
+ADVISORY_STATUS = _contract.ADVISORY_STATUS
+EXECUTION_GATE_LOCKED = _contract.EXECUTION_GATE_LOCKED
 
 # Provenance contract for the Reconciliation queue.  ONLY rows whose
 # created_via column equals this exact value AND that pass the user-
@@ -209,6 +216,80 @@ def _empty_summary() -> dict[str, Any]:
     }
 
 
+# constrained_first_priority is computed by the PURE signal-geometry layer.
+# We import it lazily/defensively so a missing module degrades to the legacy
+# executed_at ordering rather than breaking the queue.  Importing it here adds
+# no side effects — the function is pure and read-only.
+try:
+    from scripts.signal_geometry_reflection import compute_constrained_first_priority
+except ModuleNotFoundError:  # pragma: no cover - script-style fallback
+    try:
+        from signal_geometry_reflection import compute_constrained_first_priority  # type: ignore[no-redef]
+    except ImportError:
+        compute_constrained_first_priority = None  # type: ignore[assignment]
+except ImportError:  # pragma: no cover
+    compute_constrained_first_priority = None  # type: ignore[assignment]
+
+# Unreconciled trades age out of usefulness; map age to a pseudo-freshness so
+# the constrained-first scorer surfaces the most stale items first.  A trade
+# older than this many days is treated as fully stale (freshness 0).
+_STALE_FRESHNESS_DAYS = 30.0
+
+
+def _priority_signal_from_item(item: dict[str, Any]) -> dict[str, Any]:
+    """Translate a queue item into the input dict the constrained-first
+    priority scorer understands.
+
+    Only fields that genuinely apply to an *unreconciled* manual trade are
+    populated.  Outcome-driven factors (stop-loss / take-profit breach,
+    reconciliation mismatch, realized loss) have no value yet for a trade
+    that has not been reconciled, so they default to absent.  The factors
+    that DO apply here are: staleness (age), missing exit data, duplicate
+    ambiguity, and leverage exposure.  Advisory ordering only — never an
+    execution instruction.
+    """
+    age = item.get("age_days")
+    if isinstance(age, (int, float)):
+        freshness = max(0.0, 1.0 - (float(age) / _STALE_FRESHNESS_DAYS))
+    else:
+        freshness = 0.0  # unknown age => treat as stale => higher priority
+    # Missing exit data: no invalidation level AND no exit plan recorded.
+    has_invalidation = bool(str(item.get("invalidation_level") or "").strip())
+    has_exit_plan = bool(str(item.get("exit_plan") or "").strip())
+    missing_exit_data = not (has_invalidation or has_exit_plan)
+    exit_options_score = 0.1 if missing_exit_data else 0.8
+    ambiguity = 0.8 if item.get("possible_duplicate") else 0.0
+    return {
+        "freshness_score": freshness,
+        "ambiguity_score": ambiguity,
+        "exit_options_score": exit_options_score,
+        "leverage": item.get("leverage", 1.0),
+        # No reconciliation outcome yet for an unreconciled trade.
+        "stop_loss_breached": False,
+        "take_profit_breached": False,
+        "reconciliation_mismatch": False,
+        "chaos_score": 0.0,
+    }
+
+
+def _attach_priority(item: dict[str, Any]) -> None:
+    """Compute and attach constrained_first_priority fields to a queue item.
+
+    Mutates ``item`` in place.  Pure / advisory: adds a fragility score and a
+    handle_now / handle_soon / handle_later bucket.  Never an order action.
+    """
+    if compute_constrained_first_priority is None:
+        item["constrained_first_priority"] = 0.0
+        item["priority_bucket"] = "handle_later"
+        return
+    scored = compute_constrained_first_priority(_priority_signal_from_item(item))
+    item["constrained_first_priority"] = float(
+        scored.get("constrained_first_priority") or 0.0
+    )
+    item["priority_bucket"] = str(scored.get("priority_bucket") or "handle_later")
+    item["priority_components"] = scored.get("components", {})
+
+
 def _build_journal_entry(row: dict[str, Any], outcome: dict[str, Any]) -> dict[str, Any]:
     """Shape one trade row into the dict expected by score_journal_entry()."""
     return {
@@ -292,7 +373,7 @@ def build_queue(
         cols = _columns_present(conn, "manual_trades")
         select_cols = [c for c in (
             "trade_id", "event_id", "ticker", "side", "quantity", "price",
-            "executed_at", "thesis", *_JOURNAL_FIELDS,
+            "executed_at", "thesis", "leverage", *_JOURNAL_FIELDS,
         ) if c in cols]
         if "trade_id" not in select_cols:
             warnings.append("manual_trades_missing_trade_id_column")
@@ -471,6 +552,7 @@ def build_queue(
                 "executed_at": str(row_dict.get("executed_at") or ""),
                 "age_days": _age_days(row_dict.get("executed_at"), now),
                 "thesis": str(row_dict.get("thesis") or ""),
+                "leverage": float(row_dict.get("leverage") or 1.0),
                 "origin_label": "USER_MANUAL",
                 "duplicate_group_key": dup_key,
                 "duplicate_count": dup_count,
@@ -491,6 +573,7 @@ def build_queue(
                 "needs_reconciliation": True,
             }
             item.update(_SAFETY_STAMPS)
+            _attach_priority(item)
             items.append(item)
 
         # Build summary over the FULL unreconciled set, not the limited view.
@@ -539,6 +622,15 @@ def build_queue(
             "by_expected_horizon": by_expected_horizon,
         }
         base["summary"] = summary
+
+        # constrained_first_priority ordering: surface the most fragile /
+        # high-risk items first.  Stable sort by descending priority keeps the
+        # underlying executed_at-ASC order as the tiebreaker, so equal-priority
+        # items still read oldest-first.  Advisory ordering ONLY — this does
+        # not authorize, place, modify, or cancel any order.
+        items.sort(key=lambda it: it.get("constrained_first_priority", 0.0), reverse=True)
+        base["ordering"] = "constrained_first_priority"
+        base["ordering_advisory_only"] = True
 
         if isinstance(limit, int) and limit >= 0:
             base["items"] = items[:limit]

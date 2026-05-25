@@ -1,0 +1,75 @@
+{
+  "run_date": "2026-05-24",
+  "generated_at_utc": "2026-05-24T07:41:59+00:00",
+  "snapshot_timestamp_utc": null,
+  "source_health": "UNVERIFIED",
+  "provider": "STATIC_UNIVERSE_FALLBACK",
+  "is_live": false,
+  "indices": [
+    {
+      "ticker": "SPY",
+      "name": "S&P 500 ETF",
+      "market": "US",
+      "asset_class": "equity_index_proxy"
+    },
+    {
+      "ticker": "QQQ",
+      "name": "Nasdaq 100 ETF",
+      "market": "US",
+      "asset_class": "equity_index_proxy"
+    },
+    {
+      "ticker": "IWM",
+      "name": "Russell 2000 ETF",
+      "market": "US",
+      "asset_class": "equity_index_proxy"
+    },
+    {
+      "ticker": "^NSEI",
+      "name": "Nifty 50",
+      "market": "India",
+      "asset_class": "equity_index"
+    },
+    {
+      "ticker": "^GDAXI",
+      "name": "DAX",
+      "market": "Germany",
+      "asset_class": "equity_index"
+    }
+  ],
+  "macro_proxies": [
+    {
+      "ticker": "GLD",
+      "theme": "gold_safe_haven"
+    },
+    {
+      "ticker": "TLT",
+      "theme": "long_duration"
+    },
+    {
+      "ticker": "TIP",
+      "theme": "inflation_protected_bonds"
+    },
+    {
+      "ticker": "USO",
+      "theme": "oil_proxy"
+    },
+    {
+      "ticker": "UUP",
+      "theme": "usd_proxy"
+    },
+    {
+      "ticker": "BTC-USD",
+      "theme": "crypto_risk_proxy"
+    }
+  ],
+  "rates": [],
+  "commodities": [],
+  "fx": [],
+  "regime_notes": [
+    {
+      "note": "Market snapshot generated from static fallback universe; live data not yet verified.",
+      "freshness": "UNVERIFIED"
+    }
+  ]
+}

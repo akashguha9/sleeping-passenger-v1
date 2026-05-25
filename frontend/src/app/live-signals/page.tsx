@@ -22,6 +22,8 @@ import { SourceHealthBadge } from '@/components/SourceHealthBadge';
 const SOURCE_OPTIONS: { value: '' | LiveSignalSource; label: string }[] = [
   { value: '', label: 'All Sources' },
   { value: 'polymarket', label: 'Polymarket' },
+  { value: 'kalshi', label: 'Kalshi' },
+  { value: 'prediction_market_disagreement', label: 'Disagreements' },
   { value: 'gdelt', label: 'GDELT' },
   { value: 'sec_edgar', label: 'SEC EDGAR' },
   { value: 'newsapi', label: 'NewsAPI' },
@@ -36,6 +38,8 @@ const SOURCE_OPTIONS: { value: '' | LiveSignalSource; label: string }[] = [
 
 const SOURCE_ACCENT: Record<string, string> = {
   polymarket: 'rgba(167, 139, 250, 0.9)',
+  kalshi: 'rgba(142, 196, 168, 0.9)',
+  prediction_market_disagreement: 'rgba(214, 168, 90, 0.9)',
   gdelt: 'rgba(125, 211, 252, 0.9)',
   sec_edgar: 'rgba(200, 154, 74, 0.9)',
   newsapi: 'rgba(95, 189, 200, 0.9)',
@@ -50,6 +54,8 @@ const SOURCE_ACCENT: Record<string, string> = {
 
 const SOURCE_LABELS: Record<string, string> = {
   polymarket: 'Polymarket',
+  kalshi: 'Kalshi',
+  prediction_market_disagreement: 'Prediction Market Disagreement',
   gdelt: 'GDELT',
   sec_edgar: 'SEC EDGAR',
   newsapi: 'NewsAPI',
@@ -64,7 +70,53 @@ const SOURCE_LABELS: Record<string, string> = {
 
 function getTitle(ev: LiveSignalEvent): string {
   const p = ev.raw_payload;
+  if (ev.source_name === 'prediction_market_disagreement') {
+    // The persisted disagreement payload uses ``customer_label`` as its
+    // operator-facing headline; ``title`` may be absent.
+    return (p.customer_label as string) || 'Prediction Market Disagreement Alert';
+  }
+  if (ev.source_name === 'kalshi') {
+    // Prefer the deterministic display_title written by the Kalshi
+    // normalizer — it has already rejected raw "yes X, yes Y" outcome
+    // dumps and applied the priority chain (event_title → market_title
+    // → title → question → subtitle → ticker label).
+    return (
+      (p.display_title as string) ||
+      (p.primary_title as string) ||
+      (p.title as string) ||
+      ev.event_id
+    );
+  }
   return p.title || p.question as string || ev.event_id;
+}
+
+function isKalshiQuarantined(ev: LiveSignalEvent): boolean {
+  if (ev.source_name !== 'kalshi') return false;
+  const p = ev.raw_payload;
+  if (p.visible_in_kalshi_feed === false) return true;
+  if (p.category_allowed === false) return true;
+  return false;
+}
+
+const KALSHI_DISPLAY_LABEL_BY_SLUG: Record<string, string> = {
+  elections: 'Elections',
+  politics: 'Politics',
+  crypto: 'Crypto',
+  commodities: 'Commodities',
+  economics: 'Economics',
+  finance: 'Finance',
+  tech_science: 'Tech & Science',
+};
+
+function kalshiDisplayCategory(ev: LiveSignalEvent): string {
+  const p = ev.raw_payload;
+  if (typeof p.display_category === 'string' && p.display_category.trim()) {
+    return p.display_category;
+  }
+  if (typeof p.mvp_category === 'string' && KALSHI_DISPLAY_LABEL_BY_SLUG[p.mvp_category]) {
+    return KALSHI_DISPLAY_LABEL_BY_SLUG[p.mvp_category];
+  }
+  return String(p.category || '');
 }
 
 function getSubtitle(ev: LiveSignalEvent): string {
@@ -75,6 +127,30 @@ function getSubtitle(ev: LiveSignalEvent): string {
     if (p.volume != null) parts.push(`Vol: ${Number(p.volume).toLocaleString()}`);
     if (p.liquidity != null) parts.push(`Liq: ${Number(p.liquidity).toLocaleString()}`);
     if (p.end_date) parts.push(`Ends: ${p.end_date}`);
+    return parts.join(' · ');
+  }
+  if (ev.source_name === 'prediction_market_disagreement') {
+    const parts: string[] = [];
+    if (p.pair_type) parts.push(String(p.pair_type));
+    if (p.probability_gap != null) {
+      parts.push(`Gap: ${(Number(p.probability_gap) * 100).toFixed(1)} percentage points`);
+    }
+    if (p.status) parts.push(`Status: ${String(p.status)}`);
+    return parts.join(' · ');
+  }
+  if (ev.source_name === 'kalshi') {
+    const parts: string[] = [];
+    const cat = kalshiDisplayCategory(ev);
+    if (cat) parts.push(cat.toUpperCase());
+    if (p.source_market_id) parts.push(`Market ${p.source_market_id}`);
+    if (p.implied_probability != null) {
+      parts.push(`Implied: ${(Number(p.implied_probability) * 100).toFixed(1)}%`);
+    } else if (p.yes_price != null) {
+      parts.push(`YES: ${Number(p.yes_price).toFixed(2)}`);
+    }
+    if (p.volume != null) parts.push(`Vol: ${Number(p.volume).toLocaleString()}`);
+    if (p.open_interest != null) parts.push(`OI: ${Number(p.open_interest).toLocaleString()}`);
+    if (p.close_time_utc) parts.push(`Closes: ${p.close_time_utc}`);
     return parts.join(' · ');
   }
   if (ev.source_name === 'gdelt') {
@@ -214,6 +290,14 @@ function matchesSearch(ev: LiveSignalEvent, query: string): boolean {
     p.exchange_or_regulator,
     p.disclosure_type,
     p.summary,
+    // kalshi-specific fields
+    p.category,
+    p.source_label,
+    p.source_market_id,
+    p.market_url,
+    p.semantic_text,
+    ...((p.asset_tags as string[] | undefined) ?? []),
+    ...((p.event_tags as string[] | undefined) ?? []),
   ]
     .filter(Boolean)
     .some((v) => String(v).toLowerCase().includes(q));
@@ -232,6 +316,20 @@ function formatTs(ts: string): string {
   }
 }
 
+const KALSHI_FRESHNESS_LABEL: Record<string, string> = {
+  LIVE_VERIFIED: 'Source · LIVE_VERIFIED',
+  SOURCE_STALE: 'Source · SOURCE_STALE',
+  UNVERIFIED: 'Source · UNVERIFIED',
+  SOURCE_ERROR: 'Source · SOURCE_ERROR',
+};
+
+const KALSHI_ACTIVITY_LABEL: Record<string, string> = {
+  MARKET_OPEN: 'Market · OPEN',
+  MARKET_CLOSED: 'Market · CLOSED',
+  MARKET_EXPIRED: 'Market · EXPIRED',
+  MARKET_UNKNOWN: 'Market · UNKNOWN',
+};
+
 function SignalEventCard({
   ev,
   displayState,
@@ -246,7 +344,25 @@ function SignalEventCard({
     displayState === 'optional_unconfigured_with_archive' ||
     displayState === 'planned_coverage' ||
     displayState === 'optional_unconfigured_with_coverage';
-  const isStaleRow = displayState === 'stale_active';
+  // Kalshi rows carry per-record freshness + activity status; suppress
+  // the generic STALE_ACTIVE chip for Kalshi in favour of the two
+  // explicit badges so the operator never conflates source staleness
+  // with market activity.
+  const isStaleRow =
+    displayState === 'stale_active' && ev.source_name !== 'kalshi';
+  const isKalshi = ev.source_name === 'kalshi';
+  const kFreshness =
+    isKalshi && typeof ev.raw_payload.source_freshness_status === 'string'
+      ? ev.raw_payload.source_freshness_status
+      : '';
+  const kActivity =
+    isKalshi && typeof ev.raw_payload.market_activity_status === 'string'
+      ? ev.raw_payload.market_activity_status
+      : '';
+  const kBadge =
+    isKalshi && typeof ev.raw_payload.ui_badge_status === 'string'
+      ? ev.raw_payload.ui_badge_status
+      : '';
 
   return (
     <div
@@ -256,6 +372,9 @@ function SignalEventCard({
       data-row-classification={
         isArchived ? 'archived' : isStaleRow ? 'stale' : 'current_live'
       }
+      data-kalshi-source-freshness={kFreshness || undefined}
+      data-kalshi-market-activity={kActivity || undefined}
+      data-kalshi-ui-badge={kBadge || undefined}
     >
       {/* Header row */}
       <div className="flex items-start justify-between gap-3">
@@ -299,6 +418,44 @@ function SignalEventCard({
               STALE_ACTIVE
             </span>
           )}
+          {isKalshi && kFreshness && (
+            <span
+              className="text-[10px] font-mono uppercase tracking-widest px-1.5 py-0.5 rounded"
+              data-testid="kalshi-source-freshness-badge"
+              style={{
+                color:
+                  kFreshness === 'LIVE_VERIFIED'
+                    ? 'var(--sp-cyan)'
+                    : kFreshness === 'SOURCE_ERROR'
+                    ? '#d57b6a'
+                    : 'var(--sp-gold)',
+                border: '1px solid rgba(214, 168, 90, 0.35)',
+                background: 'rgba(13, 16, 21, 0.6)',
+              }}
+              title="How fresh the source's last successful fetch is — independent of whether the market itself is open."
+            >
+              {KALSHI_FRESHNESS_LABEL[kFreshness] || `Source · ${kFreshness}`}
+            </span>
+          )}
+          {isKalshi && kActivity && (
+            <span
+              className="text-[10px] font-mono uppercase tracking-widest px-1.5 py-0.5 rounded"
+              data-testid="kalshi-market-activity-badge"
+              style={{
+                color:
+                  kActivity === 'MARKET_OPEN'
+                    ? 'var(--sp-cyan)'
+                    : kActivity === 'MARKET_EXPIRED'
+                    ? '#d57b6a'
+                    : 'var(--sp-gold)',
+                border: '1px solid rgba(125, 211, 252, 0.28)',
+                background: 'rgba(13, 16, 21, 0.6)',
+              }}
+              title="Whether the Kalshi market itself is still open — independent of source freshness."
+            >
+              {KALSHI_ACTIVITY_LABEL[kActivity] || `Market · ${kActivity}`}
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-2 shrink-0">
           <span className="sp-chip sp-chip-rust">Execution · Locked</span>
@@ -310,6 +467,10 @@ function SignalEventCard({
 
       {getSubtitle(ev) && (
         <p className="text-xs" style={{ color: 'var(--sp-mist)' }}>{getSubtitle(ev)}</p>
+      )}
+
+      {ev.source_name === 'prediction_market_disagreement' && (
+        <DisagreementDetailBlock ev={ev} />
       )}
 
       <div className="flex items-center gap-2 flex-wrap pt-0.5">
@@ -346,6 +507,303 @@ function SignalEventCard({
     </div>
   );
 }
+
+/**
+ * Per-card body for Disagreement alerts — Polymarket vs Kalshi probabilities,
+ * gap, pair type, status pill, and review-required wording.  The forbidden
+ * customer-facing trading verbs (see live-signals.disagreement.spec.tsx and
+ * tests/test_frontend_no_execution_language.py) MUST NOT appear in this
+ * block, in any subtree, ever.
+ */
+function DisagreementDetailBlock({ ev }: { ev: LiveSignalEvent }) {
+  const p = ev.raw_payload;
+  const polyProb =
+    p.polymarket_probability != null
+      ? `${(Number(p.polymarket_probability) * 100).toFixed(1)}%`
+      : '—';
+  const kalshiProb =
+    p.kalshi_probability != null
+      ? `${(Number(p.kalshi_probability) * 100).toFixed(1)}%`
+      : '—';
+  const gap =
+    p.probability_gap != null
+      ? `${(Number(p.probability_gap) * 100).toFixed(1)} percentage points`
+      : '—';
+  const pairType = String(p.pair_type ?? 'UNKNOWN_PAIR_TYPE');
+  const status = String(p.status ?? 'UNKNOWN');
+  const reasons = (p.resolution_mismatch_reasons as string[] | undefined) ?? [];
+  const polyProbSource = (p.probability_source_polymarket as string | undefined) ?? '';
+  const kalshiProbSource = (p.probability_source_kalshi as string | undefined) ?? '';
+  const components =
+    (p.pair_score_components as Record<string, number> | undefined) ?? undefined;
+  const embeddingProvider = (p.embedding_provider as string | undefined) ?? '';
+  const embeddingModel = (p.embedding_model as string | undefined) ?? '';
+  const embeddingAvailable = p.embedding_available as boolean | undefined;
+  const embeddingStatusReason =
+    (p.embedding_status_reason as string | undefined) ?? '';
+
+  const statusChipClass =
+    status === 'ALERT'
+      ? 'sp-chip sp-chip-rust'
+      : status === 'DIAGNOSTIC' || pairType === 'SAME_EVENT_DIFFERENT_THRESHOLD'
+      ? 'sp-chip sp-chip-warn'
+      : 'sp-chip';
+  const statusLabel =
+    status === 'ALERT'
+      ? 'Alert'
+      : status === 'DIAGNOSTIC' || status === 'PROBABILITY_MISSING'
+      ? `Watch · ${status.toLowerCase()}`
+      : status === 'WATCH'
+      ? 'Watch only'
+      : status;
+
+  return (
+    <div
+      className="rounded p-3 space-y-2 text-xs"
+      data-testid="disagreement-detail-block"
+      style={{
+        background: 'rgba(13, 16, 21, 0.45)',
+        border: '1px solid var(--sp-line)',
+      }}
+    >
+      <div className="grid gap-2 md:grid-cols-2">
+        <div data-testid="disagreement-poly-row">
+          <div className="sp-eyebrow">Polymarket</div>
+          <p style={{ color: 'var(--sp-bone)' }}>{String(p.polymarket_title ?? '—')}</p>
+          <p className="font-mono" style={{ color: 'var(--sp-mist)' }}>
+            Implied probability: {polyProb}
+          </p>
+          {polyProbSource && (
+            <p
+              className="text-[10px] font-mono"
+              style={{ color: 'var(--sp-mist)' }}
+              data-testid="disagreement-poly-prob-source"
+            >
+              Polymarket probability source · {polyProbSource}
+            </p>
+          )}
+        </div>
+        <div data-testid="disagreement-kalshi-row">
+          <div className="sp-eyebrow">Kalshi</div>
+          <p style={{ color: 'var(--sp-bone)' }}>{String(p.kalshi_title ?? '—')}</p>
+          <p className="font-mono" style={{ color: 'var(--sp-mist)' }}>
+            Implied probability: {kalshiProb}
+          </p>
+          {kalshiProbSource && (
+            <p
+              className="text-[10px] font-mono"
+              style={{ color: 'var(--sp-mist)' }}
+              data-testid="disagreement-kalshi-prob-source"
+            >
+              Kalshi probability source · {kalshiProbSource}
+            </p>
+          )}
+        </div>
+      </div>
+      <PairScoreComponentsBlock
+        components={components}
+        embeddingProvider={embeddingProvider}
+        embeddingModel={embeddingModel}
+        embeddingAvailable={embeddingAvailable}
+        embeddingStatusReason={embeddingStatusReason}
+      />
+      <div className="flex flex-wrap items-center gap-2">
+        <span className={statusChipClass} data-testid="disagreement-status-chip">
+          {statusLabel}
+        </span>
+        <span
+          className="text-[10px] font-mono uppercase tracking-widest"
+          style={{ color: 'var(--sp-mist)' }}
+          data-testid="disagreement-pair-type"
+        >
+          Pair type · {pairType}
+        </span>
+        <span
+          className="text-[10px] font-mono"
+          style={{ color: 'var(--sp-mist)' }}
+          data-testid="disagreement-gap"
+        >
+          Cross-venue probability gap · {gap}
+        </span>
+      </div>
+      {reasons.length > 0 && (
+        <p
+          className="text-[10px]"
+          style={{ color: 'var(--sp-gold)' }}
+          data-testid="disagreement-mismatch-reasons"
+        >
+          Blocked by resolution mismatch — resolution terms may differ across venues:
+          <span className="ml-1 font-mono" style={{ color: 'var(--sp-bone)' }}>
+            {reasons.join('; ')}
+          </span>
+        </p>
+      )}
+      <p
+        className="text-[10px]"
+        style={{ color: 'var(--sp-mist)' }}
+        data-testid="disagreement-advisory-line"
+      >
+        Disagreement alert · Advisory only · Human review required · No
+        broker action authorised. Resolution terms may differ across
+        venues.
+      </p>
+    </div>
+  );
+}
+
+
+/**
+ * Renders the per-axis pair-score components emitted by the disagreement
+ * scanner.  Pure presentational — driven entirely off the persisted
+ * payload so the operator can see why a pair did or did not promote to
+ * a clean alert.  Falls back gracefully when the scanner ran with an
+ * older payload that lacks these fields.
+ */
+const PAIR_SCORE_COMPONENT_LABELS: Array<{
+  key: string;
+  label: string;
+}> = [
+  { key: 'text_score', label: 'Text' },
+  { key: 'entity_score', label: 'Entity' },
+  { key: 'category_score', label: 'Category' },
+  { key: 'date_score', label: 'Date/window' },
+  { key: 'threshold_score', label: 'Threshold' },
+  { key: 'resolution_score', label: 'Resolution' },
+  { key: 'embedding_score', label: 'Embedding' },
+  { key: 'final_score', label: 'Final score' },
+];
+
+function PairScoreComponentsBlock({
+  components,
+  embeddingProvider,
+  embeddingModel,
+  embeddingAvailable,
+  embeddingStatusReason,
+}: {
+  components?: Record<string, number>;
+  embeddingProvider?: string;
+  embeddingModel?: string;
+  embeddingAvailable?: boolean;
+  embeddingStatusReason?: string;
+}) {
+  const hasComponents =
+    components && Object.keys(components).length > 0;
+  const hasEmbeddingMetadata = Boolean(
+    embeddingProvider || embeddingModel || embeddingAvailable !== undefined,
+  );
+  if (!hasComponents && !hasEmbeddingMetadata) {
+    return (
+      <div
+        className="rounded p-2 text-[11px]"
+        data-testid="pair-score-components-fallback"
+        style={{
+          background: 'rgba(13, 16, 21, 0.4)',
+          border: '1px dashed var(--sp-line)',
+          color: 'var(--sp-mist)',
+        }}
+      >
+        Pair score components unavailable for this alert.
+      </div>
+    );
+  }
+  return (
+    <div
+      className="rounded p-2 space-y-1.5 text-[11px]"
+      data-testid="pair-score-components"
+      style={{
+        background: 'rgba(13, 16, 21, 0.4)',
+        border: '1px solid var(--sp-line)',
+      }}
+    >
+      <div className="sp-eyebrow">Pair score components</div>
+      {hasComponents ? (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-x-3 gap-y-1 font-mono">
+          {PAIR_SCORE_COMPONENT_LABELS.map(({ key, label }) => {
+            const value = components ? components[key] : undefined;
+            if (value === undefined || value === null) return null;
+            const isFinal = key === 'final_score';
+            return (
+              <div
+                key={key}
+                data-testid={`pair-score-${key}`}
+                className="flex items-center justify-between gap-1"
+                style={{
+                  color: isFinal ? 'var(--sp-bone)' : 'var(--sp-mist)',
+                }}
+              >
+                <span className="uppercase tracking-widest text-[9px]">
+                  {label}
+                </span>
+                <span
+                  className={isFinal ? 'font-semibold' : ''}
+                  style={{ color: isFinal ? 'var(--sp-cyan)' : 'var(--sp-bone)' }}
+                >
+                  {Number(value).toFixed(2)}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        <p
+          className="font-mono"
+          style={{ color: 'var(--sp-mist)' }}
+          data-testid="pair-score-components-missing"
+        >
+          Pair score components unavailable
+        </p>
+      )}
+      {hasEmbeddingMetadata && (
+        <div
+          className="flex flex-wrap gap-x-3 gap-y-1 font-mono"
+          data-testid="pair-score-embedding-meta"
+        >
+          {embeddingProvider && (
+            <span
+              data-testid="pair-score-embedding-provider"
+              style={{ color: 'var(--sp-mist)' }}
+            >
+              Embedding provider · <span style={{ color: 'var(--sp-bone)' }}>{embeddingProvider}</span>
+            </span>
+          )}
+          {embeddingModel && (
+            <span
+              data-testid="pair-score-embedding-model"
+              style={{ color: 'var(--sp-mist)' }}
+            >
+              Model · <span style={{ color: 'var(--sp-bone)' }}>{embeddingModel}</span>
+            </span>
+          )}
+          {embeddingAvailable !== undefined && (
+            <span
+              data-testid="pair-score-embedding-available"
+              style={{
+                color:
+                  embeddingAvailable === false ? 'var(--sp-gold)' : 'var(--sp-mist)',
+              }}
+            >
+              Availability ·{' '}
+              <span style={{ color: 'var(--sp-bone)' }}>
+                {embeddingAvailable ? 'true' : 'false'}
+              </span>
+            </span>
+          )}
+        </div>
+      )}
+      {embeddingAvailable === false && (
+        <p
+          className="text-[10px]"
+          style={{ color: 'var(--sp-gold)' }}
+          data-testid="pair-score-embedding-fallback"
+        >
+          Embedding unavailable — deterministic/local scoring used
+          {embeddingStatusReason ? ` (${embeddingStatusReason})` : ''}.
+        </p>
+      )}
+    </div>
+  );
+}
+
 
 /**
  * Renders an honest, per-source empty state.  Uses /source-health/summary
@@ -538,8 +996,15 @@ export default function LiveSignalsPage() {
 
   const filtered = useMemo(() => {
     if (!data) return [];
-    return data.live_signal_events.filter((ev) => matchesSearch(ev, searchQuery));
+    return data.live_signal_events
+      .filter((ev) => !isKalshiQuarantined(ev))
+      .filter((ev) => matchesSearch(ev, searchQuery));
   }, [data, searchQuery]);
+
+  const kalshiQuarantinedCount = useMemo(() => {
+    if (!data) return 0;
+    return data.live_signal_events.filter((ev) => isKalshiQuarantined(ev)).length;
+  }, [data]);
 
   const sourceCounts = useMemo(() => {
     if (!data) return {} as Record<string, number>;
@@ -566,7 +1031,7 @@ export default function LiveSignalsPage() {
             Live Signals
           </h1>
           <p className="text-sm mt-1 max-w-2xl" style={{ color: 'var(--sp-mist)' }}>
-            Polymarket · GDELT · SEC EDGAR · NewsAPI · Event Registry · Etherscan · Grok/xAI · Market Data · India · Global Filings · Asia Disclosure — advisory only.
+            Polymarket · Kalshi · GDELT · SEC EDGAR · NewsAPI · Event Registry · Etherscan · Grok/xAI · Market Data · India · Global Filings · Asia Disclosure — advisory only.
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -681,8 +1146,19 @@ export default function LiveSignalsPage() {
         <PerSourceEmptyState sourceFilter={sourceFilter} data={data} health={health} />
       ) : (
         <>
-          <div className="text-[10px] font-mono uppercase tracking-widest" style={{ color: 'var(--sp-mist)' }}>
-            {filtered.length} of {data?.count ?? 0} signal{filtered.length !== 1 ? 's' : ''}
+          <div className="text-[10px] font-mono uppercase tracking-widest flex items-center gap-3 flex-wrap" style={{ color: 'var(--sp-mist)' }}>
+            <span>
+              {filtered.length} of {data?.count ?? 0} signal{filtered.length !== 1 ? 's' : ''}
+            </span>
+            {kalshiQuarantinedCount > 0 && (sourceFilter === '' || sourceFilter === 'kalshi') && (
+              <span
+                data-testid="kalshi-quarantine-count"
+                title="Out-of-scope Kalshi markets hidden from the main feed (esports / sports / unknown / etc.)."
+                style={{ color: 'var(--sp-gold)' }}
+              >
+                Quarantined: {kalshiQuarantinedCount} out-of-scope Kalshi market{kalshiQuarantinedCount === 1 ? '' : 's'}
+              </span>
+            )}
           </div>
           <div className="space-y-3">
             {filtered.map((ev) => {

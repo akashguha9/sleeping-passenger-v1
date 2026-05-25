@@ -38,6 +38,7 @@ const NAV_GROUPS: NavGroup[] = [
     description: 'Mistakes, lessons, exports',
     items: [
       { href: '/moltbook', label: 'Moltbook', icon: '◑' },
+      { href: '/cockpit', label: 'Cockpit', icon: '◳' },
       { href: '/exports', label: 'Exports', icon: '▤' },
     ],
   },

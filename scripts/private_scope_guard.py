@@ -82,6 +82,101 @@ APPROVED_DOMAINS: tuple[str, ...] = (
     "execution_integrity_audit",
     "no_execution",
     "hygiene",
+    "complex_systems",  # advisory-only complex-systems signal doctrine layer
+    # Kanté defensive sprint — advisory-only safety / deploy / compliance layer.
+    "advisory",       # advisory_contract.py — shared safety stamp
+    "deploy",         # local_deploy_preflight.py
+    "release",        # release_gate.py
+    "local_stack",    # start_local_stack.ps1 launcher
+    "business",       # business_value_report.py
+    "compliance",     # compliance_preflight.py
+    # Kanté Sprint 2 — enforcement / fitness / resilience defensive layer.
+    "architecture",     # architecture_fitness.py — dependency-boundary fitness
+    "fault_injection",  # fault_injection_probe.py — resilience probe
+    "performance_probe",  # performance_probe.py — bounded-load probe
+    "schema_migration",   # schema_migrations.py — non-destructive schema versioning
+    "query_plan",         # sqlite_query_plan_audit.py — indexed-read evidence
+    # Closed-loop learning sprint — advisory-only DB-backed audit/report layer.
+    "broken_windows",   # broken_windows_report.py — repair-debt visibility
+    "defensive",        # defensive_alpha_report.py — bad-decisions-prevented ledger
+    "truth_purity",     # runtime_truth_purity_audit.py — fake-data canonical guard
+    "closed_loop",      # closed_loop_learning_audit.py — signal->lesson chain audit
+    # Bruce Lee / JKD sprint — advisory-only decision-discipline diagnostics.
+    # Scores/gates only; no broker execution, no order placement, no API writes.
+    "jkd",              # jkd_decision_discipline.py — JKD advisory decision score
+    "bruce_lee",        # bruce_lee_*.py — decision-quality index + discipline report
+    "reality_check",    # finger_moon_reality_check.py — reality-confirmation diagnostic
+    "diablo",           # diablo_narrative_veto.py — advisory hard-veto combinations
+    "economy_of_motion",  # economy_of_motion_audit.py — hygiene/ornamentation audit
+    # Enforcement / scalability / compliance ceiling sprint — advisory-only,
+    # read-only diagnostics service + derived cache + reliability ledger.
+    # No broker execution, no order placement, no API trading writes.
+    "diagnostics",      # diagnostics_snapshot_cache.py / diagnostics_service.py
+    "model_reliability",  # model_reliability_ledger.py — per-model calibration ledger
+    # Kanté defensive sprint (follow-up) — advisory-only cockpit hot-path
+    # query/index evidence + guarded additive-index apply.  Read-only audit;
+    # the apply path is ADMIN/MIGRATION_WRITE guarded, CREATE INDEX IF NOT
+    # EXISTS only, never drops/deletes, no broker execution.
+    "cockpit_hot_path",  # cockpit_hot_path_query_audit.py / apply_cockpit_hot_path_indexes.py
+    # Kanté defensive sprint (Task C) — advisory-only, read-only concurrency /
+    # stress probe over signal_events + cockpit hot paths.  No mutation, no
+    # broker execution, no order placement, no API writes; bounded workers.
+    "stress_probe",  # cockpit_concurrency_stress_probe.py
+    # Daily five-model synthesis truth/discovery sprint — advisory-only layer
+    # that sources holdings truth from data/daily_payload/ and produces fresh
+    # candidates without letting phantom positions block discovery.  Scores and
+    # gates only; no broker execution, no order placement, no API trading writes.
+    "daily",            # daily_payload.py / daily_synthesis_pipeline.py / daily_discovery_config.py / daily_scoring.py
+    "portfolio_truth",  # portfolio_truth_gate.py — H = V \ (C ∪ S ∪ D)
+    "discovery",        # fresh_market_discovery.py — null-safe candidate quality score
+    "candidate_executable",  # candidate_executable_split.py — CQS/EQS classification
+    "anti_staleness",   # anti_staleness.py — freshness labels + novelty enforcement
+    # Daily fresh-data sprint — advisory-only payload builders + scoring signals
+    # that feed (never execute) the five-model synthesis. Scores/gates only; no
+    # broker execution, no order placement, no API trading writes.
+    "build_today",      # build_today_market_snapshot/price_movers/news_events/filings_events.py
+    "build_yesterday",  # build_yesterday_final_candidates.py — anti-staleness set Y
+    "universe",         # minimum_daily_universe.py — minimum viable fresh universe (U_static)
+    "why_today",        # why_today.py — "why today, not yesterday?" executable gate
+    "memory_decay",     # candidate_memory_decay.py — exp(-lambda*d) candidate decay
+    "disagreement",     # model_disagreement.py — cross-model variance / consensus quality
+    # Kalshi read-only adapter sprint — public market-data ingestion + category
+    # allowlist + advisory-only signal normalizer.  Read-only end-to-end; no
+    # trading endpoints, no auth, no order placement, no broker calls.
+    "kalshi",           # kalshi_normalizer.py / kalshi_market_data_adapter.py / kalshi_runner.py
+    # Cross-venue prediction-market sprint — advisory-only information-fracture
+    # detector across Polymarket × Kalshi.  Semantic pairing + disagreement
+    # scanner.  No execution, no broker calls, no order placement, no
+    # arbitrage/buy/sell language.  Persistence reuses signal_events under a
+    # distinct source_name="prediction_market_disagreement"; no new mutation
+    # table; JSONL is not made canonical.
+    "prediction_market",  # prediction_market_semantic_pairing.py / prediction_market_disagreement_scanner.py
+    # Integrated sprint — advisory-only LPQ + promotion downgrade + AI report
+    # ingestion + per-provider verification.  Scores/gates only; no broker
+    # execution, no order placement, no API trading writes.
+    "live_payload",         # live_payload_quality.py — LPQ + M_live
+    "promotion_downgrade",  # promotion_downgrade.py — candidate state decider
+    "ai_report",            # ai_report_ingestion.py — AIReportSignal normalizer
+    "provider_verification",  # provider_verification.py — source-health classifier
+    "typed_config",         # typed_config.py — typed config schema
+    "prewarm",              # prewarm_diagnostics_snapshot.py — diagnostics warm
+    "snapshot_key",         # diagnostics_snapshot_key.py — deterministic key
+    "tail_metrics",         # diagnostics_tail_metrics.py — p95/p99/max/tail
+    "compliance_registers",  # compliance_registers.py — privacy + license JSON
+    # Kanté defensive batch 2 — advisory-only release-gate readiness layer.
+    # Scores/gates only; no broker execution, no order placement, no API
+    # trading writes.
+    "ai_integration",       # ai_integration_readiness.py — AI/API readiness
+    "five_model",           # five_model_independence.py — model_runs independence
+    # Sprint 3 (score-upgrade) — advisory-only readiness/contract modules.
+    # Scores/gates only; no broker execution, no order placement, no API
+    # trading writes; no executable trade language.
+    "promotion_contract",     # candidate_promotion_contract.py — composite gate
+    "universe_coverage",      # universe_coverage.py — 44-ticker advisory universe
+    "operator_demo_value",    # operator_demo_value.py — paper/advisory proxy
+    "compliance_trace",       # live_provider_compliance_trace.py — per-provider audit
+    "backend_api_quality",    # backend_api_quality.py — readiness envelope
+    "operator_live_provider", # operator_live_provider_refresh.py — explicit refresh
 )
 
 # Explicit allowlist for individual files / directories whose name does
@@ -99,11 +194,13 @@ EXPLICIT_IN_SCOPE: frozenset[str] = frozenset({
 # Modules deliberately marked OUT_OF_SCOPE inside ``scripts/``.  This
 # list exists so the guard report distinguishes "we know this is out of
 # scope and have accepted it" from "this is new and needs an operator
-# decision".  Empty after the GMAT scraper was relocated to
-# ``tools/gmat_scraper/`` (see ``QUARANTINED_TOOL_DIRS`` below) — leave
-# it as a frozenset so future operators have an obvious slot to use
-# when they accept a *new* in-scripts/ out-of-scope module.
-KNOWN_OUT_OF_SCOPE: frozenset[str] = frozenset()
+# decision".  Adding here is an explicit operator acknowledgement: the
+# file is intentionally outside the approved MVP domains but accepted.
+KNOWN_OUT_OF_SCOPE: frozenset[str] = frozenset({
+    # local operator helper for advisory-only five-model synthesis prompt
+    # recovery; no broker execution, no order placement, no API trading writes.
+    "run_five_model_synthesis.ps1",
+})
 
 # Quarantined non-MVP tool directories.  These live under ``tools/`` so
 # they are physically off the MVP runtime surface — no module under

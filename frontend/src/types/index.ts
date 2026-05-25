@@ -721,7 +721,20 @@ export interface DbStatusResponse {
   generated_at: string;
 }
 
-export type LiveSignalSource = 'polymarket' | 'gdelt' | 'sec_edgar' | 'newsapi' | 'event_registry' | 'etherscan' | 'grok_xai' | 'market_data' | 'india' | 'global_filings' | 'asia_disclosure';
+export type LiveSignalSource =
+  | 'polymarket'
+  | 'kalshi'
+  | 'prediction_market_disagreement'
+  | 'gdelt'
+  | 'sec_edgar'
+  | 'newsapi'
+  | 'event_registry'
+  | 'etherscan'
+  | 'grok_xai'
+  | 'market_data'
+  | 'india'
+  | 'global_filings'
+  | 'asia_disclosure';
 
 export interface LiveSignalRawPayload {
   event_id?: string;
@@ -805,6 +818,70 @@ export interface LiveSignalRawPayload {
   // asia_disclosure (Phase C.8 — China/HK/Japan/Singapore/Korea disclosures, no execution)
   // Re-uses issuer_name, ticker_or_identifier, exchange_or_regulator, jurisdiction,
   // disclosure_type, published_at, url, summary, provider, language (all already declared above)
+  // kalshi (Kalshi sprint — prediction-market signal, advisory-only)
+  source?: string;
+  source_label?: string;
+  source_market_id?: string;
+  category?: string;
+  category_raw?: string;
+  display_category?: string;
+  mvp_category?: string | null;
+  category_allowed?: boolean;
+  quarantine_reason?: string;
+  visible_in_kalshi_feed?: boolean;
+  primary_title?: string;
+  display_title?: string;
+  raw_title?: string;
+  title_source?: string;
+  title_quality?: string;
+  title_warnings?: string[];
+  outcomes?: string[];
+  source_freshness_status?: string;
+  market_activity_status?: string;
+  ui_badge_status?: string;
+  source_freshness_ttl_seconds?: number;
+  last_successful_fetch_at_utc?: string | null;
+  rules?: string;
+  market_url?: string;
+  implied_probability?: number | null;
+  yes_price?: number | null;
+  no_price?: number | null;
+  open_interest?: number | null;
+  close_time_utc?: string;
+  fetched_at_utc?: string;
+  asset_tags?: string[];
+  event_tags?: string[];
+  semantic_text?: string;
+  cross_venue_match_label?: string | null;
+  is_mock_fixture?: boolean;
+  advisory_only?: boolean;
+  execution_permission?: string;
+  // prediction_market_disagreement (cross-venue advisory alert)
+  pair_id?: string;
+  polymarket_event_id?: string;
+  kalshi_event_id?: string;
+  polymarket_title?: string;
+  kalshi_title?: string;
+  polymarket_probability?: number | null;
+  kalshi_probability?: number | null;
+  probability_gap?: number | null;
+  disagreement_threshold?: number;
+  semantic_similarity?: number;
+  pair_type?: string;
+  disagreement_triggered?: boolean;
+  signal_class?: string;
+  customer_label?: string;
+  resolution_mismatch_reasons?: string[];
+  pair_score_components?: Record<string, number>;
+  probability_source_polymarket?: string;
+  probability_source_kalshi?: string;
+  status?: string;
+  // Embedding provider stamps written by the disagreement scanner so
+  // the frontend can render explainability without a backend round-trip.
+  embedding_provider?: string;
+  embedding_model?: string;
+  embedding_available?: boolean;
+  embedding_status_reason?: string;
   [key: string]: unknown;
 }
 

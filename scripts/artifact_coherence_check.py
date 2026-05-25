@@ -47,10 +47,38 @@ def _classify_artifact_state(name: str, payload: dict[str, Any], missing: list[s
     return "partial_metadata"
 
 
-def _load_json_payload(path: Path) -> dict[str, Any] | None:
+def _read_text_bom_tolerant(path: Path) -> str | None:
+    """Read ``path`` as text, tolerating UTF-8 BOM, UTF-16 LE/BE BOM, and CP1252.
+
+    Returns ``None`` when the file cannot be decoded at all so callers can
+    silently skip pollution (e.g. a runtime artifact written via PowerShell
+    ``Out-File`` which defaults to UTF-16 LE) rather than crashing the
+    governance check.
+    """
     try:
-        payload = json.loads(path.read_text(encoding="utf-8-sig"))
-    except (OSError, json.JSONDecodeError):
+        raw = path.read_bytes()
+    except OSError:
+        return None
+    if raw.startswith(b"\xff\xfe") or raw.startswith(b"\xfe\xff"):
+        try:
+            return raw.decode("utf-16")
+        except UnicodeDecodeError:
+            return None
+    for encoding in ("utf-8-sig", "utf-8", "cp1252"):
+        try:
+            return raw.decode(encoding)
+        except UnicodeDecodeError:
+            continue
+    return None
+
+
+def _load_json_payload(path: Path) -> dict[str, Any] | None:
+    text = _read_text_bom_tolerant(path)
+    if text is None:
+        return None
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError:
         return None
     if not isinstance(payload, dict):
         return None
@@ -60,7 +88,10 @@ def _load_json_payload(path: Path) -> dict[str, Any] | None:
 def _latest_snapshot_row(path: Path) -> tuple[str, dict[str, Any]] | None:
     if not path.exists():
         return None
-    lines = [line for line in path.read_text(encoding="utf-8-sig").splitlines() if line.strip()]
+    text = _read_text_bom_tolerant(path)
+    if text is None:
+        return None
+    lines = [line for line in text.splitlines() if line.strip()]
     if not lines:
         return None
     try:

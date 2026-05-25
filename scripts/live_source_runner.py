@@ -41,13 +41,17 @@ try:
     from scripts.ingestion.polymarket_loader import PolymarketLoader
     from scripts.ingestion.gdelt_loader import GDELTLoader
     from scripts.ingestion.sec_edgar_loader import SECEdgarLoader
+    from scripts.ingestion.kalshi_loader import KalshiLoader
     from scripts.ingestion.base_loader import LoaderResult, SkipLoader
+    from scripts.kalshi_normalizer import normalize_kalshi_market
 except ModuleNotFoundError:
     from runtime_common import utc_timestamp  # type: ignore[no-redef]
     from ingestion.polymarket_loader import PolymarketLoader  # type: ignore[no-redef]
     from ingestion.gdelt_loader import GDELTLoader  # type: ignore[no-redef]
     from ingestion.sec_edgar_loader import SECEdgarLoader  # type: ignore[no-redef]
+    from ingestion.kalshi_loader import KalshiLoader  # type: ignore[no-redef]
     from ingestion.base_loader import LoaderResult, SkipLoader  # type: ignore[no-redef]
+    from kalshi_normalizer import normalize_kalshi_market  # type: ignore[no-redef]
 
 _ADVISORY_STATUS = "ADVISORY_ONLY"
 _EXECUTION_GATE = "LOCKED"
@@ -234,10 +238,41 @@ def _normalize_sec_record(rec: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _normalize_kalshi_record(
+    rec: dict[str, Any],
+    *,
+    event_lookup: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
+    """Normalize a raw Kalshi market record.
+
+    Returns None when the market is rejected by the Kalshi category
+    allowlist (Elections / Politics / Crypto / Commodities / Economics /
+    Finance / Tech & Science).  Rejected records are NEVER written to
+    SQLite.  Every accepted record carries the canonical advisory-safety
+    stamps (advisory_status=ADVISORY_ONLY, execution_gate=LOCKED,
+    broker_api_called=False, ai_execution_count=0).
+    """
+    normalized = normalize_kalshi_market(
+        rec, fetched_at_utc=utc_timestamp(), event_lookup=event_lookup
+    )
+    if normalized is None:
+        return None
+    # Project-wide event_id key already set by the normalizer.  Defensive
+    # re-stamp of the advisory-only invariants in case a downstream caller
+    # ever loosens the normalizer (it should not).
+    normalized["advisory_status"] = _ADVISORY_STATUS
+    normalized["execution_gate"] = _EXECUTION_GATE
+    normalized["human_review_required"] = True
+    normalized["broker_api_called"] = False
+    normalized["ai_execution_count"] = _AI_EXECUTION_COUNT
+    return normalized
+
+
 _NORMALIZERS: dict[str, Any] = {
     "polymarket": _normalize_polymarket_record,
     "gdelt": _normalize_gdelt_record,
     "sec_edgar": _normalize_sec_record,
+    "kalshi": _normalize_kalshi_record,
 }
 
 
@@ -276,24 +311,41 @@ def _persist_events(
     source_name: str,
     fetched_at: str,
 ) -> int:
-    """Persist normalized events to SQLite. Returns count of newly inserted rows."""
+    """Persist normalized events to SQLite. Returns count of newly inserted rows.
+
+    ``persistence.DB_PATH`` is resolved at call time and threaded through
+    ``insert_signal_event`` explicitly.  Python's default-argument binding
+    captures ``DB_PATH`` at function-definition time inside persistence,
+    so without an explicit pass-through here tests that monkeypatch
+    ``persistence.DB_PATH`` (including the autouse runtime-isolation
+    fixture in conftest.py) would silently leak writes back into the
+    operator's real ``runtime/mvp_local.db``.  ``get_signal_events`` was
+    already fixed for the same reason — this mirrors that fix on the
+    write side.
+    """
     try:
         try:
+            from scripts import persistence as _persistence
             from scripts.persistence import insert_signal_event
         except ModuleNotFoundError:
+            import persistence as _persistence  # type: ignore[no-redef]
             from persistence import insert_signal_event  # type: ignore[no-redef]
     except Exception:
         return 0
 
+    target_db = getattr(_persistence, "DB_PATH", None)
     count = 0
     for ev in events:
         try:
-            inserted = insert_signal_event(
-                event_id=ev["event_id"],
-                source_name=source_name,
-                raw_payload=ev,
-                fetched_at=fetched_at,
-            )
+            kwargs: dict[str, Any] = {
+                "event_id": ev["event_id"],
+                "source_name": source_name,
+                "raw_payload": ev,
+                "fetched_at": fetched_at,
+            }
+            if target_db is not None:
+                kwargs["db_path"] = target_db
+            inserted = insert_signal_event(**kwargs)
             if inserted:
                 count += 1
         except Exception:
@@ -382,6 +434,8 @@ def run_phase1(
     sec_max_filings: int = _SEC_MAX_FILINGS,
     sec_default_watchlist: bool = False,
     sources: list[str] | None = None,
+    kalshi_limit: int = 25,
+    kalshi_use_mock: bool | None = None,
 ) -> Phase1RunReport:
     """
     Run Phase 1 live source ingestion: Polymarket, GDELT, SEC EDGAR.
@@ -420,6 +474,14 @@ def run_phase1(
             max_filings=sec_max_filings,
             timeout=_DEFAULT_TIMEOUT,
             use_default_watchlist=sec_default_watchlist,
+        ),
+        # Kalshi: public read-only market discovery (no auth, no trading).
+        # Default sources tuple still does NOT include Kalshi so existing
+        # consumers are not surprised; use --source kalshi to opt in.
+        "kalshi": KalshiLoader(
+            limit=kalshi_limit,
+            timeout=_DEFAULT_TIMEOUT,
+            use_mock_fixtures=kalshi_use_mock,
         ),
     }
 
@@ -471,7 +533,14 @@ def run_phase1(
             )
         else:
             raw_count = len(loader_result.records)
-            normalized = [normalizer(rec) for rec in loader_result.records]
+            if source_name == "kalshi":
+                ev_lookup = getattr(loader, "last_event_lookup", None) or {}
+                normalized = [
+                    normalizer(rec, event_lookup=ev_lookup)
+                    for rec in loader_result.records
+                ]
+            else:
+                normalized = [normalizer(rec) for rec in loader_result.records]
             # Filter out None (domain-rejected) records — only applies to Polymarket
             events = [e for e in normalized if e is not None]
             rejected_count = raw_count - len(events)
@@ -481,8 +550,16 @@ def run_phase1(
                 if source_name == "polymarket":
                     _cleanup_rejected_polymarket_events()
                 persisted = _persist_events(events, source_name, ts)
-            # Set OK_FILTERED when source responded but all records were domain-rejected
-            if source_name == "polymarket" and raw_count > 0 and len(events) == 0:
+            # Status taxonomy for the prediction-market sources:
+            #   ok_empty    — adapter responded but returned zero rows
+            #   ok_filtered — adapter returned rows but every one was rejected
+            #                 by the category/domain allowlist
+            #   ok          — at least one row passed the allowlist
+            # The taxonomy lets /source-health/summary surface a healthy
+            # but-quiet source distinctly from a healthy-and-flowing one.
+            if source_name in ("polymarket", "kalshi") and raw_count == 0:
+                run_status = "ok_empty"
+            elif source_name in ("polymarket", "kalshi") and len(events) == 0:
                 run_status = "ok_filtered"
             else:
                 run_status = "ok"
@@ -490,6 +567,10 @@ def run_phase1(
             if source_name == "polymarket":
                 detail = (
                     f"domain gate active — accepted {len(events)}/{raw_count}"
+                )
+            elif source_name == "kalshi":
+                detail = (
+                    f"Kalshi category allowlist active — accepted {len(events)}/{raw_count}"
                 )
             src_result = SourceRunResult(
                 source_name=source_name,
@@ -513,7 +594,7 @@ def run_phase1(
     return report
 
 
-_PHASE1_SOURCES = ["polymarket", "gdelt", "sec_edgar"]
+_PHASE1_SOURCES = ["polymarket", "gdelt", "sec_edgar", "kalshi"]
 
 __all__ = [
     "SourceRunResult",
@@ -543,9 +624,10 @@ _PHASE2_ENV_REQS: dict[str, str] = {
     "india": "",         # no key — public NSE endpoints
     "global_filings": "", # no key (ASX only active provider)
     "asia_disclosure": "", # all placeholder — no key
+    "kalshi": "",         # scaffold — live API deferred
 }
 
-_PHASE2_IMPLEMENTED: set[str] = {"newsapi", "event_registry", "etherscan", "grok_xai", "market_data", "india", "global_filings", "asia_disclosure"}
+_PHASE2_IMPLEMENTED: set[str] = {"newsapi", "event_registry", "etherscan", "grok_xai", "market_data", "india", "global_filings", "asia_disclosure", "kalshi"}
 
 
 def _check_env_key(env_spec: str) -> tuple[bool, str]:
@@ -606,7 +688,7 @@ def _build_diag_rows(phase1_report: "Phase1RunReport") -> list[dict]:
         })
 
     # Phase 2 sources — diagnostic only (no live fetch in this mode)
-    p2_sources = ["newsapi", "event_registry", "etherscan", "grok_xai",
+    p2_sources = ["kalshi", "newsapi", "event_registry", "etherscan", "grok_xai",
                   "market_data", "india", "global_filings", "asia_disclosure"]
     for src_name in p2_sources:
         env_spec = _PHASE2_ENV_REQS.get(src_name, "")
@@ -637,6 +719,7 @@ def _build_diag_rows(phase1_report: "Phase1RunReport") -> list[dict]:
 
 _DISPLAY_NAMES: dict[str, str] = {
     "polymarket": "Polymarket",
+    "kalshi": "Kalshi",
     "gdelt": "GDELT",
     "sec_edgar": "SEC EDGAR",
     "newsapi": "NewsAPI",

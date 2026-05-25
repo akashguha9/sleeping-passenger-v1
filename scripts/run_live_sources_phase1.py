@@ -82,6 +82,32 @@ def _parse_args() -> argparse.Namespace:
         help="Max Polymarket markets per request (default: 20).",
     )
     parser.add_argument(
+        "--kalshi-limit",
+        type=int,
+        default=25,
+        metavar="N",
+        help="Max Kalshi markets per page (default: 25).",
+    )
+    parser.add_argument(
+        "--kalshi-mock",
+        action="store_true",
+        dest="kalshi_mock",
+        help=(
+            "Use deterministic in-process Kalshi mock fixtures instead of "
+            "the public HTTP endpoint."
+        ),
+    )
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        metavar="N",
+        help=(
+            "Generic per-source limit override. When --source is given, this "
+            "replaces the source-specific default (e.g. --kalshi-limit)."
+        ),
+    )
+    parser.add_argument(
         "--gdelt-max",
         type=int,
         default=25,
@@ -152,9 +178,13 @@ def main() -> int:
 
     gdelt_max = args.gdelt_max_records_alias if args.gdelt_max_records_alias else args.gdelt_max
 
+    # Generic --limit overrides the source-specific defaults when present.
+    polymarket_limit = args.limit if args.limit is not None else args.polymarket_limit
+    kalshi_limit = args.limit if args.limit is not None else args.kalshi_limit
+
     report = run_phase1(
         dry_run=dry_run,
-        polymarket_limit=args.polymarket_limit,
+        polymarket_limit=polymarket_limit,
         gdelt_max_records=gdelt_max,
         gdelt_query=args.gdelt_query,
         gdelt_timeout=args.gdelt_timeout,
@@ -162,6 +192,8 @@ def main() -> int:
         sec_form_type=args.sec_form,
         sec_default_watchlist=args.sec_default_watchlist,
         sources=sources,
+        kalshi_limit=kalshi_limit,
+        kalshi_use_mock=args.kalshi_mock or None,
     )
 
     if args.output_json:
