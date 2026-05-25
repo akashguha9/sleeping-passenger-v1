@@ -97,6 +97,24 @@ STATUS_IMPROVED_BUT_STALE = "IMPROVED_BUT_STALE"
 STATUS_STALE_UNCHANGED = "STALE_UNCHANGED"
 STATUS_ERROR = "ERROR"
 
+# Distinct exit codes so the Windows Task Scheduler wrapper can tell
+# "watchdog ran cleanly, sources still stale" apart from "watchdog crashed":
+#
+#   0  HEALTHY / IMPROVED_BUT_STALE  — watchdog ran fine, progress made
+#   2  STALE_UNCHANGED               — watchdog ran fine, upstreams stale
+#   1  ERROR                         — watchdog itself crashed
+#
+# The wrapper (scripts/windows/run_refresh_watchdog_once.ps1) maps exit
+# code 2 → wrapper exit 0 with a PASS_WITH_STALE_SOURCES log line, so
+# Task Scheduler does not flag the watchdog as failed merely because
+# the upstreams are still down.  Cockpit always shows the watchdog's
+# own STALE_UNCHANGED status truthfully — exit-code reshaping is for
+# Task Scheduler only.
+EXIT_HEALTHY = 0
+EXIT_IMPROVED_BUT_STALE = 0
+EXIT_STALE_UNCHANGED = 2
+EXIT_ERROR = 1
+
 _SAFETY_STAMPS: dict[str, Any] = {
     "advisory_only": True,
     "human_execution_required": True,
@@ -819,6 +837,10 @@ def run_watchdog(
             "parent_stale_derived_sources": [],
             "derived_source_dependency_status": {},
             "dependency_critical_sources": [],
+            "derived_recompute_attempts": [],
+            "derived_recompute_skipped": [],
+            "parent_recovery_detected": False,
+            "disagreement_recompute_invoked_in_tick": False,
             "freshness_improved": False,
             "improvement_reasons": [],
             "started_at_utc": started_at,
@@ -828,13 +850,28 @@ def run_watchdog(
             **_SAFETY_STAMPS,
         }
         _write_summary(target_summary, summary)
-        return WatchdogResult(status=STATUS_ERROR, exit_code=1, summary=summary)
+        return WatchdogResult(status=STATUS_ERROR, exit_code=EXIT_ERROR, summary=summary)
 
     refresh_attempts: list[dict[str, Any]] = []
     retries_attempted = 0
     any_improvement_ever = False
     improvement_reasons: list[str] = []
     current = before
+    # Same-tick disagreement recompute tracking.  These fields drive the
+    # cockpit "watchdog ran a recompute immediately after Kalshi parent
+    # recovered" signal; they are advisory-only.
+    derived_recompute_attempts: list[dict[str, Any]] = []
+    derived_recompute_skipped: list[dict[str, Any]] = []
+    parent_recovery_detected = False
+    disagreement_recompute_invoked_in_tick = False
+    # Snapshot the initial parent freshness states so we can detect when
+    # they flip from non-fresh to fresh within a single watchdog tick.
+    _initial_parent_states: dict[str, str] = {}
+    for _parent in DERIVED_PARENT_KEYS.get("prediction_market_disagreement", ()):
+        _entry = before.entries.get(_parent)
+        _initial_parent_states[_parent] = (
+            _entry.freshness_state if _entry is not None else "missing"
+        )
 
     # --- main loop ------------------------------------------------------
     while True:
@@ -885,6 +922,19 @@ def run_watchdog(
                 "prediction_market_disagreement", ()
             )
             parent_states = {p: (mid.entries.get(p).freshness_state if p in mid.entries else "missing") for p in parents}
+            # Parent-recovery detection: any required parent that was
+            # non-fresh in the BEFORE snapshot and is now fresh in MID
+            # counts as recovery, regardless of which source triggered
+            # the refresh.  This drives the cockpit "same-tick recompute"
+            # signal.
+            recovered_parents = [
+                p
+                for p in parents
+                if _initial_parent_states.get(p) != "fresh"
+                and parent_states.get(p) == "fresh"
+            ]
+            if recovered_parents:
+                parent_recovery_detected = True
             parents_fresh = all(
                 p in mid.entries
                 and mid.entries[p].freshness_state == "fresh"
@@ -893,14 +943,32 @@ def run_watchdog(
             )
             if parents_fresh:
                 scanner_result = _run_disagreement_command(runner=runner)
+                disagreement_recompute_invoked_in_tick = True
+                derived_recompute_attempts.append(
+                    {
+                        "attempt_number": attempt_no,
+                        "parent_states": parent_states,
+                        "recovered_parents": recovered_parents,
+                        "returncode": scanner_result.get("returncode"),
+                        "finished_at_utc": scanner_result.get("finished_at_utc"),
+                    }
+                )
                 attempt_payload["actions"].append(
                     {
                         "kind": "prediction_market_disagreement_scanner",
                         "parent_states": parent_states,
+                        "recovered_parents": recovered_parents,
                         **scanner_result,
                     }
                 )
             else:
+                derived_recompute_skipped.append(
+                    {
+                        "attempt_number": attempt_no,
+                        "reason": "parents_not_fresh",
+                        "parent_states": parent_states,
+                    }
+                )
                 attempt_payload["actions"].append(
                     {
                         "kind": "prediction_market_disagreement_scanner",
@@ -961,13 +1029,13 @@ def run_watchdog(
     diff_total = _diff_snapshots(before, after)
     if not after.stale_active_sources:
         status = STATUS_HEALTHY
-        exit_code = 0
+        exit_code = EXIT_HEALTHY
     elif any_improvement_ever or diff_total["any_improved"]:
         status = STATUS_IMPROVED_BUT_STALE
-        exit_code = 0
+        exit_code = EXIT_IMPROVED_BUT_STALE
     else:
         status = STATUS_STALE_UNCHANGED
-        exit_code = 1
+        exit_code = EXIT_STALE_UNCHANGED
 
     derived_dep_status: dict[str, Any] = {}
     for derived_key, parents in DERIVED_PARENT_KEYS.items():
@@ -1071,6 +1139,12 @@ def run_watchdog(
         "parent_stale_derived_sources": sorted(after.parent_stale_derived_sources),
         "derived_source_dependency_status": derived_dep_status,
         "dependency_critical_sources": dependency_critical_sources,
+        "derived_recompute_attempts": derived_recompute_attempts,
+        "derived_recompute_skipped": derived_recompute_skipped,
+        "parent_recovery_detected": bool(parent_recovery_detected),
+        "disagreement_recompute_invoked_in_tick": bool(
+            disagreement_recompute_invoked_in_tick
+        ),
         "kalshi_freshness_before": kalshi_freshness_before_chip,
         "kalshi_freshness_after": kalshi_freshness_after_chip,
         "prediction_market_disagreement_freshness_before": (

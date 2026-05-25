@@ -208,23 +208,44 @@ def test_route_never_exposes_arbitrary_top_level_keys(tmp_path: Path) -> None:
 
 
 def test_live_signals_page_includes_watchdog_panel_and_advisory_footer() -> None:
-    src = (
+    """WatchdogStatusPanel was extracted to its own component file in the
+    next hardening sprint.  The page imports + renders it; the safety
+    contract (advisory footer, no execution verbs) is asserted against
+    the extracted component file."""
+    page_src = (
         _REPO_ROOT / "frontend" / "src" / "app" / "live-signals" / "page.tsx"
     ).read_text(encoding="utf-8")
-    assert "WatchdogStatusPanel" in src
-    assert "watchdog-status-panel" in src
-    assert "Watchdog is advisory-only" in src
-    assert "does not trade" in src
-    assert "does not authorize trades" in src or "does not authorize trade" in src
-    # The new panel must NOT introduce any execute/order verb.  Anchor on
-    # the function definition (not the JSX render site) so we are scanning
-    # only the panel body.
-    new_block_start = src.find("function WatchdogStatusPanel")
-    assert new_block_start > -1, "WatchdogStatusPanel function definition missing"
-    new_block_end = src.find("function AutoRefreshPanel", new_block_start)
-    assert new_block_end > new_block_start, "AutoRefreshPanel marker missing after WatchdogStatusPanel"
-    panel_block = src[new_block_start:new_block_end]
-    lowered = panel_block.lower()
+    component_src = (
+        _REPO_ROOT
+        / "frontend"
+        / "src"
+        / "components"
+        / "WatchdogStatusPanel.tsx"
+    ).read_text(encoding="utf-8")
+
+    # page.tsx imports the panel and renders it.
+    assert (
+        "from '@/components/WatchdogStatusPanel'" in page_src
+        or 'from "@/components/WatchdogStatusPanel"' in page_src
+    )
+    assert "<WatchdogStatusPanel" in page_src
+
+    # Extracted component carries the panel guts + advisory contract.
+    assert "watchdog-status-panel" in component_src
+    assert "Watchdog is advisory-only" in component_src
+    assert "does not trade" in component_src
+
+    # Either page or component must carry "does not authorize trades"
+    # somewhere in the cockpit surface (the existing language lives in
+    # the page-level no-execution banner / panel footers).
+    combined = page_src + "\n" + component_src
+    assert (
+        "does not authorize trades" in combined
+        or "does not authorize trade" in combined
+    )
+
+    # Component body must NOT introduce any execute/order verb.
+    lowered = component_src.lower()
     forbidden = [
         "place order",
         "execute trade",

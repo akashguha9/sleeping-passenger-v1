@@ -280,6 +280,21 @@ def _build_skip_entry(
         error_message="",
         skipped_reason=reason,
     )
+    # Mirror the same guaranteed source_run_log write the success path
+    # writes — otherwise the cockpit shows ``never_run`` for a source
+    # the orchestrator explicitly short-circuited as CONFIG_MISSING or
+    # PLACEHOLDER.
+    _safe_log_source_run_attempt(
+        source_name=source_key,
+        success=False,
+        skipped=True,
+        error_message="",
+        skipped_reason=reason,
+        runner_status="skipped",
+        runner_fetched_count=0,
+        timestamp_utc=now,
+        duration_seconds=0.0,
+    )
     return entry
 
 
@@ -472,7 +487,111 @@ def _run_one_source(
         error_message=error_message,
         skipped_reason=skipped_reason,
     )
+    # Orchestrator-level guarantee: every refresh attempt must produce a
+    # source_run_log row even if the inner runner crashed before its own
+    # ``_log_run`` call (import error, loader instantiation crash, etc.).
+    # The inner runner already logs on the happy and SkipLoader paths;
+    # this fallback row is INSERT-only and ensures the cockpit/watchdog
+    # cannot show ``never_run`` for a source that was actually attempted.
+    # An extra row is harmless — ``get_latest_source_run_per_source``
+    # picks the MAX(id), so the freshest attempt wins.
+    _safe_log_source_run_attempt(
+        source_name=source_key,
+        success=success,
+        skipped=skipped,
+        error_message=error_message,
+        skipped_reason=skipped_reason,
+        runner_status=str(runner_result.get("status", "")),
+        runner_fetched_count=int(runner_result.get("fetched_count", 0) or 0),
+        timestamp_utc=finished_iso,
+        duration_seconds=duration_seconds,
+    )
     return entry
+
+
+_RUNNER_STATUS_TO_LOG_STATUS: dict[str, str] = {
+    # Inner runner taxonomy → source_run_log taxonomy.  Keep both columns
+    # narrow and operator-readable; the cockpit treats anything other
+    # than OK/OK_FILTERED/OK_EMPTY as non-fresh.
+    "ok": "OK",
+    "ok_empty": "OK_EMPTY",
+    "ok_filtered": "OK_FILTERED",
+    "rate_limited": "RATE_LIMITED",
+    "timeout": "TIMEOUT",
+    "http_error": "HTTP_ERROR",
+    "placeholder": "PLACEHOLDER",
+    "skipped": "SKIPPED",
+}
+
+
+def _safe_log_source_run_attempt(
+    *,
+    source_name: str,
+    success: bool,
+    skipped: bool,
+    error_message: str,
+    skipped_reason: str,
+    runner_status: str,
+    runner_fetched_count: int,
+    timestamp_utc: str,
+    duration_seconds: float,
+) -> None:
+    """Best-effort source_run_log INSERT for this refresh attempt.
+
+    Never raises into the caller — a failure here must not crash the
+    orchestrator, since the metadata row in ``live_source_refresh_runs``
+    has already been written and the orchestrator return value is
+    already finalised.
+
+    The status taxonomy is the union of the inner runner's labels and
+    the orchestrator's outcome buckets.  When the runner ran cleanly we
+    forward its label verbatim; when the orchestrator caught a raw
+    exception we record ``ERROR`` so the cockpit chip flips to
+    ``failed`` (not ``never_run``).  ``CONFIG_MISSING`` is recorded when
+    the orchestrator short-circuited on missing credentials, so the
+    cockpit can distinguish "operator never configured this" from
+    "upstream is down".
+    """
+    runner_status_norm = (runner_status or "").strip().lower()
+    if success and not error_message:
+        status = _RUNNER_STATUS_TO_LOG_STATUS.get(runner_status_norm, "OK")
+    elif error_message and not skipped:
+        status = "ERROR"
+    elif skipped:
+        reason_lower = (skipped_reason or "").lower()
+        if "missing_credentials" in reason_lower or "config_missing" in reason_lower:
+            status = "CONFIG_MISSING"
+        elif "adapter_planned" in reason_lower or "planned" in reason_lower:
+            status = "PLACEHOLDER"
+        elif runner_status_norm in _RUNNER_STATUS_TO_LOG_STATUS:
+            status = _RUNNER_STATUS_TO_LOG_STATUS[runner_status_norm]
+        else:
+            status = "SKIPPED"
+    else:
+        status = "ERROR"
+
+    safe_reason = (skipped_reason or "")[:240]
+    safe_error = (error_message or "")[:240]
+    duration_ms = int(max(0.0, float(duration_seconds)) * 1000)
+    try:
+        try:
+            from scripts.persistence import log_source_run as _log
+        except ModuleNotFoundError:  # pragma: no cover - script-style env
+            from persistence import log_source_run as _log  # type: ignore[no-redef]
+        _log(
+            source_name=str(source_name),
+            status=status,
+            fetched_count=int(runner_fetched_count or 0),
+            skipped_reason=safe_reason,
+            error_message=safe_error,
+            timestamp_utc=str(timestamp_utc),
+            duration_ms=duration_ms,
+        )
+    except Exception:
+        # Persistence failures must not crash the orchestrator.  The
+        # metadata row is already written; the cockpit will degrade to
+        # the prior source_run_log state, which is still truthful.
+        return
 
 
 def _safe_db_path() -> str:

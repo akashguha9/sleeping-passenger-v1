@@ -185,6 +185,77 @@ actual_sleep_seconds_per_retry
 `actual_sleep_seconds_per_retry` is all zeros when `--no-sleep` is
 passed; the planned values are still recorded.
 
+## Orchestrator-level source_run_log guarantee
+
+`scripts/refresh_live_signals.py::_run_one_source` now writes a
+`source_run_log` row for every attempt, regardless of whether the
+inner runner reached its own `_log_run` call. The status taxonomy:
+
+| Outcome | source_run_log status |
+| --- | --- |
+| OK (rows persisted) | `OK` |
+| OK but empty payload | `OK_EMPTY` |
+| OK but every row filtered out | `OK_FILTERED` |
+| Rate-limited | `RATE_LIMITED` |
+| Timeout | `TIMEOUT` |
+| HTTP error | `HTTP_ERROR` |
+| Missing required credentials | `CONFIG_MISSING` |
+| Planned/placeholder adapter | `PLACEHOLDER` |
+| Uncaught exception inside runner | `ERROR` |
+| Otherwise skipped | `SKIPPED` |
+
+The cockpit chip can therefore never show `never_run` for a source
+the orchestrator actually attempted — it will at minimum show
+`error`, `timeout`, or `config_missing` so the operator knows
+something tried.
+
+## Immediate disagreement recompute (same-tick)
+
+When a watchdog tick refreshes a stale parent (e.g. Kalshi) and that
+parent goes fresh within the same tick, the disagreement scanner is
+invoked immediately — no waiting for the next 30-minute cycle. The
+summary records:
+
+```
+parent_recovery_detected
+disagreement_recompute_invoked_in_tick
+derived_recompute_attempts
+derived_recompute_skipped       # reason: parents_not_fresh
+```
+
+The cockpit panel surfaces a "Parent recovery detected this tick"
+line when these fields fire.
+
+## Task Scheduler exit-code semantics
+
+The Python watchdog uses distinct exit codes so the Windows wrapper
+can tell a STALE_UNCHANGED tick (watchdog ran cleanly, upstreams
+still down) apart from an actual watchdog crash:
+
+| Python status | Python exit | Wrapper log | Wrapper exit |
+| --- | ---:| --- | ---:|
+| HEALTHY | 0 | PASS | 0 |
+| IMPROVED_BUT_STALE | 0 | PASS | 0 |
+| STALE_UNCHANGED | 2 | PASS_WITH_STALE_SOURCES | 0 |
+| ERROR | 1 | FAIL rc=1 | 1 |
+
+Task Scheduler's `LastTaskResult` therefore reflects wrapper health,
+not upstream freshness. Cockpit/`/source-health/watchdog` continues
+to report the watchdog's own `STALE_UNCHANGED` status truthfully —
+the exit-code remapping is for the scheduler only.
+
+## Watchdog log rotation
+
+`scripts/windows/run_refresh_watchdog_once.ps1` now rotates
+`logs/refresh_watchdog.log` size-based before each append:
+
+- `-LogMaxBytes` (default `5242880` = 5 MB)
+- `-LogBackupCount` (default `5`)
+- Rotated files: `refresh_watchdog.log.1` ... `refresh_watchdog.log.5`
+
+Only the active log and its numbered backups are touched; unrelated
+log files in `logs/` are never moved or deleted.
+
 ## End-to-end SQLite test
 
 `tests/test_watchdog_sqlite_e2e.py` mounts a tmp_path SQLite as

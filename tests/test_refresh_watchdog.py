@@ -275,7 +275,10 @@ def test_stale_unchanged_after_max_retries(tmp_path: Path) -> None:
         snapshot_fn=lambda **_: next(snapshots),
     )
     assert result.status == STATUS_STALE_UNCHANGED
-    assert result.exit_code == 1
+    # STALE_UNCHANGED now exits 2 (distinct from ERROR=1) so the Windows
+    # wrapper can tell "watchdog ran cleanly, upstreams still stale"
+    # apart from "watchdog crashed".  See EXIT_STALE_UNCHANGED.
+    assert result.exit_code == 2
     assert set(result.summary["stale_sources_after"]) >= {"kalshi", "gdelt", "prediction_market_disagreement"}
     _assert_safety(result.summary)
 
