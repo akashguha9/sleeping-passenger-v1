@@ -70,6 +70,7 @@ KALSHI_CATEGORY_MAP: dict[str, str] = {
     "macro": "Economics",
     "finance": "Finance",
     "financial": "Finance",
+    "financials": "Finance",
     "markets": "Finance",
     "tech & science": "Tech & Science",
     "tech and science": "Tech & Science",

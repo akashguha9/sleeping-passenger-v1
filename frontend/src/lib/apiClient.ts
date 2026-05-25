@@ -22,6 +22,7 @@ import type {
   SecurityCoverageResponse,
   ReconciliationQueueResponse,
   LearningCompletenessResponse,
+  KalshiSourceHealthResponse,
 } from '@/types';
 
 export interface HealthResponse {
@@ -534,6 +535,21 @@ export async function getSourceHealthSummary(): Promise<SourceHealthSummaryRespo
 export async function getLiveSourcesStatus(): Promise<LiveSourcesStatusResponse | null> {
   try {
     return await apiFetch<LiveSourcesStatusResponse>('/live-sources/status');
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Fetch the sanitized Kalshi source-health summary that backs the
+ * operator-truth panel.  The backend reads
+ * ``runtime/release/kalshi_source_health.json`` and strips any
+ * auth-bearing keys before serving it.  This fetch returns ``null``
+ * on any failure so the page can degrade gracefully.
+ */
+export async function getKalshiSourceHealth(): Promise<KalshiSourceHealthResponse | null> {
+  try {
+    return await apiFetch<KalshiSourceHealthResponse>('/kalshi/source-health');
   } catch {
     return null;
   }

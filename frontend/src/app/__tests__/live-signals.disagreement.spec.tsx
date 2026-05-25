@@ -30,6 +30,7 @@ vi.mock('@/lib/apiClient', () => ({
   getLiveSignals: vi.fn(),
   getSourceHealthSummary: vi.fn().mockResolvedValue(null),
   getLiveSourcesStatus: vi.fn(),
+  getKalshiSourceHealth: vi.fn().mockResolvedValue(null),
 }));
 
 import {

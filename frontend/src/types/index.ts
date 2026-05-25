@@ -711,6 +711,64 @@ export interface LearningCompletenessResponse {
   human_review_required: boolean;
 }
 
+/**
+ * Kalshi operator-truth payload — the sanitized contents of
+ * ``runtime/release/kalshi_source_health.json``.  This response is read
+ * by the live-signals page and rendered in :class:`KalshiOperatorTruthPanel`.
+ *
+ * SECRET CONTRACT: this interface MUST NOT contain or expose
+ * ``api_key_id``, ``private_key_path``, ``Authorization``, or any of
+ * the ``KALSHI-ACCESS-*`` header values.  The backend strips them; the
+ * frontend never re-fetches them.
+ */
+export interface KalshiSourceHealthResponse {
+  source_name?: string;
+  artifact_kind?: string;
+  attempted_at_utc?: string;
+  completed_at_utc?: string;
+  status?: string;
+  http_status?: number | null;
+  error_type?: string;
+  error_message?: string;
+  records_seen_total?: number;
+  records_allowed?: number;
+  records_quarantined?: number;
+  records_persisted?: number;
+  records_dropped?: number;
+  allowed_categories?: string[];
+  category_allowed_counts?: Record<string, number>;
+  category_rejected_counts?: Record<string, number>;
+  quarantine_reason_counts?: Record<string, number>;
+  last_successful_fetch_at_utc?: string;
+  freshness_ttl_seconds?: number;
+  source_freshness_status?: string;
+  is_mock_run?: boolean;
+  mode?: string;
+  env?: string;
+  auth_used?: boolean;
+  api_base_url?: string;
+  dry_run?: boolean;
+  seek_allowed?: boolean;
+  min_allowed?: number;
+  allowed_found?: boolean;
+  pages_scanned?: number;
+  cursor_exhausted?: boolean;
+  first_allowed_seen_at_page?: number | null;
+  accepted_sample_titles?: string[];
+  accepted_sample_categories?: string[];
+  quarantined_sample_categories?: string[];
+  raw_payload_stored?: boolean;
+  event_enrichment_attempted?: number;
+  event_enrichment_succeeded?: number;
+  event_enrichment_failed?: number;
+  event_enrichment_failure_rate?: number;
+  advisory_only?: boolean;
+  human_review_required?: boolean;
+  execution_locked?: boolean;
+  broker_api_called?: boolean;
+  ai_execution_count?: number;
+}
+
 export interface DbStatusResponse {
   db_path: string;
   db_exists: boolean;

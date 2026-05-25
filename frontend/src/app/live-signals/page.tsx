@@ -5,6 +5,7 @@ import {
   getLiveSignals,
   getSourceHealthSummary,
   getLiveSourcesStatus,
+  getKalshiSourceHealth,
 } from '@/lib/apiClient';
 import type {
   LiveSignalEvent,
@@ -13,11 +14,13 @@ import type {
   LiveSourcesStatusResponse,
   SourceHealthSummaryEntry,
   SourceHealthSummaryResponse,
+  KalshiSourceHealthResponse,
 } from '@/types';
 import { AdvisoryOnlyBadge } from '@/components/AdvisoryOnlyBadge';
 import { HumanOnlyBadge } from '@/components/HumanOnlyBadge';
 import { SourceHealthWarnings } from '@/components/SourceHealthWarnings';
 import { SourceHealthBadge } from '@/components/SourceHealthBadge';
+import { KalshiOperatorTruthPanel } from '@/components/KalshiOperatorTruthPanel';
 
 const SOURCE_OPTIONS: { value: '' | LiveSignalSource; label: string }[] = [
   { value: '', label: 'All Sources' },
@@ -972,6 +975,7 @@ export default function LiveSignalsPage() {
   const [data, setData] = useState<LiveSignalsResponse | null>(null);
   const [health, setHealth] = useState<SourceHealthSummaryResponse | null>(null);
   const [refreshStatus, setRefreshStatus] = useState<LiveSourcesStatusResponse | null>(null);
+  const [kalshiHealth, setKalshiHealth] = useState<KalshiSourceHealthResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [backendOffline, setBackendOffline] = useState(false);
 
@@ -981,7 +985,8 @@ export default function LiveSignalsPage() {
       getLiveSignals(sourceFilter || undefined, 200),
       getSourceHealthSummary(),
       getLiveSourcesStatus(),
-    ]).then(([result, h, r]) => {
+      getKalshiSourceHealth(),
+    ]).then(([result, h, r, k]) => {
       if (!result) {
         setBackendOffline(true);
       } else {
@@ -990,6 +995,7 @@ export default function LiveSignalsPage() {
       }
       setHealth(h);
       setRefreshStatus(r);
+      setKalshiHealth(k);
       setLoading(false);
     });
   }, [sourceFilter]);
@@ -1096,6 +1102,14 @@ export default function LiveSignalsPage() {
           sourceKey={sourceFilter}
           status={refreshStatus}
         />
+      )}
+
+      {/* Kalshi operator-truth panel — surfaces the read-only source-health
+          artifact when the operator is viewing All Sources or the Kalshi
+          tab.  Renders only sanitized fields: no API key ID, no private
+          key path, no auth headers, no signatures. */}
+      {!loading && (sourceFilter === '' || sourceFilter === 'kalshi') && (
+        <KalshiOperatorTruthPanel data={kalshiHealth} />
       )}
 
       {!loading && sourceFilter === 'asia_disclosure' && (

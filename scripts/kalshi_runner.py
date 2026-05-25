@@ -66,9 +66,192 @@ except ModuleNotFoundError:  # pragma: no cover - script-style fallback
 
 DEFAULT_KALSHI_HEALTH_PATH = REPO_ROOT / "runtime" / "release" / "kalshi_source_health.json"
 DEFAULT_KALSHI_QUARANTINE_PATH = REPO_ROOT / "runtime" / "release" / "kalshi_quarantine.jsonl"
+DEFAULT_KALSHI_HEALTH_HISTORY_PATH = (
+    REPO_ROOT / "runtime" / "release" / "kalshi_source_health_history.jsonl"
+)
+DEFAULT_KALSHI_QUARANTINE_MAX_BYTES = 5 * 1024 * 1024  # 5 MiB rolling cap
+DEFAULT_KALSHI_HEALTH_HISTORY_MAX_LINES = 500
+
+# Keys that must never reach the sanitized history ledger.  Defence in
+# depth against accidental upstream changes that start carrying auth
+# material in source-health.
+_HISTORY_FORBIDDEN_KEYS = frozenset(
+    {
+        "api_key_id",
+        "private_key_path",
+        "authorization",
+        "kalshi-access-key",
+        "kalshi-access-signature",
+        "kalshi-access-timestamp",
+    }
+)
 
 
 _log = logging.getLogger(__name__)
+
+
+def _atomic_write_json(target: Path, payload: dict[str, Any]) -> None:
+    """Write ``payload`` to ``target`` atomically via tmp + os.replace.
+
+    Used so a crashed interpreter / power loss mid-write cannot leave
+    half-written JSON behind for the next operator to chase.
+    """
+    import os as _os
+
+    target = Path(target)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    tmp = target.with_suffix(target.suffix + ".tmp")
+    data = json.dumps(payload, indent=2)
+    with tmp.open("w", encoding="utf-8") as fh:
+        fh.write(data)
+        fh.flush()
+        try:
+            _os.fsync(fh.fileno())
+        except (OSError, AttributeError):  # pragma: no cover - non-POSIX fs
+            pass
+    _os.replace(tmp, target)
+
+
+def _sanitize_for_history(payload: dict[str, Any]) -> dict[str, Any]:
+    """Strip any forbidden keys from a source-health summary before logging."""
+
+    def _scrub(obj: Any) -> Any:
+        if isinstance(obj, dict):
+            return {
+                k: _scrub(v)
+                for k, v in obj.items()
+                if str(k).lower() not in _HISTORY_FORBIDDEN_KEYS
+            }
+        if isinstance(obj, list):
+            return [_scrub(x) for x in obj]
+        return obj
+
+    return _scrub(payload)
+
+
+def append_kalshi_source_health_history(
+    summary: dict[str, Any],
+    *,
+    base_path: Path | None = None,
+    max_lines: int = DEFAULT_KALSHI_HEALTH_HISTORY_MAX_LINES,
+) -> Path:
+    """Append a sanitized one-line summary to the JSONL history ledger.
+
+    Rotates by truncating to the last ``max_lines`` lines when the
+    ledger crosses that threshold — keeps the operator-visible history
+    bounded without losing recent runs.  Never persists secret material.
+    """
+    if base_path is None:
+        target = DEFAULT_KALSHI_HEALTH_HISTORY_PATH
+    else:
+        target = Path(base_path) / "kalshi_source_health_history.jsonl"
+    target.parent.mkdir(parents=True, exist_ok=True)
+
+    line = _sanitize_for_history(
+        {
+            "timestamp_utc": summary.get(
+                "completed_at_utc", summary.get("attempted_at_utc", "")
+            ),
+            "mode": summary.get("mode", "kalshi_run"),
+            "env": summary.get("env", ""),
+            "status": summary.get("status", ""),
+            "source_freshness_status": summary.get("source_freshness_status", ""),
+            "records_seen_total": summary.get("records_seen_total", 0),
+            "records_allowed": summary.get("records_allowed", 0),
+            "records_quarantined": summary.get("records_quarantined", 0),
+            "auth_used": summary.get("auth_used", False),
+            "api_base_url": summary.get("api_base_url", ""),
+            "dry_run": summary.get("dry_run", True),
+            "seek_allowed": summary.get("seek_allowed", False),
+            "allowed_found": summary.get("allowed_found", False),
+            "pages_scanned": summary.get("pages_scanned", 0),
+            "advisory_only": True,
+            "human_review_required": True,
+            "execution_locked": True,
+            "broker_api_called": False,
+            "ai_execution_count": 0,
+        }
+    )
+    try:
+        with target.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(line) + "\n")
+    except OSError as exc:  # pragma: no cover - filesystem failure
+        _log.warning("kalshi health history append failed: %s", exc)
+        return target
+
+    # Rotate by truncating to the most-recent ``max_lines``.
+    try:
+        text = target.read_text(encoding="utf-8")
+        lines = [ln for ln in text.splitlines() if ln.strip()]
+        if len(lines) > max_lines:
+            kept = lines[-max_lines:]
+            _atomic_write_text(target, "\n".join(kept) + "\n")
+    except OSError:  # pragma: no cover
+        pass
+    return target
+
+
+def _atomic_write_text(target: Path, text: str) -> None:
+    import os as _os
+
+    target = Path(target)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    tmp = target.with_suffix(target.suffix + ".tmp")
+    with tmp.open("w", encoding="utf-8") as fh:
+        fh.write(text)
+        fh.flush()
+        try:
+            _os.fsync(fh.fileno())
+        except (OSError, AttributeError):  # pragma: no cover
+            pass
+    _os.replace(tmp, target)
+
+
+def rotate_kalshi_quarantine(
+    path: Path,
+    *,
+    max_bytes: int = DEFAULT_KALSHI_QUARANTINE_MAX_BYTES,
+) -> dict[str, Any]:
+    """Rotate the Kalshi quarantine jsonl when it exceeds ``max_bytes``.
+
+    The current file is renamed to ``<path>.1`` (overwriting any prior
+    rotation), a small summary is recorded next to it, and a fresh
+    empty jsonl is left in its place.  Never deletes the audit without
+    leaving the summary breadcrumb.
+    """
+    target = Path(path)
+    if not target.exists():
+        return {"rotated": False, "reason": "missing"}
+    try:
+        size = target.stat().st_size
+    except OSError as exc:
+        return {"rotated": False, "reason": f"stat_failed:{type(exc).__name__}"}
+    if size <= int(max_bytes):
+        return {"rotated": False, "reason": "under_cap", "size_bytes": size}
+    backup = target.with_suffix(target.suffix + ".1")
+    try:
+        if backup.exists():
+            backup.unlink()
+        target.rename(backup)
+        target.write_text("", encoding="utf-8")
+    except OSError as exc:
+        return {"rotated": False, "reason": f"rename_failed:{type(exc).__name__}"}
+    rot_summary = target.with_suffix(target.suffix + ".rotation.json")
+    payload = {
+        "rotated_at_utc": utc_timestamp(),
+        "previous_file": str(backup),
+        "previous_size_bytes": int(size),
+        "max_bytes": int(max_bytes),
+        "advisory_only": True,
+        "human_review_required": True,
+        "broker_api_called": False,
+        "ai_execution_count": 0,
+    }
+    try:
+        _atomic_write_json(rot_summary, payload)
+    except OSError:  # pragma: no cover
+        pass
+    return {"rotated": True, **payload}
 
 
 @dataclass
@@ -228,10 +411,9 @@ def write_kalshi_source_health(
     }
     summary.update(_safety_block())
 
-    # Write health summary.
+    # Write health summary atomically (tmp + replace).
     try:
-        health_path.parent.mkdir(parents=True, exist_ok=True)
-        health_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
+        _atomic_write_json(health_path, summary)
     except OSError as exc:  # pragma: no cover - filesystem failure
         _log.warning("kalshi health summary write failed: %s", exc)
 
@@ -244,6 +426,20 @@ def write_kalshi_source_health(
                     fh.write(json.dumps(rec) + "\n")
         except OSError as exc:  # pragma: no cover - filesystem failure
             _log.warning("kalshi quarantine append failed: %s", exc)
+
+    # Rolling retention — bound the audit jsonl so unattended demo days
+    # don't grow it without limit.  Rotation summary preserves a
+    # breadcrumb pointing at the prior file.
+    try:
+        rotate_kalshi_quarantine(quarantine_path)
+    except Exception:  # pragma: no cover
+        pass
+
+    # Sanitized append-only history ledger (one line per run).
+    try:
+        append_kalshi_source_health_history(summary, base_path=health_path.parent)
+    except Exception:  # pragma: no cover
+        pass
 
     return summary
 
@@ -408,4 +604,10 @@ __all__ = [
     "write_kalshi_source_health",
     "DEFAULT_KALSHI_HEALTH_PATH",
     "DEFAULT_KALSHI_QUARANTINE_PATH",
+    "DEFAULT_KALSHI_HEALTH_HISTORY_PATH",
+    "DEFAULT_KALSHI_QUARANTINE_MAX_BYTES",
+    "DEFAULT_KALSHI_HEALTH_HISTORY_MAX_LINES",
+    "append_kalshi_source_health_history",
+    "rotate_kalshi_quarantine",
+    "_atomic_write_json",
 ]
