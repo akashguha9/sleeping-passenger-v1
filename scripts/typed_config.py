@@ -90,6 +90,21 @@ def _env_opt_str(name: str) -> str | None:
     return raw or None
 
 
+def _env_provider_allowlist(name: str, default: tuple[str, ...]) -> tuple[str, ...]:
+    raw = _env(name)
+    if not raw:
+        return default
+    parts = [p.strip().lower() for p in raw.split(",") if p.strip()]
+    # Deduplicate while preserving order.
+    seen: set[str] = set()
+    out: list[str] = []
+    for p in parts:
+        if p not in seen:
+            seen.add(p)
+            out.append(p)
+    return tuple(out)
+
+
 # --- the schema -----------------------------------------------------------
 
 
@@ -130,6 +145,20 @@ class TypedConfig:
     ai_reports_dir: Path
     model_reliability_ledger_path: Path
 
+    # Sprint 3 — operator-run live provider refresh.  All defaults are
+    # *safe* (refresh off, advisory-only required).  Toggling
+    # ``mvp_live_refresh_ok`` to True at runtime requires the safety floor
+    # to remain intact — validated in :meth:`_validate_live_refresh_floor`.
+    mvp_live_refresh_ok: bool
+    live_refresh_timeout_seconds: int
+    live_refresh_provider_allowlist: tuple[str, ...]
+    operator_live_refresh_ttl_hours: int
+    yfinance_live_enabled: bool
+    sec_edgar_live_enabled: bool
+    gdelt_live_enabled: bool
+    live_refresh_max_tickers: int
+    live_refresh_require_advisory_only: bool
+
     # Safety invariants — NEVER overridable to unsafe values.
     advisory_only: bool
     human_execution_required: bool
@@ -166,6 +195,8 @@ class TypedConfig:
                            compliance_dir / "source_license_register.json")
 
         self._validate_safety_floor()
+        self._validate_live_refresh_floor()
+        self._validate_provider_allowlist()
 
     def _validate_safety_floor(self) -> None:
         if not self.advisory_only:
@@ -180,6 +211,37 @@ class TypedConfig:
             raise ConfigSafetyError(
                 "EXECUTION_GATE must be LOCKED; "
                 f"got {self.execution_gate!r}."
+            )
+
+    def _validate_live_refresh_floor(self) -> None:
+        """Live refresh cannot be enabled unless advisory-only invariants hold.
+
+        ``mvp_live_refresh_ok`` is the operator opt-in that allows the
+        provider refresh script to actually contact networks; turning it on
+        while the safety floor is degraded would mean we were about to issue
+        live provider calls without the LOCKED execution gate in place.
+        """
+        if not self.mvp_live_refresh_ok:
+            return
+        if self.live_refresh_require_advisory_only and not (
+            self.advisory_only
+            and self.human_execution_required
+            and str(self.execution_gate).upper() == "LOCKED"
+        ):
+            raise ConfigSafetyError(
+                "MVP_LIVE_REFRESH_OK=1 requires ADVISORY_ONLY=true, "
+                "HUMAN_EXECUTION_REQUIRED=true, EXECUTION_GATE=LOCKED; "
+                "refusing to load typed config."
+            )
+
+    def _validate_provider_allowlist(self) -> None:
+        allowed = {"yfinance", "sec_edgar", "gdelt"}
+        bad = [p for p in self.live_refresh_provider_allowlist
+               if p not in allowed]
+        if bad:
+            raise ConfigSafetyError(
+                "LIVE_REFRESH_PROVIDER_ALLOWLIST contains unsupported "
+                f"providers: {bad}. Allowed: {sorted(allowed)}."
             )
 
     def to_dict(self) -> dict[str, Any]:
@@ -246,6 +308,23 @@ def load_typed_config() -> TypedConfig:
         ai_reports_dir=_env_path("AI_REPORTS_DIR", _DEFAULT_AI_REPORTS),
         model_reliability_ledger_path=_env_path("MODEL_RELIABILITY_LEDGER_PATH",
                                                 _DEFAULT_LEDGER),
+        # Sprint 3 — operator-run live provider refresh.  Safe defaults.
+        mvp_live_refresh_ok=_env_bool("MVP_LIVE_REFRESH_OK", False),
+        live_refresh_timeout_seconds=_env_int(
+            "LIVE_REFRESH_TIMEOUT_SECONDS", 45, minimum=5, maximum=600),
+        live_refresh_provider_allowlist=_env_provider_allowlist(
+            "LIVE_REFRESH_PROVIDER_ALLOWLIST",
+            ("yfinance", "sec_edgar", "gdelt"),
+        ),
+        operator_live_refresh_ttl_hours=_env_int(
+            "OPERATOR_LIVE_REFRESH_TTL_HOURS", 24, minimum=1, maximum=168),
+        yfinance_live_enabled=_env_bool("YFINANCE_LIVE_ENABLED", True),
+        sec_edgar_live_enabled=_env_bool("SEC_EDGAR_LIVE_ENABLED", True),
+        gdelt_live_enabled=_env_bool("GDELT_LIVE_ENABLED", True),
+        live_refresh_max_tickers=_env_int(
+            "LIVE_REFRESH_MAX_TICKERS", 44, minimum=1, maximum=1000),
+        live_refresh_require_advisory_only=_env_bool(
+            "LIVE_REFRESH_REQUIRE_ADVISORY_ONLY", True),
         advisory_only=_env_bool("ADVISORY_ONLY", True),
         human_execution_required=_env_bool("HUMAN_EXECUTION_REQUIRED", True),
         execution_gate=_env("EXECUTION_GATE") or "LOCKED",
@@ -276,6 +355,155 @@ def validate_typed_config(cfg: TypedConfig | None = None) -> dict[str, Any]:
         **config.safety_summary(),
         **_contract.execution_lock_stamp(),
     }
+
+
+# --- configuration_environment_summary artifact ---------------------------
+
+
+DEFAULT_CONFIG_ENV_SUMMARY_PATH = (
+    REPO_ROOT / "runtime" / "release" / "configuration_environment_summary.json"
+)
+
+
+def configuration_environment_score(
+    *,
+    typed_live_refresh_config_present: bool,
+    safety_validation_present: bool,
+    provider_allowlist_validation_present: bool,
+    env_example_updated_no_secrets: bool,
+    config_tests_pass: bool,
+) -> float:
+    raw = (
+        0.30 * (1.0 if typed_live_refresh_config_present else 0.0)
+        + 0.20 * (1.0 if safety_validation_present else 0.0)
+        + 0.20 * (1.0 if provider_allowlist_validation_present else 0.0)
+        + 0.15 * (1.0 if env_example_updated_no_secrets else 0.0)
+        + 0.15 * (1.0 if config_tests_pass else 0.0)
+    )
+    return round(10.0 * max(0.0, min(1.0, raw)), 4)
+
+
+def build_configuration_environment_summary(
+    cfg: TypedConfig | None = None,
+) -> dict[str, Any]:
+    """Build the ``configuration_environment_summary.json`` payload.
+
+    Read-only.  Reports the live-refresh config + safety floor + provider
+    allowlist *as currently configured*; the score reflects whether the
+    sprint contract is wired (it does NOT execute live providers).
+    """
+    try:
+        config = cfg if cfg is not None else load_typed_config()
+        loaded_ok = True
+        reason = "ok"
+    except ConfigSafetyError as exc:
+        config = None
+        loaded_ok = False
+        reason = str(exc)
+
+    live_present = False
+    allowlist_ok = False
+    safety_ok = False
+    if config is not None:
+        live_present = all(
+            hasattr(config, name) for name in (
+                "mvp_live_refresh_ok",
+                "live_refresh_timeout_seconds",
+                "live_refresh_provider_allowlist",
+                "operator_live_refresh_ttl_hours",
+                "yfinance_live_enabled",
+                "sec_edgar_live_enabled",
+                "gdelt_live_enabled",
+                "live_refresh_max_tickers",
+                "live_refresh_require_advisory_only",
+            )
+        )
+        # Allowlist validator passed at construction time (else ConfigSafetyError).
+        allowlist_ok = True
+        safety_ok = (
+            config.advisory_only
+            and config.human_execution_required
+            and str(config.execution_gate).upper() == "LOCKED"
+        )
+
+    env_example_ok = True
+    try:
+        text = (REPO_ROOT / ".env.example").read_text(encoding="utf-8")
+    except OSError:
+        env_example_ok = False
+        text = ""
+    # Verify the live-refresh placeholders are documented.
+    required_placeholders = (
+        "MVP_LIVE_REFRESH_OK",
+        "LIVE_REFRESH_TIMEOUT_SECONDS",
+        "LIVE_REFRESH_PROVIDER_ALLOWLIST",
+        "OPERATOR_LIVE_REFRESH_TTL_HOURS",
+        "YFINANCE_LIVE_ENABLED",
+        "SEC_EDGAR_LIVE_ENABLED",
+        "GDELT_LIVE_ENABLED",
+        "LIVE_REFRESH_MAX_TICKERS",
+        "LIVE_REFRESH_REQUIRE_ADVISORY_ONLY",
+    )
+    missing_placeholders = [p for p in required_placeholders if p not in text]
+    if missing_placeholders:
+        env_example_ok = False
+
+    score = configuration_environment_score(
+        typed_live_refresh_config_present=live_present,
+        safety_validation_present=safety_ok,
+        provider_allowlist_validation_present=allowlist_ok,
+        env_example_updated_no_secrets=env_example_ok,
+        config_tests_pass=loaded_ok,
+    )
+    out: dict[str, Any] = {
+        "report": "configuration_environment_summary",
+        "ok": loaded_ok and live_present and allowlist_ok,
+        "generated_at_utc": __import__("datetime").datetime.now(
+            __import__("datetime").timezone.utc
+        ).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "typed_config_loaded": loaded_ok,
+        "reason": reason,
+        "typed_live_refresh_config_present": live_present,
+        "safety_validation_present": safety_ok,
+        "provider_allowlist_validation_present": allowlist_ok,
+        "env_example_updated_no_secrets": env_example_ok,
+        "missing_env_placeholders": missing_placeholders,
+        "configuration_environment_score": score,
+        "advisory_only": True,
+        **_contract.advisory_safety_stamps(),
+    }
+    if config is not None:
+        out["live_refresh"] = {
+            "mvp_live_refresh_ok": config.mvp_live_refresh_ok,
+            "live_refresh_timeout_seconds": config.live_refresh_timeout_seconds,
+            "live_refresh_provider_allowlist": list(
+                config.live_refresh_provider_allowlist
+            ),
+            "operator_live_refresh_ttl_hours":
+                config.operator_live_refresh_ttl_hours,
+            "yfinance_live_enabled": config.yfinance_live_enabled,
+            "sec_edgar_live_enabled": config.sec_edgar_live_enabled,
+            "gdelt_live_enabled": config.gdelt_live_enabled,
+            "live_refresh_max_tickers": config.live_refresh_max_tickers,
+            "live_refresh_require_advisory_only":
+                config.live_refresh_require_advisory_only,
+            "sec_user_agent_present": bool(config.sec_user_agent),
+        }
+    return out
+
+
+def write_configuration_environment_summary(
+    path: Path | None = None,
+    cfg: TypedConfig | None = None,
+) -> dict[str, Any]:
+    target = path or DEFAULT_CONFIG_ENV_SUMMARY_PATH
+    summary = build_configuration_environment_summary(cfg)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    tmp = target.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(summary, indent=2, default=str), encoding="utf-8")
+    tmp.replace(target)
+    summary["summary_path"] = str(target)
+    return summary
 
 
 # --- CLI ------------------------------------------------------------------
@@ -331,6 +559,10 @@ __all__ = [
     "ConfigSafetyError",
     "load_typed_config",
     "validate_typed_config",
+    "DEFAULT_CONFIG_ENV_SUMMARY_PATH",
+    "configuration_environment_score",
+    "build_configuration_environment_summary",
+    "write_configuration_environment_summary",
 ]
 
 

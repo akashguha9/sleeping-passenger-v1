@@ -108,6 +108,18 @@ CONTRACT: dict[str, str] = {
     "ADVISORY_ONLY": _PLAIN,
     "HUMAN_EXECUTION_REQUIRED": _PLAIN,
     "EXECUTION_GATE": _PLAIN,
+    # Sprint 3 — operator-run live provider refresh (yfinance / SEC / GDELT).
+    # MVP_LIVE_REFRESH_OK is the operator opt-in; the others are knobs the
+    # operator may want to override.  None of them grants execution.
+    "MVP_LIVE_REFRESH_OK": _PLAIN,
+    "LIVE_REFRESH_TIMEOUT_SECONDS": _PLAIN,
+    "LIVE_REFRESH_PROVIDER_ALLOWLIST": _PLAIN,
+    "OPERATOR_LIVE_REFRESH_TTL_HOURS": _PLAIN,
+    "YFINANCE_LIVE_ENABLED": _SOURCE,
+    "SEC_EDGAR_LIVE_ENABLED": _SOURCE,
+    "GDELT_LIVE_ENABLED": _SOURCE,
+    "LIVE_REFRESH_MAX_TICKERS": _PLAIN,
+    "LIVE_REFRESH_REQUIRE_ADVISORY_ONLY": _PLAIN,
 }
 
 REQUIRED_VARS = tuple(k for k, v in CONTRACT.items() if v == _REQUIRED)

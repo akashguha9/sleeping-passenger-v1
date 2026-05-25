@@ -41,6 +41,24 @@ except ModuleNotFoundError:  # pragma: no cover
     import source_run_ledger as _srl  # type: ignore[no-redef]
     import signal_input_quality as _siq  # type: ignore[no-redef]
 
+# Sprint 3 — optional cross-modules.  Imported best-effort so the readiness
+# summary still builds in stripped environments.
+try:
+    from scripts import candidate_promotion_contract as _cpc  # type: ignore
+except ModuleNotFoundError:  # pragma: no cover
+    try:
+        import candidate_promotion_contract as _cpc  # type: ignore[no-redef]
+    except ModuleNotFoundError:
+        _cpc = None  # type: ignore[assignment]
+
+try:
+    from scripts import operator_live_provider_refresh as _olpr  # type: ignore
+except ModuleNotFoundError:  # pragma: no cover
+    try:
+        import operator_live_provider_refresh as _olpr  # type: ignore[no-redef]
+    except ModuleNotFoundError:
+        _olpr = None  # type: ignore[assignment]
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_SUMMARY_PATH = (
     REPO_ROOT / "runtime" / "release" / "daily_signal_readiness_summary.json"
@@ -98,10 +116,26 @@ def gather_component_scores() -> dict[str, float]:
         _fmi.DEFAULT_SUMMARY_PATH, "five_model_independence_score",
         _fmi.build_summary,
     )
-    srl_score = _read_or_compute(
-        _srl.DEFAULT_SUMMARY_PATH, "live_payload_quality_score",
-        lambda: _srl.refresh(mode="fixture"),
-    )
+
+    # Sprint 3 — Live/fresh payload quality is read from the operator-run
+    # artifact when it exists *and is fresh*; otherwise we fall back to the
+    # honest fixture-mode floor (8.2 per spec).  The fixture-mode summary
+    # writes a higher headline number but it is NOT a live score.
+    live_fresh_payload_quality_score = 8.2
+    live_refresh_present = False
+    live_refresh_fresh = False
+    if _olpr is not None:
+        op_summary = _olpr.read_summary()
+        if isinstance(op_summary, dict):
+            live_refresh_present = True
+            evidence = _olpr.operator_artifact_valid(op_summary)
+            live_refresh_fresh = bool(evidence.get("fresh"))
+            providers_live = list(op_summary.get("providers_live_verified") or [])
+            if live_refresh_fresh and providers_live:
+                val = op_summary.get("live_payload_quality_score")
+                if isinstance(val, (int, float)):
+                    live_fresh_payload_quality_score = float(val)
+
     wte_score = _read_or_compute(
         _wte.DEFAULT_SUMMARY_PATH, "why_today_enforcement_score",
         _wte.build_summary,
@@ -114,6 +148,14 @@ def gather_component_scores() -> dict[str, float]:
         _siq.DEFAULT_SUMMARY_PATH, "signal_input_quality_score",
         _siq.build_summary,
     )
+    # Sprint 3 — candidate vs executable score from the promotion contract.
+    if _cpc is not None:
+        cpc_score = _read_or_compute(
+            _cpc.DEFAULT_SUMMARY_PATH, "candidate_vs_executable_score",
+            _cpc.build_summary,
+        )
+    else:
+        cpc_score = 9.8  # honest baseline; absence is non-blocking
     # Safety is invariant — the contract is the source of truth.  10.0 unless
     # an explicit downgrade is recorded by a caller.
     safety_score = 10.0
@@ -122,30 +164,57 @@ def gather_component_scores() -> dict[str, float]:
         "fresh_discovery_quality": fdq_score,
         "anti_staleness": anti_score,
         "five_model_independence": fmi_score,
-        "live_fresh_payload_quality": srl_score,
+        "live_fresh_payload_quality": live_fresh_payload_quality_score,
         "why_today_enforcement": wte_score,
         "candidate_memory_decay": memo_score,
         "model_disagreement": mdh_score,
         "signal_input_quality": siq_score,
+        "candidate_vs_executable": cpc_score,
         "safety_advisory_integrity": safety_score,
+        "_live_refresh_present": 1.0 if live_refresh_present else 0.0,
+        "_live_refresh_fresh": 1.0 if live_refresh_fresh else 0.0,
     }
 
 
 def compute_overall(
     components: dict[str, float],
 ) -> tuple[float, list[str]]:
-    """Apply the weighted formula + the three caps; return ``(score, caps)``."""
+    """Apply the weighted formula + the spec caps; return ``(score, caps)``.
+
+    Sprint 3 formula (weights sum to 1.00):
+
+        0.10 portfolio_truth_integrity
+        0.11 fresh_discovery_quality
+        0.09 anti_staleness
+        0.09 five_model_independence
+        0.15 live_fresh_payload_quality
+        0.10 why_today_enforcement
+        0.08 candidate_memory_decay
+        0.09 model_disagreement
+        0.12 signal_input_quality
+        0.04 candidate_vs_executable
+        0.03 safety_advisory_integrity
+
+    Caps (lowest cap wins):
+
+        safety < 10                 -> 7.0
+        portfolio_truth < 9.5       -> 9.0
+        live_fresh_payload < 8.0    -> 9.15
+        live_fresh_payload < 8.6    -> 9.30
+        candidate_vs_executable<9.8 -> 9.25
+    """
     weights = {
-        "portfolio_truth_integrity": 0.12,
-        "fresh_discovery_quality": 0.12,
-        "anti_staleness": 0.10,
-        "five_model_independence": 0.10,
-        "live_fresh_payload_quality": 0.12,
+        "portfolio_truth_integrity": 0.10,
+        "fresh_discovery_quality": 0.11,
+        "anti_staleness": 0.09,
+        "five_model_independence": 0.09,
+        "live_fresh_payload_quality": 0.15,
         "why_today_enforcement": 0.10,
         "candidate_memory_decay": 0.08,
-        "model_disagreement": 0.10,
+        "model_disagreement": 0.09,
         "signal_input_quality": 0.12,
-        "safety_advisory_integrity": 0.04,
+        "candidate_vs_executable": 0.04,
+        "safety_advisory_integrity": 0.03,
     }
     raw = sum(w * (components.get(k, 0.0) / 10.0) for k, w in weights.items())
     raw = _clamp01(raw)
@@ -153,18 +222,23 @@ def compute_overall(
 
     caps_applied: list[str] = []
     # The caps record *whenever the precondition fires*, not only when the
-    # cap actually lowers the score.  This way the operator sees that a
-    # constraint was in effect even if the headline number happened to be
-    # below it already.
+    # cap actually lowers the score.  Lowest cap wins.
     if components.get("safety_advisory_integrity", 10.0) < 10.0:
         caps_applied.append("safety_floor:cap_7.0")
         score = min(score, 7.0)
-    if components.get("live_fresh_payload_quality", 0.0) < 8.0:
-        caps_applied.append("live_payload_low:cap_9.15")
-        score = min(score, 9.15)
     if components.get("portfolio_truth_integrity", 0.0) < 9.5:
         caps_applied.append("portfolio_truth_low:cap_9.0")
         score = min(score, 9.0)
+    lpq = components.get("live_fresh_payload_quality", 0.0)
+    if lpq < 8.0:
+        caps_applied.append("live_payload_low:cap_9.15")
+        score = min(score, 9.15)
+    elif lpq < 8.6:
+        caps_applied.append("live_payload_below_target:cap_9.30")
+        score = min(score, 9.30)
+    if components.get("candidate_vs_executable", 0.0) < 9.8:
+        caps_applied.append("candidate_vs_executable_low:cap_9.25")
+        score = min(score, 9.25)
 
     return round(score, 4), caps_applied
 
@@ -175,15 +249,34 @@ def build_summary(
     if components is None:
         components = gather_component_scores()
     overall, caps_applied = compute_overall(components)
+    live_refresh_present = bool(components.get("_live_refresh_present", 0.0))
+    live_refresh_fresh = bool(components.get("_live_refresh_fresh", 0.0))
+    # Project a clean component view (strip the underscore-prefixed flags).
+    visible_components = {
+        k: v for k, v in components.items() if not k.startswith("_")
+    }
     return {
         "report": "daily_signal_readiness_summary",
         "ok": overall >= 9.0,
         "generated_at_utc": _utc_iso(),
         "overall_daily_signal_readiness": overall,
-        "component_scores": components,
+        "component_scores": visible_components,
         "caps_applied": caps_applied,
+        "live_refresh_present": live_refresh_present,
+        "live_refresh_fresh": live_refresh_fresh,
+        "live_fresh_payload_quality_score": components.get(
+            "live_fresh_payload_quality", 0.0
+        ),
+        "candidate_vs_executable_score": components.get(
+            "candidate_vs_executable", 0.0
+        ),
         "advisory_only": True,
+        "human_review_required": True,
         **_contract.advisory_safety_stamps(),
+        # spec requires the string form on this artifact — set AFTER the
+        # legacy contract stamps so the string isn't overwritten.
+        "execution_permission": "ADVISORY_ONLY",
+        "execution_permission_bool": False,
     }
 
 

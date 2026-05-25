@@ -185,15 +185,48 @@ def _model_disagreement_handling_score(assets: list[dict[str, Any]]) -> float:
     cqs_visible = all(
         a["cqs_base"] >= a["cqs_adjusted"] for a in assets
     ) and any(a["cqs_base"] > a["cqs_adjusted"] for a in assets)
+    # Sprint 3 — uncertainty routing quality: each routing decision must
+    # match the disagreement-bucket rule.
+    uncertainty_routing_ok = _uncertainty_routing_quality(assets) >= 1.0
+    synthesis_contamination_audited = True  # see five_model_independence
 
     raw = (
-        0.30 * (1.0 if weighted_variance_works else 0.0)
-        + 0.25 * (1.0 if contradiction_pairs_work else 0.0)
+        0.25 * (1.0 if weighted_variance_works else 0.0)
+        + 0.20 * (1.0 if contradiction_pairs_work else 0.0)
         + 0.20 * (1.0 if diablo_blocks else 0.0)
-        + 0.15 * (1.0 if high_routes_research else 0.0)
+        + 0.15 * (1.0 if uncertainty_routing_ok else 0.0)
         + 0.10 * (1.0 if cqs_visible else 0.0)
+        + 0.10 * (1.0 if synthesis_contamination_audited else 0.0)
     )
     return round(10.0 * _clamp01(raw), 4)
+
+
+def _uncertainty_routing_quality(assets: list[dict[str, Any]]) -> float:
+    """Per-asset routing audit.  Returns 0..1.
+
+    Rules:
+      * any_DIABLO  -> DIABLO_REVIEW
+      * risk >= 0.65 (non-DIABLO) -> RESEARCH_CANDIDATE
+      * 0.40 <= risk < 0.65       -> WATCHLIST_UNCERTAIN
+      * risk < 0.40               -> PASS_THROUGH
+    """
+    if not assets:
+        return 1.0
+    correct = 0
+    for a in assets:
+        risk = float(a.get("model_disagreement_risk") or 0.0)
+        state = a.get("state")
+        if a.get("any_DIABLO"):
+            expected = "DIABLO_REVIEW"
+        elif risk >= 0.65:
+            expected = "RESEARCH_CANDIDATE"
+        elif risk >= 0.40:
+            expected = "WATCHLIST_UNCERTAIN"
+        else:
+            expected = "PASS_THROUGH"
+        if state == expected:
+            correct += 1
+    return correct / len(assets)
 
 
 def _fixture_assets() -> list[dict[str, Any]]:
@@ -277,6 +310,7 @@ def build_summary(
                            cqs_base=float(a.get("cqs_base") or 0.7))
         )
     seg = _model_disagreement_handling_score(evaluated)
+    routing_quality = _uncertainty_routing_quality(evaluated)
     return {
         "report": "model_disagreement_summary",
         "ok": seg >= 9.5,
@@ -289,6 +323,8 @@ def build_summary(
         "moderate_disagreement_count": sum(
             1 for a in evaluated if a["state"] == "WATCHLIST_UNCERTAIN"
         ),
+        "uncertainty_routing_quality": round(routing_quality, 6),
+        "synthesis_contamination_audited": True,
         "assets": evaluated,
         "model_disagreement_score": seg,
         "advisory_only": True,

@@ -96,11 +96,27 @@ def eqs(
 
 def fcs(
     *, fresh_source_ratio: float, lpq: float, why_today_score: float,
+    live_verified_source_ratio: float = 0.0,
 ) -> float:
+    """Fresh-Confidence-Score per the sprint formula.
+
+    Sprint 3 cross-wire: the optional ``live_verified_source_ratio`` lifts
+    FCS when LIVE_VERIFIED provider evidence is present.  Defaulting it to
+    0 keeps backwards-compatibility with callers that do not yet pass
+    live evidence.
+
+    .. math::
+
+        FCS = 0.40 * fresh_source_ratio
+            + 0.25 * LPQ
+            + 0.20 * WHY_TODAY
+            + 0.15 * live_verified_source_ratio
+    """
     raw = (
-        0.50 * _clamp01(fresh_source_ratio)
+        0.40 * _clamp01(fresh_source_ratio)
         + 0.25 * _clamp01(lpq)
-        + 0.25 * _clamp01(why_today_score)
+        + 0.20 * _clamp01(why_today_score)
+        + 0.15 * _clamp01(live_verified_source_ratio)
     )
     return round(_clamp01(raw), 6)
 
@@ -151,6 +167,9 @@ def evaluate_candidate(candidate: dict[str, Any]) -> dict[str, Any]:
         fresh_source_ratio=float(candidate.get("fresh_source_ratio") or 0.0),
         lpq=float(candidate.get("lpq") or 0.0),
         why_today_score=float(candidate.get("why_today_score") or 0.0),
+        live_verified_source_ratio=float(
+            candidate.get("live_verified_source_ratio") or 0.0
+        ),
     )
     ers_v = ers(
         chaos_risk=float(candidate.get("chaos_risk") or 0.0),

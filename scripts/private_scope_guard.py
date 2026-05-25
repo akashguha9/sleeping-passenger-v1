@@ -168,6 +168,15 @@ APPROVED_DOMAINS: tuple[str, ...] = (
     # trading writes.
     "ai_integration",       # ai_integration_readiness.py — AI/API readiness
     "five_model",           # five_model_independence.py — model_runs independence
+    # Sprint 3 (score-upgrade) — advisory-only readiness/contract modules.
+    # Scores/gates only; no broker execution, no order placement, no API
+    # trading writes; no executable trade language.
+    "promotion_contract",     # candidate_promotion_contract.py — composite gate
+    "universe_coverage",      # universe_coverage.py — 44-ticker advisory universe
+    "operator_demo_value",    # operator_demo_value.py — paper/advisory proxy
+    "compliance_trace",       # live_provider_compliance_trace.py — per-provider audit
+    "backend_api_quality",    # backend_api_quality.py — readiness envelope
+    "operator_live_provider", # operator_live_provider_refresh.py — explicit refresh
 )
 
 # Explicit allowlist for individual files / directories whose name does

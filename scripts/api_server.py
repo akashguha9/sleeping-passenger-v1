@@ -2454,6 +2454,108 @@ def export_source_health() -> Response:
     return Response(content=export_source_health_log(), media_type=_CSV_MEDIA_TYPE)
 
 
+# ---------------------------------------------------------------------------
+# Sprint 3 — Backend / API quality readiness surface.
+#
+# Each endpoint reads a release artifact under runtime/release/ and returns
+# the structured envelope contract documented in
+# scripts/backend_api_quality.py.  Read-only, advisory-only, never grants
+# execution permission.  The POST /api/live-refresh/run route is locked
+# behind MVP_LIVE_REFRESH_OK + the safety floor; it never actually issues
+# network calls from the HTTP path (the operator runs the script).
+# ---------------------------------------------------------------------------
+
+
+try:
+    from scripts.backend_api_quality import (
+        read_artifact_envelope as _read_artifact_envelope,
+        live_refresh_run_locked_response as _live_refresh_run_locked_response,
+    )
+except ModuleNotFoundError:  # pragma: no cover
+    from backend_api_quality import (  # type: ignore[no-redef]
+        read_artifact_envelope as _read_artifact_envelope,
+        live_refresh_run_locked_response as _live_refresh_run_locked_response,
+    )
+
+
+@app.get("/api/readiness/release-gate")
+def get_release_gate_readiness() -> dict:
+    return _read_artifact_envelope("release_gate")
+
+
+@app.get("/api/readiness/daily-signal")
+def get_daily_signal_readiness() -> dict:
+    return _read_artifact_envelope("daily_signal")
+
+
+@app.get("/api/source-health")
+def get_source_health_api() -> dict:
+    return _read_artifact_envelope("source_health")
+
+
+@app.get("/api/live-refresh/summary")
+def get_live_refresh_summary() -> dict:
+    return _read_artifact_envelope("live_refresh")
+
+
+@app.get("/api/portfolio-truth")
+def get_portfolio_truth_api() -> dict:
+    return _read_artifact_envelope("portfolio_truth")
+
+
+@app.get("/api/fresh-discovery")
+def get_fresh_discovery_api() -> dict:
+    return _read_artifact_envelope("fresh_discovery")
+
+
+@app.get("/api/why-today/summary")
+def get_why_today_summary() -> dict:
+    return _read_artifact_envelope("why_today")
+
+
+@app.get("/api/model-disagreement/summary")
+def get_model_disagreement_summary() -> dict:
+    return _read_artifact_envelope("model_disagreement")
+
+
+@app.get("/api/signal-input-quality/summary")
+def get_signal_input_quality_summary() -> dict:
+    return _read_artifact_envelope("signal_input_quality")
+
+
+@app.get("/api/compliance/readiness")
+def get_compliance_readiness() -> dict:
+    return _read_artifact_envelope("compliance_readiness")
+
+
+@app.get("/api/business-value/summary")
+def get_business_value_summary() -> dict:
+    return _read_artifact_envelope("business_value")
+
+
+@app.post("/api/live-refresh/run")
+def post_live_refresh_run(
+    _auth: None = Depends(require_api_token),
+) -> dict:
+    """Locked operator endpoint — refuses unless every safety gate holds.
+
+    Does NOT actually run the live refresh from the HTTP path: live calls
+    are operator-run via ``scripts/operator_live_provider_refresh.py``.  The
+    endpoint exists to give the cockpit a deterministic, structured
+    "is live refresh permitted right now?" answer.
+    """
+    import os as _os
+    mvp_ok = _os.environ.get("MVP_LIVE_REFRESH_OK", "").lower() in {
+        "1", "true", "yes", "on",
+    }
+    return _live_refresh_run_locked_response(
+        mvp_live_refresh_ok=mvp_ok,
+        advisory_only=True,
+        human_execution_required=True,
+        execution_gate="LOCKED",
+    )
+
+
 if __name__ == "__main__":  # pragma: no cover
     import sys
 

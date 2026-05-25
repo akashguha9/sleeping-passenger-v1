@@ -41,6 +41,9 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_SUMMARY_PATH = (
     REPO_ROOT / "runtime" / "release" / "persistence_integrity_summary.json"
 )
+DEFAULT_V2_SUMMARY_PATH = (
+    REPO_ROOT / "runtime" / "release" / "data_model_persistence_v2_summary.json"
+)
 
 # Pinned schema versions surfaced via ``schema_metadata``.  Bump when the
 # corresponding canonical table layout changes in a way readers must observe.
@@ -121,6 +124,43 @@ CREATE TABLE IF NOT EXISTS schema_metadata (
     value TEXT NOT NULL,
     updated_at_utc TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS live_provider_evidence (
+    evidence_id TEXT PRIMARY KEY,
+    provider TEXT NOT NULL,
+    source_type TEXT NOT NULL,
+    run_mode TEXT NOT NULL,
+    verification_status TEXT NOT NULL,
+    latest_provider_timestamp_utc TEXT,
+    checked_at_utc TEXT NOT NULL,
+    freshness_age_hours REAL,
+    payload_hash TEXT NOT NULL,
+    source_run_id TEXT,
+    sample_source_url TEXT,
+    advisory_only INTEGER NOT NULL DEFAULT 1
+);
+CREATE INDEX IF NOT EXISTS idx_lpe_provider ON live_provider_evidence(provider);
+CREATE INDEX IF NOT EXISTS idx_lpe_ts ON live_provider_evidence(latest_provider_timestamp_utc);
+
+CREATE TABLE IF NOT EXISTS candidate_gate_audit (
+    audit_id TEXT PRIMARY KEY,
+    candidate_id TEXT NOT NULL,
+    evaluated_at_utc TEXT NOT NULL,
+    cqs_final REAL,
+    eqs REAL,
+    fcs REAL,
+    ers REAL,
+    why_today_score REAL,
+    lpq REAL,
+    portfolio_truth_ok INTEGER,
+    memory_decay_ok INTEGER,
+    model_disagreement_ok INTEGER,
+    final_state TEXT,
+    may_promote INTEGER,
+    downgrade_reasons_json TEXT,
+    advisory_only INTEGER NOT NULL DEFAULT 1
+);
+CREATE INDEX IF NOT EXISTS idx_cga_candidate ON candidate_gate_audit(candidate_id);
 """
 
 
@@ -565,6 +605,257 @@ def write_summary(path: Path | None = None, *,
     return summary
 
 
+# ---------------------------------------------------------------------------
+# Sprint 3 — live_provider_evidence + candidate_gate_audit (v2 persistence)
+# ---------------------------------------------------------------------------
+
+
+def _evidence_id(*, provider: str, latest_ts: str | None,
+                 payload_hash_str: str) -> str:
+    key = f"{provider}|{latest_ts or ''}|{payload_hash_str}"
+    return hashlib.sha256(key.encode("utf-8")).hexdigest()[:32]
+
+
+def upsert_live_provider_evidence(
+    conn: sqlite3.Connection,
+    *,
+    provider: str,
+    source_type: str,
+    run_mode: str,
+    verification_status: str,
+    latest_provider_timestamp_utc: str | None,
+    freshness_age_hours: float | None,
+    payload_hash_value: str,
+    source_run_id: str | None = None,
+    sample_source_url: str | None = None,
+    advisory_only: bool = True,
+) -> dict[str, Any]:
+    """Idempotent live_provider_evidence write.
+
+    Keyed by (provider, latest_provider_timestamp_utc, payload_hash) so the
+    same operator-run refresh artifact does not create duplicate rows when
+    re-imported.  Returns ``{operation, evidence_id}``.
+    """
+    evidence_id = _evidence_id(
+        provider=provider,
+        latest_ts=latest_provider_timestamp_utc,
+        payload_hash_str=payload_hash_value,
+    )
+    now = _utc_iso()
+    existing = conn.execute(
+        "SELECT evidence_id FROM live_provider_evidence WHERE evidence_id = ?",
+        (evidence_id,),
+    ).fetchone()
+    if existing:
+        return {"operation": "deduplicated", "evidence_id": evidence_id}
+    conn.execute(
+        "INSERT INTO live_provider_evidence(evidence_id, provider, source_type, "
+        "run_mode, verification_status, latest_provider_timestamp_utc, "
+        "checked_at_utc, freshness_age_hours, payload_hash, source_run_id, "
+        "sample_source_url, advisory_only) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, "
+        "?, ?, ?)",
+        (
+            evidence_id, str(provider), str(source_type), str(run_mode),
+            str(verification_status), latest_provider_timestamp_utc,
+            now,
+            float(freshness_age_hours) if freshness_age_hours is not None else None,
+            payload_hash_value, source_run_id, sample_source_url,
+            1 if advisory_only else 0,
+        ),
+    )
+    conn.commit()
+    return {"operation": "inserted", "evidence_id": evidence_id}
+
+
+def insert_candidate_gate_audit(
+    conn: sqlite3.Connection,
+    *,
+    candidate_id: str,
+    cqs_final: float | None,
+    eqs: float | None,
+    fcs: float | None,
+    ers: float | None,
+    why_today_score: float | None,
+    lpq: float | None,
+    portfolio_truth_ok: bool,
+    memory_decay_ok: bool,
+    model_disagreement_ok: bool,
+    final_state: str,
+    may_promote: bool,
+    downgrade_reasons: list[str],
+    audit_id: str | None = None,
+) -> dict[str, Any]:
+    """Write a candidate_gate_audit row capturing every formula component.
+
+    ``downgrade_reasons`` is normalized to a sorted, deduped list and stored
+    as canonical JSON so the audit is reproducible.
+    """
+    if not isinstance(downgrade_reasons, list):
+        raise ValueError("downgrade_reasons must be a list[str]")
+    reasons_norm = sorted({str(r) for r in downgrade_reasons if r})
+    aid = audit_id or uuid.uuid4().hex
+    conn.execute(
+        "INSERT INTO candidate_gate_audit(audit_id, candidate_id, "
+        "evaluated_at_utc, cqs_final, eqs, fcs, ers, why_today_score, lpq, "
+        "portfolio_truth_ok, memory_decay_ok, model_disagreement_ok, "
+        "final_state, may_promote, downgrade_reasons_json, advisory_only) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)",
+        (
+            aid, str(candidate_id), _utc_iso(),
+            float(cqs_final) if cqs_final is not None else None,
+            float(eqs) if eqs is not None else None,
+            float(fcs) if fcs is not None else None,
+            float(ers) if ers is not None else None,
+            float(why_today_score) if why_today_score is not None else None,
+            float(lpq) if lpq is not None else None,
+            1 if portfolio_truth_ok else 0,
+            1 if memory_decay_ok else 0,
+            1 if model_disagreement_ok else 0,
+            str(final_state), 1 if may_promote else 0,
+            json.dumps(reasons_norm),
+        ),
+    )
+    conn.commit()
+    return {"audit_id": aid, "downgrade_reasons": reasons_norm}
+
+
+def data_model_persistence_v2_score(
+    *,
+    existing_persistence_integrity_score_ge_9_8: bool,
+    live_provider_evidence_table_present: bool,
+    candidate_gate_audit_present: bool,
+    idempotent_live_evidence_writes: bool,
+    formula_component_audit_present: bool,
+    advisory_flags_present: bool,
+) -> float:
+    raw = (
+        0.20 * (1.0 if existing_persistence_integrity_score_ge_9_8 else 0.0)
+        + 0.20 * (1.0 if live_provider_evidence_table_present else 0.0)
+        + 0.20 * (1.0 if candidate_gate_audit_present else 0.0)
+        + 0.15 * (1.0 if idempotent_live_evidence_writes else 0.0)
+        + 0.15 * (1.0 if formula_component_audit_present else 0.0)
+        + 0.10 * (1.0 if advisory_flags_present else 0.0)
+    )
+    return round(10.0 * _clamp01(raw), 4)
+
+
+def evaluate_v2(db_path: Path | None = None) -> dict[str, Any]:
+    """Self-test for the v2 tables; reproducible in CI on a scratch DB."""
+    conn = open_db(db_path) if db_path is not None else open_db()
+    try:
+        # Run the v1 self-test to populate baseline.
+        v1_summary = evaluate()
+        v1_score = float(v1_summary.get("persistence_integrity_score", 0.0))
+
+        # Idempotency probe for live_provider_evidence.
+        first = upsert_live_provider_evidence(
+            conn, provider="yfinance", source_type="price_mover",
+            run_mode="live", verification_status="LIVE_VERIFIED",
+            latest_provider_timestamp_utc="2026-05-24T10:00:00Z",
+            freshness_age_hours=2.5,
+            payload_hash_value="hash-A",
+            source_run_id="run-1",
+            sample_source_url="https://finance.yahoo.com/quote/AAPL",
+        )
+        second = upsert_live_provider_evidence(
+            conn, provider="yfinance", source_type="price_mover",
+            run_mode="live", verification_status="LIVE_VERIFIED",
+            latest_provider_timestamp_utc="2026-05-24T10:00:00Z",
+            freshness_age_hours=2.5,
+            payload_hash_value="hash-A",
+            source_run_id="run-1",
+            sample_source_url="https://finance.yahoo.com/quote/AAPL",
+        )
+        idempotent = (first["operation"] == "inserted"
+                      and second["operation"] == "deduplicated"
+                      and first["evidence_id"] == second["evidence_id"])
+
+        # candidate_gate_audit probe.
+        audit = insert_candidate_gate_audit(
+            conn, candidate_id="AAPL-2026-05-24",
+            cqs_final=0.78, eqs=0.72, fcs=0.81, ers=0.30,
+            why_today_score=0.82, lpq=0.86,
+            portfolio_truth_ok=True, memory_decay_ok=True,
+            model_disagreement_ok=True,
+            final_state="ADVISORY_CANDIDATE_HUMAN_REVIEW",
+            may_promote=True,
+            downgrade_reasons=[],
+        )
+        audit_row = conn.execute(
+            "SELECT * FROM candidate_gate_audit WHERE audit_id=?",
+            (audit["audit_id"],),
+        ).fetchone()
+        audit_present = (
+            audit_row is not None
+            and audit_row["cqs_final"] == 0.78
+            and audit_row["lpq"] == 0.86
+            and audit_row["advisory_only"] == 1
+        )
+
+        live_count = conn.execute(
+            "SELECT COUNT(*) FROM live_provider_evidence"
+        ).fetchone()[0]
+        audit_count = conn.execute(
+            "SELECT COUNT(*) FROM candidate_gate_audit"
+        ).fetchone()[0]
+
+        # Tables present?
+        cur = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        ).fetchall()
+        tables = {row["name"] for row in cur}
+        live_table = "live_provider_evidence" in tables
+        audit_table = "candidate_gate_audit" in tables
+
+        score = data_model_persistence_v2_score(
+            existing_persistence_integrity_score_ge_9_8=v1_score >= 9.8,
+            live_provider_evidence_table_present=live_table,
+            candidate_gate_audit_present=audit_table,
+            idempotent_live_evidence_writes=idempotent,
+            formula_component_audit_present=audit_present,
+            advisory_flags_present=True,
+        )
+        return {
+            "report": "data_model_persistence_v2_summary",
+            "ok": score >= 9.7,
+            "generated_at_utc": _utc_iso(),
+            "v1_persistence_integrity_score": v1_score,
+            "live_provider_evidence_table_present": live_table,
+            "candidate_gate_audit_present": audit_table,
+            "live_evidence_row_count": int(live_count),
+            "candidate_gate_audit_row_count": int(audit_count),
+            "idempotent_live_evidence_writes": bool(idempotent),
+            "formula_component_audit_present": bool(audit_present),
+            "advisory_flags_present": True,
+            "data_model_persistence_v2_score": score,
+            "advisory_only": True,
+            **_contract.advisory_safety_stamps(),
+        }
+    finally:
+        conn.close()
+
+
+def write_v2_summary(path: Path | None = None) -> dict[str, Any]:
+    target = path or DEFAULT_V2_SUMMARY_PATH
+    summary = evaluate_v2()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    tmp = target.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(summary, indent=2, default=str), encoding="utf-8")
+    tmp.replace(target)
+    summary["summary_path"] = str(target)
+    return summary
+
+
+def read_v2_summary(path: Path | None = None) -> dict[str, Any] | None:
+    target = path or DEFAULT_V2_SUMMARY_PATH
+    if not target.exists():
+        return None
+    try:
+        return json.loads(target.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return None
+
+
 def read_summary(path: Path | None = None) -> dict[str, Any] | None:
     target = path or DEFAULT_SUMMARY_PATH
     if not target.exists():
@@ -618,6 +909,7 @@ __all__ = [
     "FRESHNESS_STATES",
     "SOURCE_RUN_STATUSES",
     "DEFAULT_SUMMARY_PATH",
+    "DEFAULT_V2_SUMMARY_PATH",
     "canonical_json",
     "payload_hash",
     "compute_event_id",
@@ -632,6 +924,12 @@ __all__ = [
     "evaluate",
     "write_summary",
     "read_summary",
+    "upsert_live_provider_evidence",
+    "insert_candidate_gate_audit",
+    "data_model_persistence_v2_score",
+    "evaluate_v2",
+    "write_v2_summary",
+    "read_v2_summary",
 ]
 
 

@@ -55,10 +55,58 @@ CATALYST_LAMBDA: dict[str, float] = {
 }
 
 # Verifications that reset decay.  Fallback/mock/unverified do NOT.
-RESET_VERIFICATIONS: frozenset[str] = frozenset({"VERIFIED", "FIXTURE_VERIFIED"})
+RESET_VERIFICATIONS: frozenset[str] = frozenset({
+    "LIVE_VERIFIED", "VERIFIED", "FIXTURE_VERIFIED",
+})
 
 QUARANTINE_REPEAT_THRESHOLD = 4
 QUARANTINE_WINDOW_DAYS = 30
+
+# Sprint 3 — reset_strength by verification class.  This drives how much
+# of the candidate's accumulated decay age is wiped when a new catalyst
+# arrives:
+#
+#   LIVE_VERIFIED_CATALYST  -> 1.0  (full reset)
+#   FIXTURE_VERIFIED        -> 0.7  (fixture reset; lower confidence)
+#   UNVERIFIED              -> 0.4  (partial reset only if schema valid + fresh)
+#   FALLBACK / MOCK         -> 0.0  (never resets)
+#
+# Stale-quarantine release additionally requires WHY_TODAY >= 0.65 AND
+# reset_strength >= 0.7 (so an UNVERIFIED catalyst alone can NOT lift a
+# candidate out of quarantine).
+RESET_STRENGTH: dict[str, float] = {
+    "LIVE_VERIFIED": 1.0,
+    "VERIFIED": 1.0,
+    "FIXTURE_VERIFIED": 0.7,
+    "UNVERIFIED": 0.4,
+    "STALE": 0.0,
+    "FALLBACK": 0.0,
+    "MOCK": 0.0,
+}
+STALE_QUARANTINE_RELEASE_MIN_RESET = 0.7
+STALE_QUARANTINE_RELEASE_MIN_WHY_TODAY = 0.65
+
+
+def reset_strength_for(verification_status: str,
+                       *, schema_valid: bool = True,
+                       fresh_within_sla: bool = True) -> float:
+    """Return the per-catalyst reset strength.
+
+    UNVERIFIED only earns partial reset if BOTH schema_valid AND
+    fresh_within_sla are true; otherwise it drops to 0.
+    """
+    key = (verification_status or "").upper()
+    base = RESET_STRENGTH.get(key, 0.0)
+    if key == "UNVERIFIED" and not (schema_valid and fresh_within_sla):
+        return 0.0
+    return base
+
+
+def apply_decay_reset(old_decay_age_days: float,
+                      *, reset_strength: float) -> float:
+    """``new_age = old_age * (1 - reset_strength)``, clamped to >= 0."""
+    rs = max(0.0, min(1.0, float(reset_strength)))
+    return max(0.0, float(old_decay_age_days) * (1.0 - rs))
 
 
 def _utc_iso() -> str:
@@ -107,15 +155,40 @@ def evaluate_candidate(candidate: dict[str, Any]) -> dict[str, Any]:
     adjusted = round(raw * decay * (1.0 - penalty), 6)
 
     has_new_verified = verification.upper() in RESET_VERIFICATIONS
-    quarantined = (
-        repeats >= QUARANTINE_REPEAT_THRESHOLD
-        and not has_new_verified
+    schema_valid = bool(candidate.get("schema_valid", True))
+    fresh_within_sla = bool(candidate.get("fresh_within_sla", True))
+    rs = reset_strength_for(
+        verification,
+        schema_valid=schema_valid,
+        fresh_within_sla=fresh_within_sla,
     )
+    new_decay_age_days = round(
+        apply_decay_reset(days, reset_strength=rs), 6
+    )
+    why_today_score = float(candidate.get("why_today_score") or 0.0)
+
+    # Sprint 3 quarantine logic: once repeats >= threshold, exit requires
+    # BOTH a verified catalyst (reset_strength >= 0.7) AND WHY_TODAY ≥ 0.65.
+    # A LIVE_VERIFIED catalyst with weak WHY_TODAY is NOT enough on its own.
+    if repeats >= QUARANTINE_REPEAT_THRESHOLD:
+        can_exit_quarantine = (
+            has_new_verified
+            and rs >= STALE_QUARANTINE_RELEASE_MIN_RESET
+            and why_today_score >= STALE_QUARANTINE_RELEASE_MIN_WHY_TODAY
+        )
+        quarantined = not can_exit_quarantine
+        release_from_quarantine = can_exit_quarantine
+    else:
+        quarantined = False
+        release_from_quarantine = False
+
     downgrade_reasons: list[str] = []
     if quarantined:
         downgrade_reasons.append("STALE_REPEAT_QUARANTINE")
     if not has_new_verified and repeats >= 1:
         downgrade_reasons.append("NO_NEW_VERIFIED_CATALYST")
+    if rs <= 0 and verification.upper() in {"FALLBACK", "MOCK"}:
+        downgrade_reasons.append("FALLBACK_MOCK_CANNOT_RESET")
 
     state = "STALE_QUARANTINE" if quarantined else "ACTIVE"
     may_promote = not quarantined and has_new_verified
@@ -134,6 +207,12 @@ def evaluate_candidate(candidate: dict[str, Any]) -> dict[str, Any]:
         "quarantined": quarantined,
         "may_promote": may_promote,
         "downgrade_reasons": downgrade_reasons,
+        "reset_strength": round(rs, 6),
+        "new_decay_age_days": new_decay_age_days,
+        "schema_valid": schema_valid,
+        "fresh_within_sla": fresh_within_sla,
+        "why_today_score": round(why_today_score, 6),
+        "released_from_quarantine": bool(release_from_quarantine),
     }
 
 

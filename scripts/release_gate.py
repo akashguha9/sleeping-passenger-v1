@@ -142,6 +142,29 @@ _compliance_readiness = _try_import(
 _daily_signal_readiness = _try_import(
     "scripts.daily_signal_readiness", "daily_signal_readiness",
 )
+# Sprint 3 — best-effort imports of the new readiness subsystems.  A
+# missing module is a WARN (never silent PASS) and never a FAIL by itself.
+_operator_live_refresh = _try_import(
+    "scripts.operator_live_provider_refresh",
+    "operator_live_provider_refresh",
+)
+_backend_api_quality = _try_import(
+    "scripts.backend_api_quality", "backend_api_quality",
+)
+_candidate_promotion_contract = _try_import(
+    "scripts.candidate_promotion_contract",
+    "candidate_promotion_contract",
+)
+_universe_coverage = _try_import(
+    "scripts.universe_coverage", "universe_coverage",
+)
+_operator_demo_value = _try_import(
+    "scripts.operator_demo_value", "operator_demo_value",
+)
+_live_provider_compliance_trace = _try_import(
+    "scripts.live_provider_compliance_trace",
+    "live_provider_compliance_trace",
+)
 
 # Release-gate proof artifact lives next to the other release artifacts.
 REPO_ROOT_PATH = Path(__file__).resolve().parents[1]
@@ -180,7 +203,152 @@ _SUBSYSTEM_REMEDIATION = {
         "python scripts/compliance_readiness.py --write-summary",
     "daily_signal_readiness":
         "python scripts/daily_signal_readiness.py --write-summary",
+    # Sprint 3 subsystems.
+    "backend_api_quality":
+        "python scripts/backend_api_quality.py --write-summary",
+    "candidate_promotion_contract":
+        "python scripts/candidate_promotion_contract.py --write-summary",
+    "universe_coverage":
+        "python scripts/universe_coverage.py --write-summary",
+    "operator_demo_value":
+        "python scripts/operator_demo_value.py --write-summary",
+    "live_provider_compliance_trace":
+        "python scripts/live_provider_compliance_trace.py --write",
+    "data_model_persistence_v2":
+        "python -c \"from scripts.persistence_integrity import write_v2_summary; "
+        "write_v2_summary()\"",
+    "operator_live_refresh":
+        "$env:MVP_LIVE_REFRESH_OK=\"1\"; python scripts/"
+        "operator_live_provider_refresh.py --providers "
+        "yfinance,sec_edgar,gdelt --write",
 }
+
+
+def _sprint3_artifact_block(
+    label: str,
+    *,
+    module: Any,
+    summary_attr: str,
+    score_key: str | None,
+) -> dict[str, Any]:
+    """Read a sprint-3 summary off disk and project it into a proof block.
+
+    Pure read-only.  A missing / unreadable artifact becomes a WARN with a
+    remediation command.  Never raises.
+    """
+    out: dict[str, Any] = {
+        "ok": False,
+        "score": None,
+        "score_key": score_key,
+        "summary_present": False,
+        "summary_path": None,
+        "remediation": _SUBSYSTEM_REMEDIATION.get(label),
+    }
+    if module is None:
+        out["error"] = f"{label} module unavailable"
+        return out
+    path = getattr(module, summary_attr, None)
+    out["summary_path"] = str(path) if path else None
+    if path is None or not Path(path).exists():
+        return out
+    try:
+        summary = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError) as exc:
+        out["error"] = f"summary unreadable: {exc}"
+        return out
+    if not isinstance(summary, dict):
+        out["error"] = "summary not a dict"
+        return out
+    out["summary_present"] = True
+    out["ok"] = bool(summary.get("ok"))
+    if score_key and score_key in summary:
+        try:
+            out["score"] = float(summary[score_key])
+        except (TypeError, ValueError):
+            out["score"] = None
+    return out
+
+
+def _operator_live_refresh_proof_block() -> dict[str, Any]:
+    """Build the ``operator_live_refresh`` proof block + fake-LIVE detection.
+
+    Returns a dict carrying:
+      * attempted, valid, fresh
+      * providers_live_verified, lpq_before, lpq_after, ttl_hours
+      * warnings, blocking_reasons
+      * fake_live_verified_detected — True if any evidence row claims
+        LIVE_VERIFIED but is missing timestamp or source url.
+    """
+    block: dict[str, Any] = {
+        "attempted": False,
+        "valid": False,
+        "fresh": False,
+        "providers_live_verified": [],
+        "lpq_before": 8.2,
+        "lpq_after": 8.2,
+        "ttl_hours": 24,
+        "age_hours": None,
+        "warnings": [],
+        "blocking_reasons": [],
+        "fake_live_verified_detected": False,
+        "fake_live_verified_offenders": [],
+    }
+    if _operator_live_refresh is None:
+        block["warnings"].append(
+            "operator_live_provider_refresh module unavailable"
+        )
+        return block
+    summary = _operator_live_refresh.read_summary()
+    if not isinstance(summary, dict):
+        block["warnings"].append(
+            "operator live provider refresh not run; LPQ capped at "
+            "fixture/offline score"
+        )
+        return block
+    evidence = _operator_live_refresh.operator_artifact_valid(summary)
+    block.update({
+        "attempted": evidence.get("attempted", False),
+        "valid": evidence.get("valid", False),
+        "fresh": evidence.get("fresh", False),
+        "providers_live_verified": evidence.get(
+            "providers_live_verified", []
+        ),
+        "lpq_before": evidence.get("lpq_before") or 8.2,
+        "lpq_after": evidence.get("lpq_after") or 8.2,
+        "ttl_hours": evidence.get("ttl_hours") or 24,
+        "age_hours": evidence.get("age_hours"),
+    })
+    if not block["fresh"] and block["attempted"]:
+        block["warnings"].append(
+            "operator live provider refresh STALE; ignoring for LPQ "
+            f"uplift (age_hours={block['age_hours']} > "
+            f"ttl_hours={block['ttl_hours']})"
+        )
+
+    # Fake-LIVE detection: any row claiming LIVE_VERIFIED MUST have a real
+    # timestamp.  Missing timestamp or empty source urls -> blocking.
+    offenders: list[dict[str, Any]] = []
+    for ev in summary.get("providers_evidence", []) or []:
+        if str(ev.get("verification_status") or "").upper() != "LIVE_VERIFIED":
+            continue
+        ts = ev.get("latest_provider_timestamp_utc")
+        urls = ev.get("sample_source_urls") or []
+        tags = ev.get("sample_asset_tags") or []
+        if not ts or not (urls or tags):
+            offenders.append({
+                "provider": ev.get("provider"),
+                "latest_provider_timestamp_utc": ts,
+                "sample_source_urls": list(urls),
+                "sample_asset_tags": list(tags),
+            })
+    if offenders:
+        block["fake_live_verified_detected"] = True
+        block["fake_live_verified_offenders"] = offenders
+        block["blocking_reasons"].append(
+            "fake LIVE_VERIFIED without timestamp/source evidence detected: "
+            f"{[o['provider'] for o in offenders]}"
+        )
+    return block
 
 
 def _subsystem_block(
@@ -744,6 +912,72 @@ def evaluate(
             f"`{_SUBSYSTEM_REMEDIATION['daily_signal_readiness']}`. WARN."
         )
 
+    # ------------------------------------------------------------------
+    # Sprint 3 — new subsystem blocks (best-effort, never block by absence).
+    # ------------------------------------------------------------------
+    backend_api_block = _sprint3_artifact_block(
+        "backend_api_quality",
+        module=_backend_api_quality,
+        summary_attr="DEFAULT_SUMMARY_PATH",
+        score_key="backend_api_quality_score",
+    )
+    candidate_promotion_block = _sprint3_artifact_block(
+        "candidate_promotion_contract",
+        module=_candidate_promotion_contract,
+        summary_attr="DEFAULT_SUMMARY_PATH",
+        score_key="candidate_vs_executable_score",
+    )
+    universe_coverage_block = _sprint3_artifact_block(
+        "universe_coverage",
+        module=_universe_coverage,
+        summary_attr="DEFAULT_SUMMARY_PATH",
+        score_key="universe_coverage_score",
+    )
+    operator_demo_block = _sprint3_artifact_block(
+        "operator_demo_value",
+        module=_operator_demo_value,
+        summary_attr="DEFAULT_SUMMARY_PATH",
+        score_key="business_mvp_score",
+    )
+    live_provider_compliance_block = _sprint3_artifact_block(
+        "live_provider_compliance_trace",
+        module=_live_provider_compliance_trace,
+        summary_attr="DEFAULT_TRACE_PATH",
+        score_key="legal_privacy_compliance_score",
+    )
+    persistence_v2_block = _sprint3_artifact_block(
+        "data_model_persistence_v2",
+        module=_persistence_integrity,
+        summary_attr="DEFAULT_V2_SUMMARY_PATH",
+        score_key="data_model_persistence_v2_score",
+    )
+    config_env_block = _sprint3_artifact_block(
+        "configuration_environment",
+        module=_typed_config,
+        summary_attr="DEFAULT_CONFIG_ENV_SUMMARY_PATH",
+        score_key="configuration_environment_score",
+    )
+
+    # Operator-run live refresh proof + fake-LIVE detection.
+    operator_live_refresh_block = _operator_live_refresh_proof_block()
+    if not operator_live_refresh_block["attempted"]:
+        # Spec requirement: surface the warning text, but absence alone
+        # does NOT downgrade the verdict (operator-run refresh is by
+        # design optional; CI must stay green).  LPQ stays capped honestly
+        # via the daily_signal_readiness caps in Part 12.
+        warnings.append(
+            "operator live provider refresh not run; LPQ capped at "
+            "fixture/offline score."
+        )
+    elif operator_live_refresh_block["warnings"]:
+        # STALE: WARN, never inflate.
+        if verdict == PASS:
+            verdict = WARN
+        warnings.extend(operator_live_refresh_block["warnings"])
+    if operator_live_refresh_block["fake_live_verified_detected"]:
+        verdict = FAIL
+        blocking.extend(operator_live_refresh_block["blocking_reasons"])
+
     safety_stamps = _contract.advisory_safety_stamps()
     safety_block = {
         "ADVISORY_ONLY": True,
@@ -786,6 +1020,15 @@ def evaluate(
         "business_value": bv_block,
         "compliance_readiness": compliance_block,
         "daily_signal_readiness": dsr_block,
+        # Sprint 3 sub-blocks.
+        "backend_api_quality": backend_api_block,
+        "candidate_promotion_contract": candidate_promotion_block,
+        "universe_coverage": universe_coverage_block,
+        "operator_demo_value": operator_demo_block,
+        "live_provider_compliance_trace": live_provider_compliance_block,
+        "data_model_persistence_v2": persistence_v2_block,
+        "configuration_environment": config_env_block,
+        "operator_live_refresh": operator_live_refresh_block,
         "blocking_reasons": list(blocking),
         "warnings": list(warnings),
     }

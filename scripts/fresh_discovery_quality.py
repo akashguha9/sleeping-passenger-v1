@@ -38,7 +38,16 @@ REQUIRED_SOURCE_CLASSES_DEFAULT = 3  # price_mover + filing + news_event
 FRESH_DISCOVERY_GATE_MIN = 0.65
 
 # Verification states that may count as "verified for discovery".
-VERIFIED_LIKE = frozenset({"VERIFIED", "FIXTURE_VERIFIED"})
+VERIFIED_LIKE = frozenset({"VERIFIED", "FIXTURE_VERIFIED", "LIVE_VERIFIED"})
+
+# Sprint 3 — boost a candidate when LIVE_VERIFIED provider evidence is
+# present.  Spec rules:
+#   * 1 LIVE_VERIFIED source class  -> +0.15
+#   * 2 or more source classes      -> +0.25
+# The boost is *capped* at 0.25, applied AFTER the base fresh_discovery
+# score, and clamped to [0,1].
+LIVE_EVIDENCE_BOOST_SINGLE = 0.15
+LIVE_EVIDENCE_BOOST_MULTI = 0.25
 
 
 def _utc_iso() -> str:
@@ -137,12 +146,32 @@ def score_candidate(
     )
     fresh_discovery_score = round(_clamp01(raw), 6)
 
+    # Sprint 3 cross-wire: a candidate carrying LIVE_VERIFIED provider
+    # evidence (from operator-run live refresh) earns a discovery boost.
+    live_evidence = list(candidate.get("live_provider_evidence") or [])
+    live_verified_classes: set[str] = set()
+    for ev in live_evidence:
+        if str(ev.get("verification_status") or "").upper() != "LIVE_VERIFIED":
+            continue
+        sc = str(ev.get("source_class") or ev.get("source_type") or "")
+        if sc:
+            live_verified_classes.add(sc)
+    if len(live_verified_classes) >= 2:
+        live_evidence_boost = LIVE_EVIDENCE_BOOST_MULTI
+    elif len(live_verified_classes) == 1:
+        live_evidence_boost = LIVE_EVIDENCE_BOOST_SINGLE
+    else:
+        live_evidence_boost = 0.0
+    fresh_discovery_score_live_adjusted = round(
+        _clamp01(fresh_discovery_score + live_evidence_boost), 6
+    )
+
     has_verified_fresh = bool(fresh_events)
     stale_repeated = bool(candidate.get("stale_repeated"))
     advisory_only = bool(candidate.get("advisory_only", True))
 
     can_enter = (
-        fresh_discovery_score >= FRESH_DISCOVERY_GATE_MIN
+        fresh_discovery_score_live_adjusted >= FRESH_DISCOVERY_GATE_MIN
         and has_verified_fresh
         and not stale_repeated
         and advisory_only
@@ -152,7 +181,7 @@ def score_candidate(
         block_reasons.append("NO_VERIFIED_FRESH_EVENT")
     if stale_repeated:
         block_reasons.append("STALE_REPEAT")
-    if fresh_discovery_score < FRESH_DISCOVERY_GATE_MIN:
+    if fresh_discovery_score_live_adjusted < FRESH_DISCOVERY_GATE_MIN:
         block_reasons.append("FRESH_DISCOVERY_SCORE_LOW")
     if not advisory_only:
         block_reasons.append("ADVISORY_INVARIANT_BROKEN")
@@ -168,6 +197,9 @@ def score_candidate(
         "source_reliability_weighted_mean": round(reliability_mean, 6),
         "why_today_score": round(why_today, 6),
         "fresh_discovery_score": fresh_discovery_score,
+        "fresh_discovery_score_live_adjusted": fresh_discovery_score_live_adjusted,
+        "live_evidence_boost": round(live_evidence_boost, 6),
+        "live_verified_source_classes": sorted(live_verified_classes),
         "can_enter_fresh_discovery": bool(can_enter),
         "block_reasons": block_reasons,
         "stale_repeated": stale_repeated,

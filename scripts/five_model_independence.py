@@ -92,6 +92,9 @@ class ModelRun:
     status: str = "OK"
     generated_at_utc: str = field(default_factory=_utc_iso)
     ingested_at_utc: str = field(default_factory=_utc_iso)
+    frozen_before_synthesis: bool = True
+    ingested_before_synthesis: bool = True
+    missing_reason: str | None = None  # for explicitly-missing models
 
     @property
     def model_run_id(self) -> str:
@@ -113,6 +116,9 @@ class ModelRun:
         return (
             not self.saw_other_model_outputs
             and self.independent_before_synthesis
+            and self.frozen_before_synthesis
+            and self.ingested_before_synthesis
+            and not self.missing_reason
             and bool(self.prompt_hash)
             and bool(self.input_context_hash)
             and bool(self.output_hash)
@@ -152,14 +158,33 @@ def record_model_run(conn: sqlite3.Connection, run: ModelRun) -> str:
 def independence_score(runs: Iterable[ModelRun]) -> dict[str, Any]:
     runs = list(runs)
     expected = len(EXPECTED_MODELS)
-    seen_models = {r.model_name.lower() for r in runs}
-    independent = [r for r in runs if r.is_independent()]
+    seen_models = {r.model_name.lower() for r in runs
+                   if not (r.missing_reason or "")}
+    independent = [r for r in runs
+                   if r.is_independent() and not r.missing_reason]
     contaminated = [r for r in runs if r.saw_other_model_outputs]
-    missing_prompt = any(not r.prompt_hash for r in runs)
-    missing_output = any(not r.output_hash for r in runs)
+    # Sprint 3 — explicit-missing-with-reason.  A model can be marked
+    # missing with a non-empty ``missing_reason`` (e.g. "rate-limited",
+    # "API key absent").  We do NOT count it as silently missing.
+    explicitly_missing = [r for r in runs if r.missing_reason]
+    silently_missing = [
+        m for m in EXPECTED_MODELS
+        if m not in {r.model_name.lower() for r in runs}
+    ]
+    missing_prompt = any(not r.prompt_hash for r in runs if not r.missing_reason)
+    missing_output = any(not r.output_hash for r in runs if not r.missing_reason)
     synthesis_before_freeze = any(
-        not r.independent_before_synthesis for r in runs
+        not r.independent_before_synthesis for r in runs if not r.missing_reason
     )
+    # Synthesis contamination audit — any run where frozen_before_synthesis
+    # was false or saw_other_model_outputs is true.
+    synthesis_contamination = [
+        r for r in runs
+        if not r.missing_reason
+        and (r.saw_other_model_outputs or not r.frozen_before_synthesis
+             or not r.ingested_before_synthesis)
+    ]
+    synthesis_contamination_audited = True  # this fn IS the audit
 
     contamination_penalty = _clamp01(
         0.20 * (len(contaminated) / expected)
@@ -171,10 +196,21 @@ def independence_score(runs: Iterable[ModelRun]) -> dict[str, Any]:
         (len(independent) / expected) * (1.0 - contamination_penalty)
     )
 
-    all_models_seen = seen_models.issuperset(EXPECTED_MODELS)
+    all_expected_accounted_for = all(
+        m in {r.model_name.lower() for r in runs}
+        for m in EXPECTED_MODELS
+    )
+    # We give full credit when every expected model is either present-and-
+    # independent OR explicitly-missing-with-reason.  Silently-missing
+    # models are NEVER given credit.
+    accountable_for = len(seen_models) + len({
+        r.model_name.lower() for r in explicitly_missing
+    } & set(EXPECTED_MODELS))
+    accountability_ratio = min(1.0, accountable_for / expected)
+
     five_model_independence_seg = _clamp01(
         0.40 * raw_independence
-        + 0.20 * (1.0 if all_models_seen else len(seen_models) / expected)
+        + 0.20 * accountability_ratio
         + 0.20 * (0.0 if synthesis_before_freeze else 1.0)
         + 0.10 * (0.0 if missing_prompt else 1.0)
         + 0.10 * (0.0 if missing_output else 1.0)
@@ -185,14 +221,23 @@ def independence_score(runs: Iterable[ModelRun]) -> dict[str, Any]:
         "seen_model_count": len(seen_models),
         "independent_model_count": len(independent),
         "contaminated_model_count": len(contaminated),
+        "explicitly_missing_count": len(explicitly_missing),
+        "silently_missing_models": silently_missing,
+        "explicitly_missing_models": [
+            {"model_name": r.model_name, "reason": r.missing_reason}
+            for r in explicitly_missing
+        ],
         "missing_prompt_hash": missing_prompt,
         "missing_output_hash": missing_output,
         "synthesis_before_freeze": synthesis_before_freeze,
+        "synthesis_contamination_count": len(synthesis_contamination),
+        "synthesis_contamination_audited": synthesis_contamination_audited,
         "contamination_penalty": round(contamination_penalty, 6),
         "independence_score": round(raw_independence, 6),
+        "accountability_ratio": round(accountability_ratio, 6),
         "five_model_independence_score": round(10.0 * five_model_independence_seg, 4),
-        "all_expected_models_seen": all_models_seen,
-        "missing_models": [m for m in EXPECTED_MODELS if m not in seen_models],
+        "all_expected_models_seen": all_expected_accounted_for,
+        "missing_models": silently_missing,
     }
 
 

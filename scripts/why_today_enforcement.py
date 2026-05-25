@@ -35,9 +35,11 @@ DEFAULT_SUMMARY_PATH = (
 
 WHY_TODAY_HARD_GATE = 0.65
 WHY_TODAY_HIGH_THRESHOLD = 0.75
+WHY_TODAY_LIVE_ANCHOR_THRESHOLD = 0.80  # ≥ 0.80 requires LIVE/FIXTURE evidence
 
 # Verification -> fresh_catalyst contribution.
 FRESH_CATALYST_SCORE: dict[str, float] = {
+    "LIVE_VERIFIED": 1.0,
     "VERIFIED": 1.0,
     "FIXTURE_VERIFIED": 0.7,
     "UNVERIFIED_FRESH": 0.4,
@@ -45,6 +47,14 @@ FRESH_CATALYST_SCORE: dict[str, float] = {
     "FALLBACK": 0.0,
     "MOCK": 0.0,
 }
+
+# Fresh-catalyst CAPS — applied AFTER raw fresh_catalyst is computed when
+# only a degraded evidence class is present.  Spec rules:
+#   * LIVE_VERIFIED present                 -> fresh_catalyst may be 1.0
+#   * only FIXTURE_VERIFIED                 -> fresh_catalyst <= 0.7
+#   * only fallback/mock                    -> fresh_catalyst <= 0.0
+FRESH_CATALYST_CAP_FIXTURE_ONLY = 0.7
+FRESH_CATALYST_CAP_FALLBACK_ONLY = 0.0
 
 REQUIRED_EVIDENCE_KEYS: tuple[str, ...] = (
     "provider", "timestamp_utc", "claim", "verification_status",
@@ -69,7 +79,7 @@ def fresh_catalyst_score(
     """Map verification + freshness to a 0..1 fresh-catalyst score."""
     v = (verification_status or "").upper()
     fresh = age_hours <= sla_hours
-    if v in {"VERIFIED", "FIXTURE_VERIFIED"} and fresh:
+    if v in {"LIVE_VERIFIED", "VERIFIED", "FIXTURE_VERIFIED"} and fresh:
         return FRESH_CATALYST_SCORE[v]
     if v == "UNVERIFIED" and fresh:
         return FRESH_CATALYST_SCORE["UNVERIFIED_FRESH"]
@@ -80,6 +90,35 @@ def fresh_catalyst_score(
     if not fresh:
         return FRESH_CATALYST_SCORE["STALE"]
     return 0.0
+
+
+def _classify_evidence_anchor_classes(
+    anchors: list[dict[str, Any]],
+) -> dict[str, bool]:
+    """Inspect the evidence anchors to find the strongest evidence class."""
+    has_live = any(
+        str(a.get("verification_status") or "").upper() == "LIVE_VERIFIED"
+        for a in anchors
+    )
+    has_fixture = any(
+        str(a.get("verification_status") or "").upper() == "FIXTURE_VERIFIED"
+        for a in anchors
+    )
+    has_verified = any(
+        str(a.get("verification_status") or "").upper() == "VERIFIED"
+        for a in anchors
+    )
+    has_fallback_or_mock = any(
+        str(a.get("verification_status") or "").upper() in {"FALLBACK", "MOCK"}
+        for a in anchors
+    )
+    return {
+        "has_live": has_live,
+        "has_fixture": has_fixture,
+        "has_verified": has_verified,
+        "has_fallback_or_mock": has_fallback_or_mock,
+        "any_trusted": has_live or has_fixture or has_verified,
+    }
 
 
 def timing_pressure_score(
@@ -125,6 +164,20 @@ def evaluate_candidate(candidate: dict[str, Any]) -> dict[str, Any]:
         age_hours=float(candidate.get("age_hours") or 9999.0),
         sla_hours=float(candidate.get("sla_hours") or 48.0),
     )
+    # Sprint 3 — apply the evidence-class cap.  If the only trusted anchors
+    # are FIXTURE_VERIFIED, the fresh_catalyst contribution is bounded at
+    # 0.7; if there are NO trusted anchors (only FALLBACK/MOCK), it is 0.
+    anchors_raw = list(candidate.get("evidence_anchors") or [])
+    anchor_classes = _classify_evidence_anchor_classes(anchors_raw)
+    fresh_catalyst_cap_applied: str | None = None
+    if not anchor_classes["any_trusted"]:
+        if anchors_raw and anchor_classes["has_fallback_or_mock"] and fresh > 0:
+            fresh = min(fresh, FRESH_CATALYST_CAP_FALLBACK_ONLY)
+            fresh_catalyst_cap_applied = "FALLBACK_OR_MOCK_ONLY"
+    elif not (anchor_classes["has_live"] or anchor_classes["has_verified"]):
+        if anchor_classes["has_fixture"] and fresh > FRESH_CATALYST_CAP_FIXTURE_ONLY:
+            fresh = FRESH_CATALYST_CAP_FIXTURE_ONLY
+            fresh_catalyst_cap_applied = "FIXTURE_VERIFIED_ONLY"
     timing = timing_pressure_score(
         price_mover_intensity=float(candidate.get("price_mover_intensity") or 0.0),
         narrative_velocity=float(candidate.get("narrative_velocity") or 0.0),
@@ -156,6 +209,19 @@ def evaluate_candidate(candidate: dict[str, Any]) -> dict[str, Any]:
         score = WHY_TODAY_HIGH_THRESHOLD - 0.01
         capped_for_anchor = True
 
+    # Sprint 3 — WHY_TODAY ≥ 0.80 requires a live or fixture-verified anchor
+    # in the candidate's evidence list.  Anything below LIVE/FIXTURE/VERIFIED
+    # cannot push past the live-anchor threshold.
+    capped_for_live_anchor = False
+    valid_anchor_classes = _classify_evidence_anchor_classes(valid_anchors)
+    if score >= WHY_TODAY_LIVE_ANCHOR_THRESHOLD and not (
+        valid_anchor_classes["has_live"]
+        or valid_anchor_classes["has_verified"]
+        or valid_anchor_classes["has_fixture"]
+    ):
+        score = WHY_TODAY_LIVE_ANCHOR_THRESHOLD - 0.01
+        capped_for_live_anchor = True
+
     can_promote = (
         score >= WHY_TODAY_HARD_GATE
         and bool(candidate.get("advisory_only", True))
@@ -165,10 +231,17 @@ def evaluate_candidate(candidate: dict[str, Any]) -> dict[str, Any]:
         downgrade_reasons.append("WHY_TODAY_WEAK")
     if capped_for_anchor:
         downgrade_reasons.append("WHY_TODAY_HIGH_REQUIRES_EVIDENCE")
+    if capped_for_live_anchor:
+        downgrade_reasons.append("WHY_TODAY_LIVE_ANCHOR_REQUIRED")
+    if fresh_catalyst_cap_applied:
+        downgrade_reasons.append(
+            f"FRESH_CATALYST_CAPPED:{fresh_catalyst_cap_applied}"
+        )
 
     return {
         "id": candidate.get("id"),
         "fresh_catalyst_score": round(fresh, 6),
+        "fresh_catalyst_cap_applied": fresh_catalyst_cap_applied,
         "timing_pressure_score": round(timing, 6),
         "specificity_score": round(spec, 6),
         "cross_source_confirmation": round(cross, 6),
@@ -177,9 +250,11 @@ def evaluate_candidate(candidate: dict[str, Any]) -> dict[str, Any]:
         "evidence_anchors_count": len(anchors),
         "evidence_anchors_valid_count": len(valid_anchors),
         "evidence_anchors": valid_anchors,
+        "evidence_anchor_classes": valid_anchor_classes,
         "can_promote_to_human_review": bool(can_promote),
         "downgrade_reasons": downgrade_reasons,
         "high_score_evidence_anchor_required": capped_for_anchor,
+        "live_anchor_required_capped": capped_for_live_anchor,
     }
 
 
