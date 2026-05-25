@@ -1424,6 +1424,191 @@ def get_source_health_summary() -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Watchdog summary surface (Sprint hardening)
+# ---------------------------------------------------------------------------
+#
+# Exposes the JSON written by ``scripts/watchdog_refresh_stale_sources.py`` so
+# the cockpit can render an honest "watchdog ran / improved / still stale"
+# panel.  The route is READ-ONLY — it never writes, never refreshes, never
+# triggers a refresh, and never authorises execution.  Missing-file payload
+# is truthful (status=MISSING) rather than synthesising a healthy reply.
+
+_WATCHDOG_SUMMARY_STALE_AFTER_MINUTES = 60
+
+
+def _watchdog_summary_path() -> "Path":
+    from pathlib import Path as _Path
+
+    return _Path(__file__).resolve().parents[1] / "runtime" / "refresh_watchdog_summary.json"
+
+
+def _watchdog_safety_payload() -> dict:
+    return {
+        "advisory_only": True,
+        "human_execution_required": True,
+        "execution_gate": "LOCKED",
+        "broker_api_called": False,
+        "can_execute": False,
+        "ai_execution_count": 0,
+        "execution_permission": False,
+    }
+
+
+def _build_watchdog_summary_response(
+    *,
+    summary_path: "Path | None" = None,
+    now_iso: str | None = None,
+) -> dict:
+    """Pure builder for ``GET /source-health/watchdog`` — read-only."""
+    import datetime as _dt
+    import json as _json
+    from pathlib import Path as _Path
+
+    target = _Path(summary_path) if summary_path else _watchdog_summary_path()
+    safety = _watchdog_safety_payload()
+    if now_iso:
+        now_dt = _dt.datetime.fromisoformat(str(now_iso).replace("Z", "+00:00"))
+        if now_dt.tzinfo is None:
+            now_dt = now_dt.replace(tzinfo=_dt.timezone.utc)
+    else:
+        now_dt = _dt.datetime.now(_dt.timezone.utc)
+    loaded_at_iso = now_dt.isoformat(timespec="seconds")
+
+    if not target.exists():
+        return {
+            "present": False,
+            "status": "MISSING",
+            "reason": "refresh_watchdog_summary.json not found",
+            "summary_path": str(target),
+            "loaded_at_utc": loaded_at_iso,
+            "age_seconds": None,
+            "age_minutes": None,
+            "stale": False,
+            "summary": None,
+            **safety,
+        }
+    try:
+        text = target.read_text(encoding="utf-8")
+        parsed = _json.loads(text)
+        if not isinstance(parsed, dict):
+            raise ValueError("watchdog summary must be a JSON object")
+    except Exception as exc:  # noqa: BLE001 - never crash the route
+        return {
+            "present": True,
+            "status": "ERROR",
+            "reason": f"failed_to_parse_summary: {type(exc).__name__}: {exc}",
+            "summary_path": str(target),
+            "loaded_at_utc": loaded_at_iso,
+            "age_seconds": None,
+            "age_minutes": None,
+            "stale": False,
+            "summary": None,
+            **safety,
+        }
+
+    generated = parsed.get("generated_at_utc") or parsed.get("finished_at_utc")
+    age_seconds: float | None = None
+    age_minutes: float | None = None
+    summary_stale = False
+    if generated:
+        try:
+            gdt = _dt.datetime.fromisoformat(str(generated).replace("Z", "+00:00"))
+            if gdt.tzinfo is None:
+                gdt = gdt.replace(tzinfo=_dt.timezone.utc)
+            age_seconds = round((now_dt - gdt).total_seconds(), 3)
+            age_minutes = round(age_seconds / 60.0, 3)
+            summary_stale = age_minutes is not None and age_minutes > _WATCHDOG_SUMMARY_STALE_AFTER_MINUTES
+        except ValueError:
+            age_seconds = None
+            age_minutes = None
+            summary_stale = False
+
+    # Surface a small set of top-level fields the cockpit needs without
+    # forcing the frontend to re-parse the entire summary blob.
+    status = str(parsed.get("status") or "UNKNOWN")
+    return {
+        "present": True,
+        "status": status,
+        "reason": None,
+        "summary_path": str(target),
+        "loaded_at_utc": loaded_at_iso,
+        "age_seconds": age_seconds,
+        "age_minutes": age_minutes,
+        "stale": bool(summary_stale),
+        "summary_stale_after_minutes": _WATCHDOG_SUMMARY_STALE_AFTER_MINUTES,
+        # Defensive: only forward keys we know are sanitized; never echo
+        # arbitrary subprocess stdout/stderr blobs.  The watchdog already
+        # tail-trims those, but we further restrict what the route emits.
+        "summary": {
+            "operation": parsed.get("operation"),
+            "run_id": parsed.get("run_id"),
+            "status": status,
+            "ttl_hours": parsed.get("ttl_hours"),
+            "max_retries": parsed.get("max_retries"),
+            "retries_attempted": parsed.get("retries_attempted"),
+            "freshness_improved": parsed.get("freshness_improved"),
+            "improvement_reasons": parsed.get("improvement_reasons") or [],
+            "backoff_seconds": parsed.get("backoff_seconds") or [],
+            "backoff_jitter_pct": parsed.get("backoff_jitter_pct"),
+            "jitter_enabled": parsed.get("jitter_enabled"),
+            "planned_sleep_seconds_per_retry": parsed.get(
+                "planned_sleep_seconds_per_retry"
+            )
+            or [],
+            "actual_sleep_seconds_per_retry": parsed.get(
+                "actual_sleep_seconds_per_retry"
+            )
+            or [],
+            "stale_sources_before": parsed.get("stale_sources_before") or [],
+            "stale_sources_after": parsed.get("stale_sources_after") or [],
+            "excluded_optional_sources": parsed.get("excluded_optional_sources") or [],
+            "parent_stale_derived_sources": parsed.get("parent_stale_derived_sources")
+            or [],
+            "derived_source_dependency_status": parsed.get(
+                "derived_source_dependency_status"
+            )
+            or {},
+            "dependency_critical_sources": parsed.get("dependency_critical_sources")
+            or [],
+            "kalshi_freshness_before": parsed.get("kalshi_freshness_before"),
+            "kalshi_freshness_after": parsed.get("kalshi_freshness_after"),
+            "prediction_market_disagreement_freshness_before": parsed.get(
+                "prediction_market_disagreement_freshness_before"
+            ),
+            "prediction_market_disagreement_freshness_after": parsed.get(
+                "prediction_market_disagreement_freshness_after"
+            ),
+            "kalshi_status_before": parsed.get("kalshi_status_before"),
+            "kalshi_status_after": parsed.get("kalshi_status_after"),
+            "gdelt_status_before": parsed.get("gdelt_status_before"),
+            "gdelt_status_after": parsed.get("gdelt_status_after"),
+            "prediction_market_disagreement_status_before": parsed.get(
+                "prediction_market_disagreement_status_before"
+            ),
+            "prediction_market_disagreement_status_after": parsed.get(
+                "prediction_market_disagreement_status_after"
+            ),
+            "started_at_utc": parsed.get("started_at_utc"),
+            "finished_at_utc": parsed.get("finished_at_utc"),
+            "generated_at_utc": parsed.get("generated_at_utc"),
+        },
+        **safety,
+    }
+
+
+@app.get("/source-health/watchdog")
+def get_source_health_watchdog() -> dict:
+    """Expose the refresh-watchdog summary written by the 30-min task.
+
+    Read-only — never refreshes, writes, or triggers execution.  When the
+    summary file is absent, returns a truthful MISSING payload so the
+    cockpit panel can render "watchdog never ran" rather than pretending
+    healthy.  Advisory-only safety stamps are always present.
+    """
+    return _build_watchdog_summary_response()
+
+
+# ---------------------------------------------------------------------------
 # Live source freshness — per-source fresh/stale/overdue/skipped/failed
 # ---------------------------------------------------------------------------
 

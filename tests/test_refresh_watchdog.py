@@ -53,10 +53,16 @@ def _entry(
     last_refresh_skipped_reason: str = "",
     latest_event_at: str | None = "2026-05-25T10:00:00+00:00",
     is_stale_active: bool | None = None,
+    dependency_critical: bool = False,
+    used_by_derived: tuple[str, ...] = (),
+    stale_severity: str = "",
+    degraded_parent_stale_parents: tuple[str, ...] = (),
 ) -> SourceSnapshotEntry:
     if is_stale_active is None:
         is_stale_active = (
-            excluded is None and freshness in {"stale", "overdue", "never_run", "failed"}
+            excluded is None
+            and freshness
+            in {"stale", "overdue", "never_run", "failed", "degraded_parent_stale"}
         )
     return SourceSnapshotEntry(
         source_key=key,
@@ -77,6 +83,10 @@ def _entry(
         is_stale_active=is_stale_active,
         is_derived=is_derived,
         parent_sources=parents,
+        dependency_critical=dependency_critical,
+        used_by_derived=used_by_derived,
+        stale_severity=stale_severity,
+        degraded_parent_stale_parents=degraded_parent_stale_parents,
     )
 
 

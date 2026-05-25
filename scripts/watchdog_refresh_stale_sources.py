@@ -42,6 +42,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import random
 import subprocess
 import sys
 import time
@@ -58,6 +59,8 @@ if str(_REPO_ROOT) not in sys.path:
 DEFAULT_TTL_HOURS = 6
 DEFAULT_MAX_RETRIES = 3
 DEFAULT_BACKOFF_SECONDS = (60, 180, 300)
+DEFAULT_BACKOFF_JITTER_PCT = 0.15
+MIN_SLEEP_SECONDS = 1.0
 DEFAULT_SUMMARY_PATH = _REPO_ROOT / "runtime" / "refresh_watchdog_summary.json"
 DEFAULT_REFRESH_COMMAND = (sys.executable, "scripts/refresh_live_signals.py", "--write")
 DEFAULT_DISAGREEMENT_COMMAND = (
@@ -84,6 +87,11 @@ DERIVED_PARENT_KEYS: dict[str, tuple[str, ...]] = {
     "prediction_market_disagreement": ("polymarket", "kalshi"),
 }
 
+# Mirrors scripts.live_source_registry.FRESHNESS_DEGRADED_PARENT_STALE.
+# Re-declared here so the watchdog has no runtime dependency on the
+# registry during the snapshot dataclass build — kept in lockstep.
+FRESHNESS_DEGRADED_PARENT_STALE = "degraded_parent_stale"
+
 STATUS_HEALTHY = "HEALTHY"
 STATUS_IMPROVED_BUT_STALE = "IMPROVED_BUT_STALE"
 STATUS_STALE_UNCHANGED = "STALE_UNCHANGED"
@@ -108,6 +116,37 @@ _SAFETY_STAMPS: dict[str, Any] = {
 
 def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+
+
+def _compute_jittered_sleep(
+    base_seconds: float,
+    jitter_pct: float,
+    *,
+    rng: random.Random | None = None,
+) -> float:
+    """Return ``base_seconds`` perturbed by ±jitter_pct using ``rng``.
+
+    Deterministic when callers inject a seeded ``random.Random``; bounded
+    below by ``MIN_SLEEP_SECONDS`` so jitter never produces a near-zero
+    sleep that defeats the back-off, and never returns a negative value.
+
+    A zero or negative ``jitter_pct`` disables jitter and returns the
+    base value unchanged.  A zero ``base_seconds`` returns 0 (i.e. don't
+    sleep at all) — the floor only applies when the operator did intend
+    to sleep.
+    """
+    base = float(base_seconds)
+    if base <= 0:
+        return 0.0
+    pct = float(jitter_pct or 0.0)
+    if pct <= 0.0:
+        return base
+    rng = rng if rng is not None else random.Random()
+    delta = base * pct
+    perturbed = base + rng.uniform(-delta, delta)
+    if perturbed < MIN_SLEEP_SECONDS:
+        return MIN_SLEEP_SECONDS
+    return perturbed
 
 
 def _tail(text: str, limit: int = 1200) -> str:
@@ -149,6 +188,16 @@ class SourceSnapshotEntry:
     is_stale_active: bool
     is_derived: bool
     parent_sources: tuple[str, ...]
+    # Dependency-critical metadata.  Populated for parents like Kalshi
+    # whose stale-ness cascades into a derived signal (e.g. Prediction
+    # Market Disagreement).  ``stale_severity`` defaults to "" for
+    # non-critical sources; when this source is dependency_critical AND
+    # stale, the watchdog reports ``"dependency_blocking"`` so the
+    # cockpit can show a louder chip than the soft optional grade.
+    dependency_critical: bool = False
+    used_by_derived: tuple[str, ...] = ()
+    stale_severity: str = ""
+    degraded_parent_stale_parents: tuple[str, ...] = ()
 
 
 @dataclass
@@ -234,6 +283,10 @@ class Snapshot:
                 "is_stale_active": e.is_stale_active,
                 "is_derived": e.is_derived,
                 "parent_sources": list(e.parent_sources),
+                "dependency_critical": e.dependency_critical,
+                "used_by_derived": list(e.used_by_derived),
+                "stale_severity": e.stale_severity,
+                "degraded_parent_stale_parents": list(e.degraded_parent_stale_parents),
             }
         return out
 
@@ -247,6 +300,7 @@ def _load_snapshot(*, ttl_hours: int, now_epoch: float | None = None) -> Snapsho
     """Build a canonical snapshot from persistence + the registry."""
     try:
         from scripts.live_source_registry import (
+            DEPENDENCY_CRITICAL_SOURCES as _DEP_CRIT,
             compute_source_freshness,
             detect_source_credential_state,
             list_live_source_families,
@@ -258,6 +312,7 @@ def _load_snapshot(*, ttl_hours: int, now_epoch: float | None = None) -> Snapsho
         )
     except ModuleNotFoundError:  # pragma: no cover
         from live_source_registry import (  # type: ignore[no-redef]
+            DEPENDENCY_CRITICAL_SOURCES as _DEP_CRIT,
             compute_source_freshness,
             detect_source_credential_state,
             list_live_source_families,
@@ -303,7 +358,13 @@ def _load_snapshot(*, ttl_hours: int, now_epoch: float | None = None) -> Snapsho
 
         is_stale_active = False
         if excluded_reason is None:
-            if freshness_state in {"stale", "overdue", "never_run", "failed"}:
+            if freshness_state in {
+                "stale",
+                "overdue",
+                "never_run",
+                "failed",
+                FRESHNESS_DEGRADED_PARENT_STALE,
+            }:
                 is_stale_active = True
             hours = f.get("hours_since_last_success")
             if isinstance(hours, (int, float)) and hours is not None and hours > ttl_hours:
@@ -311,6 +372,30 @@ def _load_snapshot(*, ttl_hours: int, now_epoch: float | None = None) -> Snapsho
 
         parents = DERIVED_PARENT_KEYS.get(key, ())
         is_derived = key in DERIVED_SOURCE_KEYS
+
+        # Dependency-critical metadata.  Kalshi is the canonical example —
+        # registry tier remains ``optional`` for scoring continuity, but the
+        # watchdog grades a stale Kalshi as ``dependency_blocking`` because
+        # it cascades into the Prediction Market Disagreement signal.
+        dep_info = _DEP_CRIT.get(key, {})
+        dep_critical = bool(dep_info.get("dependency_critical"))
+        used_by = tuple(dep_info.get("used_by") or ())
+        if dep_critical and is_stale_active:
+            stale_severity_label = str(
+                dep_info.get("stale_severity_when_active") or "dependency_blocking"
+            )
+        elif is_stale_active and tier == "core":
+            stale_severity_label = "loud"
+        elif is_stale_active and tier == "secondary":
+            stale_severity_label = "moderate"
+        elif is_stale_active:
+            stale_severity_label = "soft"
+        else:
+            stale_severity_label = ""
+
+        degraded_parent_stale_parents = tuple(
+            f.get("degraded_parent_stale_parents") or ()
+        )
 
         entries[key] = SourceSnapshotEntry(
             source_key=key,
@@ -335,6 +420,10 @@ def _load_snapshot(*, ttl_hours: int, now_epoch: float | None = None) -> Snapsho
             is_stale_active=is_stale_active,
             is_derived=is_derived,
             parent_sources=parents,
+            dependency_critical=dep_critical,
+            used_by_derived=used_by,
+            stale_severity=stale_severity_label,
+            degraded_parent_stale_parents=degraded_parent_stale_parents,
         )
 
     return Snapshot(
@@ -641,6 +730,12 @@ def _ensure_tracked_in_summary(
                 "last_refresh_skipped_reason": entry.last_refresh_skipped_reason,
                 "tier": entry.tier,
                 "parent_sources": list(entry.parent_sources),
+                "dependency_critical": entry.dependency_critical,
+                "used_by": list(entry.used_by_derived),
+                "stale_severity": entry.stale_severity,
+                "degraded_parent_stale_parents": list(
+                    entry.degraded_parent_stale_parents
+                ),
             }
 
 
@@ -656,6 +751,9 @@ def run_watchdog(
     ttl_hours: int = DEFAULT_TTL_HOURS,
     max_retries: int = DEFAULT_MAX_RETRIES,
     backoff_seconds: Iterable[int] = DEFAULT_BACKOFF_SECONDS,
+    backoff_jitter_pct: float = DEFAULT_BACKOFF_JITTER_PCT,
+    disable_jitter: bool = False,
+    jitter_seed: int | None = None,
     no_sleep: bool = False,
     summary_path: Path | str | None = None,
     source_filter: list[str] | None = None,
@@ -677,6 +775,12 @@ def run_watchdog(
     load = snapshot_fn or _load_snapshot
     target_summary = Path(summary_path) if summary_path else DEFAULT_SUMMARY_PATH
     backoff = tuple(backoff_seconds) if backoff_seconds else DEFAULT_BACKOFF_SECONDS
+    jitter_enabled = (not disable_jitter) and float(backoff_jitter_pct or 0.0) > 0.0
+    jitter_rng = (
+        random.Random(jitter_seed) if jitter_seed is not None else random.Random()
+    )
+    planned_sleeps: list[float] = []
+    actual_sleeps: list[float] = []
 
     run_id = uuid.uuid4().hex[:16]
     started_at = _utc_now_iso()
@@ -696,6 +800,10 @@ def run_watchdog(
             "ttl_hours": int(ttl_hours),
             "max_retries": int(max_retries),
             "backoff_seconds": list(backoff),
+            "backoff_jitter_pct": float(backoff_jitter_pct or 0.0),
+            "jitter_enabled": bool(jitter_enabled),
+            "planned_sleep_seconds_per_retry": planned_sleeps,
+            "actual_sleep_seconds_per_retry": actual_sleeps,
             "refresh_command": list(DEFAULT_REFRESH_COMMAND),
             "refresh_attempts": [],
             "retries_attempted": 0,
@@ -710,6 +818,7 @@ def run_watchdog(
             "active_sources_checked": [],
             "parent_stale_derived_sources": [],
             "derived_source_dependency_status": {},
+            "dependency_critical_sources": [],
             "freshness_improved": False,
             "improvement_reasons": [],
             "started_at_utc": started_at,
@@ -833,9 +942,19 @@ def run_watchdog(
         if retries_attempted >= max_retries:
             break
         retries_attempted += 1
-        delay = backoff[min(retries_attempted - 1, len(backoff) - 1)] if backoff else 0
-        if not no_sleep and delay:
-            sleep(float(delay))
+        base_delay = backoff[min(retries_attempted - 1, len(backoff) - 1)] if backoff else 0
+        if jitter_enabled and base_delay:
+            planned = _compute_jittered_sleep(
+                float(base_delay), float(backoff_jitter_pct), rng=jitter_rng
+            )
+        else:
+            planned = float(base_delay)
+        planned_sleeps.append(round(planned, 4))
+        if not no_sleep and planned > 0:
+            sleep(planned)
+            actual_sleeps.append(round(planned, 4))
+        else:
+            actual_sleeps.append(0.0)
 
     # --- finalise -------------------------------------------------------
     after = current
@@ -858,6 +977,7 @@ def run_watchdog(
         derived_dep_status[derived_key] = {
             "freshness_state": d_entry.freshness_state,
             "is_stale_active": d_entry.is_stale_active,
+            "degraded_parent_stale_parents": list(d_entry.degraded_parent_stale_parents),
             "parents": {
                 p: {
                     "freshness_state": (
@@ -870,10 +990,19 @@ def run_watchdog(
                         if p in after.entries
                         else False
                     ),
+                    "dependency_critical": (
+                        after.entries[p].dependency_critical
+                        if p in after.entries
+                        else False
+                    ),
                 }
                 for p in parents
             },
         }
+
+    dependency_critical_sources = sorted(
+        k for k, e in after.entries.items() if e.dependency_critical
+    )
 
     fresh_before = sorted(
         k for k, e in before.entries.items() if e.freshness_state == "fresh"
@@ -893,6 +1022,27 @@ def run_watchdog(
     )
     finished_at = _utc_now_iso()
 
+    # Convenience top-level dependency-tracking fields the cockpit panel
+    # reads.  ``_ensure_tracked_in_summary`` already emits the rich
+    # ``<source>_status_before/after`` objects; these short ``*_freshness_*``
+    # strings are the chip-level summary for fast frontend rendering.
+    pmd_after = after.entries.get("prediction_market_disagreement")
+    pmd_before = before.entries.get("prediction_market_disagreement")
+    prediction_market_disagreement_freshness_before = (
+        pmd_before.freshness_state if pmd_before else "missing"
+    )
+    prediction_market_disagreement_freshness_after = (
+        pmd_after.freshness_state if pmd_after else "missing"
+    )
+    kalshi_before_entry = before.entries.get("kalshi")
+    kalshi_after_entry = after.entries.get("kalshi")
+    kalshi_freshness_before_chip = (
+        kalshi_before_entry.freshness_state if kalshi_before_entry else "missing"
+    )
+    kalshi_freshness_after_chip = (
+        kalshi_after_entry.freshness_state if kalshi_after_entry else "missing"
+    )
+
     summary: dict[str, Any] = {
         "operation": "refresh_watchdog",
         "run_id": run_id,
@@ -902,6 +1052,10 @@ def run_watchdog(
         "ttl_hours": int(ttl_hours),
         "max_retries": int(max_retries),
         "backoff_seconds": list(backoff),
+        "backoff_jitter_pct": float(backoff_jitter_pct or 0.0),
+        "jitter_enabled": bool(jitter_enabled),
+        "planned_sleep_seconds_per_retry": planned_sleeps,
+        "actual_sleep_seconds_per_retry": actual_sleeps,
         "refresh_command": list(DEFAULT_REFRESH_COMMAND),
         "refresh_attempts": refresh_attempts,
         "retries_attempted": int(retries_attempted),
@@ -916,6 +1070,15 @@ def run_watchdog(
         "active_sources_checked": sorted(after.active_sources),
         "parent_stale_derived_sources": sorted(after.parent_stale_derived_sources),
         "derived_source_dependency_status": derived_dep_status,
+        "dependency_critical_sources": dependency_critical_sources,
+        "kalshi_freshness_before": kalshi_freshness_before_chip,
+        "kalshi_freshness_after": kalshi_freshness_after_chip,
+        "prediction_market_disagreement_freshness_before": (
+            prediction_market_disagreement_freshness_before
+        ),
+        "prediction_market_disagreement_freshness_after": (
+            prediction_market_disagreement_freshness_after
+        ),
         "freshness_improved": bool(any_improvement_ever or diff_total["any_improved"]),
         "improvement_reasons": improvement_reasons,
         "diff_total": diff_total,
@@ -984,6 +1147,34 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--backoff-jitter-pct",
+        type=float,
+        default=DEFAULT_BACKOFF_JITTER_PCT,
+        help=(
+            "Random jitter applied to each backoff sleep as a fraction of "
+            "the base value (e.g. 0.15 => ±15%). Prevents multiple watchdog "
+            "tasks from retrying in lockstep. "
+            f"Default: {DEFAULT_BACKOFF_JITTER_PCT}."
+        ),
+    )
+    parser.add_argument(
+        "--disable-jitter",
+        action="store_true",
+        help=(
+            "Disable backoff jitter; sleep values exactly match "
+            "--backoff-seconds. Used for deterministic manual runs."
+        ),
+    )
+    parser.add_argument(
+        "--jitter-seed",
+        type=int,
+        default=None,
+        help=(
+            "Optional integer seed for deterministic jitter (tests/dev only). "
+            "Without it, jitter draws from an unseeded RNG."
+        ),
+    )
+    parser.add_argument(
         "--no-sleep",
         action="store_true",
         help="Skip actual sleeps between retries (tests/dev only).",
@@ -1037,6 +1228,17 @@ def _format_text_summary(summary: dict[str, Any]) -> str:
     lines.append(
         f"parent_stale_derived:    {summary.get('parent_stale_derived_sources')}"
     )
+    lines.append(
+        f"dependency_critical:     {summary.get('dependency_critical_sources')}"
+    )
+    if summary.get("jitter_enabled"):
+        lines.append(
+            f"jitter:                  pct={summary.get('backoff_jitter_pct')} "
+            f"planned={summary.get('planned_sleep_seconds_per_retry')} "
+            f"actual={summary.get('actual_sleep_seconds_per_retry')}"
+        )
+    else:
+        lines.append("jitter:                  disabled")
     lines.append("")
     for src in TRACKED_STALE_SOURCES:
         b = summary.get(f"{src}_status_before") or {}
@@ -1071,6 +1273,9 @@ def main(argv: list[str] | None = None) -> int:
         ttl_hours=int(args.ttl_hours),
         max_retries=int(args.max_retries),
         backoff_seconds=backoff,
+        backoff_jitter_pct=float(args.backoff_jitter_pct),
+        disable_jitter=bool(args.disable_jitter),
+        jitter_seed=(int(args.jitter_seed) if args.jitter_seed is not None else None),
         no_sleep=bool(args.no_sleep),
         summary_path=str(args.summary_path),
         source_filter=source_filter or None,

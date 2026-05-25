@@ -23,6 +23,7 @@ import type {
   ReconciliationQueueResponse,
   LearningCompletenessResponse,
   KalshiSourceHealthResponse,
+  WatchdogSummaryResponse,
 } from '@/types';
 
 export interface HealthResponse {
@@ -535,6 +536,21 @@ export async function getSourceHealthSummary(): Promise<SourceHealthSummaryRespo
 export async function getLiveSourcesStatus(): Promise<LiveSourcesStatusResponse | null> {
   try {
     return await apiFetch<LiveSourcesStatusResponse>('/live-sources/status');
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Fetch the refresh-watchdog summary written by the 30-minute scheduled
+ * task (or the on-demand CLI).  The backend route is read-only and
+ * returns a truthful ``status=MISSING`` payload when no watchdog summary
+ * exists — the cockpit panel renders that as "watchdog never ran"
+ * rather than pretending healthy.  This call never authorises trades.
+ */
+export async function getWatchdogSummary(): Promise<WatchdogSummaryResponse | null> {
+  try {
+    return await apiFetch<WatchdogSummaryResponse>('/source-health/watchdog');
   } catch {
     return null;
   }

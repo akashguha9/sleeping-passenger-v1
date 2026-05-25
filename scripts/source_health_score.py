@@ -137,6 +137,10 @@ _FRESHNESS_PENALTY: dict[str, float] = {
     "never_run": 0.55,
     "failed": 0.60,
     "skipped": 0.40,  # contextual; reduced for optional-missing-config below
+    # Derived sources whose required parent is stale.  Penalty is
+    # equivalent to stale; the operator sees a clear "DEGRADED — parent
+    # stale" line in source_health_summary.py so they fix the parent.
+    "degraded_parent_stale": 0.30,
 }
 
 
@@ -265,7 +269,7 @@ def score_source(entry: dict[str, Any]) -> dict[str, Any]:
     weighted_penalty = base_penalty * (0.4 + 0.6 * tier_weight)
     score -= weighted_penalty
 
-    if freshness_state in {"stale", "overdue", "failed", "never_run"}:
+    if freshness_state in {"stale", "overdue", "failed", "never_run", "degraded_parent_stale"}:
         if tier == "core":
             stale_severity = "loud"
         elif tier == "secondary":
@@ -273,6 +277,34 @@ def score_source(entry: dict[str, Any]) -> dict[str, Any]:
         else:
             stale_severity = "soft"
         reasons.append(f"freshness_state={freshness_state} (tier={tier})")
+
+    # Dependency-critical override: a stale dependency_critical parent
+    # (e.g. Kalshi) cascades into a derived signal becoming unusable.
+    # Promote its stale_severity above its tier weighting so the operator
+    # sees the cascade clearly even though the registry tier remains
+    # ``optional`` for scoring continuity.
+    if (
+        bool(entry.get("dependency_critical"))
+        and freshness_state in {"stale", "overdue", "failed", "never_run", "degraded_parent_stale"}
+    ):
+        stale_severity = "dependency_blocking"
+        used_by = list(entry.get("used_by_derived") or [])
+        if used_by:
+            reasons.append(
+                f"dependency_critical — parent for: {', '.join(used_by)}"
+            )
+
+    # Derived source whose parent is stale: surface which parent so the
+    # operator can prioritise the fix without re-reading freshness rows.
+    if freshness_state == "degraded_parent_stale":
+        offending = list(entry.get("degraded_parent_stale_parents") or [])
+        if offending:
+            reasons.append(
+                f"degraded_parent_stale parents: {', '.join(offending)}"
+            )
+        # Extra small penalty on the derived source itself so the
+        # aggregate score reflects the dependency breakage.
+        score -= 0.05
 
     if last_refresh_error:
         score -= 0.10 if tier == "core" else 0.05
@@ -684,6 +716,18 @@ def _gather_per_source_entries() -> dict[str, dict[str, Any]]:
     except Exception:
         return {}
 
+    try:
+        try:
+            from scripts.live_source_registry import (
+                DEPENDENCY_CRITICAL_SOURCES as _DEP_CRIT,
+            )
+        except ModuleNotFoundError:  # pragma: no cover
+            from live_source_registry import (  # type: ignore[no-redef]
+                DEPENDENCY_CRITICAL_SOURCES as _DEP_CRIT,
+            )
+    except Exception:
+        _DEP_CRIT = {}
+
     entries: dict[str, dict[str, Any]] = {}
     for fam in list_live_source_families():
         key = fam["source_key"]
@@ -701,6 +745,14 @@ def _gather_per_source_entries() -> dict[str, dict[str, Any]]:
         entry["last_refresh_skipped"] = bool(int(rrow.get("skipped", 0) or 0))
         entry["last_refresh_error"] = str(rrow.get("error_message") or "")
         entry["last_refresh_skipped_reason"] = str(rrow.get("skipped_reason") or "")
+        # Dependency-critical / derived-source metadata threaded through
+        # so score_source can surface "dependency_blocking" stale_severity.
+        dep_info = _DEP_CRIT.get(key, {})
+        entry["dependency_critical"] = bool(dep_info.get("dependency_critical"))
+        entry["used_by_derived"] = list(dep_info.get("used_by") or ())
+        entry["degraded_parent_stale_parents"] = list(
+            fresh.get("degraded_parent_stale_parents") or ()
+        )
         entries[key] = entry
     return entries
 

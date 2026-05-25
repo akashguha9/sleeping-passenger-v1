@@ -655,6 +655,97 @@ export interface LiveSourcesStatusResponse {
 }
 
 // ---------------------------------------------------------------------------
+// Refresh-watchdog summary (Sprint — operator cockpit visibility)
+//
+// Response shape for ``GET /source-health/watchdog``.  All output is
+// advisory-only; the route never authorises execution and the panel
+// renders an explicit "advisory only" footer.  When the watchdog summary
+// file is absent the backend returns ``present=false`` with
+// ``status='MISSING'`` — the cockpit panel must show that truthfully
+// rather than pretending healthy.
+// ---------------------------------------------------------------------------
+export interface WatchdogPerSourceStatusDetail {
+  present?: boolean;
+  freshness_state?: string;
+  is_stale_active?: boolean;
+  excluded_reason?: string | null;
+  last_success_at?: string | null;
+  last_refresh_attempt_at?: string | null;
+  last_refresh_error?: string;
+  last_refresh_skipped_reason?: string;
+  tier?: string;
+  parent_sources?: string[];
+  dependency_critical?: boolean;
+  used_by?: string[];
+  stale_severity?: string;
+  degraded_parent_stale_parents?: string[];
+}
+
+export interface WatchdogSummaryInner {
+  operation?: string;
+  run_id?: string;
+  status?: string;
+  ttl_hours?: number;
+  max_retries?: number;
+  retries_attempted?: number;
+  freshness_improved?: boolean;
+  improvement_reasons?: string[];
+  backoff_seconds?: number[];
+  backoff_jitter_pct?: number | null;
+  jitter_enabled?: boolean;
+  planned_sleep_seconds_per_retry?: number[];
+  actual_sleep_seconds_per_retry?: number[];
+  stale_sources_before?: string[];
+  stale_sources_after?: string[];
+  excluded_optional_sources?: string[];
+  parent_stale_derived_sources?: string[];
+  derived_source_dependency_status?: Record<
+    string,
+    {
+      freshness_state?: string;
+      is_stale_active?: boolean;
+      degraded_parent_stale_parents?: string[];
+      parents?: Record<
+        string,
+        { freshness_state?: string; is_stale_active?: boolean; dependency_critical?: boolean }
+      >;
+    }
+  >;
+  dependency_critical_sources?: string[];
+  kalshi_freshness_before?: string | null;
+  kalshi_freshness_after?: string | null;
+  prediction_market_disagreement_status_before?: string | null;
+  prediction_market_disagreement_status_after?: string | null;
+  kalshi_status_before?: WatchdogPerSourceStatusDetail | null;
+  kalshi_status_after?: WatchdogPerSourceStatusDetail | null;
+  gdelt_status_before?: WatchdogPerSourceStatusDetail | null;
+  gdelt_status_after?: WatchdogPerSourceStatusDetail | null;
+  started_at_utc?: string;
+  finished_at_utc?: string;
+  generated_at_utc?: string;
+}
+
+export interface WatchdogSummaryResponse {
+  present: boolean;
+  status: string;
+  reason?: string | null;
+  summary_path?: string;
+  loaded_at_utc?: string;
+  age_seconds?: number | null;
+  age_minutes?: number | null;
+  stale?: boolean;
+  summary_stale_after_minutes?: number;
+  summary: WatchdogSummaryInner | null;
+  advisory_only: boolean;
+  human_execution_required: boolean;
+  execution_gate: string;
+  broker_api_called: boolean;
+  can_execute: boolean;
+  ai_execution_count: number;
+  execution_permission: boolean;
+}
+
+// ---------------------------------------------------------------------------
 // Learning completeness (Sprint 7C.1) — advisory-only, read-only
 // ---------------------------------------------------------------------------
 

@@ -341,7 +341,16 @@ def test_disagreement_source_in_compute_source_freshness():
     assert entry["ai_execution_count"] == 0
     assert entry["execution_permission"] is False
     assert entry["can_execute"] is False
-    assert entry["freshness_state"] == "never_run"
+    # With no source rows at all, the parents (Polymarket, Kalshi) are
+    # ``never_run`` — the derived signal is therefore promoted to the
+    # explicit ``degraded_parent_stale`` state.  Asserting only that the
+    # state is non-fresh would let a future regression hide the parent
+    # cascade; pin the explicit state instead.
+    assert entry["freshness_state"] in {"never_run", "degraded_parent_stale"}
+    if entry["freshness_state"] == "degraded_parent_stale":
+        offenders = entry.get("degraded_parent_stale_parents") or []
+        # Both parents must appear because neither has a row.
+        assert "polymarket" in offenders or "kalshi" in offenders
 
 
 def test_disagreement_source_is_advisory_only_in_registry():

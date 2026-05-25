@@ -386,6 +386,7 @@ def _format_text_summary(summary: dict[str, Any], freshness: dict[str, Any]) -> 
     # Stale-active list — the truthful "what's broken right now" call.
     active_stale: list[str] = []
     excluded_optional: list[str] = []
+    degraded_parent_stale_rows: list[tuple[str, list[str]]] = []
     for key, state in (freshness or {}).items():
         fs = str(state.get("freshness_state") or "")
         tier = str(state.get("tier") or "")
@@ -393,8 +394,11 @@ def _format_text_summary(summary: dict[str, Any], freshness: dict[str, Any]) -> 
         if tier == "optional" and not cred:
             excluded_optional.append(key)
             continue
-        if fs in {"stale", "overdue", "never_run", "failed"}:
+        if fs in {"stale", "overdue", "never_run", "failed", "degraded_parent_stale"}:
             active_stale.append(key)
+        if fs == "degraded_parent_stale":
+            offending = list(state.get("degraded_parent_stale_parents") or [])
+            degraded_parent_stale_rows.append((key, offending))
     if active_stale:
         lines.append("")
         lines.append("Stale active sources (NOT excluded — must improve):")
@@ -403,6 +407,14 @@ def _format_text_summary(summary: dict[str, Any], freshness: dict[str, Any]) -> 
     else:
         lines.append("")
         lines.append("Stale active sources: none")
+    if degraded_parent_stale_rows:
+        lines.append("")
+        lines.append("Derived sources degraded by stale parent:")
+        for key, offenders in degraded_parent_stale_rows:
+            parent_list = ", ".join(offenders) if offenders else "<unknown>"
+            lines.append(
+                f"  - {key}: DEGRADED_PARENT_STALE — parent stale: {parent_list}"
+            )
     if excluded_optional:
         lines.append("")
         lines.append("Excluded (optional / not configured):")

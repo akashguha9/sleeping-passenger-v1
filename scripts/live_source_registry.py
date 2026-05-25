@@ -610,6 +610,65 @@ FRESHNESS_OVERDUE = "overdue"
 FRESHNESS_NEVER_RUN = "never_run"
 FRESHNESS_SKIPPED = "skipped"
 FRESHNESS_FAILED = "failed"
+# Derived sources whose required parent is not fresh.  This state must
+# NEVER be FRESH while a parent is stale — the operator surface depends
+# on the derived signal honestly reporting the dependency breakage.
+FRESHNESS_DEGRADED_PARENT_STALE = "degraded_parent_stale"
+
+# Derived-source parent map.  Single source of truth — the watchdog
+# (scripts/watchdog_refresh_stale_sources.py) and the freshness
+# computation read this so the cockpit and the watchdog cannot disagree
+# about which parents are required.
+DERIVED_SOURCE_PARENTS: dict[str, tuple[str, ...]] = {
+    "prediction_market_disagreement": ("polymarket", "kalshi"),
+}
+
+# Dependency-critical sources — registry tier is intentionally left
+# "optional" so existing scoring/test contracts are preserved, but the
+# UI/watchdog must flag these explicitly because a stale upstream cascades
+# into a derived signal becoming unusable.  `used_by` enumerates the
+# derived sources that consume the parent — kept in sync with
+# ``DERIVED_SOURCE_PARENTS`` by ``get_dependency_critical_info``.
+DEPENDENCY_CRITICAL_SOURCES: dict[str, dict[str, Any]] = {
+    "kalshi": {
+        "dependency_critical": True,
+        "used_by": ("prediction_market_disagreement",),
+        "stale_severity_when_active": "dependency_blocking",
+        "reason": (
+            "Kalshi is a required parent for the Prediction Market "
+            "Disagreement derived signal — a stale Kalshi means the "
+            "cross-venue scanner cannot recompute fresh outputs."
+        ),
+    },
+}
+
+
+def get_dependency_critical_info(source_key: str) -> dict[str, Any]:
+    """Return dependency-critical metadata for ``source_key`` or an empty dict.
+
+    The returned dict always carries a ``dependency_critical`` boolean key
+    so callers can branch without a ``KeyError`` guard.  ``used_by`` is
+    materialised as a list for JSON-friendly emission.
+    """
+    info = DEPENDENCY_CRITICAL_SOURCES.get(str(source_key or "").strip().lower())
+    if not info:
+        return {
+            "dependency_critical": False,
+            "used_by": [],
+            "stale_severity_when_active": None,
+            "reason": "",
+        }
+    return {
+        "dependency_critical": bool(info.get("dependency_critical")),
+        "used_by": list(info.get("used_by") or ()),
+        "stale_severity_when_active": info.get("stale_severity_when_active"),
+        "reason": str(info.get("reason") or ""),
+    }
+
+
+def get_required_parents(source_key: str) -> tuple[str, ...]:
+    """Return the tuple of required parent source_keys for a derived source."""
+    return DERIVED_SOURCE_PARENTS.get(str(source_key or "").strip().lower(), ())
 
 
 def _parse_iso8601(value: Any) -> float | None:
@@ -741,6 +800,14 @@ def compute_source_freshness(
             "credential_configured": cred_configured,
             "adapter_status": src["adapter_status"],
             "tier": get_source_tier(key),
+            "required_parents": list(get_required_parents(key)),
+            "is_derived": bool(get_required_parents(key)),
+            "dependency_critical": bool(
+                DEPENDENCY_CRITICAL_SOURCES.get(key, {}).get("dependency_critical")
+            ),
+            "used_by_derived": list(
+                DEPENDENCY_CRITICAL_SOURCES.get(key, {}).get("used_by") or ()
+            ),
             "advisory_status": ADVISORY_STATUS,
             "execution_gate": EXECUTION_GATE_LOCKED,
             "broker_api_called": False,
@@ -751,6 +818,38 @@ def compute_source_freshness(
             "may_execute": False,
             "may_call_broker": False,
         }
+
+    # ------------------------------------------------------------------
+    # Post-process derived sources: a derived signal CANNOT be marked
+    # fresh while any required parent is not fresh.  We override the
+    # state to FRESHNESS_DEGRADED_PARENT_STALE and record which parents
+    # are responsible.  ``skipped`` parents (missing config) and ``planned``
+    # parents also count as not-fresh — the derived signal has no honest
+    # way to compute.  Terminal states ``skipped``/``planned`` on the
+    # derived source itself win (don't downgrade those to PARENT_STALE).
+    # ------------------------------------------------------------------
+    for derived_key, parents in DERIVED_SOURCE_PARENTS.items():
+        d = out.get(derived_key)
+        if d is None:
+            continue
+        if d["freshness_state"] in {FRESHNESS_SKIPPED}:
+            continue
+        offending_parents: list[str] = []
+        parent_states: dict[str, str] = {}
+        for parent in parents:
+            p = out.get(parent)
+            if p is None:
+                offending_parents.append(parent)
+                parent_states[parent] = "missing"
+                continue
+            pstate = p["freshness_state"]
+            parent_states[parent] = pstate
+            if pstate != FRESHNESS_FRESH:
+                offending_parents.append(parent)
+        d["parent_freshness_states"] = parent_states
+        d["degraded_parent_stale_parents"] = offending_parents
+        if offending_parents:
+            d["freshness_state"] = FRESHNESS_DEGRADED_PARENT_STALE
     return out
 
 
@@ -785,14 +884,19 @@ __all__ = [
     "FRESHNESS_NEVER_RUN",
     "FRESHNESS_SKIPPED",
     "FRESHNESS_FAILED",
+    "FRESHNESS_DEGRADED_PARENT_STALE",
     "SOURCE_TIER_CORE",
     "SOURCE_TIER_SECONDARY",
     "SOURCE_TIER_OPTIONAL",
     "SOURCE_TIER_PLANNED",
+    "DERIVED_SOURCE_PARENTS",
+    "DEPENDENCY_CRITICAL_SOURCES",
     "asia_disclosure_subsource_state",
     "build_refresh_plan",
     "compute_source_freshness",
     "detect_source_credential_state",
+    "get_dependency_critical_info",
+    "get_required_parents",
     "get_source_family",
     "get_source_tier",
     "list_live_source_families",

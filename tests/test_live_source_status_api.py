@@ -76,6 +76,11 @@ def test_compute_source_freshness_fresh_window() -> None:
     }
     assert FRESHNESS_FRESH in fresh_states
     # Set membership sanity check: each state value is one of the documented ones.
+    # FRESHNESS_DEGRADED_PARENT_STALE is included because derived sources whose
+    # required parents are not fresh are intentionally promoted to this state
+    # (see scripts/live_source_registry.compute_source_freshness post-processing).
+    from scripts.live_source_registry import FRESHNESS_DEGRADED_PARENT_STALE
+
     valid = {
         FRESHNESS_FRESH,
         FRESHNESS_STALE,
@@ -83,6 +88,7 @@ def test_compute_source_freshness_fresh_window() -> None:
         FRESHNESS_NEVER_RUN,
         FRESHNESS_SKIPPED,
         FRESHNESS_FAILED,
+        FRESHNESS_DEGRADED_PARENT_STALE,
     }
     assert fresh_states.issubset(valid), f"unexpected state: {fresh_states - valid}"
 
