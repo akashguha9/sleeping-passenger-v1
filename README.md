@@ -215,6 +215,14 @@ python -m pytest tests/test_real_api_canary.py -v
 | Controlled private beta | 4.5 | Design complete, implementation pending. |
 | Public production SaaS | 1.5 | **Do not pursue this year.** |
 
+Run the role-fit scorecard (regenerates both JSON + Markdown):
+
+```powershell
+python scripts/segment_role_scorecard.py `
+  --json runtime/release/segment_role_scorecard.json `
+  --markdown docs/scorecards/SEGMENT_ROLE_SCORECARD.md
+```
+
 This is an **alpha MVP** with a production-grade safety floor.  It is
 suitable for a single technical operator running it locally.  It is not
 suitable for second users, hosted multi-tenant deployment, or any
@@ -242,6 +250,9 @@ predictive-validity claim until the calibration gate reports `MEASURED`.
 | [docs/SOURCE_TOS_CHECKLIST.md](docs/SOURCE_TOS_CHECKLIST.md) | Per-source ToS verification |
 | [docs/PRODUCT_DIRECTION_DECISION.md](docs/PRODUCT_DIRECTION_DECISION.md) | Local-showcase vs private-beta vs public-prod |
 | [docs/FINAL_SCORECARD.md](docs/FINAL_SCORECARD.md) | Honest before/after readiness scorecard |
+| [docs/scorecards/ROLE_FIT_SCORING_MODEL.md](docs/scorecards/ROLE_FIT_SCORING_MODEL.md) | Role-fit vs absolute scoring model + formulas |
+| [docs/scorecards/SEGMENT_ROLE_MAP.md](docs/scorecards/SEGMENT_ROLE_MAP.md) | Per-segment roles, ceilings, unlocks |
+| [docs/scorecards/SEGMENT_ROLE_SCORECARD.md](docs/scorecards/SEGMENT_ROLE_SCORECARD.md) | Generated role-fit scorecard |
 | [docs/FINAL_ACCEPTANCE_CHECKLIST.md](docs/FINAL_ACCEPTANCE_CHECKLIST.md) | Local-showcase acceptance walkthrough |
 | [docs/CALIBRATION_CORPUS.md](docs/CALIBRATION_CORPUS.md) | Calibration corpus pipeline + N_real reality check |
 | [docs/HOSTED_CANARY.md](docs/HOSTED_CANARY.md) | Nightly real-API canary workflow + safety bounds |
