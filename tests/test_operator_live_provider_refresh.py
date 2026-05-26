@@ -6,12 +6,30 @@ from __future__ import annotations
 
 import json
 import types
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
 
 from scripts import operator_live_provider_refresh as olpr
+
+
+def _recent_gdelt_seendate(hours_ago: float = 1.0) -> str:
+    """Return a GDELT-format seendate close to wall-clock now.
+
+    Mock providers must produce data that is *currently* fresh — hardcoded
+    dates drift past ``lpq_uplift_score``'s 48h gdelt freshness window as
+    the real clock advances, which would silently turn a 3-LIVE_VERIFIED
+    mock into a 2-LIVE_VERIFIED uplift and break the LPQ contract.
+    """
+    ts = datetime.now(timezone.utc) - timedelta(hours=max(0.0, hours_ago))
+    return ts.strftime("%Y%m%dT%H%M%SZ")
+
+
+def _recent_sec_filing_date(days_ago: int = 1) -> str:
+    """Return a recent SEC filing date (YYYY-MM-DD)."""
+    ts = datetime.now(timezone.utc) - timedelta(days=max(0, days_ago))
+    return ts.strftime("%Y-%m-%d")
 
 
 @pytest.fixture(autouse=True)
@@ -50,7 +68,10 @@ class _FakeRequests:
             return _FakeResponse({
                 "filings": {"recent": {
                     "form": ["10-K", "8-K"],
-                    "filingDate": ["2026-05-22", "2026-05-20"],
+                    "filingDate": [
+                        _recent_sec_filing_date(days_ago=1),
+                        _recent_sec_filing_date(days_ago=3),
+                    ],
                     "accessionNumber": ["x1", "x2"],
                 }}
             })
@@ -58,10 +79,10 @@ class _FakeRequests:
             return _FakeResponse({"articles": [
                 {"url": "https://news.example.com/a",
                  "title": "Markets rally",
-                 "seendate": "20260524T120000Z"},
+                 "seendate": _recent_gdelt_seendate(hours_ago=1.0)},
                 {"url": "https://news.example.com/b",
                  "title": "Inflation data",
-                 "seendate": "20260524T100000Z"},
+                 "seendate": _recent_gdelt_seendate(hours_ago=3.0)},
             ]})
         return _FakeResponse({})
 
@@ -362,6 +383,43 @@ def test_previous_summary_path_loads_real_two_provider_artifact(tmp_path, monkey
     assert summary["providers_live_verified"] == []
     assert summary["previous_live_payload_quality_score"] == 8.45
     assert summary["live_payload_quality_score"] == 8.45
+
+
+def test_previous_score_8_45_does_not_cap_three_provider_uplift(
+    tmp_path, monkeypatch,
+):
+    """A prior 2-provider LPQ floor (8.45) must act as a *floor*, never a
+    *cap*: when the current run mocks yfinance + sec_edgar + gdelt all
+    LIVE_VERIFIED and within their uplift freshness windows, the result
+    must be >= 8.6 even if a previous summary recorded only 8.45."""
+    prior = tmp_path / "isolated_prior_summary.json"
+    prior.write_text(json.dumps({
+        "ok": True,
+        "operator_run": True,
+        "generated_at_utc": olpr._utc_iso(),
+        "providers_live_verified": ["yfinance", "sec_edgar"],
+        "previous_live_payload_quality_score": 8.2,
+        "live_payload_quality_score": 8.45,
+        "ttl_hours": 24,
+    }), encoding="utf-8")
+
+    monkeypatch.setenv("MVP_LIVE_REFRESH_OK", "1")
+    monkeypatch.setenv("SEC_USER_AGENT", "test test@example.com")
+    summary = olpr.refresh_providers(
+        yfinance_module=_fake_yfinance(),
+        requests_module=_FakeRequests,
+        previous_summary_path=prior,
+    )
+    assert summary["ok"] is True
+    assert set(summary["providers_live_verified"]) == {
+        "yfinance", "sec_edgar", "gdelt"
+    }
+    assert summary["previous_live_payload_quality_score"] == 8.45
+    assert summary["live_payload_quality_score"] >= 8.6
+    # Safety stamps still hold under a 3-provider uplift.
+    assert summary["advisory_only"] is True
+    assert summary["broker_api_called"] is False
+    assert summary["execution_gate"] == "LOCKED"
 
 
 def test_no_broker_api_calls_anywhere():
