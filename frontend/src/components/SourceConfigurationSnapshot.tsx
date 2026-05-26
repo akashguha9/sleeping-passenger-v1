@@ -13,7 +13,25 @@
  * execution-style language.  When the backend is unavailable, the
  * component reports the truthful unavailable state — never invents data.
  */
-import type { LiveSourcesStatusResponse } from '@/types';
+import type { LiveSourceStatusEntry, LiveSourcesStatusResponse } from '@/types';
+
+/**
+ * Read an optional string-valued field from a LiveSourceStatusEntry that the
+ * static type does not declare.  Older backend snapshots emit a flat
+ * `freshness` key instead of the canonical `freshness_state`; we tolerate
+ * both without weakening LiveSourceStatusEntry with an index signature.
+ *
+ * Goes through `unknown` so TypeScript treats the bridge as deliberate
+ * rather than an unsafe Record cast (TS2352).
+ */
+function readOptionalString(
+  entry: LiveSourceStatusEntry,
+  key: string,
+): string | undefined {
+  const bag = entry as unknown as Record<string, unknown>;
+  const value = bag[key];
+  return typeof value === 'string' ? value : undefined;
+}
 
 export interface SourceConfigurationSnapshotProps {
   status: LiveSourcesStatusResponse | null;
@@ -70,13 +88,15 @@ export function computeSnapshotCounts(
     if (entry?.credential_configured) configured += 1;
     else not_configured += 1;
 
-    const freshness = String(
-      // Different versions of the backend expose either `freshness_state` or
-      // a flatter `freshness` field; tolerate both rather than reading a
-      // single key.  Default to never_run for unknown values.
-      (entry as Record<string, unknown>).freshness_state ??
-        (entry as Record<string, unknown>).freshness ??
-        'never_run',
+    // `freshness_state` is the canonical typed field; `freshness` is a
+    // legacy flat alias some older backend snapshots still emit.  Read the
+    // typed field directly and fall back to the legacy alias via a typed
+    // helper so we don't widen LiveSourceStatusEntry with an index
+    // signature.  Default to never_run for unknown values.
+    const freshness = (
+      entry.freshness_state ??
+      readOptionalString(entry, 'freshness') ??
+      'never_run'
     ).toLowerCase();
 
     if (freshness === 'fresh') fresh += 1;
