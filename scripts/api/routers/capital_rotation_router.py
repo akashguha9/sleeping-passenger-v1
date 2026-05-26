@@ -4,7 +4,7 @@ Capital Rotation Engine — HTTP surface.
 
 Exposes the Exit Review Board, Portfolio Capacity / Regime, Theme Slot
 accounting, Buy Admission Board, and Risk Budget dashboard under
-``/portfolio/*``.  Every endpoint is:
+``/capital-rotation/*``.  Every endpoint is:
 
 - read-only (HTTP GET only)
 - advisory-only (carries the centralised safety stamps)
@@ -129,6 +129,8 @@ def get_capital_rotation() -> dict:
             "juego_de_posicion": summary.get("juego_de_posicion"),
             "generated_at_utc": summary.get("generated_at_utc"),
             "source_health": summary.get("source_health"),
+            "position_context_status": summary.get("position_context_status"),
+            "candidate_feed_status": summary.get("candidate_feed_status"),
             "summary": summary,
         }
     )
@@ -152,6 +154,7 @@ def get_exit_review() -> dict:
             "partial_tp_due_count": board.get("partial_tp_due_count", 0),
             "runner_exit_review_count": board.get("runner_exit_review_count", 0),
             "data_blocked_count": board.get("data_blocked_count", 0),
+            "position_context_status": summary.get("position_context_status"),
         }
     )
 
@@ -173,10 +176,13 @@ def get_theme_slots() -> dict:
 
 
 def get_buy_admission() -> dict:
-    """Buy Admission Board (operates over an empty candidate set by default).
+    """Buy Admission Board — auto-loads candidate feed from release dir.
 
-    Candidate-side intelligence is wired via the calling caller in the
-    summary builder; this endpoint exposes the latest board state.
+    The summary builder now discovers candidate artefacts via
+    ``load_candidate_feed`` so this endpoint is no longer silently
+    empty when artefacts exist.  When no artefact exists, the empty
+    board is returned alongside ``candidate_feed_status`` so the
+    caller can see *why*.
     """
     summary = build_capital_rotation_summary()
     board = summary.get("buy_admission_board") or {}
@@ -188,6 +194,7 @@ def get_buy_admission() -> dict:
             "rows": board.get("rows", []),
             "counts": board.get("counts", {}),
             "candidate_count": board.get("candidate_count", 0),
+            "candidate_feed_status": summary.get("candidate_feed_status"),
         }
     )
 

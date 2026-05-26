@@ -216,12 +216,16 @@ def compute_position_metrics(position: dict[str, Any]) -> dict[str, Any]:
             == str(position.get("entry_currency")).upper()
         )
 
+    # DATA_BLOCKED applies only when *mechanical* fields are missing.
+    # Source health that is stale or unverified is a soft degradation,
+    # not a block — the operator can still see TP / stop math from a
+    # locally-recorded buy/live/stop/tp.  Missing thesis is even softer
+    # (see Section 5 of the sprint brief).
     data_ok = (
         p_i is not None
         and b_i is not None
         and s_i is not None
         and t_i is not None
-        and source_health not in {"", "UNVERIFIED", "STATIC_FALLBACK", "MISSING"}
         and currency_ok
     )
 
@@ -381,7 +385,21 @@ def classify_exit_status(
     metrics = compute_position_metrics(position)
     reasons: list[str] = []
 
-    # 1. DATA_BLOCKED
+    # Soft context flags — captured regardless of branch so a downstream
+    # caller can see why a HOLD_OK row is still incomplete.
+    soft_reasons: list[str] = []
+    if not (
+        position.get("thesis")
+        or position.get("entry_reason")
+        or position.get("risk_reason")
+    ):
+        soft_reasons.append("THESIS_CONTEXT_MISSING")
+    if metrics["source_health"] in {"UNVERIFIED", "STATIC_FALLBACK", "MISSING"}:
+        soft_reasons.append(
+            f"source_health_degraded={metrics['source_health']}"
+        )
+
+    # 1. DATA_BLOCKED — only when MECHANICAL fields are missing.
     if not metrics["data_ok"]:
         missing: list[str] = []
         if metrics["live_price"] is None:
@@ -392,14 +410,14 @@ def classify_exit_status(
             missing.append("stop_loss")
         if metrics["tp_price"] is None:
             missing.append("tp_price")
-        if metrics["source_health"] in {"", "UNVERIFIED", "STATIC_FALLBACK", "MISSING"}:
-            missing.append(f"source_health={metrics['source_health'] or 'MISSING'}")
         if not metrics["currency_ok"]:
             missing.append("currency_mismatch")
         reasons.append("data_blocked:" + ",".join(missing))
+        reasons.extend(soft_reasons)
         return {
             "exit_status": EXIT_DATA_BLOCKED,
             "reason_codes": reasons,
+            "missing_fields": missing,
             "metrics": metrics,
         }
 
@@ -419,7 +437,8 @@ def classify_exit_status(
     if reasons:
         return {
             "exit_status": EXIT_NOW,
-            "reason_codes": reasons,
+            "reason_codes": reasons + soft_reasons,
+            "missing_fields": [],
             "metrics": metrics,
         }
 
@@ -427,7 +446,11 @@ def classify_exit_status(
     if metrics["tp_due"]:
         return {
             "exit_status": EXIT_PARTIAL_TP_NOW,
-            "reason_codes": ["live_price_at_or_above_tp", "partial_tp_not_logged"],
+            "reason_codes": [
+                "live_price_at_or_above_tp",
+                "partial_tp_not_logged",
+            ] + soft_reasons,
+            "missing_fields": [],
             "metrics": metrics,
         }
 
@@ -445,13 +468,18 @@ def classify_exit_status(
                 why.append(f"thesis={thesis_status}")
             return {
                 "exit_status": EXIT_RUNNER_EXIT_REVIEW,
-                "reason_codes": why,
+                "reason_codes": why + soft_reasons,
+                "missing_fields": [],
                 "metrics": metrics,
             }
         if thesis_status in {None, THESIS_CONFIRMED, THESIS_UNCHANGED}:
             return {
                 "exit_status": EXIT_RUNNER_HOLD,
-                "reason_codes": ["runner_active", f"thesis={thesis_status or 'unknown'}"],
+                "reason_codes": [
+                    "runner_active",
+                    f"thesis={thesis_status or 'unknown'}",
+                ] + soft_reasons,
+                "missing_fields": [],
                 "metrics": metrics,
             }
 
@@ -466,7 +494,8 @@ def classify_exit_status(
     if trim_reasons:
         return {
             "exit_status": EXIT_TRIM_REVIEW,
-            "reason_codes": trim_reasons,
+            "reason_codes": trim_reasons + soft_reasons,
+            "missing_fields": [],
             "metrics": metrics,
         }
 
@@ -482,14 +511,16 @@ def classify_exit_status(
                         "past_expected_horizon",
                         f"pnl_pct={round(pnl, 4)}",
                         f"freshness={round(fresh, 4)}",
-                    ],
+                    ] + soft_reasons,
+                    "missing_fields": [],
                     "metrics": metrics,
                 }
 
     # 8. HOLD_OK
     return {
         "exit_status": EXIT_HOLD_OK,
-        "reason_codes": ["all_checks_passed"],
+        "reason_codes": ["all_checks_passed"] + soft_reasons,
+        "missing_fields": [],
         "metrics": metrics,
     }
 
@@ -565,6 +596,7 @@ def classify_position(
         "thesis_status": thesis_status,
         "exit_status": exit_result["exit_status"],
         "reason_codes": exit_result["reason_codes"],
+        "missing_fields": exit_result.get("missing_fields", []),
         "human_action_required": exit_result["exit_status"] != EXIT_HOLD_OK,
         "advisory_only": True,
         "broker_api_called": False,

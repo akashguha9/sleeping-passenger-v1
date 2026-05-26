@@ -33,6 +33,24 @@ type ExitRow = {
   distance_to_tp_pct: number | null;
   human_action_required: boolean;
   reason_codes: string[];
+  missing_fields?: string[];
+};
+
+type PositionContextStatus = {
+  open_positions_loaded: number;
+  quality_counts: Record<string, number>;
+  source_counts: Record<string, number>;
+  reason_codes: string[];
+  db_available: boolean;
+  holdings_present: boolean;
+};
+
+type CandidateFeedStatus = {
+  status: 'CANDIDATES_LOADED' | 'NO_CANDIDATE_FILE' | 'CANDIDATE_FILE_STALE' | 'CANDIDATE_FILE_INVALID' | 'CANDIDATES_INJECTED';
+  candidate_count: number;
+  source_files: string[];
+  reason_codes: string[];
+  generated_at_utc?: string | null;
 };
 
 type ThemeRow = {
@@ -111,6 +129,8 @@ type CapitalRotation = {
   risk_budget: RiskBudget;
   generated_at_utc: string;
   source_health: string;
+  position_context_status?: PositionContextStatus | null;
+  candidate_feed_status?: CandidateFeedStatus | null;
 };
 
 const REGIME_TEXT: Record<string, { headline: string; body: string }> = {
@@ -175,6 +195,8 @@ export default function CapitalRotationPage() {
             generatedAt={data.generated_at_utc}
             sourceHealth={data.source_health}
           />
+          <PositionContextPanel status={data.position_context_status ?? null} />
+          <CandidateFeedPanel status={data.candidate_feed_status ?? null} />
           <ExitReviewBoard board={data.exit_review_board} />
           <ThemeSlotBoard board={data.theme_slot_summary} />
           <BuyAdmissionBoard
@@ -182,6 +204,7 @@ export default function CapitalRotationPage() {
             regime={data.portfolio_regime}
             maxSizePerEntry={data.max_size_per_entry}
             maxTotal={data.max_total_new_capital}
+            feedStatus={data.candidate_feed_status ?? null}
           />
           <RiskBudgetCard budget={data.risk_budget} />
           <SafetyFooter />
@@ -358,7 +381,11 @@ function ExitReviewBoard({
           </thead>
           <tbody>
             {board.rows.map((r) => (
-              <tr key={r.ticker} style={{ borderTop: '1px solid var(--sp-line)' }}>
+              <tr
+                key={r.ticker}
+                style={{ borderTop: '1px solid var(--sp-line)' }}
+                data-testid={`exit-row-${r.ticker}`}
+              >
                 <td className="py-2 pr-3 font-mono" style={{ color: 'var(--sp-bone)' }}>{r.ticker}</td>
                 <td className="py-2 pr-3"><Pill label={r.exit_status} /></td>
                 <td className="py-2 pr-3 text-xs" style={{ color: 'var(--sp-mist)' }}>{r.thesis_status}</td>
@@ -370,6 +397,15 @@ function ExitReviewBoard({
                 </td>
                 <td className="py-2 pr-3 text-xs" style={{ color: 'var(--sp-mist)' }}>
                   {r.reason_codes.join(' · ')}
+                  {r.exit_status === 'DATA_BLOCKED' && r.missing_fields && r.missing_fields.length > 0 && (
+                    <div
+                      className="font-mono mt-1"
+                      style={{ color: '#f0c75a' }}
+                      data-testid={`exit-row-missing-${r.ticker}`}
+                    >
+                      missing: {r.missing_fields.join(', ')}
+                    </div>
+                  )}
                 </td>
               </tr>
             ))}
@@ -455,11 +491,13 @@ function BuyAdmissionBoard({
   regime,
   maxSizePerEntry,
   maxTotal,
+  feedStatus,
 }: {
   board: CapitalRotation['buy_admission_board'];
   regime: CapitalRotation['portfolio_regime'];
   maxSizePerEntry: number;
   maxTotal: number;
+  feedStatus: CandidateFeedStatus | null;
 }) {
   return (
     <section
@@ -476,15 +514,18 @@ function BuyAdmissionBoard({
         </span>
       </div>
       {regime === 'BUY_LIMITED' && (
-        <div className="text-xs" style={{ color: 'var(--sp-gold)' }}>
+        <div className="text-xs" data-testid="buy-limited-warning" style={{ color: 'var(--sp-gold)' }}>
           BUY_LIMITED: max 3 entries · max €50 each · same-theme additions require ADD / REPLACE / DIVERSIFY label.
         </div>
       )}
+      {regime === 'BUY_BLOCKED' && (
+        <div className="text-xs" data-testid="buy-blocked-warning" style={{ color: '#ff8a8a' }}>
+          BUY_BLOCKED: new entries blocked. Resolve exit / data / risk issues before adding capital.
+        </div>
+      )}
       {board.rows.length === 0 ? (
-        <div className="text-sm" style={{ color: 'var(--sp-mist)' }}>
-          No candidates supplied. Feed candidates through{' '}
-          <code className="font-mono">build_capital_rotation_summary(candidates=…)</code>{' '}
-          to populate this board.
+        <div className="text-sm" data-testid="buy-admission-empty" style={{ color: 'var(--sp-mist)' }}>
+          {emptyAdmissionExplanation(feedStatus, board.candidate_count)}
         </div>
       ) : (
         <div className="overflow-x-auto">
@@ -604,6 +645,105 @@ function OfflineNotice({ error }: { error: string | null }) {
       </p>
     </section>
   );
+}
+
+function PositionContextPanel({ status }: { status: PositionContextStatus | null }) {
+  if (!status) return null;
+  const quality = status.quality_counts ?? {};
+  const source = status.source_counts ?? {};
+  const total = status.open_positions_loaded;
+  return (
+    <section
+      className="rounded-lg p-5 space-y-3"
+      style={{ background: 'rgba(13,16,21,0.55)', border: '1px solid var(--sp-line)' }}
+      data-testid="position-context-panel"
+    >
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <h2 className="text-lg font-semibold tracking-tight" style={{ color: 'var(--sp-bone)' }}>
+          Position Context · {total} open loaded
+        </h2>
+        <span className="text-[10px] font-mono uppercase tracking-widest" style={{ color: 'var(--sp-mist)' }}>
+          merged: holdings + manual log
+        </span>
+      </div>
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+        <Stat label="COMPLETE" value={String(quality.COMPLETE ?? 0)} />
+        <Stat label="USABLE" value={String(quality.USABLE ?? 0)} />
+        <Stat label="PARTIAL" value={String(quality.PARTIAL ?? 0)} />
+        <Stat label="INSUFFICIENT" value={String(quality.INSUFFICIENT ?? 0)} />
+      </div>
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-2 text-xs pt-2 border-t" style={{ borderColor: 'var(--sp-line)', color: 'var(--sp-mist)' }}>
+        <Stat label="canonical db" value={String(source.CANONICAL_DB ?? 0)} />
+        <Stat label="manual log" value={String(source.MANUAL_LOG ?? 0)} />
+        <Stat label="release file" value={String(source.RELEASE_FILE ?? 0)} />
+        <Stat label="holdings" value={String(source.VERIFIED_HOLDINGS ?? 0)} />
+        <Stat label="fallback" value={String(source.FALLBACK ?? 0)} />
+      </div>
+    </section>
+  );
+}
+
+function CandidateFeedPanel({ status }: { status: CandidateFeedStatus | null }) {
+  if (!status) return null;
+  const colour =
+    status.status === 'CANDIDATES_LOADED' || status.status === 'CANDIDATES_INJECTED'
+      ? '#7be3a8'
+      : status.status === 'NO_CANDIDATE_FILE'
+        ? 'var(--sp-mist)'
+        : '#f0c75a';
+  return (
+    <section
+      className="rounded-lg p-5 space-y-3"
+      style={{ background: 'rgba(13,16,21,0.55)', border: '1px solid var(--sp-line)' }}
+      data-testid="candidate-feed-panel"
+    >
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <h2 className="text-lg font-semibold tracking-tight" style={{ color: 'var(--sp-bone)' }}>
+          Candidate Feed · {status.candidate_count} candidate{status.candidate_count === 1 ? '' : 's'}
+        </h2>
+        <span
+          className="text-[10px] font-mono uppercase tracking-widest"
+          style={{ color: colour }}
+          data-testid={`candidate-feed-status-${status.status}`}
+        >
+          {status.status}
+        </span>
+      </div>
+      {status.source_files.length > 0 ? (
+        <div className="text-xs" style={{ color: 'var(--sp-mist)' }}>
+          source files: {status.source_files.map((f) => f.split(/[\\/]/).pop()).join(' · ')}
+        </div>
+      ) : (
+        <div className="text-xs" style={{ color: 'var(--sp-mist)' }}>
+          No candidate file discovered in release dir.
+        </div>
+      )}
+      {status.reason_codes.length > 0 && (
+        <div className="text-xs font-mono" style={{ color: 'var(--sp-mist)' }}>
+          {status.reason_codes.join(' · ')}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function emptyAdmissionExplanation(
+  feed: CandidateFeedStatus | null,
+  candidateCount: number,
+): string {
+  if (!feed || feed.status === 'NO_CANDIDATE_FILE') {
+    return 'No candidate feed loaded. Generate a candidate artefact in runtime/release/ (e.g. operator_daily_signal.json or today_candidates.json) to populate this board.';
+  }
+  if (feed.status === 'CANDIDATE_FILE_STALE') {
+    return 'Candidate file stale. Regenerate today’s candidate artefact to populate this board.';
+  }
+  if (feed.status === 'CANDIDATE_FILE_INVALID') {
+    return 'Candidate file invalid (could not parse JSON). Fix the artefact or remove it.';
+  }
+  if (candidateCount === 0) {
+    return 'No candidates supplied. Pass candidates to build_capital_rotation_summary(candidates=…) to populate this board.';
+  }
+  return 'All candidates blocked or watch-only by admission gates. See per-candidate reasons above.';
 }
 
 function Stat({ label, value }: { label: string; value: string }) {

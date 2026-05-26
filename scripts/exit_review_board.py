@@ -203,9 +203,12 @@ def build_exit_review_board(
         1
         for r in classified
         if r.get("exit_status") == EXIT_DATA_BLOCKED
-        and any(
-            str(code).startswith("data_blocked:") and "live_price" in str(code)
-            for code in r.get("reason_codes") or []
+        and (
+            "live_price" in (r.get("missing_fields") or [])
+            or any(
+                str(code).startswith("data_blocked:") and "live_price" in str(code)
+                for code in r.get("reason_codes") or []
+            )
         )
     )
 

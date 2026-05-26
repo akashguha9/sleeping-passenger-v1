@@ -44,6 +44,14 @@ try:
     )
     from scripts.buy_admission import build_buy_admission_board
     from scripts.economic_exposure import normalize_economic_exposure
+    from scripts.position_context import (
+        load_position_context,
+        position_context_to_lifecycle_input,
+    )
+    from scripts.candidate_feed import (
+        candidate_to_admission_input,
+        load_candidate_feed,
+    )
 except ModuleNotFoundError:  # pragma: no cover — flat-layout fallback
     from runtime_common import REPO_ROOT  # type: ignore
     from daily_payload import (  # type: ignore
@@ -61,6 +69,14 @@ except ModuleNotFoundError:  # pragma: no cover — flat-layout fallback
     )
     from buy_admission import build_buy_admission_board  # type: ignore
     from economic_exposure import normalize_economic_exposure  # type: ignore
+    from position_context import (  # type: ignore
+        load_position_context,
+        position_context_to_lifecycle_input,
+    )
+    from candidate_feed import (  # type: ignore
+        candidate_to_admission_input,
+        load_candidate_feed,
+    )
 
 
 RELEASE_DIR = REPO_ROOT / "runtime" / "release"
@@ -101,23 +117,94 @@ def build_capital_rotation_summary(
     india_4x_unreviewed_count: int = 0,
     position_context: dict[str, dict[str, Any]] | None = None,
     standard_position_size: float | None = None,
+    db_path: Path | None = None,
+    holdings_path: Path | None = None,
+    manual_trade_path: Path | None = None,
+    release_dir: Path | None = None,
+    now_utc: datetime | None = None,
 ) -> dict[str, Any]:
     """Compose the daily capital-rotation summary.
 
-    Defaults: if ``positions`` is omitted, load
-    ``verified_current_holdings.json``; if ``source_health`` is None,
-    derive from the daily market snapshot.
+    Defaults:
+    - if ``positions`` is omitted, auto-load via
+      ``load_position_context`` so the open rows carry merged
+      manual-trade context (buy / stop / leverage / thesis / horizon);
+    - if ``candidates`` is omitted, auto-load via
+      ``load_candidate_feed`` from the release directory so the Buy
+      Admission Board is not silently empty;
+    - if ``source_health`` is None, derive from the daily market
+      snapshot.
     """
+    position_context_status: dict[str, Any] = {
+        "open_positions_loaded": 0,
+        "quality_counts": {},
+        "source_counts": {},
+        "reason_codes": [],
+        "db_available": False,
+        "holdings_present": False,
+    }
+
     if positions is None:
-        loaded = load_verified_holdings()
+        loaded_ctx = load_position_context(
+            db_path=db_path,
+            holdings_path=holdings_path,
+            manual_trade_path=manual_trade_path,
+            release_dir=release_dir,
+            now_utc=now_utc,
+        )
         positions_list = [
-            p
-            for p in (loaded.get("positions") or [])
-            if isinstance(p, dict)
-            and str(p.get("status") or "").strip().upper() == "OPEN"
+            position_context_to_lifecycle_input(ctx)
+            for ctx in loaded_ctx.contexts
+            if str(ctx.trade_state or "").upper() == "OPEN"
         ]
+        position_context_status = {
+            "open_positions_loaded": loaded_ctx.open_positions_loaded,
+            "quality_counts": dict(loaded_ctx.quality_counts),
+            "source_counts": dict(loaded_ctx.source_counts),
+            "reason_codes": list(loaded_ctx.reason_codes),
+            "db_available": loaded_ctx.db_available,
+            "holdings_present": loaded_ctx.holdings_present,
+        }
     else:
         positions_list = list(positions)
+        position_context_status = {
+            "open_positions_loaded": len(positions_list),
+            "quality_counts": {},
+            "source_counts": {"INJECTED": len(positions_list)},
+            "reason_codes": ["CONTEXT_INJECTED_BY_CALLER"],
+            "db_available": False,
+            "holdings_present": False,
+        }
+
+    candidate_feed_status: dict[str, Any] = {
+        "status": "NO_CANDIDATE_FILE",
+        "candidate_count": 0,
+        "source_files": [],
+        "reason_codes": ["NO_CANDIDATE_FILE"],
+    }
+    if candidates is None:
+        feed = load_candidate_feed(
+            release_dir=release_dir,
+            now_utc=now_utc,
+        )
+        candidates_list = [
+            candidate_to_admission_input(c) for c in feed.candidates
+        ]
+        candidate_feed_status = {
+            "status": feed.feed_status,
+            "candidate_count": feed.candidate_count,
+            "source_files": list(feed.source_files),
+            "reason_codes": list(feed.reason_codes),
+            "generated_at_utc": feed.generated_at_utc,
+        }
+    else:
+        candidates_list = list(candidates)
+        candidate_feed_status = {
+            "status": "CANDIDATES_INJECTED",
+            "candidate_count": len(candidates_list),
+            "source_files": [],
+            "reason_codes": ["CANDIDATES_INJECTED_BY_CALLER"],
+        }
 
     if source_health is None:
         snapshot = load_market_snapshot()
@@ -204,7 +291,7 @@ def build_capital_rotation_summary(
     )
 
     admission = build_buy_admission_board(
-        candidates or [],
+        candidates_list,
         portfolio_regime=regime["portfolio_regime"],
         regime_max_size_per_entry=float(regime.get("max_size_per_entry") or 0.0),
         theme_rows=theme_summary.get("themes") or [],
@@ -216,6 +303,8 @@ def build_capital_rotation_summary(
         "report": "capital_rotation_summary",
         "generated_at_utc": _utc_now(),
         "source_health": source_health,
+        "position_context_status": position_context_status,
+        "candidate_feed_status": candidate_feed_status,
         "portfolio_regime": regime["portfolio_regime"],
         "portfolio_regime_reasons": regime["reason_codes"],
         "portfolio_capacity_score": capacity["portfolio_capacity_score"],
@@ -280,6 +369,7 @@ def write_release_files(
         {
             "report": "exit_review_summary",
             "generated_at_utc": summary.get("generated_at_utc"),
+            "position_context_status": summary.get("position_context_status", {}),
             "exit_review_board": summary.get("exit_review_board", {}),
             **_safety_stamps(),
         },
@@ -313,6 +403,7 @@ def write_release_files(
         {
             "report": "buy_admission_summary",
             "generated_at_utc": summary.get("generated_at_utc"),
+            "candidate_feed_status": summary.get("candidate_feed_status", {}),
             "buy_admission_board": summary.get("buy_admission_board", {}),
             **_safety_stamps(),
         },
