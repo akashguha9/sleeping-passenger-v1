@@ -1,0 +1,102 @@
+{
+  "manifest": "operator_proof_manifest",
+  "advisory_status": "ADVISORY_ONLY",
+  "execution_gate": "LOCKED",
+  "broker_api_called": false,
+  "ai_execution_count": 0,
+  "demo_required_steps": 10,
+  "steps": [
+    {
+      "step": 1,
+      "name": "advisory_banner",
+      "doc": "docs/demo/DEMO_SCRIPT_5_MIN.md#step-3",
+      "documented": true,
+      "screenshot_present": false,
+      "proof_command": null,
+      "truth_marker": "ADVISORY ONLY literal"
+    },
+    {
+      "step": 2,
+      "name": "mock_live_truth_bar",
+      "doc": "docs/demo/DEMO_SCRIPT_5_MIN.md#step-4",
+      "documented": true,
+      "screenshot_present": false,
+      "proof_command": null,
+      "truth_marker": "TopTruthBar chip"
+    },
+    {
+      "step": 3,
+      "name": "source_configuration_snapshot",
+      "doc": "docs/demo/DEMO_SCRIPT_5_MIN.md#step-5",
+      "documented": true,
+      "screenshot_present": false,
+      "proof_command": null,
+      "truth_marker": "C + N = T"
+    },
+    {
+      "step": 4,
+      "name": "advisory_refresh",
+      "doc": "docs/demo/DEMO_SCRIPT_5_MIN.md#step-6",
+      "documented": true,
+      "screenshot_present": false,
+      "proof_command": "python scripts/refresh_live_signals.py --dry-run",
+      "truth_marker": "execution_gate=LOCKED"
+    },
+    {
+      "step": 5,
+      "name": "calibration_report",
+      "doc": "docs/demo/DEMO_SCRIPT_5_MIN.md#step-7",
+      "documented": true,
+      "screenshot_present": false,
+      "proof_command": "python scripts/calibration_report.py",
+      "truth_marker": "predictive_claim_allowed=false"
+    },
+    {
+      "step": 6,
+      "name": "manual_trade_log",
+      "doc": "docs/demo/DEMO_SCRIPT_5_MIN.md#step-8",
+      "documented": true,
+      "screenshot_present": false,
+      "proof_command": null,
+      "truth_marker": "ManualTradeLogForm"
+    },
+    {
+      "step": 7,
+      "name": "moltbook_feedback",
+      "doc": "docs/demo/DEMO_SCRIPT_5_MIN.md#step-9",
+      "documented": true,
+      "screenshot_present": false,
+      "proof_command": null,
+      "truth_marker": "MoltbookEntryCard"
+    },
+    {
+      "step": 8,
+      "name": "role_fit_scorecard",
+      "doc": "docs/demo/DEMO_SCRIPT_5_MIN.md#step-10",
+      "documented": true,
+      "screenshot_present": false,
+      "proof_command": "python scripts/segment_role_scorecard.py --markdown docs/scorecards/SEGMENT_ROLE_SCORECARD.md",
+      "truth_marker": "NOT_TARGETED_THIS_YEAR for Public SaaS"
+    },
+    {
+      "step": 9,
+      "name": "bootstrap_local_operator",
+      "doc": "docs/demo/DEMO_SCRIPT_5_MIN.md#pre-flight-000",
+      "documented": true,
+      "screenshot_present": false,
+      "proof_command": "python scripts/bootstrap_local_operator.py --dry-run",
+      "truth_marker": "bootstrap_score in [0,10] with advisory stamps"
+    },
+    {
+      "step": 10,
+      "name": "probability_snapshot_advisory_warning",
+      "doc": "docs/demo/LOCAL_FIRST_WALKTHROUGH.md",
+      "documented": true,
+      "screenshot_present": false,
+      "proof_command": "python scripts/probability_snapshot.py --dry-run",
+      "truth_marker": "predictive_claim_allowed=false on probability snapshot report"
+    }
+  ],
+  "screenshots_pending_operator_capture": 10,
+  "warning": "Screenshots are pending operator capture; this manifest is honest about absence."
+}

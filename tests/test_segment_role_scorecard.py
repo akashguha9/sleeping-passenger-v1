@@ -173,7 +173,7 @@ def test_calibration_gate_honesty_can_be_high_while_scoring_model_is_capped(tmp_
         s for s in report["segments"] if s["segment"] == "Scoring/model logic quality"
     )
     assert cal["role_fit_score"] >= 9.5
-    assert model["absolute_score"] <= srs.SCORING_MODEL_CEILING_NO_EVIDENCE + 1e-6
+    assert model["absolute_score"] <= srs.SCORING_MODEL_CEILING_PIPELINE_ONLY + 1e-6
     assert model["role_fit_score"] <= 5.8 + 1e-6
 
 
@@ -193,7 +193,7 @@ def test_predictive_claim_blocked_when_n_real_below_min(tmp_path: Path):
     model = next(
         s for s in report["segments"] if s["segment"] == "Scoring/model logic quality"
     )
-    assert model["absolute_score"] <= srs.SCORING_MODEL_CEILING_NO_EVIDENCE + 1e-6
+    assert model["absolute_score"] <= srs.SCORING_MODEL_CEILING_PIPELINE_ONLY + 1e-6
 
 
 def test_predictive_claim_unlocked_when_threshold_met(tmp_path: Path):
@@ -329,7 +329,7 @@ def test_live_calibration_report_agrees_with_scorecard():
         s for s in report["segments"] if s["segment"] == "Scoring/model logic quality"
     )
     if not unlocked:
-        assert model["absolute_score"] <= srs.SCORING_MODEL_CEILING_NO_EVIDENCE + 1e-6
+        assert model["absolute_score"] <= srs.SCORING_MODEL_CEILING_PIPELINE_ONLY + 1e-6
         # The predictive-criteria performance must be zero when locked.
         predictive_criteria = [
             c

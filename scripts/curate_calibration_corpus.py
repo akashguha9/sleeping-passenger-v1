@@ -187,13 +187,20 @@ def _has_valid_outcome(rec: dict[str, Any]) -> bool:
     return rec.get("outcome_label") in (0, 1)
 
 
+def _has_p_and_y(rec: dict[str, Any]) -> bool:
+    return _has_valid_probability(rec) and _has_valid_outcome(rec) and _is_real_source(rec)
+
+
 def validate_corpus(records: Iterable[dict[str, Any]]) -> dict[str, Any]:
     """Compute the spec mathematics for a corpus collection.
 
     Returns the n_total / n_real / n_fixture / n_mock / n_valid_p /
     n_valid_y / n_deduped scalars plus the derived
     ``corpus_validity``, ``corpus_coverage_score``, ``evidence_status``
-    fields.  Pure function — no I/O.
+    fields.  Also reports ``n_pairs`` (records with both ``p_i`` and
+    ``y_i`` from a real source), ``base_rate``, ``class_imbalance``, and
+    a string ``class_balance_warning`` consumed by the calibration gate.
+    Pure function — no I/O.
     """
     records_list = list(records)
     n_total = len(records_list)
@@ -208,6 +215,26 @@ def validate_corpus(records: Iterable[dict[str, Any]]) -> dict[str, Any]:
     n_valid_p = sum(1 for r in records_list if _has_valid_probability(r))
     n_valid_y = sum(1 for r in records_list if _has_valid_outcome(r))
     n_deduped = len({stable_dedupe_key(r) for r in records_list})
+    n_pairs = sum(1 for r in records_list if _has_p_and_y(r))
+
+    # Class balance computed over real (p, y) pairs only.  Without pairs
+    # the metric is undefined; emit None rather than fabricate.
+    if n_pairs > 0:
+        positives = sum(
+            1
+            for r in records_list
+            if _has_p_and_y(r) and int(r.get("outcome_label", 0)) == 1
+        )
+        base_rate = positives / float(n_pairs)
+        class_imbalance = abs(base_rate - (1.0 - base_rate))
+        if class_imbalance > 0.7:
+            class_balance_warning = "HIGH_CLASS_IMBALANCE"
+        else:
+            class_balance_warning = "OK"
+    else:
+        base_rate = None
+        class_imbalance = None
+        class_balance_warning = "NO_PAIRS"
 
     n_min = 200
     validity = (
@@ -228,10 +255,16 @@ def validate_corpus(records: Iterable[dict[str, Any]]) -> dict[str, Any]:
         "n_valid_p": n_valid_p,
         "n_valid_y": n_valid_y,
         "n_deduped": n_deduped,
+        "n_pairs": n_pairs,
         "n_min": n_min,
         "corpus_validity": bool(validity),
         "corpus_coverage_score": round(coverage_score, 6),
         "evidence_status": evidence_status,
+        "base_rate": (round(base_rate, 6) if base_rate is not None else None),
+        "class_imbalance": (
+            round(class_imbalance, 6) if class_imbalance is not None else None
+        ),
+        "class_balance_warning": class_balance_warning,
     }
 
 
@@ -264,6 +297,63 @@ def _outcome_label_from_status(status: str) -> int | None:
     return None
 
 
+def _fetch_probability_snapshots(
+    cur: Any,
+) -> dict[str, dict[str, Any]]:
+    """Return ``{event_id: snapshot_dict}`` from the probability_snapshots
+    table if it exists.  Empty mapping when the table is absent.
+    """
+    try:
+        cur.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' "
+            "AND name='probability_snapshots'"
+        )
+        if cur.fetchone() is None:
+            return {}
+        cur.execute(
+            "SELECT signal_id, model_probability, EMS, EQS, DS, LS, EFS, APS, "
+            "raw_score, chaos_risk, staleness_penalty, mock_penalty, "
+            "probability_formula_version, generated_at_utc "
+            "FROM probability_snapshots"
+        )
+        out: dict[str, dict[str, Any]] = {}
+        for row in cur.fetchall():
+            (
+                signal_id,
+                p,
+                ems,
+                eqs,
+                ds,
+                ls,
+                efs,
+                aps,
+                raw_score,
+                chaos,
+                stale,
+                mock,
+                version,
+                generated_at,
+            ) = row
+            out[str(signal_id)] = {
+                "model_probability": float(p) if p is not None else None,
+                "EMS": float(ems) if ems is not None else None,
+                "EQS": float(eqs) if eqs is not None else None,
+                "DS": float(ds) if ds is not None else None,
+                "LS": float(ls) if ls is not None else None,
+                "EFS": float(efs) if efs is not None else None,
+                "APS": float(aps) if aps is not None else None,
+                "raw_score": float(raw_score) if raw_score is not None else None,
+                "chaos_risk": float(chaos) if chaos is not None else None,
+                "staleness_penalty": float(stale) if stale is not None else None,
+                "mock_penalty": float(mock) if mock is not None else None,
+                "probability_formula_version": str(version or ""),
+                "generated_at_utc": str(generated_at or ""),
+            }
+        return out
+    except Exception:  # pragma: no cover — defensive against schema drift
+        return {}
+
+
 def gather_from_sqlite(db_path: Path) -> list[dict[str, Any]]:
     """Pull closed manual trades + reconciliations from SQLite.
 
@@ -274,9 +364,13 @@ def gather_from_sqlite(db_path: Path) -> list[dict[str, Any]]:
     * ``reconciliation_results.outcome_status`` MUST be ``WIN`` or
       ``LOSS``.
 
-    Emits ``source="manual_trade"`` records.  Historical trades carry
-    no model probability snapshot — the calibration gate excludes them
-    from the math but their presence keeps the corpus honest.
+    Emits ``source="manual_trade"`` records.  When a matching
+    ``probability_snapshots`` row exists for ``manual_trades.event_id``,
+    the snapshot's ``model_probability`` is attached and the trade
+    becomes a calibration pair (``p_i``, ``y_i``).  Trades without a
+    matching snapshot are still emitted for provenance but carry no
+    ``model_probability`` — the calibration gate's math layer excludes
+    them automatically.
     """
     import sqlite3
 
@@ -287,6 +381,7 @@ def gather_from_sqlite(db_path: Path) -> list[dict[str, Any]]:
     con = sqlite3.connect(str(db))
     try:
         cur = con.cursor()
+        snapshots = _fetch_probability_snapshots(cur)
         cur.execute(
             """
             SELECT mt.trade_id, mt.event_id, mt.ticker, mt.executed_at,
@@ -314,6 +409,48 @@ def gather_from_sqlite(db_path: Path) -> list[dict[str, Any]]:
             horizon = max(0.0, (odt - sdt).total_seconds() / 86400.0)
         except Exception:
             horizon = 0.0
+        # Bridge: when probability_snapshots has a row for this signal,
+        # attach the snapshot so the trade becomes a calibration pair.
+        snap = snapshots.get(str(event_id) or "")
+        if snap is None:
+            snap = {}
+        score_snapshot: dict[str, Any] = {
+            "EMS": snap.get("EMS"),
+            "EQS": snap.get("EQS"),
+            "DS": snap.get("DS"),
+            "LS": snap.get("LS"),
+            "EFS": snap.get("EFS"),
+            "APS": snap.get("APS"),
+        }
+        if snap.get("model_probability") is not None:
+            p_val = snap["model_probability"]
+            try:
+                p_float = float(p_val)
+            except (TypeError, ValueError):
+                p_float = None
+            if (
+                p_float is not None
+                and not math_is_invalid(p_float)
+                and 0.0 <= p_float <= 1.0
+            ):
+                score_snapshot["model_probability"] = round(p_float, 6)
+        provenance = {
+            "truth_source": "sqlite",
+            "canonical": True,
+            "mock_fallback": False,
+            "fallback_used": False,
+            "url_or_source_hint_redacted": "runtime/mvp_local.db:manual_trades+reconciliation_results",
+            "collected_at_utc": _utc_now_iso(),
+            "created_via": str(created_via or ""),
+        }
+        if snap:
+            provenance["bridged_from_probability_snapshot"] = True
+            provenance["probability_formula_version"] = snap.get(
+                "probability_formula_version", ""
+            )
+            provenance["snapshot_generated_at_utc"] = snap.get(
+                "generated_at_utc", ""
+            )
         rec = CorpusRecord(
             record_id=f"mt:{trade_id}",
             source="manual_trade",
@@ -322,31 +459,20 @@ def gather_from_sqlite(db_path: Path) -> list[dict[str, Any]]:
             signal_timestamp_utc=signal_ts,
             outcome_timestamp_utc=outcome_ts,
             horizon_days=round(horizon, 4),
-            # No historical score snapshot is recoverable for legacy
-            # trades.  Omit ``model_probability`` entirely so the
-            # calibration gate honestly excludes this row from the math.
-            score_snapshot={
-                "EMS": None,
-                "EQS": None,
-                "DS": None,
-                "LS": None,
-                "EFS": None,
-                "APS": None,
-            },
+            score_snapshot=score_snapshot,
             outcome_label=int(label),
             outcome_definition="manual_trade_reconciliation_win_loss",
-            provenance={
-                "truth_source": "sqlite",
-                "canonical": True,
-                "mock_fallback": False,
-                "fallback_used": False,
-                "url_or_source_hint_redacted": "runtime/mvp_local.db:manual_trades+reconciliation_results",
-                "collected_at_utc": _utc_now_iso(),
-                "created_via": str(created_via or ""),
-            },
+            provenance=provenance,
         )
         out.append(rec.to_dict())
     return out
+
+
+def math_is_invalid(value: float) -> bool:
+    """True when ``value`` is NaN or infinite."""
+    import math
+
+    return math.isnan(value) or math.isinf(value)
 
 
 # ---------------------------------------------------------------------------

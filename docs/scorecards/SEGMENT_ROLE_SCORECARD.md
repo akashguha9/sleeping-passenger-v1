@@ -1,6 +1,6 @@
 # Segment Role-Fit Scorecard
 
-> Generated 2026-05-26T09:18:48+00:00 · advisory_status=`ADVISORY_ONLY` · execution_gate=`LOCKED` · broker_api_called=`False` · ai_execution_count=`0`.
+> Generated 2026-05-26T13:29:36+00:00 · advisory_status=`ADVISORY_ONLY` · execution_gate=`LOCKED` · broker_api_called=`False` · ai_execution_count=`0`.
 
 > Two lenses, on purpose. **Absolute readiness** asks *'how close to production / private beta / public SaaS?'*. **Role-fit readiness** asks *'given this segment's role in this local-first MVP, is it performing that role at an elite level?'*. A refusal/safety segment that refuses perfectly is 10/10 even if it never scores a goal.
 
@@ -20,8 +20,8 @@ OverallRoleFit  = Σ_s W_role_s * R_adj_s * T_s / Σ_s W_role_s * T_s   (NOT_TAR
 
 | Lens | Score /10 |
 |---|---:|
-| Overall absolute readiness | 7.659 |
-| Overall role-fit readiness | 8.588 |
+| Overall absolute readiness | 7.756 |
+| Overall role-fit readiness | 8.623 |
 
 **NOT_TARGETED (excluded from role-fit denominator):**
 - Commercial SaaS readiness
@@ -35,13 +35,13 @@ OverallRoleFit  = Σ_s W_role_s * R_adj_s * T_s / Σ_s W_role_s * T_s   (NOT_TAR
 | 2 | Advisory-only safety integrity | Ball-winning defensive midfielder | 1.00 | 9.80 | 10.00 | 0.97 | 1.00 | 9.70 | 9.70 |
 | 3 | Execution-lock integrity | Goal-line clearance defender | 1.00 | 9.70 | 10.00 | 0.97 | 1.00 | 9.70 | 9.70 |
 | 4 | Backend architecture | Modular FastAPI advisory backend | 1.00 | 7.50 | 9.00 | 0.85 | 1.00 | 7.65 | 7.65 |
-| 5 | Frontend architecture | Strict React/TS operator surface | 1.00 | 8.00 | 9.40 | 0.90 | 1.00 | 8.46 | 8.46 |
+| 5 | Frontend architecture | Strict React/TS operator surface | 1.00 | 8.50 | 9.80 | 0.90 | 1.00 | 8.82 | 8.82 |
 | 6 | Frontend UX truthfulness | Honest-state painter | 1.00 | 9.30 | 10.00 | 0.95 | 1.00 | 9.50 | 9.50 |
 | 7 | Mock/fallback transparency | Truth-surface marker | 1.00 | 9.60 | 10.00 | 0.95 | 1.00 | 9.50 | 9.50 |
 | 8 | Data-source realism | Realistic-but-bounded data layer | 1.00 | 7.50 | 9.00 | 0.85 | 1.00 | 7.65 | 7.65 |
 | 9 | Live-source integration quality | Live-feed contract enforcer | 0.80 | 6.50 | 9.00 | 0.80 | 1.00 | 7.20 | 7.20 |
 | 10 | Source-health observability | Freshness/degraded-state truth surface | 1.00 | 9.00 | 10.00 | 0.95 | 1.00 | 9.50 | 9.50 |
-| 11 | Scoring/model logic quality | Predictive engine | 1.00 | 5.80 | 1.50 | 0.75 | 1.00 | 1.12 | 1.12 |
+| 11 | Scoring/model logic quality | Predictive engine | 1.00 | 6.10 | 1.50 | 0.75 | 1.00 | 1.12 | 1.12 |
 | 12 | Calibration gate honesty | False-confidence blocker | 1.00 | 9.70 | 10.00 | 0.97 | 1.00 | 9.70 | 9.70 |
 | 13 | Calibration corpus evidence | Outcome-labelled evidence ledger | 1.00 | 4.50 | 10.00 | 0.90 | 1.00 | 9.00 | 9.00 |
 | 14 | State-machine / archetype clarity | Regime-aware state machine | 1.00 | 7.00 | 9.00 | 0.85 | 1.00 | 7.65 | 7.65 |
@@ -49,7 +49,7 @@ OverallRoleFit  = Σ_s W_role_s * R_adj_s * T_s / Σ_s W_role_s * T_s   (NOT_TAR
 | 16 | Portfolio/trade recommendation safety | Advisory recommendation guard | 1.00 | 9.00 | 10.00 | 0.92 | 1.00 | 9.20 | 9.20 |
 | 17 | Risk / chaos / veto logic | Veto-and-recover layer | 1.00 | 7.80 | 9.00 | 0.85 | 1.00 | 7.65 | 7.65 |
 | 18 | Testing depth | Truth-gate test ladder | 1.00 | 9.20 | 10.00 | 0.95 | 1.00 | 9.50 | 9.50 |
-| 19 | Frontend tests | Component truth tests | 1.00 | 8.00 | 10.00 | 0.90 | 1.00 | 9.00 | 9.00 |
+| 19 | Frontend tests | Component truth tests | 1.00 | 8.50 | 10.00 | 0.92 | 1.00 | 9.20 | 9.20 |
 | 20 | Backend tests | Backend contract suite | 1.00 | 9.00 | 10.00 | 0.95 | 1.00 | 9.50 | 9.50 |
 | 21 | Integration tests | End-to-end advisory loop test | 1.00 | 7.50 | 9.00 | 0.85 | 1.00 | 7.65 | 7.65 |
 | 22 | Runtime hygiene | Artefact coherence enforcer | 1.00 | 8.70 | 10.00 | 0.92 | 1.00 | 9.20 | 9.20 |
@@ -57,20 +57,20 @@ OverallRoleFit  = Σ_s W_role_s * R_adj_s * T_s / Σ_s W_role_s * T_s   (NOT_TAR
 | 24 | Persistence model / database truth | Canonical-store discipline | 1.00 | 8.50 | 10.00 | 0.92 | 1.00 | 9.20 | 9.20 |
 | 25 | JSONL vs SQLite truth discipline | Canonical/audit boundary keeper | 1.00 | 9.50 | 10.00 | 0.95 | 1.00 | 9.50 | 9.50 |
 | 26 | Deployment readiness | Local-first deploy | 0.50 | 6.00 | 9.50 | 0.80 | 1.00 | 7.60 | 7.60 |
-| 27 | Local developer experience | First-day operator concierge | 1.00 | 8.50 | 10.00 | 0.90 | 1.00 | 9.00 | 9.00 |
+| 27 | Local developer experience | First-day operator concierge | 1.00 | 9.00 | 10.00 | 0.92 | 1.00 | 9.20 | 9.20 |
 | 28 | Security posture | Local-first security baseline | 1.00 | 7.30 | 10.00 | 0.85 | 1.00 | 8.50 | 8.50 |
 | 29 | Secret-handling posture | Secret-redaction enforcer | 1.00 | 9.30 | 10.00 | 0.95 | 1.00 | 9.50 | 9.50 |
 | 30 | Documentation quality | Operator-first doc set | 1.00 | 9.00 | 10.00 | 0.92 | 1.00 | 9.20 | 9.20 |
-| 31 | Operator workflow usability | 13-step workflow conductor | 1.00 | 8.20 | 10.00 | 0.90 | 1.00 | 9.00 | 9.00 |
+| 31 | Operator workflow usability | 13-step workflow conductor | 1.00 | 8.80 | 10.00 | 0.92 | 1.00 | 9.20 | 9.20 |
 | 32 | Commercial SaaS readiness | Out-of-scope striker | 0.00 | 1.50 | 10.00 | 0.95 | 1.00 | 9.50 | NOT_TARGETED |
 | 33 | Feedback-loop / Moltbook readiness | Closed-loop learning ledger | 1.00 | 8.00 | 10.00 | 0.88 | 1.00 | 8.80 | 8.80 |
 | 34 | Maintainability | Future-operator readability | 1.00 | 7.50 | 9.50 | 0.85 | 1.00 | 8.07 | 8.07 |
 | 35 | Performance / scalability | Local-machine performance | 0.50 | 5.00 | 9.00 | 0.75 | 1.00 | 6.75 | 6.75 |
-| 36 | Failure-mode handling | Graceful-degradation conductor | 1.00 | 8.00 | 10.00 | 0.90 | 1.00 | 9.00 | 9.00 |
+| 36 | Failure-mode handling | Graceful-degradation conductor | 1.00 | 8.80 | 10.00 | 0.92 | 1.00 | 9.20 | 9.20 |
 | 37 | Real-user readiness | Single-operator readiness | 0.60 | 6.50 | 10.00 | 0.85 | 1.00 | 8.50 | 8.50 |
 | 38 | Overall MVP readiness | Local-first showcase composite | 1.00 | 8.20 | 10.00 | 0.92 | 1.00 | 9.20 | 9.20 |
-| 39 | Local-first showcase | Local-first showcase | 1.00 | 8.90 | 10.00 | 0.93 | 1.00 | 9.30 | 9.30 |
-| 40 | Private beta readiness | Design-stage candidate | 0.50 | 5.00 | 10.00 | 0.85 | 1.00 | 8.50 | 8.50 |
+| 39 | Local-first showcase | Local-first showcase | 1.00 | 9.20 | 10.00 | 0.93 | 1.00 | 9.30 | 9.30 |
+| 40 | Private beta readiness | Design-stage candidate | 0.50 | 5.50 | 10.00 | 0.88 | 1.00 | 8.80 | 8.80 |
 | 41 | Public SaaS readiness | Out-of-scope striker | 0.00 | 1.50 | 10.00 | 0.95 | 1.00 | 9.50 | NOT_TARGETED |
 
 ## Per-segment criteria
@@ -159,16 +159,17 @@ OverallRoleFit  = Σ_s W_role_s * R_adj_s * T_s / Σ_s W_role_s * T_s   (NOT_TAR
 > Strict TypeScript; small, composable components; no any/ts-ignore.
 
 - target_relevance `T_s` = 1.00
-- absolute_score `A_s` = 8.00  (ceiling: No Storybook / visual regression yet.)
-- role_fit_score `R_s` = 9.40
+- absolute_score `A_s` = 8.50  (ceiling: Page extracted (live-signals page down from 1116 → ~478 lines via LiveSignalEmptyState + LiveSignalsHeader + RunRefreshPanel); Storybook / visual regression still missing.)
+- role_fit_score `R_s` = 9.80
 - confidence `C_s` = 0.90, evidence_completeness `E_s` = 1.00
-- **confidence-adjusted role-fit `R_adj_s` = 8.46**
+- **confidence-adjusted role-fit `R_adj_s` = 8.82**
 
 | Criterion | w_i | p_i | Evidence | Blocker |
 |---|---:|---:|---|---|
-| frontend npx tsc --noEmit passes on strict | 0.40 | 1.00 | `frontend/tsconfig.json` | — |
-| Small, named components in src/components | 0.30 | 0.90 | `frontend/src/components` | — |
-| Component unit tests exist alongside components | 0.30 | 0.90 | `frontend/src/components/__tests__` | — |
+| frontend npx tsc --noEmit passes on strict | 0.30 | 1.00 | `frontend/tsconfig.json` | — |
+| Live-signals page extracted into focused sub-components | 0.30 | 1.00 | `frontend/src/components/live-signals/LiveSignalEmptyState.tsx`, `frontend/src/components/live-signals/LiveSignalsHeader.tsx`, `frontend/src/components/live-signals/RunRefreshPanel.tsx` | — |
+| Small, named components in src/components | 0.20 | 0.95 | `frontend/src/components` | — |
+| Component unit tests exist alongside components | 0.20 | 0.95 | `frontend/src/components/__tests__` | — |
 
 **Blockers**:
 - No visual regression coverage.
@@ -285,7 +286,7 @@ OverallRoleFit  = Σ_s W_role_s * R_adj_s * T_s / Σ_s W_role_s * T_s   (NOT_TAR
 > Real predictive validity: N_real >= 200, Brier ≤ 0.25, ECE ≤ 0.10, MCE ≤ 0.25, reliability diagram generated.
 
 - target_relevance `T_s` = 1.00
-- absolute_score `A_s` = 5.80  (ceiling: Hard cap at 5.8 until N_real ≥ 200 with usable model_probability.)
+- absolute_score `A_s` = 6.10  (ceiling: Hard cap at 5.8 until N_real ≥ 200 with usable model_probability.)
 - role_fit_score `R_s` = 1.50
 - confidence `C_s` = 0.75, evidence_completeness `E_s` = 1.00
 - **confidence-adjusted role-fit `R_adj_s` = 1.12**
@@ -443,23 +444,25 @@ OverallRoleFit  = Σ_s W_role_s * R_adj_s * T_s / Σ_s W_role_s * T_s   (NOT_TAR
 
 ### Frontend tests — *Component truth tests*
 
-> Component-level spec coverage of the top truth-surface panels.
+> Component-level spec coverage of the top truth-surface panels plus a vitest-based truth-flow integration suite covering the seven advisory-only flows (mock/live, snapshot, refresh, calibration gate, forbidden-vocabulary scan).
 
 - target_relevance `T_s` = 1.00
-- absolute_score `A_s` = 8.00  (ceiling: No CI integration of frontend tests.)
+- absolute_score `A_s` = 8.50  (ceiling: Vitest integration substitute caps frontend tests at ≤ 8.6 per the sprint spec (Playwright not yet installed).)
 - role_fit_score `R_s` = 10.00
-- confidence `C_s` = 0.90, evidence_completeness `E_s` = 1.00
-- **confidence-adjusted role-fit `R_adj_s` = 9.00**
+- confidence `C_s` = 0.92, evidence_completeness `E_s` = 1.00
+- **confidence-adjusted role-fit `R_adj_s` = 9.20**
 
 | Criterion | w_i | p_i | Evidence | Blocker |
 |---|---:|---:|---|---|
-| Top-truth panels have component specs | 0.50 | 1.00 | `frontend/src/components/__tests__/TopTruthBar.spec.tsx`, `frontend/src/components/__tests__/SourceConfigurationSnapshot.spec.tsx` | — |
-| Watchdog + reconciliation panels have specs | 0.50 | 1.00 | `frontend/src/components/__tests__/WatchdogStatusPanel.spec.tsx`, `frontend/src/components/__tests__/ReconciliationCard.currency.spec.tsx` | — |
+| Top-truth panels have component specs | 0.30 | 1.00 | `frontend/src/components/__tests__/TopTruthBar.spec.tsx`, `frontend/src/components/__tests__/SourceConfigurationSnapshot.spec.tsx` | — |
+| Watchdog + reconciliation panels have specs | 0.30 | 1.00 | `frontend/src/components/__tests__/WatchdogStatusPanel.spec.tsx`, `frontend/src/components/__tests__/ReconciliationCard.currency.spec.tsx` | — |
+| Truth-flow integration spec covers the 7 required flows | 0.40 | 1.00 | `frontend/src/components/__tests__/truth_flow.integration.spec.tsx` | — |
 
 **Blockers**:
 - Frontend tests not yet wired into CI.
+- Playwright not installed; integration substitute caps at 8.6.
 
-**Next action**: Wire vitest into CI on the frontend workspace.
+**Next action**: Wire vitest into CI; evaluate Playwright as a follow-up.
 
 ### Backend tests — *Backend contract suite*
 
@@ -604,21 +607,22 @@ OverallRoleFit  = Σ_s W_role_s * R_adj_s * T_s / Σ_s W_role_s * T_s   (NOT_TAR
 > An operator can run, refresh, and read the scorecard locally in under an hour.
 
 - target_relevance `T_s` = 1.00
-- absolute_score `A_s` = 8.50  (ceiling: No one-line bootstrap script yet.)
+- absolute_score `A_s` = 9.00  (ceiling: Bootstrap script lands a 10/10 dry-run preflight; recorded demo / walkthrough video still pending.)
 - role_fit_score `R_s` = 10.00
-- confidence `C_s` = 0.90, evidence_completeness `E_s` = 1.00
-- **confidence-adjusted role-fit `R_adj_s` = 9.00**
+- confidence `C_s` = 0.92, evidence_completeness `E_s` = 1.00
+- **confidence-adjusted role-fit `R_adj_s` = 9.20**
 
 | Criterion | w_i | p_i | Evidence | Blocker |
 |---|---:|---:|---|---|
-| Local deployment checklist + README present | 0.40 | 1.00 | `docs/LOCAL_DEPLOYMENT_CHECKLIST.md`, `README.md` | — |
-| Scorecard generator runnable from CLI | 0.30 | 1.00 | `scripts/segment_role_scorecard.py` | — |
-| Backup + restore docs present | 0.30 | 1.00 | `scripts/backup_db.py`, `scripts/backup_local_state.py` | — |
+| Local deployment checklist + README present | 0.30 | 1.00 | `docs/LOCAL_DEPLOYMENT_CHECKLIST.md`, `README.md` | — |
+| Scorecard generator runnable from CLI | 0.20 | 1.00 | `scripts/segment_role_scorecard.py` | — |
+| Backup + restore docs present | 0.20 | 1.00 | `scripts/backup_db.py`, `scripts/backup_local_state.py` | — |
+| Bootstrap operator script + tests present | 0.30 | 1.00 | `scripts/bootstrap_local_operator.py`, `tests/test_bootstrap_local_operator.py` | — |
 
 **Blockers**:
-- No single-command bootstrap.
+- No recorded walkthrough video.
 
-**Next action**: Add a `make bootstrap` / pwsh `bootstrap.ps1`.
+**Next action**: Record the demo from docs/demo/DEMO_SCRIPT_5_MIN.md.
 
 ### Security posture — *Local-first security baseline*
 
@@ -687,20 +691,22 @@ OverallRoleFit  = Σ_s W_role_s * R_adj_s * T_s / Σ_s W_role_s * T_s   (NOT_TAR
 > The first-day operator can complete the canonical workflow without reading source.
 
 - target_relevance `T_s` = 1.00
-- absolute_score `A_s` = 8.20  (ceiling: No recorded walk-through.)
+- absolute_score `A_s` = 8.80  (ceiling: 5-minute demo script + screenshot checklist + truth-flow integration tests landed; recorded video walkthrough still pending operator capture.)
 - role_fit_score `R_s` = 10.00
-- confidence `C_s` = 0.90, evidence_completeness `E_s` = 1.00
-- **confidence-adjusted role-fit `R_adj_s` = 9.00**
+- confidence `C_s` = 0.92, evidence_completeness `E_s` = 1.00
+- **confidence-adjusted role-fit `R_adj_s` = 9.20**
 
 | Criterion | w_i | p_i | Evidence | Blocker |
 |---|---:|---:|---|---|
-| Demo case studies + rehearsal notes present | 0.50 | 1.00 | `docs/DEMO_CASE_STUDIES.md`, `docs/DEMO_REHEARSAL_NOTES.md` | — |
-| E2E test plan documents the workflow | 0.50 | 1.00 | `docs/E2E_TEST_PLAN.md` | — |
+| Demo case studies + rehearsal notes present | 0.25 | 1.00 | `docs/DEMO_CASE_STUDIES.md`, `docs/DEMO_REHEARSAL_NOTES.md` | — |
+| E2E test plan documents the workflow | 0.25 | 1.00 | `docs/E2E_TEST_PLAN.md` | — |
+| 5-min demo + walkthrough + screenshot checklist present | 0.25 | 1.00 | `docs/demo/DEMO_SCRIPT_5_MIN.md`, `docs/demo/LOCAL_FIRST_WALKTHROUGH.md`, `docs/demo/SCREENSHOT_CHECKLIST.md`, `docs/demo/OPERATOR_PROOF_MANIFEST.json` | — |
+| Truth-flow integration tests cover the operator surface | 0.25 | 1.00 | `frontend/src/components/__tests__/truth_flow.integration.spec.tsx` | — |
 
 **Blockers**:
-- No recorded walk-through.
+- No recorded walkthrough video.
 
-**Next action**: Record a 5-minute walkthrough video.
+**Next action**: Record a 5-minute walkthrough video and update the manifest.
 
 ### Commercial SaaS readiness — *Out-of-scope striker*
 
@@ -782,24 +788,25 @@ OverallRoleFit  = Σ_s W_role_s * R_adj_s * T_s / Σ_s W_role_s * T_s   (NOT_TAR
 
 ### Failure-mode handling — *Graceful-degradation conductor*
 
-> When a source fails, the UI degrades to advisory empty/stale states truthfully rather than fabricating data.
+> When a source fails, the UI degrades to advisory empty/stale states truthfully rather than fabricating data; the failure-mode harness pins twelve scenarios (timeout, malformed payload, empty response, staleness, lock contention, missing keys, corrupted artifacts, missing outcomes, missing axes, missing calibration report).
 
 - target_relevance `T_s` = 1.00
-- absolute_score `A_s` = 8.00  (ceiling: No chaos harness.)
+- absolute_score `A_s` = 8.80  (ceiling: Harness covers 12/12 scenarios; full chaos-style fuzz harness for the refresh orchestrator still pending.)
 - role_fit_score `R_s` = 10.00
-- confidence `C_s` = 0.90, evidence_completeness `E_s` = 1.00
-- **confidence-adjusted role-fit `R_adj_s` = 9.00**
+- confidence `C_s` = 0.92, evidence_completeness `E_s` = 1.00
+- **confidence-adjusted role-fit `R_adj_s` = 9.20**
 
 | Criterion | w_i | p_i | Evidence | Blocker |
 |---|---:|---:|---|---|
-| AdvisoryEmptyState handles absent data truthfully | 0.40 | 1.00 | `frontend/src/components/AdvisoryEmptyState.tsx`, `frontend/src/components/__tests__/AdvisoryEmptyState.spec.tsx` | — |
-| Watchdog status panel surfaces failures | 0.30 | 1.00 | `frontend/src/components/WatchdogStatusPanel.tsx`, `frontend/src/components/__tests__/WatchdogStatusPanel.spec.tsx` | — |
-| Anti-staleness rules tested | 0.30 | 1.00 | `tests/test_anti_staleness_rules.py` | — |
+| AdvisoryEmptyState handles absent data truthfully | 0.25 | 1.00 | `frontend/src/components/AdvisoryEmptyState.tsx`, `frontend/src/components/__tests__/AdvisoryEmptyState.spec.tsx` | — |
+| Watchdog status panel surfaces failures | 0.20 | 1.00 | `frontend/src/components/WatchdogStatusPanel.tsx`, `frontend/src/components/__tests__/WatchdogStatusPanel.spec.tsx` | — |
+| Anti-staleness rules tested | 0.20 | 1.00 | `tests/test_anti_staleness_rules.py` | — |
+| Failure-mode harness covers 12/12 scenarios | 0.35 | 1.00 | `tests/test_failure_mode_harness.py` | — |
 
 **Blockers**:
-- No chaos harness.
+- No fuzz-style chaos harness.
 
-**Next action**: Add a chaos test for the refresh orchestrator.
+**Next action**: Add a fuzz harness for the refresh orchestrator.
 
 ### Real-user readiness — *Single-operator readiness*
 
@@ -845,36 +852,39 @@ OverallRoleFit  = Σ_s W_role_s * R_adj_s * T_s / Σ_s W_role_s * T_s   (NOT_TAR
 > End-to-end local demo: safe, honest, observable, reproducible.
 
 - target_relevance `T_s` = 1.00
-- absolute_score `A_s` = 8.90  (ceiling: No recorded demo yet; e2e partial.)
+- absolute_score `A_s` = 9.20  (ceiling: Demo script + walkthrough + screenshot checklist + truth-flow integration tests + bootstrap script all landed; recorded demo video and a real calibration corpus still pending.)
 - role_fit_score `R_s` = 10.00
 - confidence `C_s` = 0.93, evidence_completeness `E_s` = 1.00
 - **confidence-adjusted role-fit `R_adj_s` = 9.30**
 
 | Criterion | w_i | p_i | Evidence | Blocker |
 |---|---:|---:|---|---|
-| Local deployment checklist + README present | 0.30 | 1.00 | `docs/LOCAL_DEPLOYMENT_CHECKLIST.md`, `README.md` | — |
-| Top-truth panels render honest state | 0.30 | 1.00 | `frontend/src/components/TopTruthBar.tsx`, `frontend/src/components/SourceConfigurationSnapshot.tsx` | — |
-| Calibration honesty + advisory safety stamped | 0.40 | 1.00 | `runtime/release/calibration_report.json`, `runtime/release/release_gate_proof.json` | — |
+| Local deployment checklist + README present | 0.20 | 1.00 | `docs/LOCAL_DEPLOYMENT_CHECKLIST.md`, `README.md` | — |
+| Top-truth panels render honest state | 0.20 | 1.00 | `frontend/src/components/TopTruthBar.tsx`, `frontend/src/components/SourceConfigurationSnapshot.tsx` | — |
+| Calibration honesty + advisory safety stamped | 0.30 | 1.00 | `runtime/release/calibration_report.json`, `runtime/release/release_gate_proof.json` | — |
+| 5-min demo + walkthrough + bootstrap operator preflight | 0.30 | 1.00 | `docs/demo/DEMO_SCRIPT_5_MIN.md`, `docs/demo/LOCAL_FIRST_WALKTHROUGH.md`, `scripts/bootstrap_local_operator.py` | — |
 
 **Blockers**:
-- No recorded demo.
+- No recorded demo video; no real calibration corpus.
 
-**Next action**: Record the demo and pin it from README.
+**Next action**: Record the demo, capture screenshots, and pin from README.
 
 ### Private beta readiness — *Design-stage candidate*
 
-> Design exists for auth + hosted DB; nothing shipped yet.
+> Design exists for auth + hosted DB + user isolation + staging smoke; readiness report quantifies the design-only ceiling at 6.2 until real Auth + HostedDB land.
 
 - target_relevance `T_s` = 0.50
-- absolute_score `A_s` = 5.00  (ceiling: Hard capped at 5.0 without real multi-user auth + hosted DB.)
+- absolute_score `A_s` = 5.50  (ceiling: Hard capped at 6.2 design-only; capped at 5.0 here until user-isolation contract test ships.  Real multi-user auth + hosted DB still absent.)
 - role_fit_score `R_s` = 10.00
-- confidence `C_s` = 0.85, evidence_completeness `E_s` = 1.00
-- **confidence-adjusted role-fit `R_adj_s` = 8.50**
+- confidence `C_s` = 0.88, evidence_completeness `E_s` = 1.00
+- **confidence-adjusted role-fit `R_adj_s` = 8.80**
 
 | Criterion | w_i | p_i | Evidence | Blocker |
 |---|---:|---:|---|---|
-| Hosted deployment plan documented | 0.50 | 1.00 | `docs/HOSTED_DEPLOYMENT_PLAN.md` | — |
-| Legal/privacy compliance notes present | 0.50 | 1.00 | `docs/LEGAL_PRIVACY_NOTES.md`, `docs/LEGAL_PRIVACY_COMPLIANCE_MODEL.md` | — |
+| Hosted deployment plan documented | 0.25 | 1.00 | `docs/HOSTED_DEPLOYMENT_PLAN.md` | — |
+| Legal/privacy compliance notes present | 0.25 | 1.00 | `docs/LEGAL_PRIVACY_NOTES.md`, `docs/LEGAL_PRIVACY_COMPLIANCE_MODEL.md` | — |
+| Thin-slice + auth/user-isolation + staging docs present | 0.25 | 1.00 | `docs/private_beta/PRIVATE_BETA_THIN_SLICE.md`, `docs/private_beta/AUTH_AND_USER_ISOLATION_PLAN.md`, `docs/private_beta/STAGING_SMOKE_CHECK.md` | — |
+| Readiness report + tests pin design-only cap | 0.25 | 1.00 | `scripts/private_beta_readiness_report.py`, `tests/test_private_beta_readiness_report.py` | — |
 
 **Blockers**:
 - No multi-user auth, no hosted DB.

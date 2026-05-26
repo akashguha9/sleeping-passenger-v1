@@ -181,6 +181,21 @@ APPROVED_DOMAINS: tuple[str, ...] = (
     # absolute readiness from role-fit readiness with evidence weighting.
     # Read-only; no broker execution, no order placement, no API trading writes.
     "segment_role_scorecard",  # segment_role_scorecard.py — role-fit + absolute readiness governance scorecard
+    # Full Role-Uplift Sprint — advisory-only probability snapshot pipeline.
+    # Persists an uncalibrated model_probability beside each scored signal so
+    # the calibration gate can later pair p_i with y_i.  Additive SQLite
+    # schema only; no broker execution, no order placement, no API trading
+    # writes.  predictive_claim_allowed stays False until N_real >= 200.
+    "probability_snapshot",     # probability_snapshot.py — uncalibrated advisory probability snapshots
+    # Full Role-Uplift Sprint — advisory-only local-operator bootstrap script.
+    # Read-only dry-run preflight that prints next commands without starting
+    # servers, touching secrets, or hitting external APIs unless explicitly
+    # opted in.  No broker execution, no order placement, no API trading writes.
+    "bootstrap_local",          # bootstrap_local_operator.py — first-day operator bootstrap
+    # Full Role-Uplift Sprint — advisory-only private-beta readiness report.
+    # Read-only score assembly over docs + local stubs.  Reports a hard
+    # ceiling of 6.2 unless real auth + hosted DB + staging deploy exist.
+    "private_beta",             # private_beta_readiness_report.py — readiness score
 )
 
 # Explicit allowlist for individual files / directories whose name does

@@ -290,6 +290,7 @@ export function WatchdogStatusPanel({ summary }: WatchdogStatusPanelProps) {
         data-testid="watchdog-advisory-footer"
       >
         Watchdog is advisory-only. It does not trade, call brokers, or unlock execution.
+        Refreshing watchdog state does not authorize trades.
       </p>
     </div>
   );
