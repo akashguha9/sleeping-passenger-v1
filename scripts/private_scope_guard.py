@@ -177,6 +177,10 @@ APPROVED_DOMAINS: tuple[str, ...] = (
     "compliance_trace",       # live_provider_compliance_trace.py — per-provider audit
     "backend_api_quality",    # backend_api_quality.py — readiness envelope
     "operator_live_provider", # operator_live_provider_refresh.py — explicit refresh
+    # Kanté Role-Fit Sprint — advisory-only governance scorecard splitting
+    # absolute readiness from role-fit readiness with evidence weighting.
+    # Read-only; no broker execution, no order placement, no API trading writes.
+    "segment_role_scorecard",  # segment_role_scorecard.py — role-fit + absolute readiness governance scorecard
 )
 
 # Explicit allowlist for individual files / directories whose name does
