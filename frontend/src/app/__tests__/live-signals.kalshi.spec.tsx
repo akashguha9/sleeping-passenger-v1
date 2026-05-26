@@ -10,7 +10,7 @@
  *     Buy / Sell / Execute trade / Arbitrage / Risk-free wording.
  */
 // @ts-ignore
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import { vi } from 'vitest';
 
 // @ts-ignore
@@ -160,7 +160,7 @@ describe('Live Signals — Kalshi first-class tab', () => {
 
     render(<LiveSignalsPage />);
     await waitFor(() => screen.getByRole('button', { name: 'Kalshi' }));
-    (screen.getByRole('button', { name: 'Kalshi' }) as HTMLButtonElement).click();
+    fireEvent.click(screen.getByRole('button', { name: 'Kalshi' }));
 
     await waitFor(() => screen.getAllByTestId('signal-event-card'));
     const cards = screen.getAllByTestId('signal-event-card');
@@ -178,7 +178,7 @@ describe('Live Signals — Kalshi first-class tab', () => {
 
     render(<LiveSignalsPage />);
     await waitFor(() => screen.getByRole('button', { name: 'Polymarket' }));
-    (screen.getByRole('button', { name: 'Polymarket' }) as HTMLButtonElement).click();
+    fireEvent.click(screen.getByRole('button', { name: 'Polymarket' }));
 
     await waitFor(() => screen.getAllByTestId('signal-event-card'));
     for (const card of screen.getAllByTestId('signal-event-card')) {
@@ -196,7 +196,7 @@ describe('Live Signals — Kalshi first-class tab', () => {
 
     render(<LiveSignalsPage />);
     await waitFor(() => screen.getByRole('button', { name: 'All Sources' }));
-    (screen.getByRole('button', { name: 'All Sources' }) as HTMLButtonElement).click();
+    fireEvent.click(screen.getByRole('button', { name: 'All Sources' }));
 
     await waitFor(() => screen.getAllByTestId('signal-event-card'));
     const allText = screen.getAllByTestId('signal-event-card').map((c) => c.textContent || '').join('|');
@@ -213,7 +213,7 @@ describe('Live Signals — Kalshi first-class tab', () => {
 
     render(<LiveSignalsPage />);
     await waitFor(() => screen.getByRole('button', { name: 'Kalshi' }));
-    (screen.getByRole('button', { name: 'Kalshi' }) as HTMLButtonElement).click();
+    fireEvent.click(screen.getByRole('button', { name: 'Kalshi' }));
 
     await waitFor(() => screen.getAllByTestId('signal-event-card'));
     const card = screen.getAllByTestId('signal-event-card')[0];

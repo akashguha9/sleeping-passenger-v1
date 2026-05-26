@@ -496,35 +496,46 @@ class TestForbiddenEndpoints:
 # ===========================================================================
 
 
+def _registered_routes():
+    """Truthful route surface — uses FastAPI's app.routes instead of
+    a literal source-regex on api_server.py.  Several routes have been
+    extracted into ``scripts/api/routers/*`` (Calibration Corpus +
+    Hosted Canary sprint, Phase 3); the regex form is brittle and
+    would falsely fail extraction sprints.
+    """
+    import scripts.api_server as srv
+    return {getattr(r, "path", None) for r in srv.app.routes}
+
+
 class TestRequiredAPIRoutes:
     def test_live_signals_route_exists(self):
-        content = _read(_API)
-        assert re.search(r'@app\.get\("/live-signals"\)', content), \
-            "api_server.py missing GET /live-signals route"
+        assert "/live-signals" in _registered_routes(), \
+            "FastAPI app missing GET /live-signals route"
 
     def test_live_signals_supports_source_filter(self):
-        content = _read(_API)
-        assert "source" in content, \
-            "GET /live-signals does not appear to support source filtering"
+        import inspect
+        from scripts.api.routers.live_signals_router import get_live_signals
+        sig = inspect.signature(get_live_signals)
+        assert "source" in sig.parameters, \
+            "GET /live-signals does not expose a `source` filter parameter"
 
     def test_source_health_route_exists(self):
-        content = _read(_API)
-        assert re.search(r'@app\.get\("/source-health"\)', content), \
-            "api_server.py missing GET /source-health route"
+        assert "/source-health" in _registered_routes(), \
+            "FastAPI app missing GET /source-health route"
 
     def test_db_status_route_exists(self):
-        content = _read(_API)
-        assert re.search(r'@app\.get\("/db/status"\)', content), \
-            "api_server.py missing GET /db/status route"
+        assert "/db/status" in _registered_routes(), \
+            "FastAPI app missing GET /db/status route"
 
     def test_health_route_exists(self):
-        content = _read(_API)
-        assert re.search(r'@app\.get\("/health"\)', content), \
-            "api_server.py missing GET /health route"
+        assert "/health" in _registered_routes(), \
+            "FastAPI app missing GET /health route"
 
     def test_source_run_log_in_source_health(self):
-        content = _read(_API)
-        assert "source_run_log" in content, \
+        import inspect as _inspect
+        import scripts.api.routers.source_health_router as router_mod
+        source = _inspect.getsource(router_mod)
+        assert "source_run_log" in source, \
             "GET /source-health does not include source_run_log"
 
     def test_advisory_status_in_api_responses(self):

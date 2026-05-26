@@ -1,0 +1,65 @@
+name: Real API Canary
+
+# Nightly read-only schema canary for public live sources.
+#
+# Safety doctrine:
+#   * GET-only on public endpoints. No order / fill / position / broker
+#     calls. No private trading endpoints.
+#   * Secrets are NEVER printed; the canary script redacts any 16+
+#     alphanumeric run before logging.
+#   * Local pytest runs SKIP these tests by default; this workflow is
+#     the only place RUN_REAL_API_CANARY=1 is set.
+#   * NEWS_API_KEY is optional. When absent the NewsAPI sub-canary
+#     skips cleanly; the workflow does not fail on that condition.
+
+on:
+  schedule:
+    # 03:17 UTC every day — off-hours and avoids the top of the hour
+    # where rate-limit windows commonly reset (less noisy).
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  real-api-canary:
+    name: Real API Canary
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      RUN_REAL_API_CANARY: "1"
+      # NEWS_API_KEY is intentionally NOT passed here; the canary uses
+      # secrets.NEWS_API_KEY only when the operator sets it on the repo.
+      # If absent, the NewsAPI sub-canary skips cleanly.
+      NEWS_API_KEY: ${{ secrets.NEWS_API_KEY }}
+      SEC_USER_AGENT: "sleeping-passenger-mvp canary@github-actions.local"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+
+      - name: Run real-API canary (read-only)
+        run: |
+          mkdir -p runtime/release
+          python -m pytest tests/test_real_api_canary.py -q --tb=short \
+            --junitxml=runtime/release/real_api_canary_junit.xml
+
+      - name: Upload canary report artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: real-api-canary-report
+          path: |
+            runtime/release/real_api_canary_report.json
+            runtime/release/real_api_canary_junit.xml
+          if-no-files-found: warn
+          retention-days: 14

@@ -658,6 +658,58 @@ export async function getSecurityCoverage(
   }
 }
 
+// Advisory-only operator refresh button — sprint Phase 4.
+//
+// Calls POST /api/live-refresh/run and returns the structured truth
+// envelope (last run summary + locked status).  The backend NEVER
+// triggers an actual network refresh from the HTTP path; it surfaces
+// the artifact written by scripts/operator_live_provider_refresh.py.
+//
+// Setting an MVP_API_TOKEN does not authorise execution; the response
+// always carries execution_gate=LOCKED and broker_api_called=false.
+export interface LiveRefreshSourceResult {
+  source: string;
+  status: 'SUCCESS' | 'PARTIAL' | 'FAILED' | 'SKIPPED' | 'MOCK_UNAVAILABLE' | string;
+  rows_written: number;
+  skipped: boolean;
+  error_redacted: string;
+}
+
+export interface LiveRefreshRunResponse {
+  advisory_status: 'ADVISORY_ONLY' | string;
+  execution_gate: 'LOCKED' | string;
+  broker_api_called: boolean;
+  ai_execution_count: number;
+  refresh_status:
+    | 'SUCCESS'
+    | 'PARTIAL'
+    | 'FAILED'
+    | 'SKIPPED'
+    | 'MOCK_UNAVAILABLE'
+    | string;
+  sources_attempted: number;
+  sources_succeeded: number;
+  sources_skipped: number;
+  sources_failed: number;
+  rows_written: number;
+  started_at_utc: string | null;
+  finished_at_utc: string | null;
+  source_results: LiveRefreshSourceResult[];
+  // Backwards-compat fields from the legacy locked envelope.
+  ok?: boolean;
+  error?: string;
+  blocking_reasons?: string[];
+  warnings?: string[];
+  last_run_present?: boolean;
+  last_run_path?: string;
+}
+
+export async function runLiveRefresh(): Promise<LiveRefreshRunResponse> {
+  return apiFetch<LiveRefreshRunResponse>('/api/live-refresh/run', {
+    method: 'POST',
+  });
+}
+
 export function getCsvExportUrl(
   type:
     | 'signal-inbox'

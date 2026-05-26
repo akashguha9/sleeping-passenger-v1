@@ -243,6 +243,10 @@ predictive-validity claim until the calibration gate reports `MEASURED`.
 | [docs/PRODUCT_DIRECTION_DECISION.md](docs/PRODUCT_DIRECTION_DECISION.md) | Local-showcase vs private-beta vs public-prod |
 | [docs/FINAL_SCORECARD.md](docs/FINAL_SCORECARD.md) | Honest before/after readiness scorecard |
 | [docs/FINAL_ACCEPTANCE_CHECKLIST.md](docs/FINAL_ACCEPTANCE_CHECKLIST.md) | Local-showcase acceptance walkthrough |
+| [docs/CALIBRATION_CORPUS.md](docs/CALIBRATION_CORPUS.md) | Calibration corpus pipeline + N_real reality check |
+| [docs/HOSTED_CANARY.md](docs/HOSTED_CANARY.md) | Nightly real-API canary workflow + safety bounds |
+| [docs/OPERATOR_REFRESH_CONTROL.md](docs/OPERATOR_REFRESH_CONTROL.md) | In-app advisory-only refresh button contract |
+| [docs/CREDENTIAL_HYGIENE.md](docs/CREDENTIAL_HYGIENE.md) | Root service-account refusal + secrets path policy |
 
 ### Silent local startup (Windows)
 

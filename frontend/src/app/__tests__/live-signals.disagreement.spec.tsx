@@ -14,7 +14,7 @@
  *   - Forbidden customer-facing trading language is absent.
  */
 // @ts-ignore
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import { vi } from 'vitest';
 
 // @ts-ignore
@@ -226,7 +226,7 @@ describe('Live Signals — Disagreements first-class tab', () => {
 
     render(<LiveSignalsPage />);
     await waitFor(() => screen.getByRole('button', { name: 'Disagreements' }));
-    (screen.getByRole('button', { name: 'Disagreements' }) as HTMLButtonElement).click();
+    fireEvent.click(screen.getByRole('button', { name: 'Disagreements' }));
 
     await waitFor(() => screen.getAllByTestId('disagreement-detail-block'));
     expect(seenSources).toContain('prediction_market_disagreement');
@@ -241,7 +241,7 @@ describe('Live Signals — Disagreements first-class tab', () => {
 
     render(<LiveSignalsPage />);
     await waitFor(() => screen.getByRole('button', { name: 'Disagreements' }));
-    (screen.getByRole('button', { name: 'Disagreements' }) as HTMLButtonElement).click();
+    fireEvent.click(screen.getByRole('button', { name: 'Disagreements' }));
 
     await waitFor(() => screen.getAllByTestId('disagreement-detail-block'));
     const block = screen.getAllByTestId('disagreement-detail-block')[0];
@@ -270,7 +270,7 @@ describe('Live Signals — Disagreements first-class tab', () => {
 
     render(<LiveSignalsPage />);
     await waitFor(() => screen.getByRole('button', { name: 'Disagreements' }));
-    (screen.getByRole('button', { name: 'Disagreements' }) as HTMLButtonElement).click();
+    fireEvent.click(screen.getByRole('button', { name: 'Disagreements' }));
 
     await waitFor(() => screen.getAllByTestId('disagreement-detail-block'));
     const block = screen.getAllByTestId('disagreement-detail-block')[0];
@@ -290,7 +290,7 @@ describe('Live Signals — Disagreements first-class tab', () => {
 
     render(<LiveSignalsPage />);
     await waitFor(() => screen.getByRole('button', { name: 'All Sources' }));
-    (screen.getByRole('button', { name: 'All Sources' }) as HTMLButtonElement).click();
+    fireEvent.click(screen.getByRole('button', { name: 'All Sources' }));
 
     await waitFor(() => screen.getAllByTestId('signal-event-card'));
     const blocks = screen.queryAllByTestId('disagreement-detail-block');
@@ -305,7 +305,7 @@ describe('Live Signals — Disagreements first-class tab', () => {
 
     render(<LiveSignalsPage />);
     await waitFor(() => screen.getByRole('button', { name: 'Polymarket' }));
-    (screen.getByRole('button', { name: 'Polymarket' }) as HTMLButtonElement).click();
+    fireEvent.click(screen.getByRole('button', { name: 'Polymarket' }));
 
     await waitFor(() => screen.getAllByTestId('signal-event-card'));
     expect(screen.queryAllByTestId('disagreement-detail-block')).toHaveLength(0);
@@ -319,7 +319,7 @@ describe('Live Signals — Disagreements first-class tab', () => {
 
     render(<LiveSignalsPage />);
     await waitFor(() => screen.getByRole('button', { name: 'Kalshi' }));
-    (screen.getByRole('button', { name: 'Kalshi' }) as HTMLButtonElement).click();
+    fireEvent.click(screen.getByRole('button', { name: 'Kalshi' }));
 
     await waitFor(() => screen.getAllByTestId('signal-event-card'));
     expect(screen.queryAllByTestId('disagreement-detail-block')).toHaveLength(0);
@@ -334,7 +334,7 @@ describe('Live Signals — Disagreements first-class tab', () => {
 
     render(<LiveSignalsPage />);
     await waitFor(() => screen.getByRole('button', { name: 'Disagreements' }));
-    (screen.getByRole('button', { name: 'Disagreements' }) as HTMLButtonElement).click();
+    fireEvent.click(screen.getByRole('button', { name: 'Disagreements' }));
 
     await waitFor(() => screen.getAllByTestId('pair-score-components'));
     const componentsBlock = screen.getAllByTestId('pair-score-components')[0];
@@ -380,7 +380,7 @@ describe('Live Signals — Disagreements first-class tab', () => {
 
     render(<LiveSignalsPage />);
     await waitFor(() => screen.getByRole('button', { name: 'Disagreements' }));
-    (screen.getByRole('button', { name: 'Disagreements' }) as HTMLButtonElement).click();
+    fireEvent.click(screen.getByRole('button', { name: 'Disagreements' }));
 
     await waitFor(() => screen.getAllByTestId('pair-score-embedding-fallback'));
     const fallback = screen.getAllByTestId('pair-score-embedding-fallback')[0];
@@ -411,7 +411,7 @@ describe('Live Signals — Disagreements first-class tab', () => {
 
     render(<LiveSignalsPage />);
     await waitFor(() => screen.getByRole('button', { name: 'Disagreements' }));
-    (screen.getByRole('button', { name: 'Disagreements' }) as HTMLButtonElement).click();
+    fireEvent.click(screen.getByRole('button', { name: 'Disagreements' }));
 
     await waitFor(() => screen.getAllByTestId('pair-score-components-fallback'));
     const fallback = screen.getAllByTestId('pair-score-components-fallback')[0];
@@ -427,7 +427,7 @@ describe('Live Signals — Disagreements first-class tab', () => {
 
     render(<LiveSignalsPage />);
     await waitFor(() => screen.getByRole('button', { name: 'Disagreements' }));
-    (screen.getByRole('button', { name: 'Disagreements' }) as HTMLButtonElement).click();
+    fireEvent.click(screen.getByRole('button', { name: 'Disagreements' }));
 
     await waitFor(() => screen.getAllByTestId('disagreement-detail-block'));
     for (const card of screen.getAllByTestId('signal-event-card')) {

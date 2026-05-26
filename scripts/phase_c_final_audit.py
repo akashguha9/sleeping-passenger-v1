@@ -339,23 +339,49 @@ def check_frontend_safety() -> None:
 def check_api() -> None:
     api = _read(_API)
 
+    # Calibration Corpus + Hosted Canary sprint Phase 3 extracted several
+    # routes into ``scripts/api/routers/*``.  Audit by inspecting the
+    # FastAPI app's registered routes instead of regex-grepping
+    # api_server.py for inline decorators.
+    try:
+        import scripts.api_server as _srv
+        registered = {getattr(r, "path", None) for r in _srv.app.routes}
+    except Exception:  # pragma: no cover — falls back to regex
+        registered = set()
+
     required_routes = [
-        ('GET /live-signals', r'@app\.get\("/live-signals"\)'),
-        ('GET /source-health', r'@app\.get\("/source-health"\)'),
-        ('GET /db/status', r'@app\.get\("/db/status"\)'),
-        ('GET /health', r'@app\.get\("/health"\)'),
+        ('GET /live-signals', "/live-signals"),
+        ('GET /source-health', "/source-health"),
+        ('GET /db/status', "/db/status"),
+        ('GET /health', "/health"),
     ]
-    for label, pattern in required_routes:
+    for label, path in required_routes:
+        present = path in registered
+        # Fallback regex check in case the FastAPI app failed to import.
+        if not present:
+            present = bool(
+                re.search(rf'@app\.get\("{re.escape(path)}"\)', api)
+                or re.search(rf'router\.get\("{re.escape(path)}"\)', api)
+            )
         _check(
             f"api:route_exists:{label}",
-            bool(re.search(pattern, api)),
-            f"Required route {label} missing from api_server.py",
+            present,
+            f"Required route {label} missing from FastAPI app",
         )
 
     # source filtering via ?source=
+    try:
+        from scripts.api.routers.live_signals_router import get_live_signals
+        import inspect as _inspect
+        sig = _inspect.signature(get_live_signals)
+        has_filter = "source" in sig.parameters
+    except Exception:
+        has_filter = (
+            "source_name=source" in api or "source_name = source" in api
+        )
     _check(
         "api:live_signals_source_filter",
-        "source_name=source" in api or "source_name = source" in api,
+        has_filter,
         "GET /live-signals does not pass source param to persistence layer",
     )
 

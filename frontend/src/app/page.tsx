@@ -9,6 +9,7 @@ import { BullStateBadge } from '@/components/BullStateBadge';
 import { AdvisoryOnlyBadge } from '@/components/AdvisoryOnlyBadge';
 import { HumanOnlyBadge } from '@/components/HumanOnlyBadge';
 import { SourceHealthWarnings } from '@/components/SourceHealthWarnings';
+import { RunRefreshButton } from '@/components/RunRefreshButton';
 import { deriveNextBestAction } from '@/lib/nextBestAction';
 import Link from 'next/link';
 
@@ -80,6 +81,10 @@ export default function DashboardPage() {
       </div>
 
       <SourceHealthWarnings />
+
+      {/* Operator refresh — advisory-only.  Calls POST /api/live-refresh/run
+          and renders the structured last-run truth. */}
+      <RunRefreshButton />
 
       {/* Mission control: single "what to do next" panel */}
       {!loading && (

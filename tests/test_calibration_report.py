@@ -21,6 +21,7 @@ Properties under test
 """
 from __future__ import annotations
 
+import json
 from typing import Any
 
 import pytest
@@ -28,13 +29,18 @@ import pytest
 from scripts.calibration_report import (
     DEFAULT_BS_THRESHOLD,
     DEFAULT_ECE_THRESHOLD,
+    DEFAULT_MCE_THRESHOLD,
     DEFAULT_N_MIN,
     Observation,
     SCORE_AXES,
+    base_rate,
     brier_score,
     compute_calibration_report,
+    compute_corpus_calibration_report,
     expected_calibration_error,
+    maximum_calibration_error,
     reliability_buckets,
+    sharpness,
 )
 
 
@@ -217,3 +223,186 @@ def test_defaults_match_spec():
     assert DEFAULT_N_MIN == 200
     assert DEFAULT_BS_THRESHOLD == 0.25
     assert DEFAULT_ECE_THRESHOLD == 0.10
+    assert DEFAULT_MCE_THRESHOLD == 0.25
+
+
+# ---------------------------------------------------------------------------
+# MCE / base rate / sharpness math
+# ---------------------------------------------------------------------------
+
+
+def test_mce_is_max_bucket_error_when_one_bucket_is_off():
+    # 200 rows: 100 at p=0.1 with y=0 (perfect for that bucket), 100 at p=0.9 with y=0
+    # (massively off — calibration error for 0.9 bucket = 0.9, MCE = 0.9).
+    rows = [_row(0.1, 0) for _ in range(100)] + [_row(0.9, 0) for _ in range(100)]
+    parsed = [Observation.from_raw(r) for r in rows]
+    parsed = [o for o in parsed if o is not None]
+    mce = maximum_calibration_error(parsed, n_buckets=10)
+    assert mce == pytest.approx(0.9, abs=1e-9)
+
+
+def test_base_rate_and_sharpness_known_case():
+    parsed = [Observation(p=0.2, y=0), Observation(p=0.8, y=1)]
+    assert base_rate(parsed) == pytest.approx(0.5, abs=1e-9)
+    # mean(p)=0.5; var = ((0.2-0.5)^2 + (0.8-0.5)^2)/2 = 0.09; sharpness=0.3
+    assert sharpness(parsed) == pytest.approx(0.3, abs=1e-9)
+
+
+def test_report_includes_mce_base_rate_sharpness():
+    rows = [_row(0.0, 0) for _ in range(100)] + [_row(1.0, 1) for _ in range(100)]
+    report = compute_calibration_report(rows, n_min=200)
+    assert report["mce"] == 0.0
+    assert report["base_rate"] == 0.5
+    assert report["sharpness"] == pytest.approx(0.5, abs=1e-9)
+
+
+# ---------------------------------------------------------------------------
+# Corpus-driven gate
+# ---------------------------------------------------------------------------
+
+
+def _corpus_envelope(records):
+    return {
+        "script": "curate_calibration_corpus.py",
+        "generated_at_utc": "2026-05-26T00:00:00+00:00",
+        "sources_used": ["test"],
+        "metrics": {},
+        "records": records,
+    }
+
+
+def _crec(p: float, y: int, *, source: str = "manual_trade",
+          source_record_id: str | None = None, mock: bool = False) -> dict[str, Any]:
+    return {
+        "record_id": source_record_id or f"r{p}_{y}",
+        "source": source,
+        "source_record_id": source_record_id or f"sr{p}_{y}",
+        "asset_or_market": "T",
+        "signal_timestamp_utc": "2026-01-01T00:00:00+00:00",
+        "outcome_timestamp_utc": "2026-01-02T00:00:00+00:00",
+        "horizon_days": 1.0,
+        "score_snapshot": {"model_probability": p},
+        "outcome_label": y,
+        "outcome_definition": "test",
+        "provenance": {"mock_fallback": mock, "fallback_used": False},
+    }
+
+
+def test_corpus_predictive_claim_false_when_n_real_below_min(tmp_path):
+    recs = [_crec(0.0, 0, source_record_id=f"a{i}") for i in range(50)] + \
+           [_crec(1.0, 1, source_record_id=f"b{i}") for i in range(50)]
+    path = tmp_path / "corpus.json"
+    path.write_text(json.dumps(_corpus_envelope(recs)), encoding="utf-8")
+    report = compute_corpus_calibration_report(path, n_min=200)
+    assert report["evidence_status"] == "INSUFFICIENT_EVIDENCE"
+    assert report["calibration_status"] == "INSUFFICIENT_EVIDENCE"
+    assert report["predictive_claim_allowed"] is False
+    assert report["n_real"] == 100
+
+
+def test_corpus_predictive_claim_true_only_when_all_thresholds_pass(tmp_path):
+    # Perfect calibration at scale.
+    recs = [_crec(0.0, 0, source_record_id=f"a{i}") for i in range(100)] + \
+           [_crec(1.0, 1, source_record_id=f"b{i}") for i in range(100)]
+    path = tmp_path / "corpus.json"
+    path.write_text(json.dumps(_corpus_envelope(recs)), encoding="utf-8")
+    report = compute_corpus_calibration_report(path, n_min=200)
+    assert report["calibration_status"] == "MEASURED_PASS"
+    assert report["predictive_claim_allowed"] is True
+    assert report["brier_score"] == 0.0
+    assert report["ece"] == 0.0
+    assert report["mce"] == 0.0
+
+
+def test_corpus_predictive_claim_false_when_mce_fails(tmp_path):
+    # 100 records calibrated perfectly at p=0.1 + 100 records badly miscalibrated at p=0.9.
+    # ECE will be ≈ 0.45 (also fails), so this also exercises ECE.  But the
+    # MCE alone is 0.9 which trips the MCE threshold (0.25) in isolation.
+    recs = [_crec(0.1, 0, source_record_id=f"a{i}") for i in range(100)] + \
+           [_crec(0.9, 0, source_record_id=f"b{i}") for i in range(100)]
+    path = tmp_path / "corpus.json"
+    path.write_text(json.dumps(_corpus_envelope(recs)), encoding="utf-8")
+    report = compute_corpus_calibration_report(path, n_min=200)
+    assert report["calibration_status"] == "MEASURED_FAIL"
+    assert report["mce"] > 0.25
+    assert report["predictive_claim_allowed"] is False
+    assert "MCE" in report["warning"] or "ECE" in report["warning"] or "Brier" in report["warning"]
+
+
+def test_corpus_predictive_claim_false_when_brier_fails(tmp_path):
+    # Brier = 0.25 — exactly at the threshold, so passes the ≤ check.  Bump it
+    # by adding a perfect-loss row to drive Brier above 0.25.  We force ECE
+    # below threshold by using a single bucket at p=0.5 with mixed outcomes
+    # (predicted=0.5, observed=0.5 → ECE=0).  MCE also stays at 0 in that
+    # bucket.  But Brier alone trips.
+    recs = []
+    for i in range(100):
+        recs.append(_crec(0.5, 1, source_record_id=f"y{i}"))
+        recs.append(_crec(0.5, 0, source_record_id=f"n{i}"))
+    # Now BS = (0.5)^2 = 0.25 exactly.  Pad with two rows pushing BS past 0.25.
+    recs.append(_crec(0.0, 1, source_record_id="bad1"))  # BS contribution 1.0
+    recs.append(_crec(1.0, 0, source_record_id="bad2"))
+    path = tmp_path / "corpus.json"
+    path.write_text(json.dumps(_corpus_envelope(recs)), encoding="utf-8")
+    report = compute_corpus_calibration_report(path, n_min=200)
+    assert report["brier_score"] > 0.25
+    assert report["calibration_status"] == "MEASURED_FAIL"
+    assert report["predictive_claim_allowed"] is False
+
+
+def test_corpus_fixture_records_do_not_count_toward_n_real(tmp_path):
+    real = [_crec(0.5, 1, source_record_id=f"r{i}") for i in range(10)]
+    fixture = [
+        dict(_crec(0.5, 1, source_record_id=f"f{i}"), source="fixture_test_only")
+        for i in range(10)
+    ]
+    path = tmp_path / "corpus.json"
+    path.write_text(json.dumps(_corpus_envelope(real + fixture)), encoding="utf-8")
+    report = compute_corpus_calibration_report(path, n_min=200)
+    assert report["n_total"] == 20
+    assert report["n_fixture"] == 10
+    assert report["n_real"] == 10
+    assert report["evidence_status"] == "INSUFFICIENT_EVIDENCE"
+
+
+def test_corpus_mock_fallback_records_excluded_from_n_real(tmp_path):
+    real = [_crec(0.5, 1, source_record_id=f"r{i}") for i in range(5)]
+    mocked = [_crec(0.5, 1, source_record_id=f"m{i}", mock=True) for i in range(5)]
+    path = tmp_path / "corpus.json"
+    path.write_text(json.dumps(_corpus_envelope(real + mocked)), encoding="utf-8")
+    report = compute_corpus_calibration_report(path, n_min=200)
+    assert report["n_total"] == 10
+    assert report["n_mock"] == 5
+    assert report["n_real"] == 5
+
+
+def test_corpus_missing_file_yields_insufficient_evidence(tmp_path):
+    path = tmp_path / "missing.json"
+    report = compute_corpus_calibration_report(path, n_min=200)
+    assert report["calibration_status"] == "INSUFFICIENT_EVIDENCE"
+    assert report["predictive_claim_allowed"] is False
+    assert "missing" in report["warning"].lower()
+
+
+def test_corpus_carries_advisory_stamps_and_no_broker_language(tmp_path):
+    path = tmp_path / "empty.json"
+    path.write_text(json.dumps(_corpus_envelope([])), encoding="utf-8")
+    report = compute_corpus_calibration_report(path)
+    assert report["advisory_status"] == "ADVISORY_ONLY"
+    assert report["execution_gate"] == "LOCKED"
+    assert report["broker_api_called"] is False
+    assert report["ai_execution_count"] == 0
+    serialized = json.dumps(report).lower()
+    for forbidden in ("/orders", "place_order", "broker_order_id\": \"y"):
+        assert forbidden not in serialized
+
+
+def test_corpus_report_thresholds_match_spec(tmp_path):
+    path = tmp_path / "empty.json"
+    path.write_text(json.dumps(_corpus_envelope([])), encoding="utf-8")
+    report = compute_corpus_calibration_report(path)
+    th = report["thresholds"]
+    assert th["n_min"] == 200
+    assert th["brier_score_max"] == 0.25
+    assert th["ece_max"] == 0.10
+    assert th["mce_max"] == 0.25

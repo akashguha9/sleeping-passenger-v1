@@ -13,7 +13,7 @@
  *   - Advisory-only badges remain visible.
  */
 // @ts-ignore
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { render, screen, waitFor, within, fireEvent } from '@testing-library/react';
 import { vi } from 'vitest';
 
 // @ts-ignore
@@ -185,7 +185,7 @@ describe('Etherscan tab — optional, not configured, with archived rows', () =>
     render(<LiveSignalsPage />);
     // Switch to the Etherscan tab so the source-aware tiles render.
     await waitFor(() => screen.getByRole('button', { name: 'Etherscan' }));
-    (screen.getByRole('button', { name: 'Etherscan' }) as HTMLButtonElement).click();
+    fireEvent.click(screen.getByRole('button', { name: 'Etherscan' }));
 
     await waitFor(() =>
       expect(screen.queryByTestId('signal-stat-tiles')).toBeTruthy(),
@@ -200,7 +200,7 @@ describe('Etherscan tab — optional, not configured, with archived rows', () =>
   it('renders Current live signals 0, Archived/persisted rows 25, Latest archived row', async () => {
     render(<LiveSignalsPage />);
     await waitFor(() => screen.getByRole('button', { name: 'Etherscan' }));
-    (screen.getByRole('button', { name: 'Etherscan' }) as HTMLButtonElement).click();
+    fireEvent.click(screen.getByRole('button', { name: 'Etherscan' }));
 
     await waitFor(() => screen.getByTestId('tile-current-live'));
     const liveTile = screen.getByTestId('tile-current-live');
@@ -219,7 +219,7 @@ describe('Etherscan tab — optional, not configured, with archived rows', () =>
   it('renders the optional-not-configured display banner', async () => {
     render(<LiveSignalsPage />);
     await waitFor(() => screen.getByRole('button', { name: 'Etherscan' }));
-    (screen.getByRole('button', { name: 'Etherscan' }) as HTMLButtonElement).click();
+    fireEvent.click(screen.getByRole('button', { name: 'Etherscan' }));
 
     await waitFor(() =>
       expect(screen.getByTestId('selected-source-display-banner')).toBeTruthy(),
@@ -233,7 +233,7 @@ describe('Etherscan tab — optional, not configured, with archived rows', () =>
   it('marks individual Etherscan cards as archived (not current live)', async () => {
     render(<LiveSignalsPage />);
     await waitFor(() => screen.getByRole('button', { name: 'Etherscan' }));
-    (screen.getByRole('button', { name: 'Etherscan' }) as HTMLButtonElement).click();
+    fireEvent.click(screen.getByRole('button', { name: 'Etherscan' }));
 
     await waitFor(() => screen.getAllByTestId('signal-event-card'));
     const cards = screen.getAllByTestId('signal-event-card');
@@ -310,7 +310,7 @@ describe('Asia Disclosure tab — planned, coverage rows', () => {
   it('renders the planned/coverage empty-state banner instead of generic empty', async () => {
     render(<LiveSignalsPage />);
     await waitFor(() => screen.getByRole('button', { name: 'Asia Disclosure' }));
-    (screen.getByRole('button', { name: 'Asia Disclosure' }) as HTMLButtonElement).click();
+    fireEvent.click(screen.getByRole('button', { name: 'Asia Disclosure' }));
 
     await waitFor(() =>
       expect(
@@ -327,7 +327,7 @@ describe('Asia Disclosure tab — planned, coverage rows', () => {
   it('renders the 11-country coverage table without India', async () => {
     render(<LiveSignalsPage />);
     await waitFor(() => screen.getByRole('button', { name: 'Asia Disclosure' }));
-    (screen.getByRole('button', { name: 'Asia Disclosure' }) as HTMLButtonElement).click();
+    fireEvent.click(screen.getByRole('button', { name: 'Asia Disclosure' }));
 
     await waitFor(() =>
       expect(screen.getByTestId('asia-disclosure-coverage-table')).toBeTruthy(),
@@ -342,7 +342,7 @@ describe('Asia Disclosure tab — planned, coverage rows', () => {
   it('reports Current live signals 0 + Coverage rows 11 in summary tiles', async () => {
     render(<LiveSignalsPage />);
     await waitFor(() => screen.getByRole('button', { name: 'Asia Disclosure' }));
-    (screen.getByRole('button', { name: 'Asia Disclosure' }) as HTMLButtonElement).click();
+    fireEvent.click(screen.getByRole('button', { name: 'Asia Disclosure' }));
 
     await waitFor(() => screen.getByTestId('tile-current-live'));
     expect(screen.getByTestId('tile-current-live').textContent).toMatch(
