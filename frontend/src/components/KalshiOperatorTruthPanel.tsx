@@ -151,6 +151,39 @@ export function KalshiOperatorTruthPanel({
     sourceStatus === 'SOURCE_ERROR_TIMEOUT' ||
     sourceStatus === 'SOURCE_ERROR_PRODUCTION_ENV_MISSING';
 
+  // Split-semantic truth (API health vs canonical signal_events).  The
+  // backend now serves these via /source-health/kalshi; when absent
+  // (older API or local artifact only), default to UNKNOWN so the UI
+  // doesn't silently merge them back into a single chip.
+  const apiHealthStatus = data.api_health_status || (isHealthy ? 'LIVE_VERIFIED' : 'UNKNOWN');
+  const canonicalSignalStatus = data.canonical_signal_status || 'UNKNOWN';
+  const semanticFresh = Boolean(data.semantic_fresh);
+  const isDegraded = Boolean(data.degraded);
+  const canonicalLiveCount = data.canonical_live_count ?? 0;
+  const apiHealthTone: 'good' | 'warn' | 'error' =
+    apiHealthStatus === 'LIVE_VERIFIED'
+      ? 'good'
+      : apiHealthStatus === 'AUTH_FAILED' || apiHealthStatus === 'API_ERROR'
+      ? 'error'
+      : 'warn';
+  const canonicalTone: 'good' | 'warn' | 'error' =
+    canonicalSignalStatus === 'LIVE_CANONICAL' ||
+    canonicalSignalStatus === 'DUPLICATE_REFRESHED'
+      ? 'good'
+      : canonicalSignalStatus === 'STALE_CANONICAL' ||
+        canonicalSignalStatus === 'MISSING_CANONICAL'
+      ? 'error'
+      : 'warn';
+  const splitMessage =
+    data.operator_message ||
+    (apiHealthStatus === 'LIVE_VERIFIED' &&
+    canonicalSignalStatus === 'ZERO_FRESH_ROWS'
+      ? 'Kalshi API is live, but no fresh canonical signal_events rows were produced. This usually means accepted markets were deduped, filtered, or not wired into canonical persistence.'
+      : apiHealthStatus === 'LIVE_VERIFIED' &&
+        canonicalSignalStatus === 'FILTERED'
+      ? 'Kalshi API is live, but returned markets were filtered/quarantined by allowlist.'
+      : '');
+
   // Defence in depth: explicitly read safety stamps as booleans, never
   // forward unknown keys to the DOM.
   const advisoryOnly = data.advisory_only === true;
@@ -211,6 +244,38 @@ export function KalshiOperatorTruthPanel({
           </span>
         </div>
       </div>
+
+      <div
+        className="grid gap-2 md:grid-cols-2 text-xs"
+        data-testid="kalshi-operator-truth-split"
+        data-api-health-status={apiHealthStatus}
+        data-canonical-signal-status={canonicalSignalStatus}
+        data-semantic-fresh={String(semanticFresh)}
+        data-degraded={String(isDegraded)}
+      >
+        <StatRow
+          label="Kalshi API health"
+          value={apiHealthStatus}
+          tone={apiHealthTone}
+          testId="kalshi-operator-api-health-status"
+        />
+        <StatRow
+          label="Kalshi canonical live signals"
+          value={`${canonicalSignalStatus} (${canonicalLiveCount} fresh)`}
+          tone={canonicalTone}
+          testId="kalshi-operator-canonical-signal-status"
+        />
+      </div>
+
+      {splitMessage && (
+        <p
+          className="text-xs"
+          style={{ color: isDegraded ? 'var(--sp-gold)' : 'var(--sp-mist)' }}
+          data-testid="kalshi-operator-truth-message"
+        >
+          {splitMessage}
+        </p>
+      )}
 
       <div className="grid gap-2 md:grid-cols-2 text-xs">
         <StatRow

@@ -1542,6 +1542,145 @@ def insert_signal_event(
         conn.close()
 
 
+def upsert_signal_event_observation(
+    event_id: str,
+    source_name: str,
+    raw_payload: dict[str, Any] | str,
+    fetched_at: str,
+    *,
+    advisory_status: str = _ADVISORY_STATUS,
+    human_review_required: int = 1,
+    execution_gate: str = "LOCKED",
+    ai_execution_count: int = _AI_EXECUTION_COUNT,
+    db_path: Path | None = None,
+) -> tuple[int, int]:
+    """Upsert a signal_events observation with a stable ``event_id``.
+
+    Returns ``(rows_added, rows_refreshed)``:
+    * ``rows_added`` is 1 when a new row was inserted, else 0.
+    * ``rows_refreshed`` is 1 when an existing row's ``fetched_at`` /
+      ``raw_payload`` was updated to the current observation, else 0.
+
+    A re-observation of the same logical market refreshes canonical
+    freshness without breaking the append-only audit history (the latest
+    snapshot wins, but the deterministic ``event_id`` is unchanged so
+    operators can still join against earlier history).  Advisory-safety
+    fields are re-stamped on every write — they cannot be loosened from
+    outside this helper.
+    """
+    target = db_path if db_path is not None else DB_PATH
+    payload_str = (
+        raw_payload if isinstance(raw_payload, str) else json.dumps(raw_payload)
+    )
+    conn = _get_conn(target)
+    try:
+        existing = conn.execute(
+            "SELECT id FROM signal_events WHERE event_id=?", (event_id,)
+        ).fetchone()
+        if existing is None:
+            conn.execute(
+                "INSERT INTO signal_events"
+                " (event_id, source_name, raw_payload, fetched_at,"
+                "  advisory_status, human_review_required, execution_gate, ai_execution_count)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    event_id,
+                    source_name,
+                    payload_str,
+                    fetched_at,
+                    str(advisory_status or _ADVISORY_STATUS),
+                    int(1 if human_review_required else 0),
+                    str(execution_gate or "LOCKED"),
+                    int(ai_execution_count or 0),
+                ),
+            )
+            conn.commit()
+            return (1, 0)
+        conn.execute(
+            "UPDATE signal_events"
+            " SET raw_payload=?, fetched_at=?,"
+            "     advisory_status=?, human_review_required=?,"
+            "     execution_gate=?, ai_execution_count=?"
+            " WHERE event_id=?",
+            (
+                payload_str,
+                fetched_at,
+                str(advisory_status or _ADVISORY_STATUS),
+                int(1 if human_review_required else 0),
+                str(execution_gate or "LOCKED"),
+                int(ai_execution_count or 0),
+                event_id,
+            ),
+        )
+        conn.commit()
+        return (0, 1)
+    finally:
+        conn.close()
+
+
+def count_fresh_signal_events_by_source(
+    source_name: str,
+    ttl_hours: float = 6.0,
+    now_iso: str | None = None,
+    db_path: Path | None = None,
+) -> dict[str, Any]:
+    """Return canonical freshness stats for a single source.
+
+    Returns ``{"fresh_count": int, "latest_fetched_at": str|None,
+    "latest_age_hours": float|None}``.  ``fresh_count`` counts rows whose
+    ``fetched_at`` is within the TTL window relative to ``now`` (UTC).
+    Unparsable timestamps are treated as infinitely old.
+    """
+    import datetime as _dt
+
+    target = db_path if db_path is not None else DB_PATH
+    if now_iso:
+        now_dt = _dt.datetime.fromisoformat(str(now_iso).replace("Z", "+00:00"))
+        if now_dt.tzinfo is None:
+            now_dt = now_dt.replace(tzinfo=_dt.timezone.utc)
+    else:
+        now_dt = _dt.datetime.now(_dt.timezone.utc)
+    ttl_seconds = max(0.0, float(ttl_hours)) * 3600.0
+    cutoff_dt = now_dt - _dt.timedelta(seconds=ttl_seconds)
+    cutoff_iso = cutoff_dt.isoformat()
+
+    conn = _get_conn(target)
+    try:
+        row = conn.execute(
+            "SELECT COUNT(*) AS n, MAX(fetched_at) AS latest"
+            "  FROM signal_events"
+            " WHERE lower(source_name)=lower(?)",
+            (source_name,),
+        ).fetchone()
+        fresh_row = conn.execute(
+            "SELECT COUNT(*) AS n FROM signal_events"
+            " WHERE lower(source_name)=lower(?) AND fetched_at >= ?",
+            (source_name, cutoff_iso),
+        ).fetchone()
+    finally:
+        conn.close()
+
+    total = int(row["n"] if row and row["n"] is not None else 0)
+    latest = row["latest"] if row else None
+    latest_age_hours: float | None = None
+    if latest:
+        try:
+            ldt = _dt.datetime.fromisoformat(str(latest).replace("Z", "+00:00"))
+            if ldt.tzinfo is None:
+                ldt = ldt.replace(tzinfo=_dt.timezone.utc)
+            latest_age_hours = max(0.0, (now_dt - ldt).total_seconds() / 3600.0)
+        except ValueError:
+            latest_age_hours = None
+    fresh_count = int(fresh_row["n"] if fresh_row and fresh_row["n"] is not None else 0)
+    return {
+        "total_count": total,
+        "fresh_count": fresh_count,
+        "latest_fetched_at": str(latest) if latest else None,
+        "latest_age_hours": latest_age_hours,
+        "ttl_hours": float(ttl_hours),
+    }
+
+
 def get_signal_events(
     source_name: str | None = None,
     limit: int = 100,

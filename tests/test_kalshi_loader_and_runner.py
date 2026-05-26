@@ -152,23 +152,34 @@ class TestKalshiPhase1Runner:
     def test_write_mode_calls_persist_with_only_approved_categories(
         self, kalshi_payload
     ):
-        """In write-mode the runner calls _persist_events exactly once with
-        an events list containing only the approved-category rows."""
+        """In write-mode the runner upserts each approved-category row.
+
+        The Kalshi refresh path delegates to
+        ``scripts.kalshi_phase1_runner._upsert`` (which fans out to
+        ``persistence.upsert_signal_event_observation``).  The contract
+        the original assertion was protecting — "only approved categories
+        reach persistence" — is preserved; the implementation hook moved.
+        """
         from scripts.live_source_runner import run_phase1
+        import scripts.kalshi_phase1_runner as kpr
+
+        upsert_calls: list[dict] = []
+
+        def _fake_upsert(payload, fetched_at, *, db_path):
+            upsert_calls.append(payload)
+            return (1, 0)
 
         with patch("requests.get", return_value=_mock_response(kalshi_payload)):
             with (
-                patch("scripts.live_source_runner._persist_events", return_value=2) as persist_mock,
+                patch.object(kpr, "_upsert", side_effect=_fake_upsert),
                 patch("scripts.live_source_runner._log_run"),
             ):
                 report = run_phase1(dry_run=False, sources=["kalshi"], kalshi_limit=5)
 
-        persist_mock.assert_called_once()
-        events_arg = persist_mock.call_args.args[0]
-        assert len(events_arg) == 2
-        categories = {e["category"] for e in events_arg}
+        assert len(upsert_calls) == 2
+        categories = {e["category"] for e in upsert_calls}
         assert categories == {"Crypto", "Economics"}
-        for ev in events_arg:
+        for ev in upsert_calls:
             assert ev["source"] == "kalshi"
             assert ev["source_label"] == "Kalshi"
             assert ev["execution_permission"] == "ADVISORY_ONLY"

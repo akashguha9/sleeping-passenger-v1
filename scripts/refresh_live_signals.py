@@ -435,8 +435,15 @@ def _run_one_source(
         success = False
     else:
         status = str(runner_result.get("status", "")).lower()
-        if status == "ok" or status == "ok_filtered":
+        if status == "ok":
             success = True
+        elif status == "ok_filtered":
+            # ok_filtered with rows_added=0 is canonical-zero-write — for
+            # Kalshi specifically we classify this as DEGRADED below, but
+            # the inner runner's status field stays as-is so we can also
+            # treat it as "succeeded" for non-Kalshi sources that already
+            # ignore filtered outcomes today.
+            success = source_key != "kalshi"
         elif status in {"skipped", "rate_limited", "timeout", "placeholder", "http_error"}:
             skipped = True
             skipped_reason = runner_result.get("skipped_reason", "") or status
@@ -472,6 +479,118 @@ def _run_one_source(
     }
     entry.update(_SAFETY_STAMPS)
 
+    # ------------------------------------------------------------------
+    # Kalshi semantic-freshness classification.
+    #
+    # The inner runner now returns the extra metrics (records_seen_total,
+    # records_allowed, records_quarantined, rows_added, rows_refreshed,
+    # health_path).  We classify them via the shared module so the parent
+    # refresh, watchdog and API all share the same truth model.
+    #
+    # Non-Kalshi sources keep their existing behaviour; ``provider_result``
+    # is not stamped for them.
+    # ------------------------------------------------------------------
+    if source_key == "kalshi" and not skipped:
+        try:
+            try:
+                from scripts.kalshi_semantic_freshness import (
+                    build_kalshi_truth,
+                    RESULT_DEGRADED_FILTERED,
+                    RESULT_DEGRADED_HEALTH_ONLY,
+                    RESULT_DEGRADED_ZERO_CANONICAL,
+                    RESULT_ERROR,
+                    RESULT_OK_INSERTED,
+                    RESULT_OK_REFRESHED,
+                )
+                from scripts.persistence import count_fresh_signal_events_by_source
+            except ModuleNotFoundError:  # pragma: no cover
+                from kalshi_semantic_freshness import (  # type: ignore[no-redef]
+                    build_kalshi_truth,
+                    RESULT_DEGRADED_FILTERED,
+                    RESULT_DEGRADED_HEALTH_ONLY,
+                    RESULT_DEGRADED_ZERO_CANONICAL,
+                    RESULT_ERROR,
+                    RESULT_OK_INSERTED,
+                    RESULT_OK_REFRESHED,
+                )
+                from persistence import count_fresh_signal_events_by_source  # type: ignore[no-redef]
+
+            health_path_str = str(runner_result.get("health_path") or "") or None
+            health_path = Path(health_path_str) if health_path_str else None
+            if health_path is None:
+                # Resolve canonical default relative to repo root so
+                # `cwd` mishaps don't blind the classifier.
+                health_path = _REPO_ROOT / "runtime" / "release" / "kalshi_source_health.json"
+
+            canonical_stats = count_fresh_signal_events_by_source(
+                source_name="kalshi", ttl_hours=6.0
+            )
+
+            runner_rows_added = int(runner_result.get("rows_added", 0) or 0)
+            runner_rows_refreshed = int(runner_result.get("rows_refreshed", 0) or 0)
+
+            truth = build_kalshi_truth(
+                health_path=health_path,
+                canonical_stats=canonical_stats,
+                rows_added=runner_rows_added,
+                rows_refreshed=runner_rows_refreshed,
+                records_seen_total=int(runner_result.get("records_seen_total", 0) or 0),
+                records_allowed=int(runner_result.get("records_allowed", 0) or 0),
+                records_quarantined=int(runner_result.get("records_quarantined", 0) or 0),
+                expected_canonical_write=True,
+                error_present=bool(error_message),
+                skipped=False,
+                skipped_reason="",
+            )
+            provider_result = truth["provider_result"]
+            entry["provider_result"] = provider_result
+            entry["api_health_status"] = truth["api_health_status"]
+            entry["canonical_signal_status"] = truth["canonical_signal_status"]
+            entry["semantic_fresh"] = truth["semantic_fresh"]
+            entry["degraded"] = truth["degraded"]
+            entry["degradation_reason"] = truth["operator_message"]
+            entry["rows_refreshed"] = runner_rows_refreshed
+            entry["records_seen_total"] = int(runner_result.get("records_seen_total", 0) or 0)
+            entry["records_allowed"] = int(runner_result.get("records_allowed", 0) or 0)
+            entry["records_quarantined"] = int(
+                runner_result.get("records_quarantined", 0) or 0
+            )
+            entry["canonical_live_count_6h"] = truth["canonical_live_count"]
+            entry["latest_kalshi_signal_ts"] = truth["latest_canonical_fetched_at"]
+            entry["source_health_status"] = truth["api_health_status"]
+            entry["source_health_live"] = (
+                truth["api_health_status"]
+                == "LIVE_VERIFIED"
+            )
+            entry["retry_count"] = int(runner_result.get("retry_count", 0) or 0)
+            entry["final_status"] = provider_result
+            # ``success`` and ``rows_added`` reflect canonical signal_events
+            # truth.  rows_added=0+ok_filtered must not count as full OK.
+            if provider_result in {RESULT_OK_INSERTED, RESULT_OK_REFRESHED}:
+                entry["success"] = True
+                entry["degraded"] = False
+            elif provider_result == RESULT_ERROR:
+                entry["success"] = False
+                if not entry.get("error_message"):
+                    entry["error_message"] = truth["operator_message"]
+            elif provider_result.startswith("DEGRADED_"):
+                entry["success"] = False
+                entry["degraded"] = True
+                # Surface the operator message via degradation_reason; do NOT
+                # write it into error_message because the source_run_log
+                # mapper would then flip the status to ERROR.  Degraded is
+                # explicitly *not* an error — it is a truthful "API live,
+                # canonical zero" outcome that the cockpit must distinguish.
+                entry["degradation_reason"] = truth["operator_message"]
+            # Surface the upsert rows_added on top of the count-delta one
+            # so DUPLICATE_REFRESHED scenarios show non-zero work.
+            if runner_rows_added > entry["rows_added"]:
+                entry["rows_added"] = runner_rows_added
+        except Exception as exc:  # noqa: BLE001
+            entry["provider_result_error"] = (
+                f"kalshi_truth_classify_failed: {type(exc).__name__}"
+            )
+
     _safe_record_metadata(
         run_id=run_id,
         source_name=source_key,
@@ -495,13 +614,28 @@ def _run_one_source(
     # cannot show ``never_run`` for a source that was actually attempted.
     # An extra row is harmless — ``get_latest_source_run_per_source``
     # picks the MAX(id), so the freshest attempt wins.
+    #
+    # When the Kalshi classifier flipped to DEGRADED, swap the runner
+    # status the log helper sees so source_run_log records the precise
+    # degraded label instead of falling through to ``ERROR``.
+    log_runner_status = str(runner_result.get("status", ""))
+    log_error_message = error_message
+    log_success = success
+    if entry.get("degraded"):
+        provider_result_norm = str(entry.get("provider_result") or "").lower()
+        if provider_result_norm:
+            log_runner_status = provider_result_norm
+        # Degraded is not an error — clear error_message so the log
+        # mapper picks the runner_status path, not the ERROR fallback.
+        log_error_message = ""
+        log_success = True
     _safe_log_source_run_attempt(
         source_name=source_key,
-        success=success,
+        success=log_success,
         skipped=skipped,
-        error_message=error_message,
+        error_message=log_error_message,
         skipped_reason=skipped_reason,
-        runner_status=str(runner_result.get("status", "")),
+        runner_status=log_runner_status,
         runner_fetched_count=int(runner_result.get("fetched_count", 0) or 0),
         timestamp_utc=finished_iso,
         duration_seconds=duration_seconds,
@@ -521,6 +655,14 @@ _RUNNER_STATUS_TO_LOG_STATUS: dict[str, str] = {
     "http_error": "HTTP_ERROR",
     "placeholder": "PLACEHOLDER",
     "skipped": "SKIPPED",
+    # New degraded taxonomy emitted by the Kalshi semantic-freshness
+    # classifier.  These are *not* errors and *not* full OK — they are
+    # the truthful in-between states the cockpit / watchdog need to
+    # distinguish: API is alive but canonical signal_events did not
+    # advance.
+    "degraded_zero_canonical": "DEGRADED_ZERO_CANONICAL",
+    "degraded_filtered": "DEGRADED_FILTERED",
+    "degraded_health_only": "DEGRADED_HEALTH_ONLY",
 }
 
 
@@ -694,9 +836,13 @@ def run_refresh(
 
     refresh_finished_at = _utc_now_iso()
     total_duration = round(time.monotonic() - started_monotonic, 3)
-    succeeded = sum(1 for e in entries if e["success"])
+    succeeded = sum(1 for e in entries if e["success"] and not e.get("degraded"))
+    degraded = sum(1 for e in entries if e.get("degraded"))
     skipped = sum(1 for e in entries if e["skipped"])
-    failed = sum(1 for e in entries if not e["success"] and not e["skipped"])
+    failed = sum(
+        1 for e in entries
+        if not e["success"] and not e["skipped"] and not e.get("degraded")
+    )
 
     summary: dict[str, Any] = {
         "operation": "refresh_live_signals",
@@ -708,6 +854,7 @@ def run_refresh(
         "cadence_hours": int(cadence_hours),
         "total_sources_attempted": len(entries),
         "total_sources_succeeded": succeeded,
+        "total_sources_degraded": degraded,
         "total_sources_failed": failed,
         "total_sources_skipped": skipped,
         "db_path": db_path,
@@ -759,19 +906,35 @@ def _format_summary_lines(summary: dict[str, Any], *, quiet: bool) -> list[str]:
     lines.append(f"db_path: {summary['db_path']}")
     if not quiet:
         for e in summary.get("entries", []):
-            mark = "OK " if e["success"] else ("SKIP" if e["skipped"] else "FAIL")
+            if e.get("degraded"):
+                mark = "DEG "
+            elif e["success"]:
+                mark = "OK  "
+            elif e["skipped"]:
+                mark = "SKIP"
+            else:
+                mark = "FAIL"
             extra = ""
             if e["skipped_reason"]:
                 extra = f"  ({e['skipped_reason']})"
             elif e["error_message"]:
-                extra = f"  ({e['error_message']})"
+                extra = f"  ({e['error_message'][:140]})"
+            kalshi_extra = ""
+            if e["source_name"] == "kalshi":
+                kalshi_extra = (
+                    f"  canonical={e.get('canonical_signal_status', '?')}"
+                    f"  api_health={e.get('api_health_status', '?')}"
+                    f"  rows_refreshed={e.get('rows_refreshed', 0)}"
+                )
             lines.append(
                 f"  [{mark}] {e['source_name']:<16} phase={e['phase']:<6} "
-                f"rows_added={e['rows_added']}  duration_s={e['duration_seconds']}{extra}"
+                f"rows_added={e['rows_added']}  duration_s={e['duration_seconds']}"
+                f"{kalshi_extra}{extra}"
             )
     lines.append(
         f"Totals: attempted={summary['total_sources_attempted']}  "
         f"succeeded={summary['total_sources_succeeded']}  "
+        f"degraded={summary.get('total_sources_degraded', 0)}  "
         f"failed={summary['total_sources_failed']}  "
         f"skipped={summary['total_sources_skipped']}"
     )

@@ -520,6 +520,52 @@ def _build_live_sources_status(
         asia_disclosure_coverage_rows = []
         source_coverage_rows.setdefault("asia_disclosure", [])
 
+    # ------------------------------------------------------------------
+    # Kalshi split-semantic truth — exposes api_health_status and
+    # canonical_signal_status as separate fields so the UI does not
+    # collapse "API live but canonical zero" into a single stale chip.
+    # ------------------------------------------------------------------
+    kalshi_truth: dict[str, Any] = {}
+    try:
+        try:
+            from scripts.kalshi_semantic_freshness import build_kalshi_truth
+            from scripts.persistence import count_fresh_signal_events_by_source
+        except ModuleNotFoundError:  # pragma: no cover
+            from kalshi_semantic_freshness import build_kalshi_truth  # type: ignore[no-redef]
+            from persistence import count_fresh_signal_events_by_source  # type: ignore[no-redef]
+        from pathlib import Path as _Path
+
+        # Resolve runtime/release/kalshi_source_health.json from repo root
+        # so cwd mishaps cannot blind the API.
+        _repo_root = _Path(__file__).resolve().parents[3]
+        health_path = _repo_root / "runtime" / "release" / "kalshi_source_health.json"
+        canonical_stats = count_fresh_signal_events_by_source(
+            source_name="kalshi", ttl_hours=float(stale_threshold_hours)
+        )
+        kalshi_truth = build_kalshi_truth(
+            health_path=health_path,
+            canonical_stats=canonical_stats,
+            ttl_hours=float(stale_threshold_hours),
+        )
+        kalshi_entry = freshness.get("kalshi")
+        if isinstance(kalshi_entry, dict):
+            kalshi_entry["api_health_status"] = kalshi_truth["api_health_status"]
+            kalshi_entry["canonical_signal_status"] = kalshi_truth[
+                "canonical_signal_status"
+            ]
+            kalshi_entry["semantic_fresh"] = kalshi_truth["semantic_fresh"]
+            kalshi_entry["degraded"] = kalshi_truth["degraded"]
+            kalshi_entry["operator_message"] = kalshi_truth["operator_message"]
+            kalshi_entry["api_health_timestamp_utc"] = kalshi_truth[
+                "api_health_timestamp_utc"
+            ]
+            kalshi_entry["api_health_timestamp_source"] = kalshi_truth[
+                "api_health_timestamp_source"
+            ]
+            kalshi_entry["canonical_live_count"] = kalshi_truth["canonical_live_count"]
+    except Exception:  # noqa: BLE001
+        kalshi_truth = {}
+
     return {
         "operation": "get_live_sources_status",
         "sources": freshness,
@@ -538,6 +584,7 @@ def _build_live_sources_status(
         "health_summary": health_summary,
         "source_coverage_rows": source_coverage_rows,
         "asia_disclosure_coverage_rows": asia_disclosure_coverage_rows,
+        "kalshi": kalshi_truth,
         "advisory_status": _ADVISORY_STATUS,
         "execution_mode": _EXECUTION_MODE,
         "execution_gate": "LOCKED",

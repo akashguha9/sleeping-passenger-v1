@@ -87,6 +87,18 @@ class SourceRunResult:
     advisory_status: str = _ADVISORY_STATUS
     status_detail: str = ""
     missing_env_var: str = ""
+    # Optional Kalshi-style semantic metrics — None for non-Kalshi sources
+    # so existing serializers see no change.  When populated, the parent
+    # refresh uses them to classify provider_result honestly.
+    records_seen_total: int | None = None
+    records_allowed: int | None = None
+    records_quarantined: int | None = None
+    rows_added: int | None = None
+    rows_refreshed: int | None = None
+    source_freshness_status: str = ""
+    health_path: str = ""
+    retry_count: int = 0
+    final_retry_reason: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -103,6 +115,15 @@ class SourceRunResult:
             "advisory_status": self.advisory_status,
             "status_detail": self.status_detail,
             "missing_env_var": self.missing_env_var,
+            "records_seen_total": self.records_seen_total,
+            "records_allowed": self.records_allowed,
+            "records_quarantined": self.records_quarantined,
+            "rows_added": self.rows_added,
+            "rows_refreshed": self.rows_refreshed,
+            "source_freshness_status": self.source_freshness_status,
+            "health_path": self.health_path,
+            "retry_count": self.retry_count,
+            "final_retry_reason": self.final_retry_reason,
         }
 
 
@@ -493,6 +514,85 @@ def run_phase1(
         normalizer = _NORMALIZERS[source_name]
         ts = utc_timestamp()
         t0 = time.monotonic()
+
+        if source_name == "kalshi":
+            try:
+                from scripts.kalshi_phase1_runner import run_kalshi_phase1
+            except ModuleNotFoundError:  # pragma: no cover
+                from kalshi_phase1_runner import run_kalshi_phase1  # type: ignore[no-redef]
+            kalshi_outcome = run_kalshi_phase1(
+                dry_run=dry_run,
+                limit=kalshi_limit,
+                timeout=_DEFAULT_TIMEOUT,
+                max_pages=1,
+                use_mock=kalshi_use_mock,
+                legacy_loader=loader,
+            )
+            duration_ms = int((time.monotonic() - t0) * 1000)
+            rows_added = int(kalshi_outcome.get("rows_added") or 0)
+            rows_refreshed = int(kalshi_outcome.get("rows_refreshed") or 0)
+            records_seen_total = int(kalshi_outcome.get("records_seen_total") or 0)
+            records_allowed = int(kalshi_outcome.get("records_allowed") or 0)
+            records_quarantined = int(kalshi_outcome.get("records_quarantined") or 0)
+            kalshi_skipped = bool(kalshi_outcome.get("skipped"))
+            kalshi_skip_reason = str(kalshi_outcome.get("skipped_reason") or "")
+            kalshi_error = bool(kalshi_outcome.get("error_present"))
+            kalshi_error_msg = str(kalshi_outcome.get("error_message") or "")
+            health_path = str(kalshi_outcome.get("health_path") or "")
+            source_freshness = str(kalshi_outcome.get("source_freshness_status") or "")
+            retry_count = int(kalshi_outcome.get("retry_count") or 0)
+            final_retry_reason = str(kalshi_outcome.get("final_retry_reason") or "")
+
+            if kalshi_skipped:
+                run_status = "skipped"
+                detail = kalshi_skip_reason or "kalshi_skipped"
+            elif kalshi_error:
+                run_status = "http_error"
+                detail = kalshi_error_msg or "kalshi_error"
+            elif records_seen_total == 0:
+                run_status = "ok_empty"
+                detail = "kalshi returned 0 markets"
+            elif records_allowed == 0:
+                run_status = "ok_filtered"
+                detail = (
+                    f"Kalshi category allowlist active — accepted 0/{records_seen_total}"
+                )
+            else:
+                run_status = "ok"
+                detail = (
+                    f"Kalshi category allowlist active — accepted "
+                    f"{records_allowed}/{records_seen_total}; rows_added="
+                    f"{rows_added} rows_refreshed={rows_refreshed}"
+                )
+
+            src_result = SourceRunResult(
+                source_name=source_name,
+                status=run_status,
+                fetched_count=records_seen_total,
+                accepted_count=records_allowed,
+                rejected_count=records_quarantined,
+                skipped_reason=kalshi_skip_reason,
+                error_message=kalshi_error_msg,
+                timestamp_utc=ts,
+                duration_ms=duration_ms,
+                events_persisted=rows_added + rows_refreshed,
+                status_detail=detail,
+                records_seen_total=records_seen_total,
+                records_allowed=records_allowed,
+                records_quarantined=records_quarantined,
+                rows_added=rows_added,
+                rows_refreshed=rows_refreshed,
+                source_freshness_status=source_freshness,
+                health_path=health_path,
+                retry_count=retry_count,
+                final_retry_reason=final_retry_reason,
+            )
+            if not dry_run:
+                _log_run(src_result)
+            report.sources.append(src_result)
+            report.total_fetched += src_result.fetched_count
+            report.total_persisted += src_result.events_persisted
+            continue
 
         loader_result = _run_loader_with_retry(loader)
 

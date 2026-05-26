@@ -308,9 +308,105 @@ def get_source_health_watchdog() -> dict:
     return fn()
 
 
+def _build_kalshi_truth_response() -> dict:
+    """Return the split-semantic Kalshi truth + sanitized health artifact.
+
+    Read-only.  Never echoes secrets.  Falls back to MISSING / UNKNOWN
+    when the artifact is absent so the UI can render the split state
+    honestly.
+    """
+    try:
+        try:
+            from scripts.kalshi_semantic_freshness import (
+                build_kalshi_truth,
+                load_health_artifact,
+            )
+            from scripts.persistence import count_fresh_signal_events_by_source
+        except ModuleNotFoundError:  # pragma: no cover
+            from kalshi_semantic_freshness import (  # type: ignore[no-redef]
+                build_kalshi_truth,
+                load_health_artifact,
+            )
+            from persistence import count_fresh_signal_events_by_source  # type: ignore[no-redef]
+        # Resolve runtime/release relative to repo root so a process started
+        # from anywhere still finds the artifact.
+        _repo_root = Path(__file__).resolve().parents[3]
+        health_path = _repo_root / "runtime" / "release" / "kalshi_source_health.json"
+        artifact = load_health_artifact(health_path)
+        canonical_stats = count_fresh_signal_events_by_source(
+            source_name="kalshi", ttl_hours=6.0
+        )
+        truth = build_kalshi_truth(
+            health_path=health_path,
+            canonical_stats=canonical_stats,
+            ttl_hours=6.0,
+        )
+
+        sanitized_artifact: dict = {}
+        if artifact.present and isinstance(artifact.raw, dict):
+            forbidden = {
+                "api_key_id",
+                "private_key_path",
+                "authorization",
+                "kalshi-access-key",
+                "kalshi-access-signature",
+                "kalshi-access-timestamp",
+            }
+            sanitized_artifact = {
+                k: v
+                for k, v in artifact.raw.items()
+                if str(k).lower() not in forbidden
+            }
+        # Surface both the truth block (for new UI components) and a
+        # backwards-compatible "sanitized artifact" block so the existing
+        # operator-truth panel keeps rendering.
+        response: dict = {
+            "kalshi_semantic_truth": truth,
+            "artifact_present": artifact.present,
+            "artifact": sanitized_artifact or None,
+            **_watchdog_safety_payload(),
+        }
+        # Surface canonical fields at the top level so the existing
+        # frontend client (which reads ``KalshiSourceHealthResponse``)
+        # keeps working without renaming.
+        if sanitized_artifact:
+            response.update(sanitized_artifact)
+        response["api_health_status"] = truth["api_health_status"]
+        response["canonical_signal_status"] = truth["canonical_signal_status"]
+        response["semantic_fresh"] = truth["semantic_fresh"]
+        response["degraded"] = truth["degraded"]
+        response["operator_message"] = truth["operator_message"]
+        response["canonical_live_count"] = truth["canonical_live_count"]
+        response["latest_canonical_fetched_at"] = truth["latest_canonical_fetched_at"]
+        return response
+    except Exception as exc:  # noqa: BLE001
+        return {
+            "kalshi_semantic_truth": None,
+            "artifact_present": False,
+            "artifact": None,
+            "error": f"{type(exc).__name__}: {str(exc)[:160]}",
+            "api_health_status": "UNKNOWN",
+            "canonical_signal_status": "UNKNOWN",
+            "semantic_fresh": False,
+            "degraded": False,
+            **_watchdog_safety_payload(),
+        }
+
+
+def get_kalshi_source_health() -> dict:
+    """Route handler — resolves builder via ``scripts.api_server`` at
+    request time so test patches still bite."""
+    import scripts.api_server as _srv
+
+    fn = getattr(_srv, "_build_kalshi_truth_response", _build_kalshi_truth_response)
+    return fn()
+
+
 def build_router():
     router = APIRouter()
     router.get("/source-health")(get_source_health)
     router.get("/source-health/summary")(get_source_health_summary)
     router.get("/source-health/watchdog")(get_source_health_watchdog)
+    router.get("/source-health/kalshi")(get_kalshi_source_health)
+    router.get("/kalshi/source-health")(get_kalshi_source_health)
     return router

@@ -858,6 +858,32 @@ export interface KalshiSourceHealthResponse {
   execution_locked?: boolean;
   broker_api_called?: boolean;
   ai_execution_count?: number;
+  // Split-semantic truth — populated by /source-health/kalshi alongside
+  // the legacy sanitized artifact fields above.  The frontend renders
+  // these as a SEPARATE row from `source_freshness_status` so the user
+  // can see when the API is LIVE_VERIFIED but canonical signals are
+  // ZERO_FRESH_ROWS / FILTERED / etc.
+  api_health_status?:
+    | 'LIVE_VERIFIED'
+    | 'STALE_HEALTH'
+    | 'HEALTH_ARTIFACT_MISSING'
+    | 'AUTH_FAILED'
+    | 'API_ERROR'
+    | 'UNKNOWN';
+  canonical_signal_status?:
+    | 'LIVE_CANONICAL'
+    | 'DUPLICATE_REFRESHED'
+    | 'ZERO_FRESH_ROWS'
+    | 'FILTERED'
+    | 'HEALTH_ONLY'
+    | 'STALE_CANONICAL'
+    | 'MISSING_CANONICAL'
+    | 'UNKNOWN';
+  semantic_fresh?: boolean;
+  degraded?: boolean;
+  operator_message?: string;
+  canonical_live_count?: number;
+  latest_canonical_fetched_at?: string | null;
 }
 
 export interface DbStatusResponse {

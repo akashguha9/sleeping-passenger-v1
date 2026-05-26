@@ -196,6 +196,7 @@ try:
         _get_source_health_summary,  # noqa: F401 — re-exported
         _log_source_health,  # noqa: F401 — re-exported
         _build_watchdog_summary_response,  # noqa: F401 — re-exported
+        _build_kalshi_truth_response,  # noqa: F401 — re-exported
         _watchdog_summary_path,  # noqa: F401 — re-exported
         _watchdog_safety_payload,  # noqa: F401 — re-exported
     )

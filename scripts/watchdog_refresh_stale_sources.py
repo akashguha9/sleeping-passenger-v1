@@ -1167,6 +1167,33 @@ def run_watchdog(
     _ensure_tracked_in_summary(summary, before, "before")
     _ensure_tracked_in_summary(summary, after, "after")
 
+    # --- Kalshi split-semantic block ------------------------------------
+    # Emitting the api_health_status / canonical_signal_status separation
+    # via the shared classifier so cockpit / API / refresh agree on truth.
+    try:
+        try:
+            from scripts.kalshi_semantic_freshness import build_kalshi_truth
+            from scripts.persistence import count_fresh_signal_events_by_source
+        except ModuleNotFoundError:  # pragma: no cover
+            from kalshi_semantic_freshness import build_kalshi_truth  # type: ignore[no-redef]
+            from persistence import count_fresh_signal_events_by_source  # type: ignore[no-redef]
+        health_artifact_path = (
+            _REPO_ROOT / "runtime" / "release" / "kalshi_source_health.json"
+        )
+        canonical_stats = count_fresh_signal_events_by_source(
+            source_name="kalshi", ttl_hours=ttl_hours
+        )
+        kalshi_truth = build_kalshi_truth(
+            health_path=health_artifact_path,
+            canonical_stats=canonical_stats,
+            ttl_hours=float(ttl_hours),
+        )
+        summary["kalshi_semantic"] = kalshi_truth
+    except Exception as exc:  # noqa: BLE001
+        summary["kalshi_semantic_error"] = (
+            f"{type(exc).__name__}: {str(exc)[:160]}"
+        )
+
     _write_summary(target_summary, summary)
 
     return WatchdogResult(status=status, exit_code=exit_code, summary=summary)
