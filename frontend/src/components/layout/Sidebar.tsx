@@ -16,6 +16,7 @@ const NAV_GROUPS: NavGroup[] = [
     description: 'See what is happening',
     items: [
       { href: '/', label: 'Dashboard', icon: '⬡' },
+      { href: '/model-portfolio', label: 'Model Portfolio', icon: '◊' },
       { href: '/signal-inbox', label: 'Signal Inbox', icon: '◈' },
       { href: '/live-signals', label: 'Live Signals', icon: '◆' },
       { href: '/chart-structure', label: 'Chart Structure', icon: '◫' },
@@ -27,6 +28,7 @@ const NAV_GROUPS: NavGroup[] = [
     title: 'Decide',
     description: 'Reflect, log, reconcile — manual only',
     items: [
+      { href: '/capital-rotation', label: 'Capital Rotation', icon: '⌖' },
       { href: '/reflection-desk', label: 'Reflection Desk', icon: '◎' },
       { href: '/manual-trade-log', label: 'Manual Trade Log', icon: '▣' },
       { href: '/reconciliation', label: 'Reconciliation', icon: '◧' },

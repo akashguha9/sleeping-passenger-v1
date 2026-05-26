@@ -1778,6 +1778,48 @@ except ModuleNotFoundError:  # pragma: no cover
     pass
 
 
+# ---------------------------------------------------------------------------
+# Customer-facing read-only routes — Customer-Facing Product Transformation
+# sprint.  Adds /api/customer/* endpoints that translate the internal
+# operator engine (MIURA / MURCIÉLAGO / DIABLO / …) into customer-safe
+# basket-and-action-label language.  Read-only.  Advisory-only.  Never
+# calls a broker.  Never places an order.
+# ---------------------------------------------------------------------------
+try:
+    from scripts.api.routers.customer_router import (  # noqa: E402
+        build_router as _build_customer_router,
+        get_customer_baskets,  # noqa: F401 — re-exported handler
+        get_customer_basket_by_id,  # noqa: F401
+        get_customer_model_portfolio,  # noqa: F401
+        get_customer_translate_state,  # noqa: F401
+        get_customer_ticker_basket,  # noqa: F401
+    )
+    if _FASTAPI_AVAILABLE:
+        app.include_router(_build_customer_router())
+except ModuleNotFoundError:  # pragma: no cover
+    pass
+
+
+# ---------------------------------------------------------------------------
+# Capital Rotation Engine — advisory-only Juego de Posición portfolio
+# operator layer.  Exposes /portfolio/capital-rotation,
+# /portfolio/exit-review, /portfolio/theme-slots, /portfolio/buy-admission.
+# Read-only.  Advisory-only.  Never calls a broker.  Never places an order.
+# ---------------------------------------------------------------------------
+try:
+    from scripts.api.routers.capital_rotation_router import (  # noqa: E402
+        build_router as _build_capital_rotation_router,
+        get_capital_rotation,  # noqa: F401 — re-exported handler
+        get_exit_review,  # noqa: F401
+        get_theme_slots,  # noqa: F401
+        get_buy_admission,  # noqa: F401
+    )
+    if _FASTAPI_AVAILABLE:
+        app.include_router(_build_capital_rotation_router())
+except ModuleNotFoundError:  # pragma: no cover
+    pass
+
+
 if __name__ == "__main__":  # pragma: no cover
     import sys
 

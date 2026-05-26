@@ -196,6 +196,27 @@ APPROVED_DOMAINS: tuple[str, ...] = (
     # Read-only score assembly over docs + local stubs.  Reports a hard
     # ceiling of 6.2 unless real auth + hosted DB + staging deploy exist.
     "private_beta",             # private_beta_readiness_report.py — readiness score
+    # Customer-Facing Product Transformation sprint — pure, read-only
+    # customer-facing surface that translates the internal operator
+    # engine into thematic baskets, customer action labels, and a
+    # default model portfolio.  No broker execution, no order placement,
+    # no API trading writes.  Served via /api/customer/* read-only.
+    "customer_language",        # customer_language.py — internal-state → customer-label translation
+    "basket_registry",          # basket_registry.py — thematic basket taxonomy
+    "model_portfolio",          # model_portfolio.py — default advisory model portfolio
+    # Capital Rotation Engine — advisory-only Juego de Posición
+    # portfolio operator layer.  Translates exit review + theme slots +
+    # buy admission into a single capital-rotation snapshot.  No broker
+    # execution, no order placement, no API trading writes.  Read-only
+    # router under /portfolio/capital-rotation, /portfolio/exit-review,
+    # /portfolio/theme-slots, /portfolio/buy-admission.
+    "economic_exposure",        # economic_exposure.py — ticker→economic-key + theme buckets
+    "exit_review",              # exit_review_board.py — per-position lifecycle aggregator
+    "theme_slot",               # theme_slot_accounting.py — pitch-zone accounting
+    "buy_admission",            # buy_admission.py — candidate admission classifier
+    "capital_rotation",         # capital_rotation_summary.py + router — daily snapshot
+    "portfolio_lifecycle",      # portfolio_lifecycle.py — thesis + exit classification
+    "portfolio_capacity",       # portfolio_capacity.py — capacity score + regime + risk budget
 )
 
 # Explicit allowlist for individual files / directories whose name does
