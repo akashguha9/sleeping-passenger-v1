@@ -52,6 +52,12 @@ try:
         candidate_to_admission_input,
         load_candidate_feed,
     )
+    from scripts.live_price_marks import (
+        LiveMarkResult,
+        live_mark_result_to_summary,
+        write_live_mark_summary,
+        LIVE_MARK_SUMMARY_FILENAME,
+    )
 except ModuleNotFoundError:  # pragma: no cover — flat-layout fallback
     from runtime_common import REPO_ROOT  # type: ignore
     from daily_payload import (  # type: ignore
@@ -77,6 +83,12 @@ except ModuleNotFoundError:  # pragma: no cover — flat-layout fallback
         candidate_to_admission_input,
         load_candidate_feed,
     )
+    from live_price_marks import (  # type: ignore
+        LiveMarkResult,
+        live_mark_result_to_summary,
+        write_live_mark_summary,
+        LIVE_MARK_SUMMARY_FILENAME,
+    )
 
 
 RELEASE_DIR = REPO_ROOT / "runtime" / "release"
@@ -86,6 +98,7 @@ EXIT_REVIEW_SUMMARY_PATH = RELEASE_DIR / "exit_review_summary.json"
 PORTFOLIO_CAPACITY_SUMMARY_PATH = RELEASE_DIR / "portfolio_capacity_summary.json"
 THEME_SLOT_SUMMARY_PATH = RELEASE_DIR / "theme_slot_summary.json"
 BUY_ADMISSION_SUMMARY_PATH = RELEASE_DIR / "buy_admission_summary.json"
+LIVE_PRICE_MARKS_SUMMARY_PATH = RELEASE_DIR / LIVE_MARK_SUMMARY_FILENAME
 
 
 def _utc_now() -> str:
@@ -144,6 +157,9 @@ def build_capital_rotation_summary(
         "holdings_present": False,
     }
 
+    live_mark_summary: dict[str, Any] | None = None
+    live_mark_result: LiveMarkResult | None = None
+
     if positions is None:
         loaded_ctx = load_position_context(
             db_path=db_path,
@@ -165,6 +181,9 @@ def build_capital_rotation_summary(
             "db_available": loaded_ctx.db_available,
             "holdings_present": loaded_ctx.holdings_present,
         }
+        live_mark_result = loaded_ctx.live_mark_result
+        if live_mark_result is not None:
+            live_mark_summary = live_mark_result_to_summary(live_mark_result)
     else:
         positions_list = list(positions)
         position_context_status = {
@@ -299,12 +318,34 @@ def build_capital_rotation_summary(
         held_exposures=held_exposures,
     )
 
+    if live_mark_summary is None:
+        live_mark_summary = {
+            "generated_at": _utc_now(),
+            "aggregate_source_health": "NO_LIVE_MARKS",
+            "coverage_ratio": 0.0,
+            "usable_coverage_ratio": 0.0,
+            "average_quality_score": 0.0,
+            "requested_tickers": [],
+            "resolved_tickers": [],
+            "missing_tickers": [],
+            "stale_tickers": [],
+            "provider_status": {},
+            "marks": [],
+            "reason_codes": ["NO_LIVE_MARKS"],
+            "advisory_only": True,
+            "broker_api_called": False,
+            "ai_execution_count": 0,
+            "human_execution_required": True,
+            "execution_permission": "ADVISORY_ONLY",
+        }
+
     summary = {
         "report": "capital_rotation_summary",
         "generated_at_utc": _utc_now(),
         "source_health": source_health,
         "position_context_status": position_context_status,
         "candidate_feed_status": candidate_feed_status,
+        "live_mark_summary": live_mark_summary,
         "portfolio_regime": regime["portfolio_regime"],
         "portfolio_regime_reasons": regime["reason_codes"],
         "portfolio_capacity_score": capacity["portfolio_capacity_score"],
@@ -354,7 +395,7 @@ def write_release_files(
     *,
     release_dir: Path | None = None,
 ) -> dict[str, str]:
-    """Write the five sibling JSONs.  Returns ``{name: path_str}``."""
+    """Write the sibling JSONs.  Returns ``{name: path_str}``."""
     base = release_dir or RELEASE_DIR
 
     main = base / "capital_rotation_summary.json"
@@ -362,6 +403,7 @@ def write_release_files(
     capacity_path = base / "portfolio_capacity_summary.json"
     theme_path = base / "theme_slot_summary.json"
     admission_path = base / "buy_admission_summary.json"
+    live_marks_path = base / LIVE_MARK_SUMMARY_FILENAME
 
     _write_json(main, summary)
     _write_json(
@@ -370,6 +412,7 @@ def write_release_files(
             "report": "exit_review_summary",
             "generated_at_utc": summary.get("generated_at_utc"),
             "position_context_status": summary.get("position_context_status", {}),
+            "live_mark_summary": summary.get("live_mark_summary", {}),
             "exit_review_board": summary.get("exit_review_board", {}),
             **_safety_stamps(),
         },
@@ -409,12 +452,23 @@ def write_release_files(
         },
     )
 
+    live_payload = dict(summary.get("live_mark_summary") or {})
+    live_payload.setdefault("generated_at", summary.get("generated_at_utc"))
+    live_payload.update(_safety_stamps())
+    live_payload["advisory_only"] = True
+    live_payload["broker_api_called"] = False
+    live_payload["ai_execution_count"] = 0
+    live_payload["human_execution_required"] = True
+    live_payload["execution_permission"] = "ADVISORY_ONLY"
+    _write_json(live_marks_path, live_payload)
+
     return {
         "capital_rotation_summary": str(main),
         "exit_review_summary": str(exit_path),
         "portfolio_capacity_summary": str(capacity_path),
         "theme_slot_summary": str(theme_path),
         "buy_admission_summary": str(admission_path),
+        "live_price_marks_summary": str(live_marks_path),
     }
 
 
@@ -433,6 +487,7 @@ __all__ = [
     "PORTFOLIO_CAPACITY_SUMMARY_PATH",
     "THEME_SLOT_SUMMARY_PATH",
     "BUY_ADMISSION_SUMMARY_PATH",
+    "LIVE_PRICE_MARKS_SUMMARY_PATH",
     "build_capital_rotation_summary",
     "write_release_files",
 ]

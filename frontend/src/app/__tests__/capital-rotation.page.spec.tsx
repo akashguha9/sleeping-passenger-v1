@@ -54,6 +54,7 @@ type Snapshot = {
   source_health: string;
   position_context_status: any;
   candidate_feed_status: any;
+  live_mark_summary?: any;
 };
 
 function makeSnapshot(overrides: Partial<Snapshot> = {}): Snapshot {
@@ -138,6 +139,20 @@ function makeSnapshot(overrides: Partial<Snapshot> = {}): Snapshot {
       candidate_count: 0,
       source_files: [],
       reason_codes: ['NO_CANDIDATE_FILE'],
+    },
+    live_mark_summary: {
+      generated_at: '2026-05-26T16:00:00Z',
+      aggregate_source_health: 'LIVE_VERIFIED',
+      coverage_ratio: 1.0,
+      usable_coverage_ratio: 1.0,
+      average_quality_score: 0.91,
+      requested_tickers: ['NVDA'],
+      resolved_tickers: ['NVDA'],
+      missing_tickers: [],
+      stale_tickers: [],
+      provider_status: { yfinance: { ok: true } },
+      marks: [{ ticker: 'NVDA' }],
+      reason_codes: ['LIVE_MARK_COVERAGE_FULL'],
     },
   };
   return { ...base, ...overrides };
@@ -344,7 +359,128 @@ describe('CapitalRotationPage', () => {
     expect(text).toMatch(/€50/);
   });
 
-  it('renders Position Context status counts', async () => {
+  it('renders the Live Mark Panel with LIVE_VERIFIED state', async () => {
+    stubFetch(makeSnapshot());
+    render(<CapitalRotationPage />);
+    const panel = await screen.findByTestId('live-mark-panel');
+    expect(panel.textContent ?? '').toMatch(/Live Mark Coverage/);
+    const health = await screen.findByTestId('live-mark-health-LIVE_VERIFIED');
+    expect(health.textContent ?? '').toMatch(/LIVE_VERIFIED/);
+    const headline = await screen.findByTestId('live-mark-headline');
+    expect((headline.textContent ?? '').toLowerCase()).toMatch(/live marks verified/);
+  });
+
+  it('renders DELAYED_BUT_USABLE wording when marks are delayed', async () => {
+    stubFetch(
+      makeSnapshot({
+        live_mark_summary: {
+          generated_at: '2026-05-26T16:00:00Z',
+          aggregate_source_health: 'DELAYED_BUT_USABLE',
+          coverage_ratio: 1.0,
+          usable_coverage_ratio: 0.9,
+          average_quality_score: 0.68,
+          requested_tickers: ['NVDA'],
+          resolved_tickers: ['NVDA'],
+          missing_tickers: [],
+          stale_tickers: [],
+          provider_status: {},
+          marks: [],
+          reason_codes: ['DELAYED_BUT_USABLE'],
+        },
+      }),
+    );
+    render(<CapitalRotationPage />);
+    const headline = await screen.findByTestId('live-mark-headline');
+    expect((headline.textContent ?? '').toLowerCase()).toMatch(/delayed marks usable/);
+  });
+
+  it('renders NO_LIVE_MARKS wording and the missing ticker list', async () => {
+    stubFetch(
+      makeSnapshot({
+        live_mark_summary: {
+          generated_at: '2026-05-26T16:00:00Z',
+          aggregate_source_health: 'NO_LIVE_MARKS',
+          coverage_ratio: 0.0,
+          usable_coverage_ratio: 0.0,
+          average_quality_score: 0.0,
+          requested_tickers: ['NVDA'],
+          resolved_tickers: [],
+          missing_tickers: ['NVDA'],
+          stale_tickers: [],
+          provider_status: {},
+          marks: [],
+          reason_codes: ['NO_LIVE_MARKS'],
+        },
+      }),
+    );
+    render(<CapitalRotationPage />);
+    const headline = await screen.findByTestId('live-mark-headline');
+    expect((headline.textContent ?? '').toLowerCase()).toMatch(/no usable live marks/);
+    const missing = await screen.findByTestId('live-mark-missing-tickers');
+    expect(missing.textContent ?? '').toMatch(/NVDA/);
+  });
+
+  it('renders the stale-ticker warning when marks are stale', async () => {
+    stubFetch(
+      makeSnapshot({
+        live_mark_summary: {
+          generated_at: '2026-05-26T16:00:00Z',
+          aggregate_source_health: 'PARTIAL',
+          coverage_ratio: 0.5,
+          usable_coverage_ratio: 0.4,
+          average_quality_score: 0.5,
+          requested_tickers: ['NVDA'],
+          resolved_tickers: ['NVDA'],
+          missing_tickers: [],
+          stale_tickers: ['NVDA'],
+          provider_status: {},
+          marks: [],
+          reason_codes: ['SOME_MARKS_STALE'],
+        },
+      }),
+    );
+    render(<CapitalRotationPage />);
+    const stale = await screen.findByTestId('live-mark-stale-tickers');
+    expect(stale.textContent ?? '').toMatch(/NVDA/);
+  });
+
+  it('shows DATA_BLOCKED row explanation when live mark is missing', async () => {
+    stubFetch(
+      makeSnapshot({
+        exit_review_board: {
+          rows: [
+            {
+              ticker: 'XYZ',
+              economic_exposure_key: 'XYZ',
+              theme_buckets: ['OTHER'],
+              exit_status: 'DATA_BLOCKED',
+              thesis_status: 'THESIS_UNCHANGED',
+              live_price: null,
+              display_live_price: null,
+              mechanical_live_price_usable: false,
+              live_mark_source_health: 'NO_LIVE_MARK',
+              stop_loss: 90,
+              tp_price: 130,
+              pnl_pct: null,
+              distance_to_stop_pct: null,
+              distance_to_tp_pct: null,
+              human_action_required: true,
+              reason_codes: ['data_blocked:live_price', 'LIVE_MARK_MISSING'],
+              missing_fields: ['live_price'],
+            },
+          ],
+          counts: { DATA_BLOCKED: 1 },
+          duplicate_exposures: [],
+          open_position_count: 1,
+        },
+      }),
+    );
+    render(<CapitalRotationPage />);
+    const missing = await screen.findByTestId('exit-row-missing-XYZ');
+    expect((missing.textContent ?? '').toLowerCase()).toMatch(/live_price/);
+  });
+
+  it('Position Context status counts still render below Live Mark Panel', async () => {
     stubFetch(makeSnapshot({
       position_context_status: {
         open_positions_loaded: 4,

@@ -131,6 +131,7 @@ def get_capital_rotation() -> dict:
             "source_health": summary.get("source_health"),
             "position_context_status": summary.get("position_context_status"),
             "candidate_feed_status": summary.get("candidate_feed_status"),
+            "live_mark_summary": summary.get("live_mark_summary"),
             "summary": summary,
         }
     )
@@ -155,6 +156,7 @@ def get_exit_review() -> dict:
             "runner_exit_review_count": board.get("runner_exit_review_count", 0),
             "data_blocked_count": board.get("data_blocked_count", 0),
             "position_context_status": summary.get("position_context_status"),
+            "live_mark_summary": summary.get("live_mark_summary"),
         }
     )
 
@@ -195,6 +197,7 @@ def get_buy_admission() -> dict:
             "counts": board.get("counts", {}),
             "candidate_count": board.get("candidate_count", 0),
             "candidate_feed_status": summary.get("candidate_feed_status"),
+            "live_mark_summary": summary.get("live_mark_summary"),
         }
     )
 

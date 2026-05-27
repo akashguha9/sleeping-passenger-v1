@@ -219,6 +219,7 @@ APPROVED_DOMAINS: tuple[str, ...] = (
     "portfolio_capacity",       # portfolio_capacity.py — capacity score + regime + risk budget
     "position_context",         # position_context.py — merge holdings + manual log → context
     "candidate_feed",           # candidate_feed.py — discover daily candidate artefacts
+    "live_price_marks",         # live_price_marks.py — advisory-only live mark ingestion
 )
 
 # Explicit allowlist for individual files / directories whose name does

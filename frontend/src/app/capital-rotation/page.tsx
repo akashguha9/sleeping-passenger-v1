@@ -26,6 +26,12 @@ type ExitRow = {
   exit_status: string;
   thesis_status: string;
   live_price: number | null;
+  display_live_price?: number | null;
+  mechanical_live_price_usable?: boolean;
+  live_mark_quality_score?: number | null;
+  live_mark_source?: string | null;
+  live_mark_source_health?: string | null;
+  live_mark_age_hours?: number | null;
   stop_loss: number | null;
   tp_price: number | null;
   pnl_pct: number | null;
@@ -34,6 +40,26 @@ type ExitRow = {
   human_action_required: boolean;
   reason_codes: string[];
   missing_fields?: string[];
+};
+
+type LiveMarkSummary = {
+  generated_at?: string | null;
+  aggregate_source_health:
+    | 'LIVE_VERIFIED'
+    | 'DELAYED_BUT_USABLE'
+    | 'PARTIAL'
+    | 'DEGRADED'
+    | 'NO_LIVE_MARKS';
+  coverage_ratio: number;
+  usable_coverage_ratio: number;
+  average_quality_score: number;
+  requested_tickers: string[];
+  resolved_tickers: string[];
+  missing_tickers: string[];
+  stale_tickers: string[];
+  provider_status?: Record<string, unknown>;
+  marks?: unknown[];
+  reason_codes: string[];
 };
 
 type PositionContextStatus = {
@@ -131,6 +157,7 @@ type CapitalRotation = {
   source_health: string;
   position_context_status?: PositionContextStatus | null;
   candidate_feed_status?: CandidateFeedStatus | null;
+  live_mark_summary?: LiveMarkSummary | null;
 };
 
 const REGIME_TEXT: Record<string, { headline: string; body: string }> = {
@@ -196,6 +223,7 @@ export default function CapitalRotationPage() {
             sourceHealth={data.source_health}
           />
           <PositionContextPanel status={data.position_context_status ?? null} />
+          <LiveMarkPanel summary={data.live_mark_summary ?? null} />
           <CandidateFeedPanel status={data.candidate_feed_status ?? null} />
           <ExitReviewBoard board={data.exit_review_board} />
           <ThemeSlotBoard board={data.theme_slot_summary} />
@@ -389,7 +417,26 @@ function ExitReviewBoard({
                 <td className="py-2 pr-3 font-mono" style={{ color: 'var(--sp-bone)' }}>{r.ticker}</td>
                 <td className="py-2 pr-3"><Pill label={r.exit_status} /></td>
                 <td className="py-2 pr-3 text-xs" style={{ color: 'var(--sp-mist)' }}>{r.thesis_status}</td>
-                <td className="py-2 pr-3 font-mono">{r.live_price ?? '—'}</td>
+                <td className="py-2 pr-3 font-mono" data-testid={`exit-row-live-${r.ticker}`}>
+                  {r.live_price ?? (
+                    r.display_live_price != null ? (
+                      <span style={{ color: '#f0c75a' }} data-testid={`exit-row-live-stale-${r.ticker}`}>
+                        {r.display_live_price} (stale)
+                      </span>
+                    ) : (
+                      '—'
+                    )
+                  )}
+                  {r.live_mark_source_health && r.live_mark_source_health !== 'LIVE_VERIFIED' && (
+                    <span
+                      className="ml-1 text-[10px] font-mono"
+                      style={{ color: 'var(--sp-mist)' }}
+                      data-testid={`exit-row-live-health-${r.ticker}`}
+                    >
+                      ({r.live_mark_source_health})
+                    </span>
+                  )}
+                </td>
                 <td className="py-2 pr-3 font-mono">{r.stop_loss ?? '—'}</td>
                 <td className="py-2 pr-3 font-mono">{r.tp_price ?? '—'}</td>
                 <td className="py-2 pr-3 font-mono">
@@ -679,6 +726,116 @@ function PositionContextPanel({ status }: { status: PositionContextStatus | null
         <Stat label="holdings" value={String(source.VERIFIED_HOLDINGS ?? 0)} />
         <Stat label="fallback" value={String(source.FALLBACK ?? 0)} />
       </div>
+    </section>
+  );
+}
+
+function LiveMarkPanel({ summary }: { summary: LiveMarkSummary | null }) {
+  if (!summary) return null;
+  const health = summary.aggregate_source_health;
+  const meta: { headline: string; body: string; colour: string } =
+    health === 'LIVE_VERIFIED'
+      ? {
+          headline: 'Live marks verified for open positions.',
+          body: 'Mechanical exit / TP / stop calculations are running on current prices.',
+          colour: '#7be3a8',
+        }
+      : health === 'DELAYED_BUT_USABLE'
+        ? {
+            headline:
+              'Delayed marks usable. Exit/TP calculations are allowed but should be manually checked.',
+            body: 'Some marks are stale but still inside the market-closed tolerance window.',
+            colour: '#f0c75a',
+          }
+        : health === 'PARTIAL' || health === 'DEGRADED'
+          ? {
+              headline:
+                'Live mark coverage is partial. Some exit/TP decisions are blocked until prices are refreshed.',
+              body:
+                'Manual refresh required for any DATA_BLOCKED row that names a missing or stale live_price.',
+              colour: '#f0c75a',
+            }
+          : {
+              headline:
+                'No usable live marks. Exit/TP decisions requiring current prices are DATA_BLOCKED.',
+              body:
+                'Operator can still read manual log fields; mechanical exit math is suspended until marks are refreshed.',
+              colour: '#ff8a8a',
+            };
+  return (
+    <section
+      className="rounded-lg p-5 space-y-3"
+      style={{ background: 'rgba(13,16,21,0.55)', border: '1px solid var(--sp-line)' }}
+      data-testid="live-mark-panel"
+    >
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <h2 className="text-lg font-semibold tracking-tight" style={{ color: 'var(--sp-bone)' }}>
+          Live Mark Coverage
+        </h2>
+        <span
+          className="text-[10px] font-mono uppercase tracking-widest"
+          style={{ color: meta.colour }}
+          data-testid={`live-mark-health-${health}`}
+        >
+          {health}
+        </span>
+      </div>
+      <p className="text-sm" style={{ color: meta.colour }} data-testid="live-mark-headline">
+        {meta.headline}
+      </p>
+      <p className="text-xs" style={{ color: 'var(--sp-mist)' }}>
+        {meta.body}
+      </p>
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+        <Stat
+          label="coverage"
+          value={`${Math.round((summary.coverage_ratio ?? 0) * 100)}%`}
+        />
+        <Stat
+          label="usable coverage"
+          value={`${Math.round((summary.usable_coverage_ratio ?? 0) * 100)}%`}
+        />
+        <Stat
+          label="avg quality"
+          value={(summary.average_quality_score ?? 0).toFixed(2)}
+        />
+        <Stat
+          label="requested"
+          value={String(summary.requested_tickers?.length ?? 0)}
+        />
+      </div>
+      {summary.missing_tickers && summary.missing_tickers.length > 0 && (
+        <div
+          className="text-xs"
+          style={{ color: '#ff8a8a' }}
+          data-testid="live-mark-missing-tickers"
+        >
+          Missing live marks: {summary.missing_tickers.join(' · ')}
+        </div>
+      )}
+      {summary.stale_tickers && summary.stale_tickers.length > 0 && (
+        <div
+          className="text-xs"
+          style={{ color: '#f0c75a' }}
+          data-testid="live-mark-stale-tickers"
+        >
+          Stale live marks: {summary.stale_tickers.join(' · ')}
+        </div>
+      )}
+      {summary.reason_codes && summary.reason_codes.length > 0 && (
+        <div
+          className="text-[10px] font-mono"
+          style={{ color: 'var(--sp-mist)' }}
+          data-testid="live-mark-reasons"
+        >
+          {summary.reason_codes.join(' · ')}
+        </div>
+      )}
+      {summary.generated_at && (
+        <div className="text-[10px] font-mono" style={{ color: 'var(--sp-mist)' }}>
+          generated {summary.generated_at}
+        </div>
+      )}
     </section>
   );
 }

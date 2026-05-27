@@ -54,6 +54,19 @@ try:
         map_theme_buckets,
         normalize_economic_exposure,
     )
+    from scripts.live_price_marks import (
+        LiveMark,
+        LiveMarkResult,
+        fetch_live_marks as _fetch_live_marks,
+        REASON_LIVE_MARK_MERGED as _REASON_LIVE_MARK_MERGED,
+        REASON_LIVE_MARK_STALE as _REASON_LM_STALE,
+        REASON_LIVE_MARK_UNUSABLE as _REASON_LM_UNUSABLE,
+        REASON_LIVE_MARK_PROVIDER_DISAGREEMENT as _REASON_LM_DISAGREE,
+        REASON_LIVE_MARK_FROM_YFINANCE as _REASON_LM_YF,
+        REASON_LIVE_MARK_FROM_SNAPSHOT as _REASON_LM_SNAPSHOT,
+        REASON_LIVE_MARK_FROM_DB as _REASON_LM_DB,
+        REASON_LIVE_MARK_FROM_RELEASE as _REASON_LM_RELEASE,
+    )
 except ModuleNotFoundError:  # pragma: no cover — flat-layout fallback
     from runtime_common import REPO_ROOT  # type: ignore
     from daily_payload import (  # type: ignore
@@ -69,6 +82,19 @@ except ModuleNotFoundError:  # pragma: no cover — flat-layout fallback
     from economic_exposure import (  # type: ignore
         map_theme_buckets,
         normalize_economic_exposure,
+    )
+    from live_price_marks import (  # type: ignore
+        LiveMark,
+        LiveMarkResult,
+        fetch_live_marks as _fetch_live_marks,
+        REASON_LIVE_MARK_MERGED as _REASON_LIVE_MARK_MERGED,
+        REASON_LIVE_MARK_STALE as _REASON_LM_STALE,
+        REASON_LIVE_MARK_UNUSABLE as _REASON_LM_UNUSABLE,
+        REASON_LIVE_MARK_PROVIDER_DISAGREEMENT as _REASON_LM_DISAGREE,
+        REASON_LIVE_MARK_FROM_YFINANCE as _REASON_LM_YF,
+        REASON_LIVE_MARK_FROM_SNAPSHOT as _REASON_LM_SNAPSHOT,
+        REASON_LIVE_MARK_FROM_DB as _REASON_LM_DB,
+        REASON_LIVE_MARK_FROM_RELEASE as _REASON_LM_RELEASE,
     )
 
 
@@ -104,6 +130,13 @@ ALL_SOURCE_HEALTH: tuple[str, ...] = (
 # Reason codes (kept as constants so tests can reference them directly).
 REASON_LIVE_MARK_STALE = "LIVE_MARK_STALE"
 REASON_LIVE_MARK_MISSING = "LIVE_MARK_MISSING"
+REASON_LIVE_MARK_MERGED = "LIVE_MARK_MERGED"
+REASON_LIVE_MARK_UNUSABLE = "LIVE_MARK_UNUSABLE"
+REASON_LIVE_MARK_PROVIDER_DISAGREEMENT = "LIVE_MARK_PROVIDER_DISAGREEMENT"
+REASON_LIVE_MARK_FROM_YFINANCE = "LIVE_MARK_FROM_YFINANCE"
+REASON_LIVE_MARK_FROM_SNAPSHOT = "LIVE_MARK_FROM_SNAPSHOT"
+REASON_LIVE_MARK_FROM_DB = "LIVE_MARK_FROM_DB"
+REASON_LIVE_MARK_FROM_RELEASE = "LIVE_MARK_FROM_RELEASE"
 REASON_CONTEXT_FROM_FALLBACK = "CONTEXT_FROM_FALLBACK"
 REASON_CONTEXT_FROM_CANONICAL_DB = "CONTEXT_FROM_CANONICAL_DB"
 REASON_CONTEXT_FROM_MANUAL_LOG = "CONTEXT_FROM_MANUAL_LOG"
@@ -162,6 +195,19 @@ class PositionContext:
     missing_fields: list[str] = field(default_factory=list)
     reason_codes: list[str] = field(default_factory=list)
 
+    # --- Live mark provenance + mechanical usability --------------------
+    # ``live_price`` above is the mechanical price the lifecycle classifier
+    # consumes — it is only set when ``mechanical_live_price_usable`` is
+    # True.  ``display_live_price`` may still hold a stale/delayed price so
+    # the UI can render a number with a clear "delayed" badge.
+    display_live_price: float | None = None
+    mechanical_live_price_usable: bool = False
+    live_mark_quality_score: float | None = None
+    live_mark_source: str | None = None
+    live_mark_source_health: str | None = None
+    live_mark_age_hours: float | None = None
+    live_mark_reason_codes: list[str] = field(default_factory=list)
+
     advisory_only: bool = True
     broker_api_called: bool = False
     ai_execution_count: int = 0
@@ -183,6 +229,7 @@ class PositionContextResult:
     open_positions_loaded: int = 0
     db_available: bool = False
     holdings_present: bool = False
+    live_mark_result: LiveMarkResult | None = None
     advisory_only: bool = True
     broker_api_called: bool = False
     ai_execution_count: int = 0
@@ -198,6 +245,11 @@ class PositionContextResult:
             "open_positions_loaded": self.open_positions_loaded,
             "db_available": self.db_available,
             "holdings_present": self.holdings_present,
+            "live_mark_result": (
+                self.live_mark_result.to_dict()
+                if self.live_mark_result is not None
+                else None
+            ),
             "advisory_only": self.advisory_only,
             "broker_api_called": self.broker_api_called,
             "ai_execution_count": self.ai_execution_count,
@@ -531,11 +583,16 @@ def _build_live_marks(
     market_snapshot: dict[str, Any] | None,
     explicit_live_marks: dict[str, float] | None,
 ) -> dict[str, float]:
-    """Best-effort live-price lookup.
+    """Best-effort live-price lookup (float-only fast path).
 
     Priority: explicit caller marks → ``live_price`` field on a
     holdings row (if the operator pre-populated it) → ``current_price``
     on a holdings row → empty.  We never hit the network.
+
+    NOTE: this is the legacy float-only merge path.  The new
+    ``LiveMarkResult`` integration goes via
+    ``_marks_from_live_mark_result`` and lets the caller flow richer
+    provenance into the PositionContext.
     """
     marks: dict[str, float] = {}
     if market_snapshot:
@@ -584,6 +641,75 @@ def _build_live_marks(
     return marks
 
 
+def _normalize_live_marks_input(
+    live_marks: Any,
+) -> tuple[dict[str, float], dict[str, LiveMark]]:
+    """Coerce caller-supplied live marks into two parallel views.
+
+    Returns:
+      * ``floats_by_ticker``  — ticker → numeric price (legacy view)
+      * ``rich_by_ticker``    — ticker → :class:`LiveMark` instance
+
+    Accepts: plain ``{ticker: price}`` floats, a list of LiveMark
+    dataclasses, a list of raw dicts, or a mix.  Unknown shapes are
+    silently dropped (never raises).
+    """
+    floats: dict[str, float] = {}
+    rich: dict[str, LiveMark] = {}
+    if not live_marks:
+        return floats, rich
+    if isinstance(live_marks, dict):
+        for key, value in live_marks.items():
+            ticker_key = normalize_position_ticker(key)
+            if not ticker_key:
+                continue
+            if isinstance(value, LiveMark):
+                rich[ticker_key] = value
+                if value.live_price is not None:
+                    floats[ticker_key] = float(value.live_price)
+                continue
+            if isinstance(value, dict):
+                price = _safe_float(value.get("live_price") or value.get("price"))
+                if price is not None:
+                    floats[ticker_key] = price
+                continue
+            price = _safe_float(value)
+            if price is not None:
+                floats[ticker_key] = price
+        return floats, rich
+    if isinstance(live_marks, list):
+        for entry in live_marks:
+            if isinstance(entry, LiveMark):
+                key = normalize_position_ticker(entry.ticker)
+                if not key:
+                    continue
+                rich[key] = entry
+                if entry.live_price is not None:
+                    floats[key] = float(entry.live_price)
+                continue
+            if isinstance(entry, dict):
+                key = normalize_position_ticker(
+                    entry.get("ticker")
+                    or entry.get("symbol")
+                    or entry.get("normalized_ticker")
+                )
+                if not key:
+                    continue
+                price = _safe_float(entry.get("live_price") or entry.get("price"))
+                if price is not None:
+                    floats[key] = price
+        return floats, rich
+    return floats, rich
+
+
+def _marks_from_live_mark_result(
+    result: LiveMarkResult | None,
+) -> dict[str, LiveMark]:
+    if result is None:
+        return {}
+    return {normalize_position_ticker(k): v for k, v in result.marks.items()}
+
+
 # ---------------------------------------------------------------------------
 # Merge logic — public API
 # ---------------------------------------------------------------------------
@@ -599,6 +725,13 @@ def position_context_to_lifecycle_input(ctx: PositionContext) -> dict[str, Any]:
         "normalized_ticker": ctx.ticker,
         "buy_price": ctx.buy_price,
         "live_price": ctx.live_price,
+        "display_live_price": ctx.display_live_price,
+        "mechanical_live_price_usable": ctx.mechanical_live_price_usable,
+        "live_mark_quality_score": ctx.live_mark_quality_score,
+        "live_mark_source": ctx.live_mark_source,
+        "live_mark_source_health": ctx.live_mark_source_health,
+        "live_mark_age_hours": ctx.live_mark_age_hours,
+        "live_mark_reason_codes": list(ctx.live_mark_reason_codes),
         "stop_loss": ctx.stop_loss,
         "tp_price": ctx.tp_price,
         "leverage": ctx.leverage,
@@ -649,15 +782,21 @@ def _lifecycle_source_health(label: str) -> str:
 def merge_position_context(
     holdings: Iterable[dict[str, Any]],
     trade_rows: Iterable[dict[str, Any]],
-    live_marks: dict[str, float] | None = None,
+    live_marks: dict[str, float] | dict[str, LiveMark] | list | None = None,
     *,
     closed_tickers: Iterable[str] | None = None,
     sold_tickers: Iterable[str] | None = None,
     do_not_manage_tickers: Iterable[str] | None = None,
     now_utc: datetime | None = None,
+    live_mark_objects: dict[str, LiveMark] | None = None,
 ) -> list[PositionContext]:
     """Build one PositionContext per OPEN holding row, enriched from
     manual-trade aggregated state and any provided live marks.
+
+    ``live_marks`` may be a legacy ``{ticker: price}`` float map *or* a
+    map of LiveMark objects / dicts.  When it carries rich LiveMark
+    objects, mechanical usability flows into the position context via
+    ``mechanical_live_price_usable`` and ``live_mark_*`` fields.
 
     Closed / sold / do-not-manage tickers are excluded — they may still
     appear in the canonical OPEN list during a stale transition but the
@@ -665,7 +804,13 @@ def merge_position_context(
     """
     now = now_utc or datetime.now(timezone.utc)
     aggregated = _build_manual_trade_state(list(trade_rows or []))
-    marks = dict(live_marks or {})
+    floats_view, rich_view = _normalize_live_marks_input(live_marks)
+    if live_mark_objects:
+        for key, mark in live_mark_objects.items():
+            rich_view[normalize_position_ticker(key)] = mark
+            if mark.live_price is not None and key not in floats_view:
+                floats_view[normalize_position_ticker(key)] = float(mark.live_price)
+    marks = dict(floats_view)
     closed = {normalize_position_ticker(t) for t in (closed_tickers or []) if t}
     sold = {normalize_position_ticker(t) for t in (sold_tickers or []) if t}
     do_not_manage = {
@@ -711,6 +856,7 @@ def merge_position_context(
             raw_ticker=raw_ticker,
             manual_state=aggregated.get(normalized),
             live_price=marks.get(normalized),
+            live_mark=rich_view.get(normalized),
             now_utc=now,
         )
         contexts.append(ctx)
@@ -752,6 +898,7 @@ def _build_open_context(
     manual_state: dict[str, Any] | None,
     live_price: float | None,
     now_utc: datetime,
+    live_mark: LiveMark | None = None,
 ) -> PositionContext:
     raw_ticker_str = str(raw_ticker) if raw_ticker is not None else None
     metadata = {
@@ -831,7 +978,40 @@ def _build_open_context(
                 pass
 
     # 3. Live mark, if any.
-    ctx.live_price = _safe_float(live_price) if live_price is not None else None
+    legacy_live = _safe_float(live_price) if live_price is not None else None
+    if live_mark is not None:
+        # Rich LiveMark — flow mechanical usability and provenance.
+        ctx.display_live_price = _safe_float(live_mark.live_price)
+        ctx.mechanical_live_price_usable = bool(live_mark.is_usable)
+        if live_mark.is_usable and live_mark.live_price is not None:
+            ctx.live_price = float(live_mark.live_price)
+        else:
+            ctx.live_price = None
+        ctx.live_mark_quality_score = (
+            round(float(live_mark.live_mark_quality_score), 4)
+            if live_mark.live_mark_quality_score is not None
+            else None
+        )
+        ctx.live_mark_source = live_mark.provider or None
+        ctx.live_mark_source_health = live_mark.source_health or None
+        ctx.live_mark_age_hours = (
+            float(live_mark.age_hours)
+            if live_mark.age_hours is not None
+            else None
+        )
+        ctx.live_mark_reason_codes = list(live_mark.reason_codes)
+    else:
+        # Legacy float-only mark — treat as usable when present
+        # (callers that don't know about LiveMark stay backwards
+        # compatible).
+        ctx.live_price = legacy_live
+        ctx.display_live_price = legacy_live
+        ctx.mechanical_live_price_usable = legacy_live is not None
+        ctx.live_mark_quality_score = None
+        ctx.live_mark_source = None
+        ctx.live_mark_source_health = None
+        ctx.live_mark_age_hours = None
+        ctx.live_mark_reason_codes = []
 
     # 4. money_allocated = buy_price × quantity (when both known).
     if ctx.buy_price is not None and ctx.quantity is not None:
@@ -869,7 +1049,25 @@ def _build_open_context(
         ctx.source_health = holdings_source
 
     # 8. Live mark provenance.
-    if ctx.live_price is None:
+    if live_mark is not None:
+        if live_mark.is_usable:
+            ctx.reason_codes.append(REASON_LIVE_MARK_MERGED)
+            if live_mark.provider == "existing_yfinance_provider":
+                ctx.reason_codes.append(REASON_LIVE_MARK_FROM_YFINANCE)
+            elif live_mark.provider == "today_market_snapshot":
+                ctx.reason_codes.append(REASON_LIVE_MARK_FROM_SNAPSHOT)
+            elif live_mark.provider == "canonical_db_live_mark":
+                ctx.reason_codes.append(REASON_LIVE_MARK_FROM_DB)
+            elif live_mark.provider == "release_summary":
+                ctx.reason_codes.append(REASON_LIVE_MARK_FROM_RELEASE)
+        else:
+            if live_mark.live_price is None:
+                ctx.reason_codes.append(REASON_LIVE_MARK_MISSING)
+            elif live_mark.is_stale:
+                ctx.reason_codes.append(REASON_LIVE_MARK_STALE)
+            else:
+                ctx.reason_codes.append(REASON_LIVE_MARK_UNUSABLE)
+    elif ctx.live_price is None:
         ctx.reason_codes.append(REASON_LIVE_MARK_MISSING)
 
     # 9. Soft thesis-context missing → reason code only (does NOT block).
@@ -891,7 +1089,11 @@ def load_position_context(
     holdings_path: Path | None = None,
     manual_trade_path: Path | None = None,
     release_dir: Path | None = None,
-    live_marks: dict[str, float] | None = None,
+    live_marks: dict | list | None = None,
+    live_mark_result: LiveMarkResult | None = None,
+    fetch_live_marks_if_missing: bool = True,
+    allow_network: bool = True,
+    live_mark_fetcher: Any = None,
     now_utc: datetime | None = None,
 ) -> PositionContextResult:
     """Top-level loader.
@@ -900,6 +1102,15 @@ def load_position_context(
     table + any live marks we can find, merges them via
     ``merge_position_context``, and returns a result bag plus
     aggregated diagnostics for the summary writer.
+
+    Live mark behaviour:
+      * If ``live_marks`` / ``live_mark_result`` are explicitly passed,
+        they win and no auto-fetch is attempted.
+      * Else if ``fetch_live_marks_if_missing`` is true, the loader calls
+        :func:`scripts.live_price_marks.fetch_live_marks` to resolve
+        open-position tickers.  Tests should pass
+        ``allow_network=False`` and an explicit ``live_mark_fetcher`` or
+        rely on cached snapshot/release/DB sources.
     """
     holdings_payload = load_verified_holdings(holdings_path)
     holdings_rows = list(holdings_payload.get("positions") or [])
@@ -916,16 +1127,79 @@ def load_position_context(
     )
     trade_rows = _read_manual_trade_rows(trade_path_resolved)
 
-    marks = _build_live_marks(
+    # Build legacy float view from explicit caller marks + holdings + snapshot.
+    explicit_floats: dict[str, float] = {}
+    explicit_rich: dict[str, LiveMark] = {}
+    if live_marks is not None:
+        explicit_floats, explicit_rich = _normalize_live_marks_input(live_marks)
+    legacy_marks = _build_live_marks(
         holdings_rows=holdings_rows,
         market_snapshot=market_snapshot,
-        explicit_live_marks=live_marks,
+        explicit_live_marks=explicit_floats,
     )
+
+    lm_result: LiveMarkResult | None = live_mark_result
+    rich_view: dict[str, LiveMark] = dict(explicit_rich)
+    if (
+        lm_result is None
+        and not explicit_rich
+        and fetch_live_marks_if_missing
+    ):
+        open_keys: list[str] = []
+        ticker_meta: dict[str, dict[str, Any]] = {}
+        closed_set = {normalize_position_ticker(t) for t in (closed_payload.get("closed_tickers") or []) if t}
+        sold_set = {normalize_position_ticker(t) for t in (sold_payload.get("tickers") or []) if t}
+        dnm_set = {normalize_position_ticker(t) for t in (dnm_payload.get("all_tickers") or []) if t}
+        for row in holdings_rows:
+            if not isinstance(row, dict):
+                continue
+            status = str(row.get("status") or "").strip().upper()
+            if status and status not in OPEN_STATUSES:
+                continue
+            raw_ticker = (
+                row.get("ticker")
+                or row.get("symbol")
+                or row.get("normalized_ticker")
+            )
+            key = normalize_position_ticker(
+                row.get("normalized_ticker") or raw_ticker
+            )
+            if not key:
+                continue
+            if key in closed_set or key in sold_set or key in dnm_set:
+                continue
+            if key not in open_keys:
+                open_keys.append(key)
+                ticker_meta[key] = {
+                    "country": row.get("country"),
+                    "currency": row.get("currency"),
+                    "raw_ticker": str(raw_ticker) if raw_ticker is not None else key,
+                }
+        if open_keys:
+            try:
+                lm_result = _fetch_live_marks(
+                    open_keys,
+                    db_path=db_path_resolved,
+                    release_dir=release_dir,
+                    market_snapshot=market_snapshot,
+                    now_utc=now_utc,
+                    allow_network=allow_network,
+                    fetcher=live_mark_fetcher,
+                    ticker_metadata=ticker_meta,
+                )
+            except Exception:  # pragma: no cover — defensive
+                lm_result = None
+
+    if lm_result is not None:
+        rich_from_result = _marks_from_live_mark_result(lm_result)
+        for key, mark in rich_from_result.items():
+            rich_view.setdefault(key, mark)
 
     contexts = merge_position_context(
         holdings=holdings_rows,
         trade_rows=trade_rows,
-        live_marks=marks,
+        live_marks=legacy_marks,
+        live_mark_objects=rich_view,
         closed_tickers=closed_payload.get("closed_tickers"),
         sold_tickers=sold_payload.get("tickers"),
         do_not_manage_tickers=dnm_payload.get("all_tickers"),
@@ -953,6 +1227,7 @@ def load_position_context(
         open_positions_loaded=open_count,
         db_available=trade_path_resolved.exists(),
         holdings_present=bool(holdings_payload.get("present")),
+        live_mark_result=lm_result,
     )
 
 
@@ -970,6 +1245,13 @@ __all__ = [
     "ALL_SOURCE_HEALTH",
     "REASON_LIVE_MARK_STALE",
     "REASON_LIVE_MARK_MISSING",
+    "REASON_LIVE_MARK_MERGED",
+    "REASON_LIVE_MARK_UNUSABLE",
+    "REASON_LIVE_MARK_PROVIDER_DISAGREEMENT",
+    "REASON_LIVE_MARK_FROM_YFINANCE",
+    "REASON_LIVE_MARK_FROM_SNAPSHOT",
+    "REASON_LIVE_MARK_FROM_DB",
+    "REASON_LIVE_MARK_FROM_RELEASE",
     "REASON_CONTEXT_FROM_FALLBACK",
     "REASON_CONTEXT_FROM_CANONICAL_DB",
     "REASON_CONTEXT_FROM_MANUAL_LOG",

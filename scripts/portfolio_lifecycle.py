@@ -413,6 +413,21 @@ def classify_exit_status(
         if not metrics["currency_ok"]:
             missing.append("currency_mismatch")
         reasons.append("data_blocked:" + ",".join(missing))
+        # When the live mark is the missing field, surface *why* it is
+        # missing precisely — STALE / UNUSABLE / MISSING — rather than
+        # the generic ``live_price`` placeholder.
+        if "live_price" in missing:
+            display_price = _safe_float(position.get("display_live_price"))
+            mech_usable = _truthy_yes(position.get("mechanical_live_price_usable"))
+            lm_reasons = position.get("live_mark_reason_codes") or []
+            if not mech_usable and display_price is not None:
+                reasons.append("LIVE_MARK_STALE_FOR_MECHANICAL_DECISION")
+            for code in lm_reasons:
+                code_str = str(code)
+                if code_str.startswith("LIVE_MARK_") and code_str not in reasons:
+                    reasons.append(code_str)
+            if not lm_reasons and "LIVE_MARK_MISSING" not in reasons:
+                reasons.append("LIVE_MARK_MISSING")
         reasons.extend(soft_reasons)
         return {
             "exit_status": EXIT_DATA_BLOCKED,
@@ -579,6 +594,16 @@ def classify_position(
         ),
         "buy_price": metrics["buy_price"],
         "live_price": metrics["live_price"],
+        "display_live_price": _safe_float(position.get("display_live_price")),
+        "mechanical_live_price_usable": _truthy_yes(
+            position.get("mechanical_live_price_usable")
+        ),
+        "live_mark_quality_score": _safe_float(
+            position.get("live_mark_quality_score")
+        ),
+        "live_mark_source": position.get("live_mark_source"),
+        "live_mark_source_health": position.get("live_mark_source_health"),
+        "live_mark_age_hours": _safe_float(position.get("live_mark_age_hours")),
         "stop_loss": metrics["stop_loss"],
         "tp_price": metrics["tp_price"],
         "partial_tp_logged": metrics["partial_tp_logged"],
