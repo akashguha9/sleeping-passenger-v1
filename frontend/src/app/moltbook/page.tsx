@@ -20,25 +20,51 @@ const MISTAKE_CATEGORIES = [
   'early_exit',
   'no_trade_correct',
   'no_trade_missed_opportunity',
+  'trade_loss',
+  'manual_exit_loss',
+  'stop_loss_breach',
 ];
 
 export default function MoltbookPage() {
   const [entries, setEntries] = useState<MoltbookEntry[]>(MOCK_MOLTBOOK_ENTRIES);
   const [isMock, setIsMock] = useState(true);
   const [loading, setLoading] = useState(true);
+  const [showRaw, setShowRaw] = useState(false);
+  const [rawTotal, setRawTotal] = useState<number>(MOCK_MOLTBOOK_ENTRIES.length);
+  const [visible, setVisible] = useState<number>(MOCK_MOLTBOOK_ENTRIES.length);
+  const [hiddenDuplicates, setHiddenDuplicates] = useState<number>(0);
+  const [hiddenTestDemo, setHiddenTestDemo] = useState<number>(0);
+  const [hiddenIneligible, setHiddenIneligible] = useState<number>(0);
 
   useEffect(() => {
-    getMoltbook().then(({ data, isMock: mock }) => {
+    setLoading(true);
+    getMoltbook({ includeRaw: showRaw }).then(({ data, isMock: mock }) => {
       setEntries(data.items);
       setIsMock(mock);
+      setRawTotal(data.raw_total_entries ?? data.items.length);
+      setVisible(data.visible_entries ?? data.items.length);
+      setHiddenDuplicates(data.hidden_duplicates ?? 0);
+      setHiddenTestDemo(data.hidden_test_demo ?? 0);
+      setHiddenIneligible(data.hidden_ineligible ?? 0);
       setLoading(false);
     });
-  }, []);
+  }, [showRaw]);
 
+  // Category distribution: derive from visible canonical entries only so
+  // duplicates / test-demo / ineligible rows can never inflate the
+  // operator-facing histogram.
+  const visibleEntriesForCategories = showRaw
+    ? entries.filter((e) => {
+        const raw = e as unknown as Record<string, unknown>;
+        return !Number(raw.hidden_from_default_view ?? 0);
+      })
+    : entries;
   const categoryCounts = MISTAKE_CATEGORIES.reduce<Record<string, number>>((acc, cat) => {
-    acc[cat] = entries.filter((e) => e.mistake_type === cat).length;
+    acc[cat] = visibleEntriesForCategories.filter((e) => e.mistake_type === cat).length;
     return acc;
   }, {});
+
+  const totalHidden = hiddenDuplicates + hiddenTestDemo + hiddenIneligible;
 
   return (
     <div className="max-w-4xl mx-auto space-y-5">
@@ -61,16 +87,35 @@ export default function MoltbookPage() {
       </div>
 
       <div className="bg-slate-800/60 border border-slate-700/60 rounded-lg p-4 text-xs text-slate-400">
-        Moltbook entries log what happened, why, and what to learn. All entries are{' '}
-        <span className="text-amber-400 font-semibold">ADVISORY_ONLY</span>. AI execution count is always{' '}
+        Moltbook shows <span className="text-slate-200 font-semibold">finalized trade outcomes only</span>:
+        stop-loss, trailing stop, take-profit, partial TP, closed wins/losses, manual exits, and breakeven exits.
+        All entries are <span className="text-amber-400 font-semibold">ADVISORY_ONLY</span>. AI execution count is always{' '}
         <span className="text-emerald-400 font-mono font-bold">0</span>.
       </div>
+
+      {!loading && totalHidden > 0 && (
+        <div className="bg-slate-900/60 border border-slate-700/60 rounded-lg px-4 py-2.5 flex items-start justify-between gap-3 text-xs">
+          <div className="text-slate-400">
+            Duplicate/test entries hidden from default operator view.{' '}
+            <span className="text-slate-300 font-mono">
+              raw={rawTotal} visible={visible} dup={hiddenDuplicates} test={hiddenTestDemo} ineligible={hiddenIneligible}
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setShowRaw((prev) => !prev)}
+            className="shrink-0 text-amber-400 hover:text-amber-300 underline-offset-2 hover:underline"
+          >
+            {showRaw ? 'hide raw/debug entries' : 'show raw/debug entries'}
+          </button>
+        </div>
+      )}
 
       {loading ? (
         <div className="text-center py-16 text-slate-500 text-sm">Loading moltbook…</div>
       ) : (
         <>
-          {/* Category summary */}
+          {/* Category summary (visible canonical entries only) */}
           <div className="bg-slate-800/60 border border-slate-700/60 rounded-lg p-5">
             <h2 className="text-sm font-semibold text-slate-300 mb-3">Mistake Category Distribution</h2>
             <div className="grid grid-cols-2 gap-2">
@@ -95,6 +140,9 @@ export default function MoltbookPage() {
           <div>
             <h2 className="text-sm font-semibold text-slate-300 mb-3">
               Entries ({entries.length})
+              {showRaw && (
+                <span className="ml-2 text-amber-400 font-mono">raw mode</span>
+              )}
             </h2>
             {entries.length === 0 ? (
               <div className="text-center py-12 text-slate-500 text-sm">No Moltbook entries yet.</div>

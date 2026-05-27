@@ -240,7 +240,8 @@ def test_closed_win_creates_success_entry(db):
         realized_pl=11.0,
     )
     assert result["status"] == "created"
-    assert result["event_type"] == "CLOSED"
+    # Outcome-correctness contract: CLOSED + P>0 normalizes to CLOSED_WIN.
+    assert result["event_type"] == "CLOSED_WIN"
     assert result["outcome_quality"] == "GOOD_PROCESS_WIN"
     assert result["learning_direction"] == "SUCCESS_PATTERN"
 
@@ -257,7 +258,8 @@ def test_closed_loss_creates_loss_entry(db):
         entry_quantity=0.1114,
         realized_pl=-0.7319,
     )
-    assert result["event_type"] == "CLOSED"
+    # CLOSED + P<0 normalizes to CLOSED_LOSS.
+    assert result["event_type"] == "CLOSED_LOSS"
     assert result["outcome_quality"] == "GOOD_PROCESS_LOSS"
     assert result["learning_direction"] == "MISTAKE_OR_INVALIDATION"
 
@@ -395,3 +397,220 @@ def test_classify_learning_direction_partial_tp_is_success():
     assert bridge.classify_learning_direction(
         "PARTIAL_TP_LOGGED", ""
     ) == "SUCCESS_PATTERN"
+
+
+# ---------------------------------------------------------------------------
+# Eligibility helper (single authoritative gate)
+# ---------------------------------------------------------------------------
+
+
+def _elig(event_type, **kwargs):
+    base = {
+        "event_type": event_type,
+        "symbol": kwargs.pop("symbol", "AAPL"),
+        "trade_id": kwargs.pop("trade_id", "MT_X"),
+        "exit_price": kwargs.pop("exit_price", 110.0),
+        "realized_pl": kwargs.pop("realized_pl", 10.0),
+        "thesis": kwargs.pop("thesis", "Real operator thesis."),
+    }
+    base.update(kwargs)
+    return bridge.is_moltbook_eligible_reconciliation_event(base)
+
+
+def test_eligibility_stop_loss_hit_with_exit_price_is_eligible():
+    v = _elig("STOP_LOSS_HIT", exit_price=98.5, realized_pl=-65.0)
+    assert v["eligible"] is True
+    assert v["normalized_event_type"] == "STOP_LOSS_HIT"
+    assert v["reason"] == bridge.ELIGIBLE_STOP_LOSS_HIT
+
+
+def test_eligibility_take_profit_hit_is_eligible():
+    v = _elig("TAKE_PROFIT_HIT", exit_price=120.0, realized_pl=20.0)
+    assert v["eligible"] is True
+    assert v["reason"] == bridge.ELIGIBLE_TAKE_PROFIT_HIT
+
+
+def test_eligibility_partial_tp_logged_is_eligible_without_fill():
+    v = _elig("PARTIAL_TP_LOGGED", exit_price=0.0, realized_pl=0.0)
+    assert v["eligible"] is True
+    assert v["reason"] == bridge.ELIGIBLE_PARTIAL_TP
+
+
+def test_eligibility_closed_positive_pl_normalizes_to_closed_win():
+    v = _elig("CLOSED", exit_price=110.0, realized_pl=10.0)
+    assert v["eligible"] is True
+    assert v["normalized_event_type"] == "CLOSED_WIN"
+    assert v["reason"] == bridge.ELIGIBLE_CLOSED_WIN
+
+
+def test_eligibility_closed_negative_pl_normalizes_to_closed_loss():
+    v = _elig("CLOSED", exit_price=80.0, realized_pl=-20.0)
+    assert v["eligible"] is True
+    assert v["normalized_event_type"] == "CLOSED_LOSS"
+    assert v["reason"] == bridge.ELIGIBLE_CLOSED_LOSS
+
+
+def test_eligibility_closed_zero_pl_normalizes_to_breakeven():
+    v = _elig("CLOSED", exit_price=100.0, realized_pl=0.0)
+    assert v["eligible"] is True
+    assert v["normalized_event_type"] == "BREAKEVEN_EXIT"
+    assert v["reason"] == bridge.ELIGIBLE_BREAKEVEN
+
+
+def test_eligibility_open_trade_not_eligible():
+    v = _elig("OPENED", status="OPEN", exit_price=0.0, realized_pl=0.0)
+    assert v["eligible"] is False
+    assert v["reason"] == bridge.SKIP_OPEN_TRADE
+
+
+def test_eligibility_watchlist_signal_not_eligible():
+    v = _elig("WATCHLISTED", status="WATCHLIST", exit_price=0.0, realized_pl=0.0)
+    assert v["eligible"] is False
+    assert v["reason"] == bridge.SKIP_SIGNAL_ONLY
+
+
+def test_eligibility_price_mark_not_eligible():
+    v = _elig("PRICE_MARK", exit_price=0.0, realized_pl=0.0)
+    assert v["eligible"] is False
+    assert v["reason"] == bridge.SKIP_PRICE_MARK_ONLY
+
+
+def test_eligibility_unrealized_pnl_update_not_eligible():
+    v = _elig("UNREALIZED_PNL_UPDATE", exit_price=0.0, realized_pl=0.0)
+    assert v["eligible"] is False
+    assert v["reason"] == bridge.SKIP_UNREALIZED_ONLY
+
+
+def test_eligibility_thesis_test_is_test_demo_fixture():
+    v = _elig("CLOSED_WIN", thesis="test")
+    assert v["eligible"] is False
+    assert v["reason"] == bridge.SKIP_TEST_DEMO_FIXTURE
+
+
+def test_eligibility_thesis_single_letter_t_is_fixture():
+    v = _elig("CLOSED_WIN", thesis="t")
+    assert v["eligible"] is False
+    assert v["reason"] == bridge.SKIP_TEST_DEMO_FIXTURE
+
+
+def test_eligibility_thesis_probe_is_fixture():
+    v = _elig("STOP_LOSS_HIT", thesis="probe")
+    assert v["eligible"] is False
+    assert v["reason"] == bridge.SKIP_TEST_DEMO_FIXTURE
+
+
+def test_eligibility_explicit_is_test_flag():
+    v = _elig("CLOSED_WIN", is_test=True)
+    assert v["eligible"] is False
+    assert v["reason"] == bridge.SKIP_TEST_DEMO_FIXTURE
+
+
+def test_eligibility_missing_trade_identity():
+    v = _elig("CLOSED_WIN", trade_id="", symbol="AAPL")
+    assert v["eligible"] is False
+    assert v["reason"] == bridge.SKIP_MISSING_TRADE_IDENTITY
+
+
+def test_eligibility_missing_exit_and_pl_not_eligible():
+    v = _elig("STOP_LOSS_HIT", exit_price=0.0, realized_pl=None, exit_reason="")
+    assert v["eligible"] is False
+    assert v["reason"] == bridge.SKIP_MISSING_EXIT_OR_REALIZED_PL
+
+
+def test_eligibility_exit_reason_terminal_text_admits_entry():
+    v = _elig("CLOSED", exit_price=0.0, realized_pl=None,
+              exit_reason="closed at market")
+    # No P/L direction; exit_reason carries terminal intent so it should
+    # still pass the has_exit_or_realized_pl gate.
+    assert v["eligible"] is True
+
+
+def test_eligibility_buy_signal_only_not_eligible():
+    v = _elig("BUY", status="PENDING", exit_price=0.0, realized_pl=0.0)
+    assert v["eligible"] is False
+    assert v["reason"] in {bridge.SKIP_OPEN_TRADE, bridge.SKIP_SIGNAL_ONLY}
+
+
+def test_record_reconciliation_skips_test_thesis(db):
+    # A test/demo thesis must not create a Moltbook entry even though the
+    # other fields look terminal.
+    result = _record(
+        db,
+        trade_id="MT_SPY_TEST",
+        ticker="SPY",
+        thesis="test",
+        post_trade_outcome="CLOSED_WIN",
+        actual_exit_price=452.0,
+        exit_quantity=1.0,
+        entry_price=450.0,
+        entry_quantity=1.0,
+        realized_pl=2.0,
+    )
+    assert result["status"] == "skipped"
+    assert result["reason"] == bridge.SKIP_TEST_DEMO_FIXTURE
+    assert persistence.get_moltbook_entries(db_path=db) == []
+
+
+def test_record_reconciliation_skips_thesis_t(db):
+    result = _record(
+        db, trade_id="MT_SPY_T", ticker="SPY", thesis="t",
+        post_trade_outcome="CLOSED_LOSS",
+        actual_exit_price=448.0, exit_quantity=1.0,
+        entry_price=450.0, entry_quantity=1.0,
+        realized_pl=-2.0,
+    )
+    assert result["status"] == "skipped"
+    assert result["reason"] == bridge.SKIP_TEST_DEMO_FIXTURE
+    assert persistence.get_moltbook_entries(db_path=db) == []
+
+
+def test_contradictory_positive_pl_cannot_be_trade_loss(db):
+    # Even when the operator passes a confused outcome_quality, positive
+    # realized_pl must not collapse to legacy mistake_type='trade_loss'.
+    _record(
+        db, trade_id="MT_CTR", ticker="CTR",
+        post_trade_outcome="CLOSED_WIN",
+        actual_exit_price=110.0, exit_quantity=1.0,
+        entry_price=100.0, entry_quantity=1.0,
+        realized_pl=10.0,
+        outcome_quality="BAD_PROCESS_WIN",
+    )
+    rows = persistence.get_moltbook_entries(db_path=db)
+    ctr = next(r for r in rows if r["ticker"] == "CTR")
+    assert ctr["mistake_type"] != "trade_loss"
+    assert ctr["realized_pl"] == 10.0
+
+
+def test_double_save_creates_exactly_one_entry(db):
+    args = dict(
+        trade_id="MT_ONCE", ticker="ONCE",
+        post_trade_outcome="STOPPED_OUT", stop_loss_hit=True,
+        actual_exit_price=98.0, exit_quantity=10.0,
+        entry_price=100.0, entry_quantity=10.0,
+        realized_pl=-20.0,
+    )
+    _record(db, **args)
+    _record(db, **args)
+    rows = persistence.get_moltbook_entries(db_path=db)
+    assert len([r for r in rows if r["ticker"] == "ONCE"]) == 1
+
+
+def test_normalize_event_type_handles_manual_exit():
+    assert bridge.normalize_event_type(
+        event_type="MANUAL_EXIT", realized_pl=5.0, exit_reason="",
+    ) == "MANUAL_EXIT_WIN"
+    assert bridge.normalize_event_type(
+        event_type="MANUAL_EXIT", realized_pl=-5.0, exit_reason="",
+    ) == "MANUAL_EXIT_LOSS"
+
+
+def test_allowed_event_types_contains_full_finalized_vocabulary():
+    expected = {
+        "STOP_LOSS_HIT", "TRAILING_STOP_HIT", "TAKE_PROFIT_HIT",
+        "PARTIAL_TP_HIT", "PARTIAL_TP_LOGGED",
+        "CLOSED", "CLOSED_WIN", "CLOSED_LOSS",
+        "MANUAL_EXIT_WIN", "MANUAL_EXIT_LOSS",
+        "BREAKEVEN_EXIT", "RULE_FOLLOWED_LOSS",
+        "BAD_PROCESS_WIN", "BAD_PROCESS_LOSS",
+    }
+    assert bridge.ALLOWED_MOLTBOOK_EVENT_TYPES == expected

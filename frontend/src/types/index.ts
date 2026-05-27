@@ -24,7 +24,10 @@ export type MistakeCategory =
   | 'late_entry'
   | 'early_exit'
   | 'no_trade_correct'
-  | 'no_trade_missed_opportunity';
+  | 'no_trade_missed_opportunity'
+  | 'trade_loss'
+  | 'manual_exit_loss'
+  | 'stop_loss_breach';
 
 // Signal Reactor states — canonical enum mirroring scripts/signal_reactor.py.
 // "INSUFFICIENT_DATA" is the safe default the frontend uses when the

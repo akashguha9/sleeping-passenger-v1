@@ -1587,8 +1587,14 @@ def get_reconciliation_queue(limit: int = 100) -> dict:
 
 
 @app.get("/moltbook")
-def get_moltbook() -> dict:
-    return list_moltbook_entries()
+def get_moltbook(include_raw: bool = False) -> dict:
+    """Return canonical visible Moltbook entries by default.
+
+    Defaults to eligible / non-duplicate / non-test/demo / non-hidden
+    rows.  Pass ``?include_raw=true`` to include hidden + ineligible
+    rows for the operator-debug toggle.
+    """
+    return list_moltbook_entries(include_raw=include_raw)
 
 
 @app.post("/moltbook")

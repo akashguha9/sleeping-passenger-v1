@@ -266,25 +266,114 @@ def list_moltbook_entries(
     *,
     ticker: str | None = None,
     mistake_type: str | None = None,
+    include_raw: bool = False,
 ) -> dict[str, Any]:
-    """List Moltbook entries, optionally filtered by ticker or mistake_type."""
-    rows: list[dict[str, Any]] = []
-    # Only use SQLite when the JSONL path is the production default (not monkeypatched)
+    """List Moltbook entries, optionally filtered by ticker or mistake_type.
+
+    By default this returns ONLY canonical visible entries — eligible,
+    non-duplicate, non-test/demo, non-hidden.  Pass ``include_raw=True``
+    to surface every row including hidden/duplicate/ineligible ones for
+    the debug toggle.
+
+    Response metadata always reports:
+      raw_total_entries, visible_entries, hidden_ineligible,
+      hidden_duplicates, hidden_test_demo, allowed_event_types
+    """
+    raw_rows: list[dict[str, Any]] = []
     if _DB_AVAILABLE and _persistence is not None and MOLTBOOK_LOG == _MOLTBOOK_LOG_ORIG:
         try:
-            rows = _persistence.get_moltbook_entries(ticker=ticker, mistake_type=mistake_type)
+            raw_rows = _persistence.get_moltbook_entries(
+                ticker=ticker, mistake_type=mistake_type, include_hidden=True,
+            )
         except Exception:
             pass
-    if not rows:
-        rows = _load_jsonl(MOLTBOOK_LOG)
+    if not raw_rows:
+        raw_rows = _load_jsonl(MOLTBOOK_LOG)
         if ticker:
-            rows = [r for r in rows if r.get("ticker") == str(ticker).upper()]
+            raw_rows = [r for r in raw_rows if r.get("ticker") == str(ticker).upper()]
         if mistake_type:
-            rows = [r for r in rows if r.get("mistake_type") == mistake_type]
+            raw_rows = [r for r in raw_rows if r.get("mistake_type") == mistake_type]
+
+    # Lazy-import the bridge so this module stays import-cheap on cold
+    # paths (e.g. CLI-only consumers).  The bridge owns the canonical
+    # eligibility contract.
+    allowed_event_types: list[str] = []
+    eligibility_fn = None
+    try:
+        try:
+            from scripts.moltbook_learning_bridge import (
+                ALLOWED_MOLTBOOK_EVENT_TYPES,
+                is_moltbook_eligible_reconciliation_event,
+            )
+        except ModuleNotFoundError:  # pragma: no cover - script-style fallback
+            from moltbook_learning_bridge import (  # type: ignore[no-redef]
+                ALLOWED_MOLTBOOK_EVENT_TYPES,
+                is_moltbook_eligible_reconciliation_event,
+            )
+        allowed_event_types = sorted(ALLOWED_MOLTBOOK_EVENT_TYPES)
+        eligibility_fn = is_moltbook_eligible_reconciliation_event
+    except Exception:
+        pass
+
+    hidden_duplicates = 0
+    hidden_test_demo = 0
+    hidden_ineligible = 0
+    visible_rows: list[dict[str, Any]] = []
+    for row in raw_rows:
+        if int(row.get("hidden_from_default_view") or 0):
+            if int(row.get("is_duplicate") or 0):
+                hidden_duplicates += 1
+            reason = str(row.get("hidden_reason") or "")
+            if reason.startswith("SKIP_TEST_DEMO") or reason == "SKIP_TEST_DEMO_FIXTURE":
+                hidden_test_demo += 1
+            else:
+                hidden_ineligible += 1
+            if include_raw:
+                visible_rows.append(row)
+            continue
+        # Eligibility check is for reconciliation-derived entries (which
+        # have an event_type populated).  Legacy manually-logged
+        # signal-decision rows (event_type='', mistake_type in the
+        # original 12 categories) are pre-existing Moltbook content and
+        # should remain visible.
+        raw_event_type = str(row.get("event_type") or "").strip()
+        if eligibility_fn is not None and raw_event_type:
+            verdict = eligibility_fn(
+                {
+                    "event_type": raw_event_type,
+                    "symbol": row.get("ticker") or "",
+                    "trade_id": row.get("trade_id") or row.get("manual_trade_log_id") or "",
+                    "manual_trade_id": row.get("manual_trade_log_id") or "",
+                    "exit_price": row.get("exit_price"),
+                    "realized_pl": row.get("realized_pl"),
+                    "thesis": row.get("original_signal_thesis") or "",
+                }
+            )
+            if not verdict["eligible"]:
+                if verdict["reason"] == "SKIP_TEST_DEMO_FIXTURE":
+                    hidden_test_demo += 1
+                else:
+                    hidden_ineligible += 1
+                if include_raw:
+                    visible_rows.append(row)
+                continue
+        visible_rows.append(row)
+
+    items = visible_rows if not include_raw else raw_rows
     return {
         "operation": "list_moltbook_entries",
-        "entry_count": len(rows),
-        "entries": rows,
+        "entry_count": len(items),
+        "entries": items,
+        "items": items,
+        "raw_total_entries": len(raw_rows),
+        "visible_entries": len(visible_rows) if not include_raw else len(
+            [r for r in raw_rows if not int(r.get("hidden_from_default_view") or 0)]
+        ),
+        "hidden_ineligible": hidden_ineligible,
+        "hidden_duplicates": hidden_duplicates,
+        "hidden_test_demo": hidden_test_demo,
+        "allowed_event_types": allowed_event_types,
+        "include_raw": bool(include_raw),
         "advisory_status": _ADVISORY_STATUS,
         "human_review_required": True,
         "ai_execution_count": _AI_EXECUTION_COUNT,

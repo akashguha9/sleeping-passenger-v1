@@ -62,9 +62,66 @@ except ModuleNotFoundError:  # pragma: no cover - script-style fallback
 # ---------------------------------------------------------------------------
 
 EVENT_STOP_LOSS_HIT = "STOP_LOSS_HIT"
+EVENT_TRAILING_STOP_HIT = "TRAILING_STOP_HIT"
+EVENT_TAKE_PROFIT_HIT = "TAKE_PROFIT_HIT"
 EVENT_PARTIAL_TP_HIT = "PARTIAL_TP_HIT"
 EVENT_PARTIAL_TP_LOGGED = "PARTIAL_TP_LOGGED"
 EVENT_CLOSED = "CLOSED"
+EVENT_CLOSED_WIN = "CLOSED_WIN"
+EVENT_CLOSED_LOSS = "CLOSED_LOSS"
+EVENT_MANUAL_EXIT_WIN = "MANUAL_EXIT_WIN"
+EVENT_MANUAL_EXIT_LOSS = "MANUAL_EXIT_LOSS"
+EVENT_BREAKEVEN_EXIT = "BREAKEVEN_EXIT"
+EVENT_RULE_FOLLOWED_LOSS = "RULE_FOLLOWED_LOSS"
+EVENT_BAD_PROCESS_WIN = "BAD_PROCESS_WIN"
+EVENT_BAD_PROCESS_LOSS = "BAD_PROCESS_LOSS"
+
+# Canonical allow-list of finalized learning-worthy event types.  ONLY these
+# may land in the Moltbook (per the tightened eligibility contract).
+ALLOWED_MOLTBOOK_EVENT_TYPES: frozenset[str] = frozenset(
+    {
+        EVENT_STOP_LOSS_HIT,
+        EVENT_TRAILING_STOP_HIT,
+        EVENT_TAKE_PROFIT_HIT,
+        EVENT_PARTIAL_TP_HIT,
+        EVENT_PARTIAL_TP_LOGGED,
+        EVENT_CLOSED,
+        EVENT_CLOSED_WIN,
+        EVENT_CLOSED_LOSS,
+        EVENT_MANUAL_EXIT_WIN,
+        EVENT_MANUAL_EXIT_LOSS,
+        EVENT_BREAKEVEN_EXIT,
+        EVENT_RULE_FOLLOWED_LOSS,
+        EVENT_BAD_PROCESS_WIN,
+        EVENT_BAD_PROCESS_LOSS,
+    }
+)
+
+# Explicitly DISALLOWED states/event types — these are open trades, raw
+# signals, price marks, or unrealized-only updates.  Treating them as
+# Moltbook-worthy was the historical root cause of pollution.
+DISALLOWED_OPEN_STATUSES: frozenset[str] = frozenset(
+    {"OPEN", "ACTIVE", "RUNNER_ACTIVE", "WATCHLIST", "PENDING", "SIGNAL_ONLY"}
+)
+DISALLOWED_OPEN_EVENT_TYPES: frozenset[str] = frozenset(
+    {
+        "OPENED",
+        "UPDATED",
+        "WATCHLISTED",
+        "PRICE_MARK",
+        "UNREALIZED_PNL_UPDATE",
+        "BUY",
+        "SELL",
+        "WAIT",
+        "WATCHLIST",
+    }
+)
+
+# Thesis values that mean "this is a test/demo/probe fixture, not real
+# learning material".  Normalized (lowercase + stripped) comparison.
+TEST_DEMO_THESIS_TOKENS: frozenset[str] = frozenset(
+    {"test", "t", "demo", "fixture", "probe", "tt", "ttt", "x", "xx", "abc"}
+)
 
 LEARNING_WORTHY_EVENT_TYPES: frozenset[str] = frozenset(
     {
@@ -79,6 +136,54 @@ LEARNING_WORTHY_EVENT_TYPES: frozenset[str] = frozenset(
         "GOOD_PROCESS_LOSS",
         "BAD_PROCESS_WIN",
         "BAD_PROCESS_LOSS",
+        # New normalized terminal events accepted from upstream callers.
+        EVENT_TRAILING_STOP_HIT,
+        EVENT_TAKE_PROFIT_HIT,
+        EVENT_CLOSED_WIN,
+        EVENT_CLOSED_LOSS,
+        EVENT_MANUAL_EXIT_WIN,
+        EVENT_MANUAL_EXIT_LOSS,
+        EVENT_BREAKEVEN_EXIT,
+        EVENT_RULE_FOLLOWED_LOSS,
+    }
+)
+
+# Eligibility reason codes — surfaced to the API/UI so the operator can
+# audit *why* a candidate was admitted or filtered.
+ELIGIBLE_STOP_LOSS_HIT = "ELIGIBLE_STOP_LOSS_HIT"
+ELIGIBLE_TAKE_PROFIT_HIT = "ELIGIBLE_TAKE_PROFIT_HIT"
+ELIGIBLE_PARTIAL_TP = "ELIGIBLE_PARTIAL_TP"
+ELIGIBLE_CLOSED_WIN = "ELIGIBLE_CLOSED_WIN"
+ELIGIBLE_CLOSED_LOSS = "ELIGIBLE_CLOSED_LOSS"
+ELIGIBLE_MANUAL_EXIT = "ELIGIBLE_MANUAL_EXIT"
+ELIGIBLE_BREAKEVEN = "ELIGIBLE_BREAKEVEN"
+
+SKIP_OPEN_TRADE = "SKIP_OPEN_TRADE"
+SKIP_SIGNAL_ONLY = "SKIP_SIGNAL_ONLY"
+SKIP_PRICE_MARK_ONLY = "SKIP_PRICE_MARK_ONLY"
+SKIP_UNREALIZED_ONLY = "SKIP_UNREALIZED_ONLY"
+SKIP_TEST_DEMO_FIXTURE = "SKIP_TEST_DEMO_FIXTURE"
+SKIP_MISSING_TRADE_IDENTITY = "SKIP_MISSING_TRADE_IDENTITY"
+SKIP_MISSING_EXIT_OR_REALIZED_PL = "SKIP_MISSING_EXIT_OR_REALIZED_PL"
+SKIP_UNSUPPORTED_EVENT_TYPE = "SKIP_UNSUPPORTED_EVENT_TYPE"
+
+ELIGIBILITY_REASONS: frozenset[str] = frozenset(
+    {
+        ELIGIBLE_STOP_LOSS_HIT,
+        ELIGIBLE_TAKE_PROFIT_HIT,
+        ELIGIBLE_PARTIAL_TP,
+        ELIGIBLE_CLOSED_WIN,
+        ELIGIBLE_CLOSED_LOSS,
+        ELIGIBLE_MANUAL_EXIT,
+        ELIGIBLE_BREAKEVEN,
+        SKIP_OPEN_TRADE,
+        SKIP_SIGNAL_ONLY,
+        SKIP_PRICE_MARK_ONLY,
+        SKIP_UNREALIZED_ONLY,
+        SKIP_TEST_DEMO_FIXTURE,
+        SKIP_MISSING_TRADE_IDENTITY,
+        SKIP_MISSING_EXIT_OR_REALIZED_PL,
+        SKIP_UNSUPPORTED_EVENT_TYPE,
     }
 )
 
@@ -114,6 +219,247 @@ ACCEPTED_OUTCOME_QUALITIES: frozenset[str] = frozenset(
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+def _normalize_thesis(value: Any) -> str:
+    return str(value or "").strip().lower()
+
+
+def _is_test_demo_fixture(event: dict[str, Any]) -> bool:
+    """Detect obvious test/demo/probe rows the operator never wants in Moltbook.
+
+    Detection is conservative on purpose: real operator rows like XOM, CVX,
+    TSM, GLD, AAPL, ICICIBANK.NS must not be filtered just because they
+    are small.  The trigger is the *fixture marker* (explicit flag, test
+    thesis token, or test-DB origin), never the ticker alone.
+    """
+    if event.get("is_test") is True or event.get("is_demo") is True:
+        return True
+    if event.get("test_fixture") is True or event.get("demo_fixture") is True:
+        return True
+    src = str(event.get("source") or event.get("origin") or "").lower()
+    if src in {"test", "fixture", "demo", "probe"}:
+        return True
+    thesis = _normalize_thesis(event.get("thesis") or event.get("original_signal_thesis"))
+    if thesis in TEST_DEMO_THESIS_TOKENS:
+        return True
+    return False
+
+
+def _has_trade_identity(event: dict[str, Any]) -> bool:
+    if not str(event.get("symbol") or event.get("ticker") or "").strip():
+        return False
+    return bool(
+        str(event.get("trade_id") or "").strip()
+        or str(event.get("manual_trade_id") or "").strip()
+        or str(event.get("reconciliation_id") or event.get("source_reconciliation_id") or "").strip()
+    )
+
+
+def _exit_reason_indicates_terminal(reason: str) -> bool:
+    text = (reason or "").strip().lower()
+    if not text:
+        return False
+    needles = (
+        "stop", "stop-loss", "stop loss", "invalidation",
+        "take profit", "take-profit", "tp ", "target hit",
+        "closed", "manual exit",
+    )
+    return any(needle in text for needle in needles)
+
+
+def _has_exit_or_realized_pl(event: dict[str, Any]) -> bool:
+    exit_price = _coerce_float(event.get("exit_price") or event.get("actual_exit_price"))
+    if exit_price is not None and exit_price > 0:
+        return True
+    realized_pl = _coerce_float(event.get("realized_pl") or event.get("realized_pnl"))
+    if realized_pl is not None and realized_pl != 0:
+        return True
+    if realized_pl == 0 and event.get("event_type") in {EVENT_BREAKEVEN_EXIT, "BREAKEVEN", "CLOSED"}:
+        # Genuine breakeven exits count even with zero P/L provided the
+        # event type identifies the trade as terminated.
+        return True
+    return _exit_reason_indicates_terminal(str(event.get("exit_reason") or ""))
+
+
+def normalize_event_type(
+    *,
+    event_type: str,
+    realized_pl: float | None,
+    exit_reason: str = "",
+    stop_loss_hit: bool = False,
+) -> str:
+    """Normalize an event type per the outcome-correctness contract.
+
+    CLOSED + P>0 -> CLOSED_WIN; CLOSED + P<0 -> CLOSED_LOSS;
+    CLOSED + P==0 -> BREAKEVEN_EXIT.  Manual exits get WIN/LOSS suffix
+    when realized P/L direction is known.  Stop-hit reason text upgrades
+    to STOP_LOSS_HIT; take-profit text upgrades to TAKE_PROFIT_HIT.
+    """
+    et = (event_type or "").strip().upper()
+    reason = (exit_reason or "").strip().lower()
+
+    if stop_loss_hit or "stop" in reason or "invalidation" in reason:
+        if et in {"", "CLOSED", "CLOSED_LOSS", "CLOSED_WIN", "MANUAL_EXIT"}:
+            return EVENT_STOP_LOSS_HIT
+    if "trailing" in reason and "stop" in reason:
+        return EVENT_TRAILING_STOP_HIT
+    if "take profit" in reason or "take-profit" in reason or "target hit" in reason:
+        # If a partial quantity remains, the caller should already have
+        # classified PARTIAL_TP_HIT; bare "take profit" means full TP.
+        if et in {"", "CLOSED", "CLOSED_WIN"}:
+            return EVENT_TAKE_PROFIT_HIT
+    if et == "CLOSED":
+        if realized_pl is None:
+            return EVENT_CLOSED
+        if realized_pl > 0:
+            return EVENT_CLOSED_WIN
+        if realized_pl < 0:
+            return EVENT_CLOSED_LOSS
+        return EVENT_BREAKEVEN_EXIT
+    if et == "MANUAL_EXIT":
+        if realized_pl is not None and realized_pl > 0:
+            return EVENT_MANUAL_EXIT_WIN
+        if realized_pl is not None and realized_pl < 0:
+            return EVENT_MANUAL_EXIT_LOSS
+        return EVENT_CLOSED
+    return et
+
+
+def is_moltbook_eligible_reconciliation_event(
+    event: dict[str, Any],
+) -> dict[str, Any]:
+    """Authoritative eligibility check for any candidate Moltbook entry.
+
+    Returns ``{eligible, reason, normalized_event_type, learning_worthy,
+    hidden_reason}``.  ``reason`` is always one of the ELIGIBILITY_REASONS
+    constants.  ``hidden_reason`` is set only when ineligible, naming the
+    SKIP_* code an existing row would be hidden under.
+    """
+    event = dict(event or {})
+
+    if _is_test_demo_fixture(event):
+        return {
+            "eligible": False,
+            "reason": SKIP_TEST_DEMO_FIXTURE,
+            "normalized_event_type": None,
+            "learning_worthy": False,
+            "hidden_reason": SKIP_TEST_DEMO_FIXTURE,
+        }
+
+    raw_event_type = str(event.get("event_type") or "").strip().upper()
+    status = str(event.get("status") or event.get("trade_state") or "").strip().upper()
+    # Treat WATCHLIST in the event-type slot as a signal-only marker even
+    # though it appears in DISALLOWED_OPEN_EVENT_TYPES; classify before
+    # the more-generic OPEN check so the reason code stays precise.
+    if raw_event_type == "PRICE_MARK":
+        return {
+            "eligible": False,
+            "reason": SKIP_PRICE_MARK_ONLY,
+            "normalized_event_type": None,
+            "learning_worthy": False,
+            "hidden_reason": SKIP_PRICE_MARK_ONLY,
+        }
+    if raw_event_type == "UNREALIZED_PNL_UPDATE":
+        return {
+            "eligible": False,
+            "reason": SKIP_UNREALIZED_ONLY,
+            "normalized_event_type": None,
+            "learning_worthy": False,
+            "hidden_reason": SKIP_UNREALIZED_ONLY,
+        }
+    if status in DISALLOWED_OPEN_STATUSES or raw_event_type in DISALLOWED_OPEN_EVENT_TYPES:
+        hidden = SKIP_OPEN_TRADE
+        if raw_event_type == "PRICE_MARK":
+            hidden = SKIP_PRICE_MARK_ONLY
+        elif raw_event_type == "UNREALIZED_PNL_UPDATE":
+            hidden = SKIP_UNREALIZED_ONLY
+        elif status in {"WATCHLIST", "SIGNAL_ONLY", "PENDING"} or raw_event_type in {"WATCHLISTED", "BUY", "SELL", "WAIT", "WATCHLIST"}:
+            hidden = SKIP_SIGNAL_ONLY
+        return {
+            "eligible": False,
+            "reason": hidden,
+            "normalized_event_type": None,
+            "learning_worthy": False,
+            "hidden_reason": hidden,
+        }
+
+    if not _has_trade_identity(event):
+        return {
+            "eligible": False,
+            "reason": SKIP_MISSING_TRADE_IDENTITY,
+            "normalized_event_type": None,
+            "learning_worthy": False,
+            "hidden_reason": SKIP_MISSING_TRADE_IDENTITY,
+        }
+
+    # Use explicit ``is None`` here — `realized_pl=0.0` is a legitimate
+    # value (breakeven exit) that ``or`` would discard as falsy.
+    rp = event.get("realized_pl")
+    if rp is None:
+        rp = event.get("realized_pnl")
+    realized_pl = _coerce_float(rp)
+    normalized = normalize_event_type(
+        event_type=raw_event_type,
+        realized_pl=realized_pl,
+        exit_reason=str(event.get("exit_reason") or ""),
+        stop_loss_hit=bool(event.get("stop_loss_hit")),
+    )
+
+    if normalized not in ALLOWED_MOLTBOOK_EVENT_TYPES:
+        return {
+            "eligible": False,
+            "reason": SKIP_UNSUPPORTED_EVENT_TYPE,
+            "normalized_event_type": normalized or None,
+            "learning_worthy": False,
+            "hidden_reason": SKIP_UNSUPPORTED_EVENT_TYPE,
+        }
+
+    # PARTIAL_TP_LOGGED is a plan-only event; exit_price may legitimately
+    # be 0/None.  All other allowed types must have an exit or realized
+    # P/L signal to count as finalized learning material.
+    if normalized != EVENT_PARTIAL_TP_LOGGED and not _has_exit_or_realized_pl(
+        {
+            "exit_price": event.get("exit_price") or event.get("actual_exit_price"),
+            "realized_pl": realized_pl,
+            "exit_reason": event.get("exit_reason"),
+            "event_type": normalized,
+        }
+    ):
+        return {
+            "eligible": False,
+            "reason": SKIP_MISSING_EXIT_OR_REALIZED_PL,
+            "normalized_event_type": normalized,
+            "learning_worthy": False,
+            "hidden_reason": SKIP_MISSING_EXIT_OR_REALIZED_PL,
+        }
+
+    if normalized in {EVENT_STOP_LOSS_HIT, EVENT_TRAILING_STOP_HIT, EVENT_RULE_FOLLOWED_LOSS}:
+        reason = ELIGIBLE_STOP_LOSS_HIT
+    elif normalized == EVENT_TAKE_PROFIT_HIT:
+        reason = ELIGIBLE_TAKE_PROFIT_HIT
+    elif normalized in {EVENT_PARTIAL_TP_HIT, EVENT_PARTIAL_TP_LOGGED}:
+        reason = ELIGIBLE_PARTIAL_TP
+    elif normalized in {EVENT_CLOSED_WIN, EVENT_BAD_PROCESS_WIN}:
+        reason = ELIGIBLE_CLOSED_WIN
+    elif normalized in {EVENT_CLOSED_LOSS, EVENT_BAD_PROCESS_LOSS}:
+        reason = ELIGIBLE_CLOSED_LOSS
+    elif normalized in {EVENT_MANUAL_EXIT_WIN, EVENT_MANUAL_EXIT_LOSS}:
+        reason = ELIGIBLE_MANUAL_EXIT
+    elif normalized == EVENT_BREAKEVEN_EXIT:
+        reason = ELIGIBLE_BREAKEVEN
+    else:
+        # Plain CLOSED (no realized_pl direction) is still eligible as a
+        # terminal record; the operator simply hasn't supplied P/L yet.
+        reason = ELIGIBLE_CLOSED_WIN if normalized == EVENT_CLOSED else ELIGIBLE_CLOSED_LOSS
+
+    return {
+        "eligible": True,
+        "reason": reason,
+        "normalized_event_type": normalized,
+        "learning_worthy": True,
+        "hidden_reason": None,
+    }
 
 
 def _coerce_float(value: Any) -> float | None:
@@ -223,11 +569,17 @@ def classify_outcome_quality(
         return eq
 
     bad_process = bool(set(mistake_tags) & BAD_PROCESS_MISTAKE_TAGS)
-    if event_type == EVENT_STOP_LOSS_HIT:
+    if event_type in {EVENT_STOP_LOSS_HIT, EVENT_TRAILING_STOP_HIT, EVENT_RULE_FOLLOWED_LOSS}:
         return "BAD_PROCESS_LOSS" if bad_process else "GOOD_PROCESS_LOSS"
-    if event_type in {EVENT_PARTIAL_TP_HIT, EVENT_PARTIAL_TP_LOGGED}:
+    if event_type in {EVENT_PARTIAL_TP_HIT, EVENT_PARTIAL_TP_LOGGED, EVENT_TAKE_PROFIT_HIT}:
         # Booking partial profit per plan is a success pattern.
         return "BAD_PROCESS_WIN" if bad_process else "GOOD_PROCESS_WIN"
+    if event_type in {EVENT_CLOSED_WIN, EVENT_MANUAL_EXIT_WIN}:
+        return "BAD_PROCESS_WIN" if bad_process else "GOOD_PROCESS_WIN"
+    if event_type in {EVENT_CLOSED_LOSS, EVENT_MANUAL_EXIT_LOSS}:
+        return "BAD_PROCESS_LOSS" if bad_process else "GOOD_PROCESS_LOSS"
+    if event_type == EVENT_BREAKEVEN_EXIT:
+        return "UNDETERMINED"
     if event_type == EVENT_CLOSED:
         if realized_pl is None or realized_pl == 0.0:
             return "UNDETERMINED"
@@ -245,9 +597,11 @@ def classify_learning_direction(event_type: str, outcome_quality: str) -> str:
     Everything else is NEUTRAL — recorded but not steered.
     """
     eq = (outcome_quality or "").strip().upper()
-    if event_type == EVENT_STOP_LOSS_HIT:
+    if event_type in {EVENT_STOP_LOSS_HIT, EVENT_TRAILING_STOP_HIT, EVENT_RULE_FOLLOWED_LOSS,
+                      EVENT_CLOSED_LOSS, EVENT_MANUAL_EXIT_LOSS, EVENT_BAD_PROCESS_LOSS}:
         return LEARNING_DIRECTION_MISTAKE
-    if event_type in {EVENT_PARTIAL_TP_HIT, EVENT_PARTIAL_TP_LOGGED}:
+    if event_type in {EVENT_PARTIAL_TP_HIT, EVENT_PARTIAL_TP_LOGGED, EVENT_TAKE_PROFIT_HIT,
+                      EVENT_CLOSED_WIN, EVENT_MANUAL_EXIT_WIN, EVENT_BAD_PROCESS_WIN}:
         return LEARNING_DIRECTION_SUCCESS
     if eq in {"GOOD_PROCESS_WIN", "BAD_PROCESS_WIN"}:
         return LEARNING_DIRECTION_SUCCESS
@@ -257,20 +611,45 @@ def classify_learning_direction(event_type: str, outcome_quality: str) -> str:
 
 
 def _map_to_legacy_mistake_type(
-    event_type: str, outcome_quality: str, stop_loss_hit: bool
+    event_type: str,
+    outcome_quality: str,
+    stop_loss_hit: bool,
+    realized_pl: float | None = None,
 ) -> str:
     """Map the new event_type to the legacy mistake_type column.
 
     The legacy column is constrained to ACCEPTED_MISTAKE_TYPES so the
     existing aggregations / dashboards keep working.  We pick the closest
-    semantic match.
+    semantic match.  Contradiction guard: a positive realized_pl can
+    never map to ``trade_loss``; a negative realized_pl can never map to
+    ``good_signal_good_execution`` unless explicitly flagged as a
+    good-process loss.
     """
-    if event_type == EVENT_STOP_LOSS_HIT:
+    if event_type in {EVENT_STOP_LOSS_HIT, EVENT_TRAILING_STOP_HIT, EVENT_RULE_FOLLOWED_LOSS}:
         return "stop_loss_breach"
-    if event_type in {EVENT_PARTIAL_TP_HIT, EVENT_PARTIAL_TP_LOGGED}:
+    if event_type in {EVENT_PARTIAL_TP_HIT, EVENT_PARTIAL_TP_LOGGED, EVENT_TAKE_PROFIT_HIT}:
         return "good_signal_good_execution"
-    if event_type == EVENT_CLOSED:
+    if event_type in {EVENT_CLOSED, EVENT_CLOSED_WIN, EVENT_CLOSED_LOSS, EVENT_BREAKEVEN_EXIT,
+                      EVENT_MANUAL_EXIT_WIN, EVENT_MANUAL_EXIT_LOSS,
+                      EVENT_BAD_PROCESS_WIN, EVENT_BAD_PROCESS_LOSS}:
         eq = (outcome_quality or "").upper()
+        # P/L direction is the strongest signal — it overrides accidental
+        # mislabels so a +0.44% close cannot end up as ``trade_loss``.
+        if realized_pl is not None:
+            if realized_pl > 0:
+                if eq == "BAD_PROCESS_WIN":
+                    return "bad_signal_lucky_profit"
+                return "good_signal_good_execution"
+            if realized_pl < 0:
+                if eq == "BAD_PROCESS_LOSS":
+                    return "stop_loss_breach" if stop_loss_hit else "trade_loss"
+                if event_type in {EVENT_MANUAL_EXIT_LOSS} or (not stop_loss_hit and eq == "GOOD_PROCESS_LOSS"):
+                    return "manual_exit_loss"
+                return "stop_loss_breach" if stop_loss_hit else "trade_loss"
+            # realized_pl == 0 -> breakeven; record as good execution by
+            # default (operator can override via explicit outcome_quality).
+            return "good_signal_good_execution"
+        # No realized_pl signal available — fall back to outcome_quality.
         if eq == "GOOD_PROCESS_WIN":
             return "good_signal_good_execution"
         if eq == "BAD_PROCESS_WIN":
@@ -279,7 +658,7 @@ def _map_to_legacy_mistake_type(
             return "manual_exit_loss" if not stop_loss_hit else "stop_loss_breach"
         if eq == "BAD_PROCESS_LOSS":
             return "stop_loss_breach" if stop_loss_hit else "trade_loss"
-        return "trade_loss"
+        return "good_signal_good_execution"  # unknown -> safer than trade_loss
     return "trade_loss"
 
 
@@ -343,6 +722,7 @@ def record_reconciliation_learning(
     explicit_event_type: str = "",
     db_path: Any = None,
     jsonl_path: Any = None,
+    admit_demo_fixture: bool = False,
 ) -> dict[str, Any]:
     """Create or update a Moltbook learning entry from a reconciliation save.
 
@@ -397,6 +777,55 @@ def record_reconciliation_learning(
              "message": "Reconciliation saved (no Moltbook entry — open / not terminal)"}
         )
 
+    # Normalize event_type for outcome-correctness (CLOSED + P>0 -> CLOSED_WIN, etc.).
+    normalized_event_type = normalize_event_type(
+        event_type=event_type,
+        realized_pl=realized_pl_f,
+        exit_reason=exit_reason,
+        stop_loss_hit=bool(stop_loss_hit),
+    )
+
+    # Authoritative eligibility gate.  This is the single source of truth
+    # for "may this candidate land in the Moltbook?".  Test/demo theses,
+    # missing trade identity, missing exit/realized_pl, and unsupported
+    # event types are all filtered here before any write happens.
+    eligibility = is_moltbook_eligible_reconciliation_event(
+        {
+            "event_type": normalized_event_type,
+            "status": (reconciliation_status or "").strip().upper(),
+            "symbol": ticker,
+            "trade_id": trade_id,
+            "exit_price": exit_price_f,
+            "realized_pl": realized_pl_f,
+            "exit_reason": exit_reason,
+            "stop_loss_hit": bool(stop_loss_hit),
+            # When the operator explicitly opted in via
+            # --include-demo-fixtures, strip the thesis from the
+            # eligibility candidate so test/demo theses no longer
+            # trigger SKIP_TEST_DEMO_FIXTURE.  The real thesis is still
+            # persisted to the row for audit fidelity.
+            "thesis": "" if admit_demo_fixture else thesis,
+        }
+    )
+    if not eligibility["eligible"]:
+        return _safety_stamped(
+            {
+                "status": "skipped",
+                "reason": eligibility["reason"],
+                "hidden_reason": eligibility["hidden_reason"],
+                "event_type": event_type,
+                "normalized_event_type": eligibility["normalized_event_type"],
+                "post_trade_outcome": post_trade_outcome,
+                "trade_id": trade_id,
+                "ticker": str(ticker).upper(),
+                "message": (
+                    "Reconciliation recorded; Moltbook entry skipped "
+                    f"({eligibility['reason']})"
+                ),
+            }
+        )
+    event_type = eligibility["normalized_event_type"] or event_type
+
     mistake_list = _split_tags(mistake_tags)
     success_list = _split_tags(success_tags)
 
@@ -409,7 +838,7 @@ def record_reconciliation_learning(
     )
     direction = classify_learning_direction(event_type, eq)
     legacy_mistake_type = _map_to_legacy_mistake_type(
-        event_type, eq, bool(stop_loss_hit)
+        event_type, eq, bool(stop_loss_hit), realized_pl=realized_pl_f,
     )
 
     # Booked / ride percentages: only meaningful when we have both the

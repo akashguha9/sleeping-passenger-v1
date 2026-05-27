@@ -51,6 +51,13 @@ export interface ApiResult<T> {
 export interface MoltbookListResponse {
   items: MoltbookEntry[];
   item_count: number;
+  raw_total_entries?: number;
+  visible_entries?: number;
+  hidden_ineligible?: number;
+  hidden_duplicates?: number;
+  hidden_test_demo?: number;
+  allowed_event_types?: string[];
+  include_raw?: boolean;
 }
 
 // Sprint 8.1 — local-only operator-token support.
@@ -463,18 +470,44 @@ export async function getReconciliationQueue(
   }
 }
 
-export async function getMoltbook(): Promise<ApiResult<MoltbookListResponse>> {
+export async function getMoltbook(
+  options?: { includeRaw?: boolean },
+): Promise<ApiResult<MoltbookListResponse>> {
   try {
-    const raw = await apiFetch<Record<string, unknown>>('/moltbook');
+    const qs = options?.includeRaw ? '?include_raw=true' : '';
+    const raw = await apiFetch<Record<string, unknown>>(`/moltbook${qs}`);
     const items =
       ((raw.items as MoltbookEntry[] | undefined) ??
         (raw.entries as MoltbookEntry[] | undefined) ??
         []);
     const item_count = Number(raw.item_count ?? raw.entry_count ?? items.length);
-    return { data: { items, item_count }, isMock: false };
+    return {
+      data: {
+        items,
+        item_count,
+        raw_total_entries: Number(raw.raw_total_entries ?? items.length),
+        visible_entries: Number(raw.visible_entries ?? items.length),
+        hidden_ineligible: Number(raw.hidden_ineligible ?? 0),
+        hidden_duplicates: Number(raw.hidden_duplicates ?? 0),
+        hidden_test_demo: Number(raw.hidden_test_demo ?? 0),
+        allowed_event_types: (raw.allowed_event_types as string[] | undefined) ?? [],
+        include_raw: Boolean(raw.include_raw),
+      },
+      isMock: false,
+    };
   } catch {
     return {
-      data: { items: MOCK_MOLTBOOK_ENTRIES, item_count: MOCK_MOLTBOOK_ENTRIES.length },
+      data: {
+        items: MOCK_MOLTBOOK_ENTRIES,
+        item_count: MOCK_MOLTBOOK_ENTRIES.length,
+        raw_total_entries: MOCK_MOLTBOOK_ENTRIES.length,
+        visible_entries: MOCK_MOLTBOOK_ENTRIES.length,
+        hidden_ineligible: 0,
+        hidden_duplicates: 0,
+        hidden_test_demo: 0,
+        allowed_event_types: [],
+        include_raw: false,
+      },
       isMock: true,
     };
   }

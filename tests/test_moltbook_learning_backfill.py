@@ -193,8 +193,10 @@ def test_backfill_write_creates_one_entry_per_reconciliation(seeded_db):
     assert by_ticker["CVX"]["outcome_quality"] == "BAD_PROCESS_LOSS"
     assert by_ticker["ANET"]["event_type"] == "PARTIAL_TP_HIT"
     assert by_ticker["ASML"]["event_type"] == "PARTIAL_TP_LOGGED"
-    assert by_ticker["GLD"]["event_type"] == "CLOSED"
-    assert by_ticker["TSM"]["event_type"] == "CLOSED"
+    # Outcome-correctness contract: CLOSED + P<0 normalizes to
+    # CLOSED_LOSS or MANUAL_EXIT_LOSS depending on the source event.
+    assert by_ticker["GLD"]["event_type"] in {"MANUAL_EXIT_LOSS", "CLOSED_LOSS"}
+    assert by_ticker["TSM"]["event_type"] == "CLOSED_LOSS"
 
 
 def test_backfill_is_idempotent(seeded_db):
@@ -221,3 +223,72 @@ def test_backfill_safety_stamps(seeded_db):
     assert report["advisory_status"] == "ADVISORY_ONLY"
     assert report["broker_api_called"] is False
     assert report["ai_execution_count"] == 0
+
+
+# ---------------------------------------------------------------------------
+# Eligibility-aware backfill: test/demo / open / signal-only rows must
+# never reach the Moltbook on a backfill scan either.
+# ---------------------------------------------------------------------------
+
+
+def test_backfill_skips_test_demo_thesis(tmp_path):
+    db = _make_db(tmp_path)
+    _insert_trade(db, trade_id="MT_SPY_T", ticker="SPY",
+                  event_id="USER_SPY_T", price=450.0, quantity=1.0,
+                  thesis="t")
+    _insert_reconciliation(
+        db, rec_id="REC_SPY_T", trade_id="MT_SPY_T",
+        event_id="USER_SPY_T", outcome_status="WIN",
+        pnl_estimate=2.0, actual_fill_price=452.0, actual_quantity=1.0,
+        extras={
+            "post_trade_outcome": "CLOSED_WIN",
+            "entry_price": 450.0, "actual_exit_price": 452.0,
+            "exit_quantity": 1.0, "realized_pnl": 2.0,
+        },
+    )
+    report = backfill.backfill(db, write=True)
+    assert report["skipped_test_demo_count"] == 1
+    assert report["test_or_demo_skipped_count"] == 1
+    assert report["created"] == 0
+    assert persistence.get_moltbook_entries(db_path=db) == []
+
+
+def test_backfill_include_demo_fixtures_admits_test_rows(tmp_path):
+    db = _make_db(tmp_path)
+    _insert_trade(db, trade_id="MT_SPY_TEST", ticker="SPY",
+                  event_id="USER_SPY_TEST", price=450.0, quantity=1.0,
+                  thesis="test")
+    _insert_reconciliation(
+        db, rec_id="REC_SPY_TEST", trade_id="MT_SPY_TEST",
+        event_id="USER_SPY_TEST", outcome_status="WIN",
+        pnl_estimate=2.0, actual_fill_price=452.0, actual_quantity=1.0,
+        extras={
+            "post_trade_outcome": "CLOSED_WIN",
+            "entry_price": 450.0, "actual_exit_price": 452.0,
+            "exit_quantity": 1.0, "realized_pnl": 2.0,
+        },
+    )
+    report = backfill.backfill(db, write=True, include_demo_fixtures=True)
+    assert report["created"] == 1
+    assert len(persistence.get_moltbook_entries(db_path=db)) == 1
+
+
+def test_backfill_dry_run_reports_would_create_and_existing(seeded_db):
+    # First fill the DB so existing-row detection has something to find.
+    backfill.backfill(seeded_db, write=True)
+    # Second pass in dry-run must see every key as existing.
+    report = backfill.backfill(seeded_db, write=False)
+    assert report["would_create_count"] == 0
+    assert report["skipped_existing_count"] == 6
+    assert report["duplicate_candidates_count"] == 6
+
+
+def test_backfill_reports_new_required_counters(seeded_db):
+    report = backfill.backfill(seeded_db, write=False)
+    for key in (
+        "scanned_count", "eligible_count", "would_create_count",
+        "skipped_existing_count", "duplicate_candidates_count",
+        "skipped_test_demo_count", "skipped_open_trade_count",
+        "skipped_missing_exit_count", "skipped_unsupported_event_count",
+    ):
+        assert key in report, f"missing counter {key}"

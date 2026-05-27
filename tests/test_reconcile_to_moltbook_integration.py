@@ -93,7 +93,8 @@ def test_closed_win_reconcile_creates_entry():
     )
     assert out["moltbook_message"] == "Moltbook learning entry created"
     learning = out["moltbook_learning"]
-    assert learning["event_type"] == "CLOSED"
+    # CLOSED + P>0 normalizes to CLOSED_WIN per the outcome-correctness contract.
+    assert learning["event_type"] == "CLOSED_WIN"
     assert learning["learning_direction"] == "SUCCESS_PATTERN"
 
 

@@ -467,6 +467,15 @@ def _additive_migrations(conn: sqlite3.Connection) -> None:
         ("moltbook_entries", "updated_at", "TEXT NOT NULL DEFAULT ''"),
         ("moltbook_entries", "idempotency_key", "TEXT NOT NULL DEFAULT ''"),
         ("moltbook_entries", "learning_direction", "TEXT NOT NULL DEFAULT ''"),
+        # Sprint K — eligibility / dedupe / visibility columns.  Additive,
+        # nullable defaults so legacy rows stay legal.  Marking a row hidden
+        # is pure record-keeping; it never deletes, never touches broker
+        # state, and never grants execution permission.
+        ("moltbook_entries", "hidden_from_default_view", "INTEGER NOT NULL DEFAULT 0"),
+        ("moltbook_entries", "hidden_reason", "TEXT NOT NULL DEFAULT ''"),
+        ("moltbook_entries", "is_duplicate", "INTEGER NOT NULL DEFAULT 0"),
+        ("moltbook_entries", "duplicate_of", "TEXT NOT NULL DEFAULT ''"),
+        ("moltbook_entries", "eligibility_reason", "TEXT NOT NULL DEFAULT ''"),
     )
     for table, column, ddl in migrations:
         try:
@@ -1382,33 +1391,76 @@ def upsert_moltbook_learning_entry(
 def get_moltbook_entries(
     ticker: str | None = None,
     mistake_type: str | None = None,
-    db_path: Path = DB_PATH,
+    db_path: Path | None = None,
+    *,
+    include_hidden: bool = True,
 ) -> list[dict[str, Any]]:
-    conn = _get_conn(db_path)
+    # Resolve DB_PATH lazily so tests that monkeypatch the module-level
+    # ``persistence.DB_PATH`` see the override.  A frozen default would
+    # bind at import time and bypass the override.
+    target = db_path if db_path is not None else DB_PATH
+    conn = _get_conn(target)
     try:
-        if ticker and mistake_type:
-            rows = conn.execute(
-                "SELECT * FROM moltbook_entries WHERE ticker=? AND mistake_type=?"
-                " ORDER BY logged_at DESC",
-                (ticker.upper(), mistake_type),
-            ).fetchall()
-        elif ticker:
-            rows = conn.execute(
-                "SELECT * FROM moltbook_entries WHERE ticker=? ORDER BY logged_at DESC",
-                (ticker.upper(),),
-            ).fetchall()
-        elif mistake_type:
-            rows = conn.execute(
-                "SELECT * FROM moltbook_entries WHERE mistake_type=? ORDER BY logged_at DESC",
-                (mistake_type,),
-            ).fetchall()
-        else:
-            rows = conn.execute(
-                "SELECT * FROM moltbook_entries ORDER BY logged_at DESC"
-            ).fetchall()
+        clauses: list[str] = []
+        params: list[Any] = []
+        if ticker:
+            clauses.append("ticker=?")
+            params.append(ticker.upper())
+        if mistake_type:
+            clauses.append("mistake_type=?")
+            params.append(mistake_type)
+        if not include_hidden:
+            clauses.append("(hidden_from_default_view = 0 OR hidden_from_default_view IS NULL)")
+        where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+        rows = conn.execute(
+            f"SELECT * FROM moltbook_entries{where} ORDER BY logged_at DESC",
+            params,
+        ).fetchall()
     finally:
         conn.close()
     return [_to_dict(r) for r in rows]
+
+
+def mark_moltbook_entry_hidden(
+    entry_id: str,
+    *,
+    hidden_reason: str,
+    duplicate_of: str = "",
+    is_duplicate: bool = False,
+    db_path: Path | None = None,
+) -> dict[str, Any]:
+    """Mark a Moltbook row as hidden_from_default_view (advisory-only).
+
+    Never deletes.  Never touches broker state.  Setting hidden=true and
+    recording a reason is pure record-keeping so the operator can audit
+    *why* a row no longer appears in the default canonical view.
+    """
+    target = db_path if db_path is not None else DB_PATH
+    conn = _get_conn(target)
+    try:
+        conn.execute(
+            "UPDATE moltbook_entries SET hidden_from_default_view=1,"
+            " hidden_reason=?, is_duplicate=?, duplicate_of=? WHERE entry_id=?",
+            (
+                str(hidden_reason or "")[:120],
+                1 if is_duplicate else 0,
+                str(duplicate_of or "")[:64],
+                entry_id,
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return {
+        "entry_id": entry_id,
+        "hidden_from_default_view": True,
+        "hidden_reason": hidden_reason,
+        "is_duplicate": is_duplicate,
+        "duplicate_of": duplicate_of,
+        "advisory_status": _ADVISORY_STATUS,
+        "broker_api_called": False,
+        "ai_execution_count": _AI_EXECUTION_COUNT,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -2481,6 +2533,7 @@ __all__ = [
     "insert_moltbook_entry",
     "upsert_moltbook_learning_entry",
     "get_moltbook_entries",
+    "mark_moltbook_entry_hidden",
     "upsert_duplicate_fingerprint",
     "get_duplicate_fingerprints",
     "upsert_signal_cell",
