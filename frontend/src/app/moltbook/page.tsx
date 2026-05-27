@@ -35,6 +35,11 @@ export default function MoltbookPage() {
   const [hiddenDuplicates, setHiddenDuplicates] = useState<number>(0);
   const [hiddenTestDemo, setHiddenTestDemo] = useState<number>(0);
   const [hiddenIneligible, setHiddenIneligible] = useState<number>(0);
+  const [hiddenUnconfirmed, setHiddenUnconfirmed] = useState<number>(0);
+  const [hiddenCrossSource, setHiddenCrossSource] = useState<number>(0);
+  const [defaultViewNotice, setDefaultViewNotice] = useState<string>(
+    'Moltbook default view hides duplicates, test/demo fixtures, and unconfirmed closed-trade rows.',
+  );
 
   useEffect(() => {
     setLoading(true);
@@ -46,6 +51,11 @@ export default function MoltbookPage() {
       setHiddenDuplicates(data.hidden_duplicates ?? 0);
       setHiddenTestDemo(data.hidden_test_demo ?? 0);
       setHiddenIneligible(data.hidden_ineligible ?? 0);
+      setHiddenUnconfirmed(data.hidden_unconfirmed ?? 0);
+      setHiddenCrossSource(data.hidden_cross_source_duplicates ?? 0);
+      if (data.default_view_notice) {
+        setDefaultViewNotice(data.default_view_notice);
+      }
       setLoading(false);
     });
   }, [showRaw]);
@@ -64,7 +74,8 @@ export default function MoltbookPage() {
     return acc;
   }, {});
 
-  const totalHidden = hiddenDuplicates + hiddenTestDemo + hiddenIneligible;
+  const totalHidden =
+    hiddenDuplicates + hiddenTestDemo + hiddenIneligible + hiddenUnconfirmed;
 
   return (
     <div className="max-w-4xl mx-auto space-y-5">
@@ -93,12 +104,17 @@ export default function MoltbookPage() {
         <span className="text-emerald-400 font-mono font-bold">0</span>.
       </div>
 
+      <div className="bg-slate-900/60 border border-slate-700/40 rounded-lg px-4 py-2.5 text-xs text-slate-400">
+        {defaultViewNotice}
+      </div>
+
       {!loading && totalHidden > 0 && (
         <div className="bg-slate-900/60 border border-slate-700/60 rounded-lg px-4 py-2.5 flex items-start justify-between gap-3 text-xs">
           <div className="text-slate-400">
-            Duplicate/test entries hidden from default operator view.{' '}
+            Duplicate/test/unconfirmed entries hidden from default operator view.{' '}
             <span className="text-slate-300 font-mono">
-              raw={rawTotal} visible={visible} dup={hiddenDuplicates} test={hiddenTestDemo} ineligible={hiddenIneligible}
+              raw={rawTotal} visible={visible} dup={hiddenDuplicates} cross_src={hiddenCrossSource}{' '}
+              test={hiddenTestDemo} unconfirmed={hiddenUnconfirmed} ineligible={hiddenIneligible}
             </span>
           </div>
           <button

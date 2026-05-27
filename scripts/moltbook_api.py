@@ -270,14 +270,21 @@ def list_moltbook_entries(
 ) -> dict[str, Any]:
     """List Moltbook entries, optionally filtered by ticker or mistake_type.
 
-    By default this returns ONLY canonical visible entries — eligible,
-    non-duplicate, non-test/demo, non-hidden.  Pass ``include_raw=True``
-    to surface every row including hidden/duplicate/ineligible ones for
-    the debug toggle.
+    By default this returns ONLY canonical visible entries — non-duplicate,
+    non-test/demo, non-hidden, operator-confirmed-or-legacy.  Pass
+    ``include_raw=True`` to surface every row including hidden/duplicate/
+    ineligible ones for the debug toggle.
+
+    Visibility is decided dynamically by
+    :func:`scripts.moltbook_visibility.classify_moltbook_entries` so the
+    default response is truthful even before any DB cleanup has been
+    applied.
 
     Response metadata always reports:
-      raw_total_entries, visible_entries, hidden_ineligible,
-      hidden_duplicates, hidden_test_demo, allowed_event_types
+      raw_total_entries, visible_entries, hidden_duplicates,
+      hidden_test_demo, hidden_unconfirmed, hidden_cross_source_duplicates,
+      hidden_ineligible (legacy alias), visibility_reasons,
+      allowed_event_types, raw_debug_available.
     """
     raw_rows: list[dict[str, Any]] = []
     if _DB_AVAILABLE and _persistence is not None and MOLTBOOK_LOG == _MOLTBOOK_LOG_ORIG:
@@ -294,86 +301,97 @@ def list_moltbook_entries(
         if mistake_type:
             raw_rows = [r for r in raw_rows if r.get("mistake_type") == mistake_type]
 
-    # Lazy-import the bridge so this module stays import-cheap on cold
-    # paths (e.g. CLI-only consumers).  The bridge owns the canonical
-    # eligibility contract.
     allowed_event_types: list[str] = []
-    eligibility_fn = None
     try:
         try:
-            from scripts.moltbook_learning_bridge import (
-                ALLOWED_MOLTBOOK_EVENT_TYPES,
-                is_moltbook_eligible_reconciliation_event,
-            )
+            from scripts.moltbook_learning_bridge import ALLOWED_MOLTBOOK_EVENT_TYPES
         except ModuleNotFoundError:  # pragma: no cover - script-style fallback
-            from moltbook_learning_bridge import (  # type: ignore[no-redef]
-                ALLOWED_MOLTBOOK_EVENT_TYPES,
-                is_moltbook_eligible_reconciliation_event,
-            )
+            from moltbook_learning_bridge import ALLOWED_MOLTBOOK_EVENT_TYPES  # type: ignore[no-redef]
         allowed_event_types = sorted(ALLOWED_MOLTBOOK_EVENT_TYPES)
-        eligibility_fn = is_moltbook_eligible_reconciliation_event
     except Exception:
         pass
 
-    hidden_duplicates = 0
-    hidden_test_demo = 0
-    hidden_ineligible = 0
-    visible_rows: list[dict[str, Any]] = []
-    for row in raw_rows:
-        if int(row.get("hidden_from_default_view") or 0):
-            if int(row.get("is_duplicate") or 0):
-                hidden_duplicates += 1
-            reason = str(row.get("hidden_reason") or "")
-            if reason.startswith("SKIP_TEST_DEMO") or reason == "SKIP_TEST_DEMO_FIXTURE":
-                hidden_test_demo += 1
-            else:
-                hidden_ineligible += 1
-            if include_raw:
-                visible_rows.append(row)
-            continue
-        # Eligibility check is for reconciliation-derived entries (which
-        # have an event_type populated).  Legacy manually-logged
-        # signal-decision rows (event_type='', mistake_type in the
-        # original 12 categories) are pre-existing Moltbook content and
-        # should remain visible.
-        raw_event_type = str(row.get("event_type") or "").strip()
-        if eligibility_fn is not None and raw_event_type:
-            verdict = eligibility_fn(
-                {
-                    "event_type": raw_event_type,
-                    "symbol": row.get("ticker") or "",
-                    "trade_id": row.get("trade_id") or row.get("manual_trade_log_id") or "",
-                    "manual_trade_id": row.get("manual_trade_log_id") or "",
-                    "exit_price": row.get("exit_price"),
-                    "realized_pl": row.get("realized_pl"),
-                    "thesis": row.get("original_signal_thesis") or "",
-                }
+    try:
+        try:
+            from scripts.moltbook_visibility import (
+                classify_moltbook_entries,
+                summarize_decisions,
+                HIDE_DUPLICATE_SIGNATURE,
             )
-            if not verdict["eligible"]:
-                if verdict["reason"] == "SKIP_TEST_DEMO_FIXTURE":
-                    hidden_test_demo += 1
-                else:
-                    hidden_ineligible += 1
-                if include_raw:
-                    visible_rows.append(row)
-                continue
-        visible_rows.append(row)
+        except ModuleNotFoundError:  # pragma: no cover - script-style fallback
+            from moltbook_visibility import (  # type: ignore[no-redef]
+                classify_moltbook_entries,
+                summarize_decisions,
+                HIDE_DUPLICATE_SIGNATURE,
+            )
+        decisions = classify_moltbook_entries(raw_rows)
+        summary = summarize_decisions(decisions)
+    except Exception:  # pragma: no cover - defensive fallback
+        decisions = {}
+        summary = {
+            "visible_entries": 0,
+            "hidden_duplicates": 0,
+            "hidden_test_demo": 0,
+            "hidden_unconfirmed": 0,
+            "hidden_persisted": 0,
+            "hidden_open_or_not_final": 0,
+            "hidden_missing_source": 0,
+            "hidden_unsupported": 0,
+            "visibility_reasons": {},
+        }
+        HIDE_DUPLICATE_SIGNATURE = "HIDE_DUPLICATE_SIGNATURE"  # noqa: N806
+
+    visible_rows: list[dict[str, Any]] = []
+    cross_source_dupes = 0
+    for row in raw_rows:
+        entry_id = str(row.get("entry_id") or "")
+        decision = decisions.get(entry_id)
+        if decision is not None:
+            # Annotate the row in-place (only on the returned shallow copy
+            # we hand back to the caller) so the UI can display the
+            # visibility_reason and duplicate_of pointer.
+            row.setdefault("visibility_reason", decision.reason)
+            row.setdefault("canonical_group_key", decision.canonical_group_key)
+            if decision.duplicate_of:
+                row.setdefault("duplicate_of", decision.duplicate_of)
+        if decision is not None and decision.reason == HIDE_DUPLICATE_SIGNATURE \
+                and not int(row.get("hidden_from_default_view") or 0):
+            cross_source_dupes += 1
+        if decision is None or decision.visible:
+            visible_rows.append(row)
 
     items = visible_rows if not include_raw else raw_rows
+    hidden_duplicates = summary["hidden_duplicates"]
+    hidden_test_demo = summary["hidden_test_demo"]
+    hidden_unconfirmed = summary["hidden_unconfirmed"]
+    hidden_ineligible_total = (
+        summary["hidden_open_or_not_final"]
+        + summary["hidden_missing_source"]
+        + summary["hidden_unsupported"]
+        + summary["hidden_persisted"]
+        + hidden_unconfirmed
+    )
+
     return {
         "operation": "list_moltbook_entries",
         "entry_count": len(items),
         "entries": items,
         "items": items,
         "raw_total_entries": len(raw_rows),
-        "visible_entries": len(visible_rows) if not include_raw else len(
-            [r for r in raw_rows if not int(r.get("hidden_from_default_view") or 0)]
-        ),
-        "hidden_ineligible": hidden_ineligible,
+        "visible_entries": summary["visible_entries"],
+        "hidden_ineligible": hidden_ineligible_total,
         "hidden_duplicates": hidden_duplicates,
         "hidden_test_demo": hidden_test_demo,
+        "hidden_unconfirmed": hidden_unconfirmed,
+        "hidden_cross_source_duplicates": cross_source_dupes,
+        "visibility_reasons": summary["visibility_reasons"],
         "allowed_event_types": allowed_event_types,
         "include_raw": bool(include_raw),
+        "raw_debug_available": True,
+        "default_view_notice": (
+            "Moltbook default view hides duplicates, test/demo fixtures, "
+            "and unconfirmed closed-trade rows."
+        ),
         "advisory_status": _ADVISORY_STATUS,
         "human_review_required": True,
         "ai_execution_count": _AI_EXECUTION_COUNT,

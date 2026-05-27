@@ -56,8 +56,13 @@ export interface MoltbookListResponse {
   hidden_ineligible?: number;
   hidden_duplicates?: number;
   hidden_test_demo?: number;
+  hidden_unconfirmed?: number;
+  hidden_cross_source_duplicates?: number;
+  visibility_reasons?: Record<string, number>;
   allowed_event_types?: string[];
   include_raw?: boolean;
+  raw_debug_available?: boolean;
+  default_view_notice?: string;
 }
 
 // Sprint 8.1 — local-only operator-token support.
@@ -490,8 +495,16 @@ export async function getMoltbook(
         hidden_ineligible: Number(raw.hidden_ineligible ?? 0),
         hidden_duplicates: Number(raw.hidden_duplicates ?? 0),
         hidden_test_demo: Number(raw.hidden_test_demo ?? 0),
+        hidden_unconfirmed: Number(raw.hidden_unconfirmed ?? 0),
+        hidden_cross_source_duplicates: Number(
+          raw.hidden_cross_source_duplicates ?? 0,
+        ),
+        visibility_reasons:
+          (raw.visibility_reasons as Record<string, number> | undefined) ?? {},
         allowed_event_types: (raw.allowed_event_types as string[] | undefined) ?? [],
         include_raw: Boolean(raw.include_raw),
+        raw_debug_available: Boolean(raw.raw_debug_available ?? true),
+        default_view_notice: (raw.default_view_notice as string | undefined) ?? '',
       },
       isMock: false,
     };
@@ -505,8 +518,14 @@ export async function getMoltbook(
         hidden_ineligible: 0,
         hidden_duplicates: 0,
         hidden_test_demo: 0,
+        hidden_unconfirmed: 0,
+        hidden_cross_source_duplicates: 0,
+        visibility_reasons: {},
         allowed_event_types: [],
         include_raw: false,
+        raw_debug_available: true,
+        default_view_notice:
+          'Moltbook default view hides duplicates, test/demo fixtures, and unconfirmed closed-trade rows.',
       },
       isMock: true,
     };
