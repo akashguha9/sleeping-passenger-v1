@@ -38,7 +38,9 @@ Event types produced
 from __future__ import annotations
 
 import hashlib
+import json
 import uuid
+from pathlib import Path
 from typing import Any
 
 try:
@@ -55,6 +57,19 @@ try:
     import scripts.moltbook_api as _moltbook_api
 except ModuleNotFoundError:  # pragma: no cover - script-style fallback
     import moltbook_api as _moltbook_api  # type: ignore[no-redef]
+
+try:
+    from scripts.daily_payload import (
+        OPEN_STATUSES as _OPEN_HOLDINGS_STATUSES,
+        VERIFIED_HOLDINGS_PATH as _DEFAULT_VERIFIED_HOLDINGS_PATH,
+        normalize_ticker as _normalize_holdings_ticker,
+    )
+except ModuleNotFoundError:  # pragma: no cover - script-style fallback
+    from daily_payload import (  # type: ignore[no-redef]
+        OPEN_STATUSES as _OPEN_HOLDINGS_STATUSES,
+        VERIFIED_HOLDINGS_PATH as _DEFAULT_VERIFIED_HOLDINGS_PATH,
+        normalize_ticker as _normalize_holdings_ticker,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -166,6 +181,10 @@ SKIP_TEST_DEMO_FIXTURE = "SKIP_TEST_DEMO_FIXTURE"
 SKIP_MISSING_TRADE_IDENTITY = "SKIP_MISSING_TRADE_IDENTITY"
 SKIP_MISSING_EXIT_OR_REALIZED_PL = "SKIP_MISSING_EXIT_OR_REALIZED_PL"
 SKIP_UNSUPPORTED_EVENT_TYPE = "SKIP_UNSUPPORTED_EVENT_TYPE"
+# Catches the "upstream says CLOSED but operator has not yet released the
+# position from verified_current_holdings.json" contamination class.  The
+# canonical holdings file is the only source of truth for OPEN positions.
+SKIP_TICKER_STILL_OPEN_IN_VERIFIED_HOLDINGS = "SKIP_TICKER_STILL_OPEN_IN_VERIFIED_HOLDINGS"
 
 ELIGIBILITY_REASONS: frozenset[str] = frozenset(
     {
@@ -184,6 +203,7 @@ ELIGIBILITY_REASONS: frozenset[str] = frozenset(
         SKIP_MISSING_TRADE_IDENTITY,
         SKIP_MISSING_EXIT_OR_REALIZED_PL,
         SKIP_UNSUPPORTED_EVENT_TYPE,
+        SKIP_TICKER_STILL_OPEN_IN_VERIFIED_HOLDINGS,
     }
 )
 
@@ -219,6 +239,42 @@ ACCEPTED_OUTCOME_QUALITIES: frozenset[str] = frozenset(
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+def _load_verified_open_tickers_normalized(
+    path: Path | str | None = None,
+) -> frozenset[str]:
+    """Return the set of normalized OPEN tickers from the canonical
+    operator holdings file.
+
+    Defensive: missing file, malformed JSON, or unreadable disk all
+    degrade to an empty set.  An empty set means "no cross-check
+    rejection possible" — the caller's other guards still apply.
+    """
+    target = Path(path) if path is not None else Path(_DEFAULT_VERIFIED_HOLDINGS_PATH)
+    try:
+        if not target.exists():
+            return frozenset()
+        raw = target.read_text(encoding="utf-8-sig")
+        data = json.loads(raw or "{}")
+    except (OSError, ValueError):
+        return frozenset()
+    positions = data.get("positions") if isinstance(data, dict) else None
+    if not isinstance(positions, list):
+        return frozenset()
+    out: set[str] = set()
+    for row in positions:
+        if not isinstance(row, dict):
+            continue
+        status = str(row.get("status") or "").strip().upper()
+        if status and status not in _OPEN_HOLDINGS_STATUSES:
+            continue
+        normalized = str(row.get("normalized_ticker") or "").strip().upper()
+        if not normalized:
+            normalized = _normalize_holdings_ticker(row.get("ticker"))
+        if normalized:
+            out.add(normalized)
+    return frozenset(out)
 
 
 def _normalize_thesis(value: Any) -> str:
@@ -328,6 +384,8 @@ def normalize_event_type(
 
 def is_moltbook_eligible_reconciliation_event(
     event: dict[str, Any],
+    *,
+    verified_open_tickers: frozenset[str] | set[str] | None = None,
 ) -> dict[str, Any]:
     """Authoritative eligibility check for any candidate Moltbook entry.
 
@@ -335,6 +393,14 @@ def is_moltbook_eligible_reconciliation_event(
     hidden_reason}``.  ``reason`` is always one of the ELIGIBILITY_REASONS
     constants.  ``hidden_reason`` is set only when ineligible, naming the
     SKIP_* code an existing row would be hidden under.
+
+    When ``verified_open_tickers`` is supplied and non-empty, the
+    candidate's normalized ticker is cross-checked against that set.  A
+    match rejects the candidate as
+    ``SKIP_TICKER_STILL_OPEN_IN_VERIFIED_HOLDINGS`` — this catches the
+    "upstream says CLOSED but the operator has not yet released the
+    position from verified_current_holdings.json" contamination class.
+    Pass ``None`` (the default) to skip the cross-check entirely.
     """
     event = dict(event or {})
 
@@ -392,6 +458,19 @@ def is_moltbook_eligible_reconciliation_event(
             "learning_worthy": False,
             "hidden_reason": SKIP_MISSING_TRADE_IDENTITY,
         }
+
+    if verified_open_tickers:
+        candidate_ticker = _normalize_holdings_ticker(
+            event.get("symbol") or event.get("ticker")
+        )
+        if candidate_ticker and candidate_ticker in verified_open_tickers:
+            return {
+                "eligible": False,
+                "reason": SKIP_TICKER_STILL_OPEN_IN_VERIFIED_HOLDINGS,
+                "normalized_event_type": None,
+                "learning_worthy": False,
+                "hidden_reason": SKIP_TICKER_STILL_OPEN_IN_VERIFIED_HOLDINGS,
+            }
 
     # Use explicit ``is None`` here — `realized_pl=0.0` is a legitimate
     # value (breakeven exit) that ``or`` would discard as falsy.
@@ -723,6 +802,8 @@ def record_reconciliation_learning(
     db_path: Any = None,
     jsonl_path: Any = None,
     admit_demo_fixture: bool = False,
+    cross_check_verified_holdings: bool = False,
+    verified_holdings_path: Path | str | None = None,
 ) -> dict[str, Any]:
     """Create or update a Moltbook learning entry from a reconciliation save.
 
@@ -785,6 +866,14 @@ def record_reconciliation_learning(
         stop_loss_hit=bool(stop_loss_hit),
     )
 
+    # The cross-check is opt-in.  An explicit ``verified_holdings_path``
+    # also turns it on so test fixtures can inject an empty/known file.
+    verified_open_tickers: frozenset[str] | None = None
+    if cross_check_verified_holdings or verified_holdings_path is not None:
+        verified_open_tickers = _load_verified_open_tickers_normalized(
+            verified_holdings_path
+        )
+
     # Authoritative eligibility gate.  This is the single source of truth
     # for "may this candidate land in the Moltbook?".  Test/demo theses,
     # missing trade identity, missing exit/realized_pl, and unsupported
@@ -805,7 +894,8 @@ def record_reconciliation_learning(
             # trigger SKIP_TEST_DEMO_FIXTURE.  The real thesis is still
             # persisted to the row for audit fidelity.
             "thesis": "" if admit_demo_fixture else thesis,
-        }
+        },
+        verified_open_tickers=verified_open_tickers,
     )
     if not eligibility["eligible"]:
         return _safety_stamped(

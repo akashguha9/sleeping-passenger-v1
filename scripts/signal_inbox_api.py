@@ -1814,6 +1814,7 @@ def reconcile_trade(
                 exit_reason=str(so.get("exit_reason") or exit_reason or ""),
                 thesis=trade_thesis,
                 invalidation_level=str(so.get("invalidation_level") or invalidation_level or ""),
+                cross_check_verified_holdings=True,
             )
         except Exception as exc:  # pragma: no cover - defensive
             moltbook_learning = {
