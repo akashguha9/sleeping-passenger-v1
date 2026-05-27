@@ -1610,6 +1610,9 @@ def reconcile_trade(
     entry_price: float | None = None
     entry_quantity: float | None = None
     leverage: float = 1.0
+    trade_ticker: str = ""
+    trade_side: str = ""
+    trade_thesis: str = ""
     if _DB_AVAILABLE and _persistence is not None:
         try:
             event_id = _persistence.get_event_id_for_trade(trade_id)
@@ -1626,6 +1629,9 @@ def reconcile_trade(
                         leverage = float(lev_raw)
                     except (TypeError, ValueError):
                         leverage = 1.0
+                trade_ticker = str(row.get("ticker") or "").upper()
+                trade_side = str(row.get("side") or "").upper()
+                trade_thesis = str(row.get("thesis") or "")
         except Exception:
             pass
     if not event_id or entry_price is None:
@@ -1649,6 +1655,12 @@ def reconcile_trade(
                         leverage = float(lev_raw)
                     except (TypeError, ValueError):
                         leverage = 1.0
+                if not trade_ticker:
+                    trade_ticker = str(r.get("ticker") or "").upper()
+                if not trade_side:
+                    trade_side = str(r.get("side") or "").upper()
+                if not trade_thesis:
+                    trade_thesis = str(r.get("thesis") or "")
                 break
     if entry_price is None:
         entry_price = 0.0
@@ -1753,6 +1765,66 @@ def reconcile_trade(
         except Exception:
             pass
 
+    # Sprint J — reconciliation-to-Moltbook learning bridge.  Saving a
+    # learning-worthy reconciliation (STOP_HIT, PARTIAL_TP_HIT / LOGGED,
+    # CLOSED, or any explicit GOOD/BAD_PROCESS outcome) creates or
+    # updates ONE advisory Moltbook entry.  This is record-keeping only:
+    # never calls the broker, never modifies orders, never increments
+    # ai_execution_count.
+    moltbook_learning: dict[str, Any] | None = None
+    try:
+        try:
+            from scripts import moltbook_learning_bridge as _learning_bridge
+        except ModuleNotFoundError:
+            import moltbook_learning_bridge as _learning_bridge  # type: ignore[no-redef]
+    except Exception:
+        _learning_bridge = None  # type: ignore[assignment]
+    if _learning_bridge is not None:
+        try:
+            # Derive the inputs the learning bridge needs.  Prefer values
+            # from the structured outcome (operator-entered, post-validation)
+            # and fall back to the bare reconciliation fields.
+            so = structured_outcome or {}
+            moltbook_learning = _learning_bridge.record_reconciliation_learning(
+                trade_id=trade_id,
+                event_id=event_id,
+                ticker=trade_ticker,
+                side=trade_side,
+                post_trade_outcome=str(so.get("post_trade_outcome") or post_trade_outcome or ""),
+                reconciliation_status=str(so.get("reconciliation_status") or reconciliation_status or ""),
+                actual_exit_price=so.get("actual_exit_price", actual_fill_price),
+                exit_quantity=so.get("exit_quantity", actual_quantity),
+                entry_price=so.get("entry_price", entry_price),
+                entry_quantity=so.get("entry_quantity", entry_quantity),
+                stop_loss_price=so.get("stop_loss_price", stop_loss_price),
+                stop_loss_hit=bool(so.get("stop_loss_hit", stop_loss_hit)),
+                partial_take_profit_price=so.get(
+                    "partial_take_profit_price", partial_take_profit_price
+                ),
+                partial_take_profit_quantity=so.get(
+                    "partial_take_profit_quantity", partial_take_profit_quantity
+                ),
+                runner_quantity=so.get("runner_quantity", runner_quantity),
+                take_profit_plan=str(so.get("take_profit_plan") or take_profit_plan or ""),
+                realized_pl=so.get("realized_pnl", rec.pnl_estimate),
+                outcome_quality=rec.outcome_quality or outcome_quality,
+                mistake_tags=rec.mistake_tags or mistake_tags,
+                lesson=rec.lesson or lesson_takeaway or lesson,
+                notes=str(so.get("notes") or operator_notes_extra or outcome_notes or ""),
+                exit_reason=str(so.get("exit_reason") or exit_reason or ""),
+                thesis=trade_thesis,
+                invalidation_level=str(so.get("invalidation_level") or invalidation_level or ""),
+            )
+        except Exception as exc:  # pragma: no cover - defensive
+            moltbook_learning = {
+                "status": "skipped",
+                "reason": f"learning_bridge_error:{type(exc).__name__}",
+                "message": "Reconciliation saved (Moltbook learning bridge errored)",
+                "advisory_status": _ADVISORY_STATUS,
+                "broker_api_called": False,
+                "ai_execution_count": _AI_EXECUTION_COUNT,
+            }
+
     response: dict[str, Any] = {
         "operation": "reconcile_trade",
         "reconciliation_id": rec.reconciliation_id,
@@ -1803,6 +1875,23 @@ def reconcile_trade(
         response["lesson_takeaway"] = structured_outcome.get("lesson_takeaway")
         response["notes"] = structured_outcome.get("notes")
         response["leverage"] = structured_outcome.get("leverage")
+    if moltbook_learning is not None:
+        response["moltbook_learning"] = moltbook_learning
+        # Top-line UI message so the success toast can render either
+        # "created" or "already existed, updated safely" without parsing
+        # the nested object.
+        learning_status = moltbook_learning.get("status")
+        if learning_status == "created":
+            response["moltbook_message"] = "Moltbook learning entry created"
+        elif learning_status == "updated":
+            response["moltbook_message"] = (
+                "Moltbook learning entry already existed, updated safely"
+            )
+        else:
+            response["moltbook_message"] = moltbook_learning.get(
+                "message", "Reconciliation saved"
+            )
+    response["reconciliation_message"] = "Reconciliation saved"
     return response
 
 

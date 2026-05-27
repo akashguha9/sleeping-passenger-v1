@@ -441,6 +441,32 @@ def _additive_migrations(conn: sqlite3.Connection) -> None:
         ("reconciliation_results", "process_error_notes", "TEXT NOT NULL DEFAULT ''"),
         ("reconciliation_results", "mistake_tags", "TEXT NOT NULL DEFAULT ''"),
         ("reconciliation_results", "lesson", "TEXT NOT NULL DEFAULT ''"),
+        # Moltbook learning bridge (Sprint J).  Additive columns so the
+        # reconciliation→Moltbook pipeline can learn from BOTH wins and
+        # losses (stop-hits, partial-TPs, closes, good/bad process).  None
+        # of these grant execution permission; they are record-keeping for
+        # advisory review.  Each defaults to NULL/'' so legacy rows stay
+        # legal and read back as "unknown / not captured".
+        ("moltbook_entries", "trade_id", "TEXT NOT NULL DEFAULT ''"),
+        ("moltbook_entries", "source_trade_state", "TEXT NOT NULL DEFAULT ''"),
+        ("moltbook_entries", "event_type", "TEXT NOT NULL DEFAULT ''"),
+        ("moltbook_entries", "outcome_quality", "TEXT NOT NULL DEFAULT ''"),
+        ("moltbook_entries", "entry_price", "REAL"),
+        ("moltbook_entries", "exit_price", "REAL"),
+        ("moltbook_entries", "exit_quantity", "REAL"),
+        ("moltbook_entries", "stop_loss_price", "REAL"),
+        ("moltbook_entries", "take_profit_price", "REAL"),
+        ("moltbook_entries", "realized_pl", "REAL"),
+        ("moltbook_entries", "booked_percent", "REAL"),
+        ("moltbook_entries", "ride_percent", "REAL"),
+        ("moltbook_entries", "mistake_tags", "TEXT NOT NULL DEFAULT ''"),
+        ("moltbook_entries", "success_tags", "TEXT NOT NULL DEFAULT ''"),
+        ("moltbook_entries", "lesson", "TEXT NOT NULL DEFAULT ''"),
+        ("moltbook_entries", "notes", "TEXT NOT NULL DEFAULT ''"),
+        ("moltbook_entries", "created_at", "TEXT NOT NULL DEFAULT ''"),
+        ("moltbook_entries", "updated_at", "TEXT NOT NULL DEFAULT ''"),
+        ("moltbook_entries", "idempotency_key", "TEXT NOT NULL DEFAULT ''"),
+        ("moltbook_entries", "learning_direction", "TEXT NOT NULL DEFAULT ''"),
     )
     for table, column, ddl in migrations:
         try:
@@ -453,6 +479,26 @@ def _additive_migrations(conn: sqlite3.Connection) -> None:
                 conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")
         except sqlite3.OperationalError:
             pass
+    # Idempotency: a unique index on a NON-empty idempotency_key prevents a
+    # second insert for the same (trade_id, event_type, exit_price,
+    # exit_quantity) tuple.  Partial-index WHERE clause keeps legacy rows
+    # (idempotency_key='') legal.
+    try:
+        conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_mb_idempotency"
+            " ON moltbook_entries(idempotency_key)"
+            " WHERE idempotency_key <> ''"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_mb_trade_id"
+            " ON moltbook_entries(trade_id)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_mb_event_type"
+            " ON moltbook_entries(event_type)"
+        )
+    except sqlite3.OperationalError:
+        pass
 
 
 def init_schema(db_path: Path = DB_PATH) -> None:
@@ -1186,6 +1232,149 @@ def insert_moltbook_entry(
             ),
         )
         conn.commit()
+    finally:
+        conn.close()
+
+
+def upsert_moltbook_learning_entry(
+    *,
+    entry_id: str,
+    idempotency_key: str,
+    trade_id: str,
+    event_id: str,
+    ticker: str,
+    source_trade_state: str,
+    event_type: str,
+    outcome_quality: str,
+    learning_direction: str,
+    entry_price: float | None,
+    exit_price: float | None,
+    exit_quantity: float | None,
+    stop_loss_price: float | None,
+    take_profit_price: float | None,
+    realized_pl: float | None,
+    booked_percent: float | None,
+    ride_percent: float | None,
+    mistake_tags: str,
+    success_tags: str,
+    lesson: str,
+    notes: str,
+    original_signal_thesis: str,
+    ai_interpretation: str,
+    user_reflection: str,
+    final_human_decision: str,
+    outcome: str,
+    mistake_type: str,
+    lesson_learned: str,
+    bias_detected: str,
+    recalibration_note: str,
+    future_rule_update: str,
+    created_at: str,
+    updated_at: str,
+    db_path: Path | None = None,
+) -> dict[str, Any]:
+    """Insert OR update a Moltbook learning entry keyed by idempotency_key.
+
+    Returns ``{"entry_id": ..., "created": bool, "updated": bool}``.
+
+    Idempotency contract: a non-empty ``idempotency_key`` uniquely
+    identifies a single (trade_id, event_type, exit_price, exit_quantity)
+    tuple.  Re-saving the same reconciliation updates the existing row;
+    it never creates a duplicate.  Empty idempotency_key falls back to
+    plain insert (legacy callers).
+
+    Advisory-only: this function NEVER touches broker/execution state.
+    """
+    target = db_path if db_path is not None else DB_PATH
+    conn = _get_conn(target)
+    try:
+        existing = None
+        if idempotency_key:
+            existing = conn.execute(
+                "SELECT entry_id, created_at FROM moltbook_entries"
+                " WHERE idempotency_key = ?",
+                (idempotency_key,),
+            ).fetchone()
+        if existing is not None:
+            # Preserve original created_at; update only mutable fields.
+            preserved_created_at = existing["created_at"] or created_at
+            conn.execute(
+                "UPDATE moltbook_entries SET"
+                "  event_id=?, ticker=?, original_signal_thesis=?,"
+                "  ai_interpretation=?, user_reflection=?,"
+                "  final_human_decision=?, manual_trade_log_id=?, outcome=?,"
+                "  mistake_type=?, lesson_learned=?, bias_detected=?,"
+                "  recalibration_note=?, future_rule_update=?,"
+                "  trade_id=?, source_trade_state=?, event_type=?,"
+                "  outcome_quality=?, learning_direction=?,"
+                "  entry_price=?, exit_price=?, exit_quantity=?,"
+                "  stop_loss_price=?, take_profit_price=?, realized_pl=?,"
+                "  booked_percent=?, ride_percent=?,"
+                "  mistake_tags=?, success_tags=?, lesson=?, notes=?,"
+                "  created_at=?, updated_at=?,"
+                "  advisory_status=?, human_review_required=?,"
+                "  execution_mode=?, ai_execution_count=?"
+                " WHERE entry_id=?",
+                (
+                    event_id, str(ticker).upper(), original_signal_thesis,
+                    ai_interpretation, user_reflection, final_human_decision,
+                    trade_id, outcome, mistake_type, lesson_learned,
+                    bias_detected, recalibration_note, future_rule_update,
+                    trade_id, source_trade_state, event_type,
+                    outcome_quality, learning_direction,
+                    entry_price, exit_price, exit_quantity,
+                    stop_loss_price, take_profit_price, realized_pl,
+                    booked_percent, ride_percent,
+                    mistake_tags, success_tags, lesson, notes,
+                    preserved_created_at, updated_at,
+                    _ADVISORY_STATUS, 1, _EXECUTION_MODE, _AI_EXECUTION_COUNT,
+                    existing["entry_id"],
+                ),
+            )
+            conn.commit()
+            return {
+                "entry_id": existing["entry_id"],
+                "created": False,
+                "updated": True,
+                "idempotency_key": idempotency_key,
+            }
+        # New insert.
+        conn.execute(
+            "INSERT INTO moltbook_entries"
+            " (entry_id, event_id, ticker, original_signal_thesis,"
+            "  ai_interpretation, user_reflection, final_human_decision,"
+            "  manual_trade_log_id, outcome, mistake_type, lesson_learned,"
+            "  bias_detected, recalibration_note, future_rule_update,"
+            "  logged_at, advisory_status, human_review_required,"
+            "  execution_mode, ai_execution_count,"
+            "  trade_id, source_trade_state, event_type, outcome_quality,"
+            "  learning_direction, entry_price, exit_price, exit_quantity,"
+            "  stop_loss_price, take_profit_price, realized_pl,"
+            "  booked_percent, ride_percent, mistake_tags, success_tags,"
+            "  lesson, notes, created_at, updated_at, idempotency_key)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,"
+            "         ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                entry_id, event_id, str(ticker).upper(),
+                original_signal_thesis, ai_interpretation, user_reflection,
+                final_human_decision, trade_id, outcome, mistake_type,
+                lesson_learned, bias_detected, recalibration_note,
+                future_rule_update, created_at,
+                _ADVISORY_STATUS, 1, _EXECUTION_MODE, _AI_EXECUTION_COUNT,
+                trade_id, source_trade_state, event_type, outcome_quality,
+                learning_direction, entry_price, exit_price, exit_quantity,
+                stop_loss_price, take_profit_price, realized_pl,
+                booked_percent, ride_percent, mistake_tags, success_tags,
+                lesson, notes, created_at, updated_at, idempotency_key,
+            ),
+        )
+        conn.commit()
+        return {
+            "entry_id": entry_id,
+            "created": True,
+            "updated": False,
+            "idempotency_key": idempotency_key,
+        }
     finally:
         conn.close()
 
@@ -2290,6 +2479,7 @@ __all__ = [
     "get_reconciliations_for_trade",
     "get_all_reconciliations",
     "insert_moltbook_entry",
+    "upsert_moltbook_learning_entry",
     "get_moltbook_entries",
     "upsert_duplicate_fingerprint",
     "get_duplicate_fingerprints",
