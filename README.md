@@ -209,11 +209,29 @@ python -m pytest tests/test_real_api_canary.py -v
 
 ## 10. Current readiness label
 
-| Lens | Score /10 | Verdict |
+> **Self-audit, not externally validated.**  Every score below is the
+> model's own audit.  None of these numbers should be quoted without
+> also quoting `N_real`, `calibration_status`, and `evidence_status`.
+> Local showcase score is **evidence-gated**.  See
+> `docs/EVIDENCE_BUNDLE.md`.
+
+| Lens | Self-audit score /10 | Notes |
 |---|---:|---|
-| Local-first showcase | 8.2 | **SHIP** — see `docs/FINAL_SCORECARD.md`. |
-| Controlled private beta | 4.5 | Design complete, implementation pending. |
+| Local-first showcase | 8.2 | Evidence-gated.  Requires fresh `runtime/release/evidence_manifest.json` and `calibration_status` to be cited alongside.  See `docs/EVIDENCE_BUNDLE.md`. |
+| Controlled private beta | 4.5 | Design complete; implementation + 7-day hosted uptime + `N_real ≥ 20` still pending. |
 | Public production SaaS | 1.5 | **Do not pursue this year.** |
+
+Current truthful state at the time of writing:
+
+- `N_real = 0` (no calibratable outcome rows yet).
+- `calibration_status = INSUFFICIENT_EVIDENCE`.
+- `evidence_status` is whatever `scripts/evidence_manifest.py` reports.
+
+Build the manifest:
+
+```powershell
+python scripts/evidence_manifest.py --write
+```
 
 Run the role-fit scorecard (regenerates both JSON + Markdown):
 
@@ -224,9 +242,14 @@ python scripts/segment_role_scorecard.py `
 ```
 
 This is an **alpha MVP** with a production-grade safety floor.  It is
-suitable for a single technical operator running it locally.  It is not
-suitable for second users, hosted multi-tenant deployment, or any
-predictive-validity claim until the calibration gate reports `MEASURED`.
+suitable for a single technical operator running it locally.  It is
+**not** suitable for second users, hosted multi-tenant deployment, or
+any predictive-validity claim until the calibration gate reports
+`MEASURED` with `N_real ≥ 200`.
+
+Lamborghini state labels (MIURA, MURCIÉLAGO, DIABLO, AVENTADOR, …) are
+internal routing labels.  They are **not** proven predictive classes
+and must not be cited as such until the calibration gate unlocks.
 
 ## 11. Links to deeper docs
 

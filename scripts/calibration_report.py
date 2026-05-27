@@ -194,6 +194,54 @@ def base_rate(observations: Sequence[Observation]) -> float:
     return sum(o.y for o in observations) / len(observations)
 
 
+def log_loss(
+    observations: Sequence[Observation], *, eps: float = 1e-15
+) -> float:
+    """Clipped binary log loss.
+
+    ::
+
+        p'_i    = min(max(p_i, eps), 1 - eps)
+        LogLoss = -(1/N) * Σ_i [ y_i * ln(p'_i) + (1 - y_i) * ln(1 - p'_i) ]
+
+    Returns ``float('nan')`` when ``observations`` is empty so callers
+    can degrade truthfully (we never fabricate a metric).
+    """
+    n = len(observations)
+    if n == 0:
+        return float("nan")
+    total = 0.0
+    lo = float(eps)
+    hi = 1.0 - float(eps)
+    for o in observations:
+        p_clipped = min(max(o.p, lo), hi)
+        if o.y == 1:
+            total += math.log(p_clipped)
+        else:
+            total += math.log(1.0 - p_clipped)
+    return -(total / n)
+
+
+def classify_n_real_status(n_real: int) -> str:
+    """Map ``N_real`` onto the sprint's four-tier calibration_status table.
+
+    ::
+
+        N_real == 0          -> INSUFFICIENT_EVIDENCE
+        1 <= N_real < 20     -> TOO_FEW_OUTCOMES
+        20 <= N_real < 200   -> MEASURABLE_WITH_WARNING
+        N_real >= 200        -> MEASURED
+    """
+    n = int(n_real)
+    if n <= 0:
+        return "INSUFFICIENT_EVIDENCE"
+    if n < 20:
+        return "TOO_FEW_OUTCOMES"
+    if n < 200:
+        return "MEASURABLE_WITH_WARNING"
+    return "MEASURED"
+
+
 def sharpness(observations: Sequence[Observation]) -> float:
     """Sharpness = sqrt((1/N) Σ (p_i - mean(p))²)."""
     if not observations:
@@ -541,13 +589,24 @@ def compute_corpus_calibration_report(
     mce = maximum_calibration_error(parsed, n_buckets=n_buckets)
     br = base_rate(parsed)
     sh = sharpness(parsed)
+    ll = log_loss(parsed)
     buckets = reliability_buckets(parsed, n_buckets=n_buckets)
 
     passes_bs = bs <= bs_threshold
     passes_ece = ece <= ece_threshold
     passes_mce = mce <= mce_threshold
-    predictive_claim_allowed = bool(passes_bs and passes_ece and passes_mce)
-    calibration_status = "MEASURED_PASS" if predictive_claim_allowed else "MEASURED_FAIL"
+    passes_n = n_real >= int(n_min)
+    predictive_claim_allowed = bool(
+        passes_bs and passes_ece and passes_mce and passes_n
+    )
+    # Tier label from N_real, plus pass/fail suffix when fully measured.
+    n_tier = classify_n_real_status(n_real)
+    if n_tier == "MEASURED":
+        calibration_status = (
+            "MEASURED_PASS" if predictive_claim_allowed else "MEASURED_FAIL"
+        )
+    else:
+        calibration_status = n_tier
 
     warning_parts = []
     if not passes_bs:
@@ -584,9 +643,11 @@ def compute_corpus_calibration_report(
         "brier_score": round(float(bs), 6),
         "ece": round(float(ece), 6),
         "mce": round(float(mce), 6),
+        "log_loss": round(float(ll), 6),
         "base_rate": round(float(br), 6),
         "sharpness": round(float(sh), 6),
         "bucket_report": buckets,
+        "ece_bin_table": _ece_bin_table(parsed, n_buckets=n_buckets),
         "bs_threshold": float(bs_threshold),
         "ece_threshold": float(ece_threshold),
         "mce_threshold": float(mce_threshold),
@@ -599,6 +660,32 @@ def compute_corpus_calibration_report(
         "score_axes": list(SCORE_AXES),
         "warning": ("calibration thresholds not met: " + "; ".join(warning_parts)) if warning_parts else "",
     }
+
+
+def _ece_bin_table(
+    observations: Sequence[Observation], *, n_buckets: int
+) -> list[dict[str, Any]]:
+    """Spec-shape bin table:
+    ``[{bin_index, lower_bound, upper_bound, n, mean_probability,
+       empirical_accuracy, absolute_error}, ...]``.
+    """
+    if not observations:
+        return []
+    raw = reliability_buckets(observations, n_buckets=n_buckets)
+    out: list[dict[str, Any]] = []
+    for b in raw:
+        out.append(
+            {
+                "bin_index": int(b["bucket_index"]),
+                "lower_bound": float(b["range_lo"]),
+                "upper_bound": float(b["range_hi"]),
+                "n": int(b["count"]),
+                "mean_probability": b["predicted_mean"],
+                "empirical_accuracy": b["observed_mean"],
+                "absolute_error": b["calibration_error"],
+            }
+        )
+    return out
 
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:

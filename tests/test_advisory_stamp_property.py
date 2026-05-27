@@ -74,6 +74,12 @@ _PATH_PARAM_VALUES: dict[str, str] = {
     "event_id": "TEST_EVT_001",
     "trade_id": "TRADE_TEST_001",
     "symbol": "AAPL",
+    # Customer-facing endpoints added by the customer-facing product
+    # transformation sprint.  Placeholders point at known-valid values
+    # so the safety stamp scan can exercise the actual handlers.
+    "basket_id": "defense_sovereignty",
+    "state": "MIURA",
+    "ticker": "RHM.DE",
 }
 
 

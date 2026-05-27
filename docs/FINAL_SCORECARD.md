@@ -1,5 +1,15 @@
 # Final Scorecard — Day 35
 
+> **Self-audit, not externally validated.**  Every score here is the
+> model's own audit.  No external validator has reviewed any number.
+>
+> **Calibration status: `INSUFFICIENT_EVIDENCE`** unless real outcomes
+> exist.  Per `docs/EVIDENCE_BUNDLE.md`, `N_real` must be displayed
+> next to any readiness score quoted from this file.  Lamborghini state
+> labels are internal routing labels, not proven predictive classes.
+> Customer-facing mode is disabled or `DEMO_ONLY / UNCALIBRATED` until
+> the proof loop threshold is met.
+
 > Honest before/after readiness across the dimensions that matter for a
 > local-first showcase MVP. Strict scoring; no inflation; auth cannot
 > exceed 5 without real multi-user auth, deployment cannot exceed 6.5

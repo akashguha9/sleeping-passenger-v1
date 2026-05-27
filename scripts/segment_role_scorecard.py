@@ -58,6 +58,54 @@ from scripts.advisory_contract import (  # noqa: E402
     CANONICAL_STORE,
     advisory_safety_stamps,
 )
+from scripts.evidence_manifest import (  # noqa: E402
+    DEFAULT_MAX_AGE_DAYS,
+    file_age_days,
+    freshness_score,
+)
+
+
+# Per-evidence-path freshness budgets.  Anything not listed here falls
+# back to ``DEFAULT_ARTIFACT_MAX_AGE_DAYS`` so older docs/scripts decay
+# more slowly than the live runtime artifacts.
+DEFAULT_ARTIFACT_MAX_AGE_DAYS: int = 30
+EVIDENCE_PATH_MAX_AGE_DAYS: dict[str, int] = {
+    # Runtime artifacts must be regenerated weekly.
+    "runtime/release/calibration_report.json":
+        DEFAULT_MAX_AGE_DAYS["calibration_report"],
+    "runtime/release/calibration_corpus.json":
+        DEFAULT_MAX_AGE_DAYS["paper_trade_ledger"],
+    "runtime/release/calibration_corpus_status.json":
+        DEFAULT_MAX_AGE_DAYS["calibration_corpus_status"],
+    "runtime/release/evidence_manifest.json":
+        DEFAULT_MAX_AGE_DAYS["evidence_manifest"],
+    "runtime/release/release_gate_proof.json":
+        DEFAULT_MAX_AGE_DAYS["pytest_report"],
+    "runtime/release/hosted_uptime_report.json":
+        DEFAULT_MAX_AGE_DAYS["hosted_uptime_report"],
+    "runtime/release/live_provider_evidence.json":
+        DEFAULT_MAX_AGE_DAYS["source_canary_report"],
+    "runtime/release/kalshi_watchdog_summary.json": 7,
+    "runtime/release/kalshi_source_health.json": 7,
+    "runtime/release/portfolio_truth_summary.json": 7,
+    "runtime/release/why_today_summary.json": 7,
+    # Demo / screenshot pack — monthly.
+    "docs/demo/DEMO_SCRIPT_5_MIN.md":
+        DEFAULT_MAX_AGE_DAYS["demo_video_or_notes"],
+    "docs/demo/LOCAL_FIRST_WALKTHROUGH.md":
+        DEFAULT_MAX_AGE_DAYS["demo_video_or_notes"],
+    "docs/demo/SCREENSHOT_CHECKLIST.md":
+        DEFAULT_MAX_AGE_DAYS["screenshots"],
+    "docs/demo/OPERATOR_PROOF_MANIFEST.json":
+        DEFAULT_MAX_AGE_DAYS["screenshots"],
+}
+
+
+def _max_age_for(path_str: str) -> int:
+    """Resolve the freshness budget for an evidence path."""
+    if path_str in EVIDENCE_PATH_MAX_AGE_DAYS:
+        return EVIDENCE_PATH_MAX_AGE_DAYS[path_str]
+    return DEFAULT_ARTIFACT_MAX_AGE_DAYS
 
 
 DEFAULT_JSON_OUT = _REPO_ROOT / "runtime" / "release" / "segment_role_scorecard.json"
@@ -150,19 +198,41 @@ class Segment:
                 10.0 * sum(c.weight * c.performance for c in self.criteria), 4
             )
 
-        # Evidence completeness: per-criterion all-evidence-paths-present.
+        # Evidence completeness: per-criterion freshness-weighted score.
+        #
+        # Path existence alone is never full evidence.  Each evidence
+        # path on a criterion contributes its freshness score (per the
+        # sprint formula); a criterion's per-criterion completeness is
+        # the *minimum* freshness across its evidence paths (a stale
+        # artifact poisons the whole criterion).  E_s is the mean
+        # criterion completeness across criteria that have evidence
+        # paths; criteria with no evidence contribute nothing.
         if not self.criteria:
             self.evidence_completeness = 0.0
         else:
-            satisfied = 0
+            scored_criteria = 0
+            total = 0.0
             for c in self.criteria:
                 paths = c.evidence
                 if not paths:
-                    # A criterion with no evidence path cannot contribute to E_s.
                     continue
-                if all((repo_root / p).exists() for p in paths):
-                    satisfied += 1
-            self.evidence_completeness = round(satisfied / len(self.criteria), 4)
+                per_path_freshness: list[float] = []
+                for p in paths:
+                    full = repo_root / p
+                    max_age = _max_age_for(p)
+                    age = file_age_days(full)
+                    per_path_freshness.append(freshness_score(age, max_age))
+                # Minimum across paths: any stale/missing artifact pulls
+                # the criterion's completeness down.
+                criterion_completeness = (
+                    min(per_path_freshness) if per_path_freshness else 0.0
+                )
+                total += criterion_completeness
+                scored_criteria += 1
+            if scored_criteria == 0:
+                self.evidence_completeness = 0.0
+            else:
+                self.evidence_completeness = round(total / scored_criteria, 4)
 
         self.not_targeted = self.target_relevance == 0.0
 
@@ -1814,7 +1884,9 @@ def build_report(
             ),
             "role_fit_formula": "R_s = 10 * Σ_i (w_i * p_i)",
             "evidence_completeness_formula": (
-                "E_s = min(1, evidence_items_present / evidence_items_required)"
+                "E_s = mean over criteria of min(per-path freshness); "
+                "freshness(j) = 0 if missing, 1 if age<=max_age, else "
+                "max(0, 1 - (age - max_age) / max_age)."
             ),
             "confidence_adjustment_formula": (
                 "R_adj_s = R_s * (0.7 + 0.3 * E_s) * C_s"

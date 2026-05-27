@@ -1,5 +1,22 @@
 # Paper-Trade Ledger (Sprint 7B.2)
 
+> **Self-audit, not externally validated.**  This ledger and its
+> scoring are operator-side artifacts.  No external auditor has
+> reviewed them.
+>
+> **Calibration status: `INSUFFICIENT_EVIDENCE`** unless real outcome
+> rows exist.  `N_real` must be displayed next to any readiness score
+> derived from this ledger (see `docs/EVIDENCE_BUNDLE.md`).
+>
+> Lamborghini state labels (MIURA, MURCIÉLAGO, DIABLO, …) are
+> *internal routing labels*, not proven predictive classes.  Do not
+> cite them as such in any operator or customer-facing copy.
+>
+> Customer-facing mode is disabled or `DEMO_ONLY / UNCALIBRATED` until
+> the proof-loop threshold is met (`N_real >= 20` and
+> `evidence_status` ∈ {`SUFFICIENT_FOR_INVESTOR_DEMO`,
+> `SUFFICIENT_FOR_PRIVATE_BETA`}).
+
 The paper-trade ledger lets the operator rehearse the full signal →
 decision → outcome → reconciliation loop using an Excel-maintained CSV.
 No broker is contacted.  No order is placed.  No real capital is
