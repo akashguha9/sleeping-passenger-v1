@@ -382,6 +382,51 @@ def normalize_event_type(
     return et
 
 
+# Reconciliation statuses that mark a *completed* operator reconciliation
+# (the operator actually closed/partially-closed the trade), as opposed to
+# an upstream label merely *claiming* a terminal outcome.  Mirrors the
+# RECONCILED / PARTIAL_RECONCILED values produced by
+# ``reconciliation_extras.build_outcome_payload``.
+_COMPLETED_RECONCILIATION_STATUSES: frozenset[str] = frozenset(
+    {"RECONCILED", "PARTIAL_RECONCILED"}
+)
+
+
+def _has_explicit_close_stop_tp_evidence(event: dict[str, Any]) -> bool:
+    """True when an event carries hard operator-entered evidence of a stop,
+    take-profit, partial TP, or completed close.
+
+    This is the discriminator the verified-holdings cross-check uses: a
+    genuine learning-worthy reconciliation (a stop-hit, a booked partial
+    TP, a completed close) must NOT be blocked just because the ticker is
+    still listed open in canonical holdings — a partial TP leaves a runner
+    open, and a stop-hit can race the holdings-file update.  What the
+    cross-check still blocks is *bare* open-trade contamination: an
+    upstream row that merely *claims* a terminal ``event_type`` /
+    ``post_trade_outcome`` label while carrying none of the evidence below.
+
+    Evidence (any one suffices):
+      * ``stop_loss_hit`` flag is true,
+      * a completed reconciliation status (RECONCILED / PARTIAL_RECONCILED),
+      * a partial-take-profit price AND quantity are both present, or
+      * an ``exit_reason`` whose text indicates stop / close / TP / closed.
+    """
+    if bool(event.get("stop_loss_hit")):
+        return True
+    status = str(
+        event.get("status") or event.get("reconciliation_status") or ""
+    ).strip().upper()
+    if status in _COMPLETED_RECONCILIATION_STATUSES:
+        return True
+    tp_price = _coerce_float(event.get("partial_take_profit_price"))
+    tp_qty = _coerce_float(event.get("partial_take_profit_quantity"))
+    if tp_price is not None and tp_price > 0 and tp_qty is not None and tp_qty > 0:
+        return True
+    if _exit_reason_indicates_terminal(str(event.get("exit_reason") or "")):
+        return True
+    return False
+
+
 def is_moltbook_eligible_reconciliation_event(
     event: dict[str, Any],
     *,
@@ -459,7 +504,12 @@ def is_moltbook_eligible_reconciliation_event(
             "hidden_reason": SKIP_MISSING_TRADE_IDENTITY,
         }
 
-    if verified_open_tickers:
+    # Verified-holdings cross-check.  Only ambiguous / open-trade
+    # contamination is blocked here: an explicit learning-worthy
+    # reconciliation (stop-hit, booked partial TP, completed close) carries
+    # hard exit evidence and is allowed through even while the ticker still
+    # shows open in canonical holdings (e.g. a partial TP leaves a runner).
+    if verified_open_tickers and not _has_explicit_close_stop_tp_evidence(event):
         candidate_ticker = _normalize_holdings_ticker(
             event.get("symbol") or event.get("ticker")
         )
@@ -888,6 +938,11 @@ def record_reconciliation_learning(
             "realized_pl": realized_pl_f,
             "exit_reason": exit_reason,
             "stop_loss_hit": bool(stop_loss_hit),
+            # Partial-TP price+qty are hard exit evidence for the
+            # verified-holdings cross-check (a booked partial leaves a
+            # runner open but is still learning-worthy).
+            "partial_take_profit_price": tp_price_f,
+            "partial_take_profit_quantity": tp_qty_f,
             # When the operator explicitly opted in via
             # --include-demo-fixtures, strip the thesis from the
             # eligibility candidate so test/demo theses no longer

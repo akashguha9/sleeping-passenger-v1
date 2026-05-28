@@ -220,6 +220,16 @@ APPROVED_DOMAINS: tuple[str, ...] = (
     "position_context",         # position_context.py — merge holdings + manual log → context
     "candidate_feed",           # candidate_feed.py — discover daily candidate artefacts
     "live_price_marks",         # live_price_marks.py — advisory-only live mark ingestion
+    # Customer-facing readiness + proof-loop hardening sprint — advisory-only,
+    # read-only gates, evaluators, and reporting.  Scores/gates/reports only;
+    # no broker execution, no order placement, no API trading writes.
+    "customer_facing",          # customer_facing_gate.py — customer/demo readiness gate, advisory-only
+    "evaluate_ai_outputs",      # evaluate_ai_outputs.py — offline evaluation of AI advisory outputs, no execution
+    "evidence_manifest",        # evidence_manifest.py — audit/evidence manifest generation
+    "hosted_uptime",            # hosted_uptime_report.py — hosted observability/readiness report
+    "provider_edge_case",       # provider_edge_case_matrix.py — provider QA/adversarial matrix
+    "test_inventory",           # test_inventory_report.py — test coverage/inventory reporting
+    "verified_holdings",        # verified_holdings_freshness.py — verified-holdings freshness guard (prevents open-trade contamination)
 )
 
 # Explicit allowlist for individual files / directories whose name does
