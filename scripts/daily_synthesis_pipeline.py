@@ -37,6 +37,10 @@ try:
         compute_usa_bias,
         render_bias_markdown,
     )
+    from scripts.external_advisory_evidence import (
+        build_external_evidence_bundle,
+        render_external_evidence_markdown,
+    )
     from scripts.fresh_market_discovery import build_fresh_market_discovery
     from scripts.minimum_daily_universe import minimum_universe_metadata
     from scripts.portfolio_truth_gate import build_portfolio_truth_gate
@@ -56,6 +60,10 @@ except ModuleNotFoundError:  # pragma: no cover - script-style env
         compute_contamination_ratios,
         compute_usa_bias,
         render_bias_markdown,
+    )
+    from external_advisory_evidence import (
+        build_external_evidence_bundle,
+        render_external_evidence_markdown,
     )
     from fresh_market_discovery import build_fresh_market_discovery
     from minimum_daily_universe import minimum_universe_metadata
@@ -157,6 +165,12 @@ def run_daily_synthesis(
 
     discovery_metrics = _build_discovery_metrics(payload, discovery)
 
+    # EXTERNAL_ADVISORY_EVIDENCE_ENRICHMENT — wire the canonical external-adapter
+    # framework into the runtime flow as an evidence-only enrichment stage.  It
+    # is disabled-and-safe by default and never converts evidence into a trade.
+    # Runs after candidate generation, before the final advisory synthesis.
+    external_evidence = build_external_evidence_bundle(pipeline_context={})
+
     return {
         "run_date": payload["verified_holdings"].get("run_date"),
         "payload": payload,
@@ -168,6 +182,7 @@ def run_daily_synthesis(
         "country_coverage": discovery_metrics["country_coverage"],
         "usa_bias": discovery_metrics["usa_bias"],
         "contamination": discovery_metrics["contamination"],
+        "external_evidence": external_evidence,
         "l_today": discovery.get("l_today", []),
         "safety": advisory_safety_stamps(),
         "execution": human_only_stamp(),
@@ -362,6 +377,14 @@ def render_portfolio_truth_context(result: dict[str, Any]) -> str:
             "Manage existing risk before any new risk."
         )
     lines.append("")
+
+    # --- External advisory evidence (evidence-only enrichment stage) ---
+    external_evidence = result.get("external_evidence")
+    if external_evidence:
+        lines.append("------------------------------------------------------------")
+        lines.append(render_external_evidence_markdown(external_evidence))
+        lines.append("")
+
     lines.append("Reminder: advisory only. No broker action. No execution. Human review required.")
     lines.append("============================================================")
     return "\n".join(lines)
@@ -387,6 +410,23 @@ def _write_artifacts(result: dict[str, Any], context_md: str) -> None:
         "global_discovery_status": (result.get("country_coverage") or {}).get("global_discovery_status"),
         "usa_bias": result.get("usa_bias", {}),
         "contamination": result.get("contamination", {}),
+        "external_evidence": {
+            "status": (result.get("external_evidence") or {}).get(
+                "external_evidence_status"
+            ),
+            "enabled": (result.get("external_evidence") or {}).get(
+                "external_evidence_enabled"
+            ),
+            "decision_impact": (result.get("external_evidence") or {}).get(
+                "external_evidence_decision_impact"
+            ),
+            "score_delta": (result.get("external_evidence") or {}).get(
+                "external_evidence_score_delta"
+            ),
+            "accepted_count": (result.get("external_evidence") or {}).get(
+                "external_evidence_accepted_count"
+            ),
+        },
         "safety": result["safety"],
     }
     CONTEXT_JSON_PATH.write_text(json.dumps(summary, indent=2), encoding="utf-8")
