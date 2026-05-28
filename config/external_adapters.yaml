@@ -46,3 +46,17 @@ external_adapters:
     path_env: FINCEPT_EXPORT_PATH
     fallback_path: external/fincept/exports
     real_execution_allowed: false
+
+# Global flag for the EXTERNAL_ADVISORY_EVIDENCE_ENRICHMENT stage that wires the
+# adapter registry + router into daily synthesis.  Disabled-and-safe by default:
+# when disabled the stage performs no adapter calls and has zero decision impact.
+# Even when enabled, external evidence is advisory-context-only and bounded by
+# the asymmetric score-delta caps below (stronger as a risk reducer than booster).
+external_advisory_evidence:
+  enabled: false
+  decision_impact: ADVISORY_CONTEXT_ONLY
+  max_positive_score_delta: 0.50
+  max_negative_score_delta: -1.00
+  require_human_review: true
+  real_execution_allowed: false
+  execution_permission: WATCH_ONLY
