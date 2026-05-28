@@ -133,6 +133,54 @@ def _signal_ledger_watchlist(signal_ledger_path: Path | None = None) -> list[str
     return out
 
 
+def compute_l_today(payload: dict[str, Any]) -> set[str]:
+    """L_today = tickers with a fresh mapped event or a valid live mover today.
+
+    A name is live-discovered only if a genuinely fresh row backs it: a
+    news/filing event that is live AND mapped to a ticker, or a price mover
+    that is a valid live mover. Static-fallback rows never qualify.
+    """
+    live: set[str] = set()
+
+    def _fresh(row: dict[str, Any]) -> bool:
+        if row.get("is_live"):
+            return True
+        return str(row.get("freshness") or "").upper() in {"FRESH_TODAY", "UPDATED_TODAY", "FRESH", "LIVE"}
+
+    for key in ("news_events", "filings_events"):
+        for row in payload.get(key, {}).get("events", []) or []:
+            ticker = normalize_ticker(row.get("ticker") or row.get("symbol"))
+            if not ticker:
+                continue
+            mapped = str(row.get("mapping_status") or "MAPPED").upper() == "MAPPED"
+            if _fresh(row) and mapped:
+                live.add(ticker)
+
+    for row in payload.get("price_movers", {}).get("movers", []) or []:
+        ticker = normalize_ticker(row.get("ticker") or row.get("symbol"))
+        if not ticker:
+            continue
+        if row.get("valid_mover") or (_fresh(row) and row.get("valid_price")):
+            live.add(ticker)
+    return live
+
+
+def _source_class(
+    ticker: str,
+    *,
+    forbidden: set[str],
+    l_today: set[str],
+    yesterday: set[str],
+) -> str:
+    if ticker in forbidden:
+        return "PHANTOM"
+    if ticker in l_today:
+        return "LIVE"
+    if ticker in yesterday:
+        return "MEMORY_OR_STALE"
+    return "STATIC_FALLBACK"
+
+
 def build_discovery_universe(
     payload: dict[str, Any],
     model_candidates: list[str] | None = None,
@@ -195,6 +243,10 @@ def build_fresh_market_discovery(
     universe = build_discovery_universe(payload, model_candidates, signal_ledger_path)
     forbidden = set(truth_gate["closed_or_sold"]) | set(truth_gate["do_not_treat_as_open"])
     holdings = set(truth_gate["verified_open_holdings"])
+    l_today = compute_l_today(payload)
+    yesterday_all = set(payload["yesterday_candidates"]["final_candidates"]) | set(
+        payload["yesterday_candidates"]["watchlist"]
+    )
 
     scored: list[dict[str, Any]] = []
     for ticker in universe:
@@ -202,6 +254,10 @@ def build_fresh_market_discovery(
         score["portfolio_truth"] = classify_ticker(ticker, truth_gate)
         score["forbidden_for_execution"] = ticker in forbidden
         score["is_verified_holding"] = ticker in holdings
+        score["in_l_today"] = ticker in l_today
+        score["source_class"] = _source_class(
+            ticker, forbidden=forbidden, l_today=l_today, yesterday=yesterday_all
+        )
         scored.append(score)
     scored.sort(key=lambda s: (-s["cqs"], s["ticker"]))
 
@@ -251,6 +307,8 @@ def build_fresh_market_discovery(
         "global_discovery_permission": True,
         "source_health": source_health,
         "discovery_notes": discovery_notes,
+        "l_today": sorted(l_today),
+        "l_today_count": len(l_today),
         "thresholds": {"cqs_min": cqs_min, "watchlist_fcs_min": watchlist_min},
         "safety": advisory_safety_stamps(),
     }
@@ -260,6 +318,7 @@ __all__ = [
     "CQS_WEIGHTS",
     "CQS_PENALTIES",
     "score_candidate",
+    "compute_l_today",
     "build_discovery_universe",
     "build_fresh_market_discovery",
 ]

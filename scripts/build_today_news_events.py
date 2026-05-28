@@ -64,8 +64,31 @@ def build_today_news_events(
     run_date: str,
     generated_at_utc: str | None = None,
     with_static_watch: bool = False,
+    live_events: list[dict[str, Any]] | None = None,
+    live_meta: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Return the news-events payload (pure; honest empty/static fallback)."""
+    """Return the news-events payload.
+
+    When ``live_events`` are supplied by the signal_events bridge they are used
+    verbatim and the envelope is_live/source_health/provider come from
+    ``live_meta`` (honestly derived from genuinely-fresh live rows). Otherwise
+    the builder degrades to the honest empty/static fallback — it never claims
+    live data on a fallback.
+    """
+    if live_events:
+        meta = live_meta or {}
+        return {
+            "run_date": run_date,
+            "generated_at_utc": generated_at_utc or utc_timestamp(),
+            "source_health": meta.get("source_health", "DEGRADED_LIVE_UNMAPPED"),
+            "provider": meta.get("provider", "SIGNAL_EVENTS_BRIDGE"),
+            "is_live": bool(meta.get("is_live", True)),
+            "executable_allowed": bool(meta.get("executable_allowed", False)),
+            "bridge_diagnostics": meta.get("diagnostics", {}),
+            "events": live_events,
+            "records": live_events,
+        }
+
     events = (
         [_placeholder_event(t) for t in _STATIC_NARRATIVE_WATCH]
         if with_static_watch
@@ -77,6 +100,8 @@ def build_today_news_events(
         "source_health": "UNVERIFIED",
         "provider": "STATIC_OR_EMPTY_FALLBACK",
         "is_live": False,
+        "executable_allowed": False,
+        "fallback_reason": (live_meta or {}).get("fallback_reason", "NO_FRESH_SIGNAL_EVENTS"),
         "events": events,
         "records": events,
     }
@@ -87,8 +112,12 @@ def write_today_news_events(
     path: Path | None = None,
     generated_at_utc: str | None = None,
     with_static_watch: bool = False,
+    live_events: list[dict[str, Any]] | None = None,
+    live_meta: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    payload = build_today_news_events(run_date, generated_at_utc, with_static_watch)
+    payload = build_today_news_events(
+        run_date, generated_at_utc, with_static_watch, live_events, live_meta
+    )
     _write_json(path or NEWS_EVENTS_PATH, payload)
     return payload
 

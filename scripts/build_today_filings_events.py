@@ -65,8 +65,29 @@ def build_today_filings_events(
     run_date: str,
     generated_at_utc: str | None = None,
     live_events: list[dict[str, Any]] | None = None,
+    live_meta: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Return the filings-events payload (pure; honest empty fallback)."""
+    """Return the filings-events payload (pure; honest empty fallback).
+
+    Two live paths:
+      * bridge path (``live_meta`` supplied): ``live_events`` are already
+        normalized signal_events-bridge rows; the envelope comes from
+        ``live_meta`` (honest is_live/source_health derived from fresh rows).
+      * legacy path (``live_meta`` is None): ``live_events`` are raw provider
+        rows coerced via :func:`normalize_filing_event`.
+    """
+    if live_events and live_meta is not None:
+        return {
+            "run_date": run_date,
+            "generated_at_utc": generated_at_utc or utc_timestamp(),
+            "source_health": live_meta.get("source_health", "DEGRADED_LIVE_UNMAPPED"),
+            "provider": live_meta.get("provider", "SIGNAL_EVENTS_BRIDGE"),
+            "is_live": bool(live_meta.get("is_live", True)),
+            "executable_allowed": bool(live_meta.get("executable_allowed", False)),
+            "bridge_diagnostics": live_meta.get("diagnostics", {}),
+            "events": live_events,
+            "records": live_events,
+        }
     if live_events:
         events = [normalize_filing_event(e) for e in live_events if isinstance(e, dict)]
         provider = "LIVE_FILING_SOURCE"
@@ -83,6 +104,10 @@ def build_today_filings_events(
         "source_health": source_health,
         "provider": provider,
         "is_live": is_live,
+        "executable_allowed": False,
+        "fallback_reason": (live_meta or {}).get("fallback_reason", "NO_FRESH_SIGNAL_EVENTS")
+        if not live_events
+        else None,
         "events": events,
         "records": events,
     }
@@ -93,8 +118,9 @@ def write_today_filings_events(
     path: Path | None = None,
     generated_at_utc: str | None = None,
     live_events: list[dict[str, Any]] | None = None,
+    live_meta: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    payload = build_today_filings_events(run_date, generated_at_utc, live_events)
+    payload = build_today_filings_events(run_date, generated_at_utc, live_events, live_meta)
     _write_json(path or FILINGS_EVENTS_PATH, payload)
     return payload
 

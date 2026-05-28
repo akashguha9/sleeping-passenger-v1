@@ -230,6 +230,26 @@ APPROVED_DOMAINS: tuple[str, ...] = (
     "provider_edge_case",       # provider_edge_case_matrix.py — provider QA/adversarial matrix
     "test_inventory",           # test_inventory_report.py — test coverage/inventory reporting
     "verified_holdings",        # verified_holdings_freshness.py — verified-holdings freshness guard (prevents open-trade contamination)
+    # Kronos price-path evidence — advisory-only, read-only price-path
+    # foundation-model math helper.  Produces evidence fields + an advisory
+    # classification (SUPPORTIVE/CONTRADICTORY/UNSTABLE/NOISY/INSUFFICIENT_DATA/
+    # DISABLED/ERROR_SAFE) that can only nudge an existing advisory score
+    # within hard caps.  No execution surface: no broker calls, no order
+    # placement, no autonomous execution; cannot upgrade a chaos/safety veto.
+    # Covers scripts/kronos_price_path_evidence.py only — it is the internal
+    # math helper consumed by scripts/external_adapters/kronos_adapter.py
+    # (the canonical runtime integration point; see external_evidence_router).
+    "kronos",
+    # Global discovery wiring sprint — advisory-only bridges + proofs that wire
+    # canonical SQLite signal_events / market_data marks into the daily payload
+    # consumed by the five-model synthesis, plus top-30 GDP country-coverage and
+    # USA-bias/contamination metrics. Scores/gates/bridges only; read-only
+    # against SQLite; no broker execution, no order placement, no API trading
+    # writes; static/fallback names can never become executable.
+    "country_coverage",   # top30_country_coverage.py — per-country coverage proof + C_* ratios
+    "entity_ticker",      # entity_ticker_mapper.py — entity->ticker mapping w/ confidence, never drops
+    "price_movers",       # live_price_movers_bridge.py — read-only market_data -> price-mover rows
+    "bias_metrics",       # discovery_bias_metrics.py — B_US + R_static/R_live contamination ratios
 )
 
 # Explicit allowlist for individual files / directories whose name does

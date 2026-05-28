@@ -113,6 +113,20 @@ function Read-PayloadFile {
   return "MISSING_FILE"
 }
 
+# ------------------------------------------------------------
+# REFRESH DAILY PAYLOADS via the live bridges (signal_events + price).
+# Advisory/read-only: this only rebuilds the regenerable today_* payload
+# JSON inputs from canonical SQLite signal_events + market_data marks. It
+# never calls a broker, never executes, and degrades honestly to the static
+# fallback when no fresh live data exists.
+# ------------------------------------------------------------
+Write-Host "Rebuilding daily payloads via signal_events + price bridges (honest fallback if no live data)..."
+try {
+  & python ".\scripts\build_daily_payloads.py" 2>$null | Out-Null
+} catch {
+  Write-Host "build_daily_payloads bridge unavailable; using existing payload files."
+}
+
 $verifiedHoldings   = Read-PayloadFile ".\data\daily_payload\verified_current_holdings.json"
 $closedPositions    = Read-PayloadFile ".\data\daily_payload\closed_positions.json"
 $soldPositions      = Read-PayloadFile ".\data\daily_payload\sold_positions.json"
@@ -707,6 +721,23 @@ Model Contamination Audit — for each model compute:
 If contamination_score > 0, mark that model's portfolio-management section as
 contaminated, but do NOT discard its fresh-discovery section unless that section
 also relies on false holdings.
+
+L_TODAY INVARIANT (HARD — applies to every candidate any model names):
+The PORTFOLIO TRUTH GATE context block above contains an L_TODAY INVARIANT
+section with: L_today (live-discovered set), static_universe, memory_only_stale,
+phantom/closed/sold, verified holdings H, the TOP-30 COUNTRY COVERAGE PROOF, and
+USA BIAS + FALLBACK CONTAMINATION metrics. Enforce:
+  - A candidate may be a LIVE_DISCOVERED_CANDIDATE / EXECUTABLE-PAPER-BUY ONLY if
+    it appears in L_today. Otherwise it is at most RESEARCH_ONLY_STATIC,
+    MEMORY_ONLY_STALE, EXISTING_POSITION_REVIEW (if in H), PHANTOM_QUARANTINE
+    (if closed/sold), or MODEL_PRIOR_ONLY (invented, in no payload).
+  - Static-universe / model-prior names can NEVER be executable buys.
+  - If the country coverage proof is missing/weak (low C_global), state that
+    global discovery is DEGRADED or FAILED. Do NOT fill missing countries from
+    your own priors and call it discovery.
+  - Surface B_US / USA_bias_violation and R_static / R_live. A US name is not
+    blocked for being US, but a high R_static / zero R_live means the board is
+    research-grade, not live global discovery.
 
 Fresh Cross-Model Candidate Board — rank by:
   ACQS(t) = CQS(t) * exp(-0.25 * days_without_fresh_signal)   (memory decay)

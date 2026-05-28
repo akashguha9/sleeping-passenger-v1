@@ -150,6 +150,135 @@ def classify_why_today(score: float) -> str:
     return "MISSING_OR_GENERIC"
 
 
+# ---------------------------------------------------------------------------
+# Extended (multi-term) why-today score — sprint Section 6.
+# ---------------------------------------------------------------------------
+# This is ADDITIVE. The discrete why_today_score() above is unchanged so the
+# existing executable gate / tests keep their semantics; the extended score
+# adds country-coverage, mapping, and live-vs-static discipline for the richer
+# discovery surface. Static-universe-only names can NEVER be executable here.
+
+EXTENDED_WEIGHTS = {
+    "news": 0.20,
+    "filings": 0.15,
+    "price": 0.20,
+    "volume": 0.10,
+    "cross_source": 0.10,
+    "country": 0.10,
+    "mapping": 0.15,
+}
+EXTENDED_PENALTY_WEIGHTS = {
+    "static": 0.35,
+    "stale": 0.30,
+    "phantom": 1.00,
+    "concentration": 0.40,
+    "data_gap": 0.50,
+}
+
+# Classifications a name not in L_today may receive.
+NON_LIVE_CLASSIFICATIONS = (
+    "RESEARCH_ONLY_STATIC",
+    "MEMORY_ONLY_STALE",
+    "EXISTING_POSITION_REVIEW",
+    "PHANTOM_QUARANTINE",
+    "MODEL_PRIOR_ONLY",
+)
+
+
+def _c01(value: Any) -> float:
+    try:
+        num = float(value)
+    except (TypeError, ValueError):
+        return 0.0
+    return max(0.0, min(1.0, num))
+
+
+def extended_why_today_score(
+    *,
+    fresh_news_score: Any = 0.0,
+    fresh_filing_score: Any = 0.0,
+    price_mover_score: Any = 0.0,
+    abnormal_volume_score: Any = 0.0,
+    cross_source_confirmation: Any = 0.0,
+    country_coverage_confidence: Any = 0.0,
+    ticker_mapping_confidence: Any = 0.0,
+    is_static_universe_only: bool = False,
+    stale_memory_penalty: Any = 0.0,
+    phantom: bool = False,
+    portfolio_concentration_penalty: Any = 0.0,
+    missing_data_penalty: Any = 0.0,
+) -> float:
+    """Weighted multi-term why-today score, clamped to [0, 1]."""
+    raw = (
+        EXTENDED_WEIGHTS["news"] * _c01(fresh_news_score)
+        + EXTENDED_WEIGHTS["filings"] * _c01(fresh_filing_score)
+        + EXTENDED_WEIGHTS["price"] * _c01(price_mover_score)
+        + EXTENDED_WEIGHTS["volume"] * _c01(abnormal_volume_score)
+        + EXTENDED_WEIGHTS["cross_source"] * _c01(cross_source_confirmation)
+        + EXTENDED_WEIGHTS["country"] * _c01(country_coverage_confidence)
+        + EXTENDED_WEIGHTS["mapping"] * _c01(ticker_mapping_confidence)
+    )
+    raw -= EXTENDED_PENALTY_WEIGHTS["static"] * (1.0 if is_static_universe_only else 0.0)
+    raw -= EXTENDED_PENALTY_WEIGHTS["stale"] * _c01(stale_memory_penalty)
+    raw -= EXTENDED_PENALTY_WEIGHTS["phantom"] * (1.0 if phantom else 0.0)
+    raw -= EXTENDED_PENALTY_WEIGHTS["concentration"] * _c01(portfolio_concentration_penalty)
+    raw -= EXTENDED_PENALTY_WEIGHTS["data_gap"] * _c01(missing_data_penalty)
+    return round(max(0.0, min(1.0, raw)), 4)
+
+
+def executable_candidate(
+    *,
+    why_today_score_value: float,
+    source_health_score: float,
+    valid_price: bool,
+    mapping_confidence: float,
+    country_coverage_confidence: float,
+    in_phantom_closed_sold: bool,
+    is_static_universe_only: bool = False,
+    advisory_only: bool = True,
+    human_review_required: bool = True,
+    theta_map: float = 0.70,
+    why_today_min: float = 0.70,
+    source_health_min: float = 0.70,
+) -> bool:
+    """executable_candidate(t) per sprint Section 6.
+
+    A STATIC_UNIVERSE_FALLBACK name can NEVER be executable, regardless of any
+    other signal — that invariant is enforced here first.
+    """
+    if is_static_universe_only:
+        return False
+    return bool(
+        why_today_score_value >= why_today_min
+        and source_health_score >= source_health_min
+        and valid_price
+        and mapping_confidence >= theta_map
+        and country_coverage_confidence > 0
+        and not in_phantom_closed_sold
+        and advisory_only
+        and human_review_required
+    )
+
+
+def classify_non_live(
+    *,
+    in_holdings: bool,
+    in_static_universe: bool,
+    in_phantom_closed_sold: bool,
+    in_yesterday: bool,
+) -> str:
+    """Classify a candidate that is NOT in L_today."""
+    if in_phantom_closed_sold:
+        return "PHANTOM_QUARANTINE"
+    if in_holdings:
+        return "EXISTING_POSITION_REVIEW"
+    if in_static_universe:
+        return "RESEARCH_ONLY_STATIC"
+    if in_yesterday:
+        return "MEMORY_ONLY_STALE"
+    return "MODEL_PRIOR_ONLY"
+
+
 def passes_executable_why_today(
     score: float, thresholds: dict[str, Any] | None = None
 ) -> bool:
@@ -188,8 +317,14 @@ __all__ = [
     "STATIC_FALLBACK_SCORE",
     "STALE_REPEAT_SCORE",
     "MISSING_SCORE",
+    "EXTENDED_WEIGHTS",
+    "EXTENDED_PENALTY_WEIGHTS",
+    "NON_LIVE_CLASSIFICATIONS",
     "why_today_score",
     "classify_why_today",
     "passes_executable_why_today",
     "score_candidate_why_today",
+    "extended_why_today_score",
+    "executable_candidate",
+    "classify_non_live",
 ]

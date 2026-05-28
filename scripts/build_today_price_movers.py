@@ -95,14 +95,60 @@ def _fallback_mover_record(universe_row: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _coerce_live_mover(row: dict[str, Any]) -> dict[str, Any]:
+    """Ensure a live price-bridge row carries the price-mover contract fields."""
+    out = dict(row)
+    out.setdefault("bucket", "LIVE_PRICE_MOVER")
+    out.setdefault("market", out.get("country") or "US")
+    out.setdefault("freshness", "FRESH_TODAY" if out.get("is_live") else "UNVERIFIED")
+    out.setdefault("source_health", "LIVE_VERIFIED" if out.get("is_live") else "PRICE_FALLBACK")
+    out.setdefault("provider", "market_data" if out.get("is_live") else "STATIC_UNIVERSE_FALLBACK")
+    out.setdefault("data_quality", 0.6 if out.get("is_live") else 0.25)
+    if not out.get("why_today"):
+        out["why_today"] = (
+            "Live price mover confirmed today."
+            if out.get("valid_mover")
+            else "Live price mark present; not a confirmed mover."
+            if out.get("is_live")
+            else _FALLBACK_WHY_TODAY
+        )
+    return out
+
+
 def build_today_price_movers(
     run_date: str,
     generated_at_utc: str | None = None,
     universe_path: Path | None = None,
     window: int = ROTATION_WINDOW,
+    live_movers: list[dict[str, Any]] | None = None,
+    live_meta: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Return the price-movers payload (pure; honest static-fallback)."""
+    """Return the price-movers payload.
+
+    When the live price bridge supplies ``live_movers`` they are used and the
+    envelope is_live/source_health/provider come from ``live_meta``. Otherwise
+    the builder degrades to the honest static-fallback universe (null prices,
+    is_live=false) — it never claims live data on a fallback.
+    """
     universe = minimum_universe_records(universe_path)
+    if live_movers:
+        meta = live_meta or {}
+        movers = [_coerce_live_mover(r) for r in live_movers]
+        return {
+            "run_date": run_date,
+            "generated_at_utc": generated_at_utc or utc_timestamp(),
+            "source_health": meta.get("source_health", "LIVE_VERIFIED"),
+            "provider": meta.get("provider", "market_data"),
+            "is_live": bool(meta.get("is_live", True)),
+            "existing_risk_visibility_degraded": bool(meta.get("existing_risk_visibility_degraded")),
+            "existing_holdings_missing_price": meta.get("existing_holdings_missing_price", []),
+            "bridge_diagnostics": {k: v for k, v in meta.items() if k != "existing_holdings_missing_price"},
+            "rotation_window": len(movers),
+            "universe_size": len(universe),
+            "movers": movers,
+            "records": movers,
+        }
+
     slice_rows = _rotating_slice(universe, run_date, window)
     movers = [_fallback_mover_record(row) for row in slice_rows]
     return {
@@ -111,6 +157,7 @@ def build_today_price_movers(
         "source_health": "UNVERIFIED",
         "provider": "STATIC_UNIVERSE_FALLBACK",
         "is_live": False,
+        "fallback_reason": (live_meta or {}).get("fallback_reason", "PRICE_PROVIDER_UNAVAILABLE"),
         "rotation_window": len(movers),
         "universe_size": len(universe),
         "movers": movers,
@@ -124,8 +171,12 @@ def write_today_price_movers(
     path: Path | None = None,
     generated_at_utc: str | None = None,
     universe_path: Path | None = None,
+    live_movers: list[dict[str, Any]] | None = None,
+    live_meta: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    payload = build_today_price_movers(run_date, generated_at_utc, universe_path)
+    payload = build_today_price_movers(
+        run_date, generated_at_utc, universe_path, live_movers=live_movers, live_meta=live_meta
+    )
     _write_json(path or PRICE_MOVERS_PATH, payload)
     return payload
 

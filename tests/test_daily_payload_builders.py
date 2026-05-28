@@ -95,12 +95,17 @@ def test_orchestrator_writes_all_and_preserves_protected(tmp_path: Path) -> None
     verified_before = verified.read_text(encoding="utf-8")
     dnt_before = dnt.read_text(encoding="utf-8")
 
-    summary = build_all_daily_payloads(run_date=RUN_DATE, payload_dir=base)
+    # Point the live bridges at a non-existent DB so they deterministically
+    # fall back to the static/empty builders (this test covers the fallback
+    # path; the live bridge is covered by its own test module).
+    summary = build_all_daily_payloads(
+        run_date=RUN_DATE, payload_dir=base, db_path=tmp_path / "no_such.db"
+    )
 
     assert set(summary["files_written"]) == {
         "today_market_snapshot.json", "today_price_movers.json",
         "today_news_events.json", "today_filings_events.json",
-        "yesterday_final_candidates.json",
+        "yesterday_final_candidates.json", "daily_payload_manifest.json",
     }
     # Protected files untouched.
     assert verified.read_text(encoding="utf-8") == verified_before
@@ -112,6 +117,10 @@ def test_orchestrator_writes_all_and_preserves_protected(tmp_path: Path) -> None
     # Each written file is valid JSON.
     for name in summary["files_written"]:
         json.loads((base / name).read_text(encoding="utf-8"))
+    # Manifest records the honest fallback.
+    manifest = json.loads((base / "daily_payload_manifest.json").read_text(encoding="utf-8"))
+    assert manifest["signal_events_bridge_attempted"] is True
+    assert manifest["signal_events_bridge_status"] == "FALLBACK"
 
 
 def test_orchestrator_safety_intact(tmp_path: Path) -> None:
