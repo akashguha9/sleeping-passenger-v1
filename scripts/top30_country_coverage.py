@@ -162,6 +162,216 @@ _SUFFIX_COUNTRY: dict[str, str] = {
 # Bloc/region tokens that are NOT a single top-30 country.
 _NON_COUNTRY_TOKENS = {"EU", "EUROPE", "GLOBAL", "WORLD", "INTERNATIONAL", "ROW", ""}
 
+# Exchange code -> canonical country (single-country venues only). Euronext is
+# deliberately omitted because it spans PA/AS/BR/LIS — a row tagged "Euronext"
+# alone cannot be attributed to one country honestly.
+_EXCHANGE_COUNTRY: dict[str, str] = {
+    "NYSE": "United States", "NASDAQ": "United States", "AMEX": "United States",
+    "ARCA": "United States", "BATS": "United States", "NYSEARCA": "United States",
+    "LSE": "United Kingdom",
+    "TSE": "Japan", "JPX": "Japan",
+    "SSE": "China", "SZSE": "China",
+    "HKEX": "Hong Kong",
+    "NSE": "India", "BSE": "India",
+    "FSE": "Germany", "XETRA": "Germany",
+    "TSX": "Canada", "TSXV": "Canada",
+    "ASX": "Australia",
+    "TWSE": "Taiwan",
+    "KRX": "South Korea",
+    "SGX": "Singapore",
+    "BVMF": "Brazil", "B3": "Brazil",
+    "BMV": "Mexico",
+    "JSE": "South Africa",
+    "TADAWUL": "Saudi Arabia",
+    "SIX": "Switzerland",
+    "BME": "Spain",
+    "BIT": "Italy", "MIL": "Italy",
+    "IDX": "Indonesia",
+    "BM": "Malaysia",
+}
+
+# Registrable-domain suffix -> canonical country. Generic gTLDs imply nothing.
+_DOMAIN_COUNTRY: dict[str, str] = {
+    "co.uk": "United Kingdom", "uk": "United Kingdom",
+    "de": "Germany",
+    "fr": "France",
+    "co.jp": "Japan", "jp": "Japan",
+    "co.in": "India", "in": "India",
+    "co.kr": "South Korea", "kr": "South Korea",
+    "com.au": "Australia", "au": "Australia",
+    "ca": "Canada",
+    "com.br": "Brazil", "br": "Brazil",
+    "com.sg": "Singapore", "sg": "Singapore",
+    "nl": "Netherlands",
+    "com.tw": "Taiwan", "tw": "Taiwan",
+    "ch": "Switzerland",
+    "it": "Italy",
+    "es": "Spain",
+    "com.hk": "Hong Kong", "hk": "Hong Kong",
+    "com.cn": "China", "cn": "China",
+}
+_GENERIC_TLDS = {
+    "com", "org", "net", "io", "co", "info", "biz", "gov", "edu", "ai", "app",
+    "news", "media", "tv", "me", "xyz",
+}
+
+# Unambiguous locale codes only — a bare language like "en" maps to several
+# countries, so it is intentionally NOT resolvable (stays UNKNOWN).
+_LOCALE_COUNTRY: dict[str, str] = {
+    "en-gb": "United Kingdom", "en-in": "India", "en-au": "Australia",
+    "en-ca": "Canada", "en-sg": "Singapore",
+    "ja-jp": "Japan", "ko-kr": "South Korea", "de-de": "Germany",
+    "de-ch": "Switzerland", "fr-fr": "France", "pt-br": "Brazil",
+    "es-es": "Spain", "it-it": "Italy", "nl-nl": "Netherlands",
+    "zh-tw": "Taiwan", "zh-hk": "Hong Kong",
+}
+
+
+def country_from_exchange(exchange: Any) -> str | None:
+    """Map an exchange code to its single canonical country, or None."""
+    code = str(exchange or "").strip().upper()
+    if not code:
+        return None
+    return _EXCHANGE_COUNTRY.get(code)
+
+
+def country_from_domain(url: Any) -> str | None:
+    """Infer a canonical country from a URL's country-code TLD, or None.
+
+    Generic gTLDs (.com/.org/...) and unknown suffixes return None — we never
+    guess a country from a non-geographic domain.
+    """
+    text = str(url or "").strip().lower()
+    if not text:
+        return None
+    # Strip scheme + path, keep host.
+    host = text
+    if "://" in host:
+        host = host.split("://", 1)[1]
+    host = host.split("/", 1)[0].split("?", 1)[0].split(":", 1)[0]
+    host = host.strip(".")
+    if not host or "." not in host:
+        return None
+    labels = host.split(".")
+    # Try a two-label suffix first (co.uk, com.br), then the single TLD.
+    if len(labels) >= 2:
+        two = ".".join(labels[-2:])
+        if two in _DOMAIN_COUNTRY:
+            return _DOMAIN_COUNTRY[two]
+    tld = labels[-1]
+    if tld in _GENERIC_TLDS:
+        return None
+    return _DOMAIN_COUNTRY.get(tld)
+
+
+def country_from_locale(value: Any) -> str | None:
+    """Resolve an unambiguous locale/region code to a country, or None."""
+    text = str(value or "").strip().lower().replace("_", "-")
+    if not text:
+        return None
+    return _LOCALE_COUNTRY.get(text)
+
+
+# Country-enrichment evidence tiers (highest-confidence first). Each entry is
+# (method, confidence). Confidence is advisory: it lets downstream scoring
+# discount a country that was inferred from weak evidence.
+COUNTRY_CONF_EXPLICIT = 1.0
+COUNTRY_CONF_TICKER_SUFFIX = 0.9
+COUNTRY_CONF_MAPPED = 0.85
+COUNTRY_CONF_EXCHANGE = 0.75
+COUNTRY_CONF_SOURCE = 0.6
+COUNTRY_CONF_DOMAIN = 0.5
+COUNTRY_CONF_LOCALE = 0.4
+# Below this floor we refuse to assert a country (stays UNKNOWN).
+COUNTRY_CONF_FLOOR = 0.4
+
+
+def enrich_country(
+    event: dict[str, Any],
+    *,
+    mapped_country: Any = None,
+    mapped_ticker: Any = None,
+    mapped_exchange: Any = None,
+    min_confidence: float = COUNTRY_CONF_FLOOR,
+) -> dict[str, Any]:
+    """Deterministically resolve an event's country with a confidence score.
+
+    Evidence is consulted highest-confidence-first; the first hit wins. Nothing
+    is fabricated: when no tier produces a canonical top-30 country at or above
+    ``min_confidence`` the result is ``country="UNKNOWN"`` with confidence 0.0.
+
+    Returns ``{"country", "country_confidence", "country_method"}``.
+    """
+    if not isinstance(event, dict):
+        event = {}
+
+    def _result(country: str | None, confidence: float, method: str) -> dict[str, Any]:
+        if country and confidence >= min_confidence:
+            return {
+                "country": country,
+                "country_confidence": round(confidence, 4),
+                "country_method": method,
+            }
+        return None  # type: ignore[return-value]
+
+    # 1. Explicit event country / jurisdiction.
+    explicit = canonical_country(event.get("country")) or canonical_country(
+        event.get("jurisdiction")
+    )
+    if explicit:
+        out = _result(explicit, COUNTRY_CONF_EXPLICIT, "explicit_event_country")
+        if out:
+            return out
+
+    # 2. Ticker exchange-suffix (deterministic).
+    ticker = event.get("ticker") or event.get("symbol") or mapped_ticker
+    suffix_country = country_from_ticker(ticker)
+    if suffix_country:
+        out = _result(suffix_country, COUNTRY_CONF_TICKER_SUFFIX, "ticker_suffix")
+        if out:
+            return out
+
+    # 3. Country attached to the resolved mapping row.
+    mc = canonical_country(mapped_country)
+    if mc:
+        out = _result(mc, COUNTRY_CONF_MAPPED, "mapped_ticker_country")
+        if out:
+            return out
+
+    # 4. Exchange code (single-country venues only).
+    ex_country = country_from_exchange(event.get("exchange") or mapped_exchange)
+    if ex_country:
+        out = _result(ex_country, COUNTRY_CONF_EXCHANGE, "exchange_country")
+        if out:
+            return out
+
+    # 5. Provider / source country, if the provider declared one.
+    source_country = canonical_country(
+        event.get("source_country") or event.get("provider_country")
+    )
+    if source_country:
+        out = _result(source_country, COUNTRY_CONF_SOURCE, "source_country")
+        if out:
+            return out
+
+    # 6. URL / domain ccTLD.
+    domain_country = country_from_domain(event.get("url") or event.get("source_url"))
+    if domain_country:
+        out = _result(domain_country, COUNTRY_CONF_DOMAIN, "url_domain")
+        if out:
+            return out
+
+    # 7. Locale / region code (unambiguous only).
+    locale_country = country_from_locale(
+        event.get("locale") or event.get("region") or event.get("language")
+    )
+    if locale_country:
+        out = _result(locale_country, COUNTRY_CONF_LOCALE, "locale_region")
+        if out:
+            return out
+
+    return {"country": "UNKNOWN", "country_confidence": 0.0, "country_method": "none"}
+
 
 def canonical_country(value: Any) -> str | None:
     """Resolve a country code/name to its canonical top-30 name, or None.
@@ -543,8 +753,13 @@ def main(argv: list[str] | None = None) -> int:  # pragma: no cover - CLI
 __all__ = [
     "DEFAULT_TOP30_COUNTRIES",
     "DEFAULT_THETA_MAP",
+    "COUNTRY_CONF_FLOOR",
     "canonical_country",
     "country_from_ticker",
+    "country_from_exchange",
+    "country_from_domain",
+    "country_from_locale",
+    "enrich_country",
     "load_top30_countries",
     "compute_country_coverage",
     "build_country_coverage_from_payload",

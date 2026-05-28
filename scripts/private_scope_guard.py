@@ -250,6 +250,13 @@ APPROVED_DOMAINS: tuple[str, ...] = (
     "entity_ticker",      # entity_ticker_mapper.py — entity->ticker mapping w/ confidence, never drops
     "price_movers",       # live_price_movers_bridge.py — read-only market_data -> price-mover rows
     "bias_metrics",       # discovery_bias_metrics.py — B_US + R_static/R_live contamination ratios
+    # P1 live-source activation sprint — advisory-only, read-only UK/EU filings
+    # provider status surface.  No live fetch is implemented: providers report
+    # PROVIDER_NOT_CONFIGURED / NOT_ACTIVE and emit zero rows; placeholder rows
+    # are never marked live.  No broker execution, no order placement, no API
+    # trading writes.  (discovery_baseline_metrics.py is already covered by the
+    # "discovery" domain above.)
+    "global_filings",     # global_filings_loader.py — honest UK/EU filings provider status
 )
 
 # Explicit allowlist for individual files / directories whose name does

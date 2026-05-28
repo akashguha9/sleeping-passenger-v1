@@ -35,16 +35,52 @@ from typing import Any
 
 try:
     from scripts.runtime_common import REPO_ROOT
-    from scripts.top30_country_coverage import canonical_country, country_from_ticker
+    from scripts.top30_country_coverage import (
+        COUNTRY_CONF_MAPPED,
+        canonical_country,
+        country_from_ticker,
+        enrich_country,
+    )
 except ModuleNotFoundError:  # pragma: no cover - script-style env
     from runtime_common import REPO_ROOT
-    from top30_country_coverage import canonical_country, country_from_ticker
+    from top30_country_coverage import (
+        COUNTRY_CONF_MAPPED,
+        canonical_country,
+        country_from_ticker,
+        enrich_country,
+    )
 
 
 SECURITIES_MASTER_PATH = REPO_ROOT / "configs" / "global_securities_master.yaml"
 DEFAULT_THETA_MAP = 0.70
 
 _US_EXCHANGES = {"NYSE", "NASDAQ", "AMEX", "ARCA", "BATS", "NYSEARCA"}
+
+# Trailing corporate-form tokens stripped during alias normalization so that
+# "Reliance Industries Ltd" and "Reliance Industries Limited" collapse to the
+# same key. Conservative + deterministic; never reduces a name to empty.
+_CORP_SUFFIXES = {
+    "ltd", "limited", "ltda", "plc", "ag", "sa", "sab", "nv", "corp",
+    "corporation", "inc", "incorporated", "se", "co", "company", "companies",
+    "holdings", "holding", "group", "gmbh", "ab", "oyj", "spa", "kk", "bhd",
+    "tbk", "pcl", "asa", "pjsc", "sas", "srl", "llc", "lp", "llp", "aps",
+}
+
+
+def _normalize_alias(text: Any) -> str:
+    """Case/punctuation-insensitive alias key with corporate suffixes stripped.
+
+    Lowercases, maps every non-alphanumeric character to a space, collapses
+    whitespace, then drops trailing corporate-form tokens (Ltd/PLC/AG/SA/...).
+    Returns "" when there is nothing to index.
+    """
+    raw = str(text or "").strip().lower()
+    if not raw:
+        return ""
+    tokens = "".join(ch if ch.isalnum() else " " for ch in raw).split()
+    while len(tokens) > 1 and tokens[-1] in _CORP_SUFFIXES:
+        tokens.pop()
+    return " ".join(tokens)
 
 
 def _load_yaml(path: Path) -> Any:
@@ -61,18 +97,50 @@ def _load_yaml(path: Path) -> Any:
             return None
 
 
-@lru_cache(maxsize=4)
-def _load_securities_master(path_str: str) -> tuple[dict[str, dict[str, Any]], frozenset[str]]:
-    """Return ``(name_index, symbol_set)`` from the securities master YAML.
+class _SecuritiesMaster:
+    """Indexed view of the securities master used by the mapper.
 
-    ``name_index`` maps a lowercased security name -> security dict. The
-    security dict carries canonical_symbol, country (canonical), exchange_code,
-    asset_type, name.
+    * ``name_index``   — lowercased exact security name -> security dict.
+    * ``symbol_index`` — uppercased canonical symbol -> security dict.
+    * ``alias_index``  — normalized alias key -> set of canonical symbols.
+                         Built from the top-level ``aliases:`` block, each
+                         security's ``aliases`` list, and each security's
+                         (suffix-stripped) name. A key resolving to more than
+                         one distinct symbol is AMBIGUOUS, never auto-chosen.
+    * ``symbol_set``   — every canonical symbol seen.
     """
+
+    __slots__ = ("name_index", "symbol_index", "alias_index", "symbol_set")
+
+    def __init__(
+        self,
+        name_index: dict[str, dict[str, Any]],
+        symbol_index: dict[str, dict[str, Any]],
+        alias_index: dict[str, frozenset[str]],
+        symbol_set: frozenset[str],
+    ) -> None:
+        self.name_index = name_index
+        self.symbol_index = symbol_index
+        self.alias_index = alias_index
+        self.symbol_set = symbol_set
+
+
+@lru_cache(maxsize=4)
+def _load_securities_master(path_str: str) -> _SecuritiesMaster:
+    """Parse + index the securities master YAML (cached per path)."""
     path = Path(path_str)
     data = _load_yaml(path) if path.exists() else None
     name_index: dict[str, dict[str, Any]] = {}
+    symbol_index: dict[str, dict[str, Any]] = {}
+    alias_accum: dict[str, set[str]] = {}
     symbols: set[str] = set()
+
+    def _add_alias(key: str, symbol: str) -> None:
+        norm = _normalize_alias(key)
+        if not norm or not symbol:
+            return
+        alias_accum.setdefault(norm, set()).add(symbol.upper())
+
     if isinstance(data, dict):
         for entry in data.get("securities") or []:
             if not isinstance(entry, dict):
@@ -81,22 +149,46 @@ def _load_securities_master(path_str: str) -> tuple[dict[str, dict[str, Any]], f
             if not symbol:
                 continue
             name = str(entry.get("name") or "").strip()
-            country = canonical_country(entry.get("country"))
             sec = {
                 "canonical_symbol": symbol,
                 "yahoo_symbol": str(entry.get("yahoo_symbol") or symbol),
+                "local_ticker": str(entry.get("local_ticker") or "").strip(),
                 "exchange_code": str(entry.get("exchange_code") or "").strip().upper(),
-                "country": country,
+                "country": canonical_country(entry.get("country")),
+                "currency": (str(entry.get("currency")).strip() if entry.get("currency") else None),
                 "asset_type": str(entry.get("asset_type") or "EQUITY"),
+                "sector": (str(entry.get("sector")).strip() if entry.get("sector") else None),
                 "name": name,
+                "is_adr": bool(entry.get("is_adr", False)),
+                "adr_ticker": (str(entry.get("adr_ticker")).strip().upper() if entry.get("adr_ticker") else None),
+                "mapping_priority": entry.get("mapping_priority"),
             }
             symbols.add(symbol)
+            symbol_index[symbol] = sec
             if name:
                 name_index[name.lower()] = sec
-    return name_index, frozenset(symbols)
+                _add_alias(name, symbol)
+            company_name = str(entry.get("company_name") or "").strip()
+            if company_name:
+                _add_alias(company_name, symbol)
+            for alias in entry.get("aliases") or []:
+                _add_alias(str(alias), symbol)
+
+        # Top-level explicit aliases (alias -> canonical_symbol).
+        for entry in data.get("aliases") or []:
+            if not isinstance(entry, dict):
+                continue
+            alias = str(entry.get("alias") or "").strip()
+            target = str(entry.get("canonical_symbol") or "").strip().upper()
+            if alias and target:
+                symbols.add(target)
+                _add_alias(alias, target)
+
+    alias_index = {key: frozenset(syms) for key, syms in alias_accum.items()}
+    return _SecuritiesMaster(name_index, symbol_index, alias_index, frozenset(symbols))
 
 
-def _security_master(path: Path | None) -> tuple[dict[str, dict[str, Any]], frozenset[str]]:
+def _security_master(path: Path | None) -> _SecuritiesMaster:
     return _load_securities_master(str(path or SECURITIES_MASTER_PATH))
 
 
@@ -162,17 +254,22 @@ def _mapped(
     method: str,
     reason: str,
     asset_type: str = "EQUITY",
+    currency: str | None = None,
+    is_adr: bool | None = None,
 ) -> dict[str, Any]:
-    is_adr = ticker.upper().endswith(".ADR") or (
-        country not in (None, "United States")
-        and _is_us_listing(exchange, country, ticker)
-    )
+    if is_adr is None:
+        is_adr = ticker.upper().endswith(".ADR") or (
+            country not in (None, "United States")
+            and _is_us_listing(exchange, country, ticker)
+        )
     return {
         "entity_name": entity_name,
         "ticker": ticker.upper(),
         "exchange": exchange.upper(),
         "country": country,
-        "currency": None,
+        "country_confidence": None,
+        "country_method": None,
+        "currency": currency,
         "asset_type": asset_type,
         "mapping_confidence": round(confidence, 4),
         "mapping_method": method,
@@ -189,6 +286,8 @@ def _unmapped(entity_name: str, reason_code: str, detail: str = "") -> dict[str,
         "ticker": None,
         "exchange": "",
         "country": None,
+        "country_confidence": None,
+        "country_method": None,
         "currency": None,
         "asset_type": None,
         "mapping_confidence": 0.0,
@@ -199,6 +298,33 @@ def _unmapped(entity_name: str, reason_code: str, detail: str = "") -> dict[str,
         "is_local_listing": False,
         "reason": detail or reason_code,
     }
+
+
+def _attach_country_confidence(row: dict[str, Any], event: dict[str, Any]) -> None:
+    """Fill ``country_confidence``/``country_method`` (and country if absent).
+
+    For a row that already carries a country (a real mapping), the mapped
+    country is authoritative — we only record how strongly the event evidence
+    corroborates it. For a country-less row (unmapped or no master country) we
+    adopt the deterministically enriched country, which may stay UNKNOWN.
+    """
+    enriched = enrich_country(
+        event,
+        mapped_country=row.get("country"),
+        mapped_ticker=row.get("ticker"),
+        mapped_exchange=row.get("exchange"),
+    )
+    if row.get("country"):
+        if enriched["country"] == row["country"]:
+            row["country_confidence"] = enriched["country_confidence"]
+            row["country_method"] = enriched["country_method"]
+        else:
+            row["country_confidence"] = COUNTRY_CONF_MAPPED
+            row["country_method"] = "mapped_ticker_country"
+    else:
+        row["country"] = enriched["country"] if enriched["country"] != "UNKNOWN" else None
+        row["country_confidence"] = enriched["country_confidence"]
+        row["country_method"] = enriched["country_method"]
 
 
 def map_event_to_tickers(
@@ -214,7 +340,11 @@ def map_event_to_tickers(
     Returns a non-empty list. When nothing maps, the single row has
     ``mapping_status="UNMAPPED"`` and a ``mapping_failure_reason``.
     """
-    name_index, symbol_set = _security_master(securities_master_path)
+    master_data = _security_master(securities_master_path)
+    name_index = master_data.name_index
+    symbol_index = master_data.symbol_index
+    alias_index = master_data.alias_index
+    symbol_set = master_data.symbol_set
     phantom_set = {t.upper() for t in (phantom_set or set())}
     entity_name = _entity_name(event)
     raw_ticker = _raw_ticker(event)
@@ -231,10 +361,7 @@ def map_event_to_tickers(
     if raw_ticker:
         suffix_country = country_from_ticker(raw_ticker)
         country = suffix_country or event_country
-        master = next(
-            (s for s in name_index.values() if s["canonical_symbol"] == raw_ticker),
-            None,
-        )
+        master = symbol_index.get(raw_ticker)
         exchange = master["exchange_code"] if master else ""
         if master and master.get("country"):
             country = master["country"]
@@ -248,6 +375,7 @@ def map_event_to_tickers(
                 confidence=confidence,
                 method="passthrough_ticker",
                 reason="event carried an explicit ticker/identifier",
+                currency=(master or {}).get("currency"),
             )
         )
 
@@ -262,10 +390,7 @@ def map_event_to_tickers(
         except Exception:
             canonical = None
         if canonical:
-            master = next(
-                (s for s in name_index.values() if s["canonical_symbol"] == canonical.upper()),
-                None,
-            )
+            master = symbol_index.get(canonical.upper())
             country = (master or {}).get("country") or event_country or country_from_ticker(canonical)
             exchange = (master or {}).get("exchange_code", "")
             confidence = _confidence(
@@ -285,6 +410,7 @@ def map_event_to_tickers(
                     confidence=confidence,
                     method="alias_db",
                     reason="resolved via global_security_aliases",
+                    currency=(master or {}).get("currency"),
                 )
             )
 
@@ -310,8 +436,59 @@ def map_event_to_tickers(
                     method="securities_master_exact",
                     reason="exact name match in global securities master",
                     asset_type=sec["asset_type"],
+                    currency=sec.get("currency"),
                 )
             )
+
+    # --- 3b. Deterministic alias-index resolution. ---
+    # Normalized aliases from the YAML (top-level + per-security `aliases` +
+    # suffix-stripped names). An exact alias hit scores high; an alias that
+    # resolves to more than one distinct symbol is AMBIGUOUS and is never
+    # silently collapsed to a single ticker.
+    if not results and entity_name:
+        norm = _normalize_alias(entity_name)
+        candidate_symbols = alias_index.get(norm) if norm else None
+        if candidate_symbols:
+            if len(candidate_symbols) == 1:
+                symbol = next(iter(candidate_symbols))
+                sec = symbol_index.get(symbol)
+                country = (
+                    (sec or {}).get("country")
+                    or event_country
+                    or country_from_ticker(symbol)
+                )
+                exchange = (sec or {}).get("exchange_code", "")
+                confidence = _confidence(
+                    exact_alias_match=True,
+                    country_match=bool(event_country and country == event_country),
+                    exchange_or_suffix_match=bool(exchange or country_from_ticker(symbol)),
+                    source_asset_tag_match=bool(asset_tags),
+                    headline_context_match=True,
+                    provider_entity_confidence=provider_conf,
+                )
+                results.append(
+                    _mapped(
+                        entity_name=entity_name,
+                        ticker=symbol,
+                        exchange=exchange,
+                        country=country,
+                        confidence=confidence,
+                        method="alias_index",
+                        reason="exact alias match in securities master alias index",
+                        asset_type=(sec or {}).get("asset_type", "EQUITY"),
+                        currency=(sec or {}).get("currency"),
+                        is_adr=(sec or {}).get("is_adr"),
+                    )
+                )
+            else:
+                return [
+                    _unmapped(
+                        entity_name,
+                        "AMBIGUOUS_ENTITY",
+                        f"alias '{norm}' resolves to {len(candidate_symbols)} distinct symbols: "
+                        + ", ".join(sorted(candidate_symbols)),
+                    )
+                ]
 
     # --- 4. Securities-master fuzzy (token-prefix) match. ---
     if not results and entity_name:
@@ -346,6 +523,7 @@ def map_event_to_tickers(
                     method="securities_master_fuzzy",
                     reason="single fuzzy name match in securities master",
                     asset_type=sec["asset_type"],
+                    currency=sec.get("currency"),
                 )
             )
         elif len(fuzzy) > 1:
@@ -360,13 +538,17 @@ def map_event_to_tickers(
     # --- Unmapped handling. ---
     if not results:
         if not entity_name and not raw_ticker:
-            return [_unmapped("", "NO_ENTITY", "event had no entity name or ticker")]
-        if not symbol_set:
-            return [_unmapped(entity_name, "SECURITY_MASTER_EMPTY", "securities master had no entries")]
-        return [_unmapped(entity_name, "NO_ALIAS_MATCH", "no alias/master match for entity")]
+            row = _unmapped("", "NO_ENTITY", "event had no entity name or ticker")
+        elif not symbol_set:
+            row = _unmapped(entity_name, "SECURITY_MASTER_EMPTY", "securities master had no entries")
+        else:
+            row = _unmapped(entity_name, "NO_ALIAS_MATCH", "no alias/master match for entity")
+        _attach_country_confidence(row, event)
+        return [row]
 
     # --- ADR vs local preference + phantom flagging. ---
     for row in results:
+        _attach_country_confidence(row, event)
         if row.get("ticker") and row["ticker"].upper() in phantom_set:
             row["phantom"] = True
             row["reason"] = (row.get("reason", "") + "; ticker is phantom/closed/sold").strip("; ")

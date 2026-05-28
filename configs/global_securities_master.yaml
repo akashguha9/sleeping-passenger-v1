@@ -8,15 +8,31 @@
 # broker_api_called: false
 # broker_order_id: NONE
 #
+# SEED COVERAGE ONLY — this is a deterministic, manually-curated seed of the
+# largest names per major economy. It is NOT a complete market universe and
+# must never be presented as full coverage. Symbols are discovered/backfilled
+# incrementally; absence of a name here means "not yet seeded", not "delisted".
+#
 # Each entry:
 #   canonical_symbol: The primary symbol stored in global_securities (uppercase).
 #   yahoo_symbol:     The yfinance ticker string (may differ from canonical).
+#   local_ticker:     Native exchange ticker if it differs from yahoo_symbol.
 #   exchange_code:    Short exchange identifier.
 #   exchange_name:    Human-readable exchange name.
 #   country:          ISO 3166-1 alpha-2 country code.
+#   currency:         ISO 4217 trading currency (advisory only).
 #   economy_rank:     Approximate GDP rank (1 = largest).
 #   asset_type:       EQUITY | ETF | INDEX | CRYPTO | BOND
 #   name:             Human-readable security name.
+#   company_name:     Optional issuer name when distinct from `name`.
+#   sector:           Coarse GICS-style sector (advisory only).
+#   aliases:          Alternate names/tickers the entity-ticker mapper indexes.
+#   is_adr:           true if this row is a US-listed proxy (ADR/ETF) for a
+#                     foreign issuer.
+#   adr_ticker:       US-listed proxy symbol for this local listing, if any.
+#   mapping_priority: Tie-break priority when several rows could match
+#                     (lower number = preferred). Local listings should rank
+#                     ahead of US proxies.
 #
 # Symbols are discovered/backfilled via:
 #   python scripts/global_security_master_discovery.py --write
@@ -143,6 +159,14 @@ exchanges:
     name: SIX Swiss Exchange
     country: CH
     economy_rank: 20
+  - code: BME
+    name: Bolsa de Madrid (BME)
+    country: ES
+    economy_rank: 16
+  - code: BIT
+    name: Borsa Italiana (Euronext Milan)
+    country: IT
+    economy_rank: 10
 
 # Seed securities — top symbols per exchange for initial discovery
 # yahoo_symbol is the ticker used with yfinance
@@ -232,19 +256,36 @@ securities:
   # --- Japan ---
   - canonical_symbol: 7203.T
     yahoo_symbol: 7203.T
+    local_ticker: "7203"
     exchange_code: TSE
     country: JP
+    currency: JPY
     economy_rank: 3
     asset_type: EQUITY
     name: Toyota Motor Corporation
+    sector: Consumer Discretionary
+    mapping_priority: 1
+    is_adr: false
+    adr_ticker: TM
+    aliases:
+      - Toyota
+      - Toyota Motor
+      - Toyota Motor Corp
 
   - canonical_symbol: 6758.T
     yahoo_symbol: 6758.T
+    local_ticker: "6758"
     exchange_code: TSE
     country: JP
+    currency: JPY
     economy_rank: 3
     asset_type: EQUITY
     name: Sony Group Corporation
+    sector: Consumer Discretionary
+    mapping_priority: 1
+    aliases:
+      - Sony
+      - Sony Group
 
   - canonical_symbol: EWJ
     yahoo_symbol: EWJ
@@ -257,28 +298,53 @@ securities:
   # --- Germany ---
   - canonical_symbol: SAP.DE
     yahoo_symbol: SAP.DE
+    local_ticker: SAP
     exchange_code: FSE
     country: DE
+    currency: EUR
     economy_rank: 4
     asset_type: EQUITY
     name: SAP SE
+    sector: Information Technology
+    mapping_priority: 1
+    is_adr: false
+    adr_ticker: SAP
+    aliases:
+      - SAP
+      - SAP AG
 
   - canonical_symbol: VOW3.DE
     yahoo_symbol: VOW3.DE
+    local_ticker: VOW3
     exchange_code: FSE
     country: DE
+    currency: EUR
     economy_rank: 4
     asset_type: EQUITY
     name: Volkswagen AG
+    sector: Consumer Discretionary
+    mapping_priority: 1
+    aliases:
+      - Volkswagen
+      - VW
+      - Volkswagen Group
 
   # --- India ---
   - canonical_symbol: RELIANCE.NS
     yahoo_symbol: RELIANCE.NS
+    local_ticker: RELIANCE
     exchange_code: NSE
     country: IN
+    currency: INR
     economy_rank: 5
     asset_type: EQUITY
     name: Reliance Industries Limited
+    sector: Energy
+    mapping_priority: 1
+    aliases:
+      - Reliance
+      - Reliance Industries
+      - RIL
 
   - canonical_symbol: SBIN.NS
     yahoo_symbol: SBIN.NS
@@ -290,19 +356,35 @@ securities:
 
   - canonical_symbol: INFY.NS
     yahoo_symbol: INFY.NS
+    local_ticker: INFY
     exchange_code: NSE
     country: IN
+    currency: INR
     economy_rank: 5
     asset_type: EQUITY
     name: Infosys Limited
+    sector: Information Technology
+    mapping_priority: 1
+    is_adr: false
+    adr_ticker: INFY
+    aliases:
+      - Infosys
+      - Infosys Ltd
 
   - canonical_symbol: TCS.NS
     yahoo_symbol: TCS.NS
+    local_ticker: TCS
     exchange_code: NSE
     country: IN
+    currency: INR
     economy_rank: 5
     asset_type: EQUITY
     name: Tata Consultancy Services Limited
+    sector: Information Technology
+    mapping_priority: 1
+    aliases:
+      - TCS
+      - Tata Consultancy Services
 
   - canonical_symbol: INDA
     yahoo_symbol: INDA
@@ -315,37 +397,68 @@ securities:
   # --- United Kingdom ---
   - canonical_symbol: SHEL.L
     yahoo_symbol: SHEL.L
+    local_ticker: SHEL
     exchange_code: LSE
     country: GB
+    currency: GBP
     economy_rank: 6
     asset_type: EQUITY
     name: Shell plc
+    sector: Energy
+    mapping_priority: 1
+    is_adr: false
+    adr_ticker: SHEL
+    aliases:
+      - Shell
+      - Royal Dutch Shell
+      - Shell Plc
 
   - canonical_symbol: HSBA.L
     yahoo_symbol: HSBA.L
+    local_ticker: HSBA
     exchange_code: LSE
     country: GB
+    currency: GBP
     economy_rank: 6
     asset_type: EQUITY
     name: HSBC Holdings plc
+    sector: Financials
+    mapping_priority: 1
 
   # --- France ---
   - canonical_symbol: LVMH.PA
     yahoo_symbol: MC.PA
+    local_ticker: MC
     exchange_code: Euronext
     country: FR
+    currency: EUR
     economy_rank: 7
     asset_type: EQUITY
     name: LVMH Moët Hennessy Louis Vuitton SE
+    sector: Consumer Discretionary
+    mapping_priority: 1
+    aliases:
+      - LVMH
+      - Louis Vuitton
+      - Moet Hennessy Louis Vuitton
 
   # --- Canada ---
   - canonical_symbol: RY.TO
     yahoo_symbol: RY.TO
+    local_ticker: RY
     exchange_code: TSX
     country: CA
+    currency: CAD
     economy_rank: 9
     asset_type: EQUITY
     name: Royal Bank of Canada
+    sector: Financials
+    mapping_priority: 1
+    is_adr: false
+    adr_ticker: RY
+    aliases:
+      - RBC
+      - Royal Bank of Canada
 
   - canonical_symbol: SHOP.TO
     yahoo_symbol: SHOP.TO
@@ -358,11 +471,18 @@ securities:
   # --- South Korea ---
   - canonical_symbol: 005930.KS
     yahoo_symbol: 005930.KS
+    local_ticker: "005930"
     exchange_code: KRX
     country: KR
+    currency: KRW
     economy_rank: 13
     asset_type: EQUITY
     name: Samsung Electronics Co. Ltd.
+    sector: Information Technology
+    mapping_priority: 1
+    aliases:
+      - Samsung
+      - Samsung Electronics
 
   - canonical_symbol: EWY
     yahoo_symbol: EWY
@@ -375,11 +495,21 @@ securities:
   # --- Australia ---
   - canonical_symbol: BHP.AX
     yahoo_symbol: BHP.AX
+    local_ticker: BHP
     exchange_code: ASX
     country: AU
+    currency: AUD
     economy_rank: 13
     asset_type: EQUITY
     name: BHP Group Limited
+    sector: Materials
+    mapping_priority: 1
+    is_adr: false
+    adr_ticker: BHP
+    aliases:
+      - BHP
+      - BHP Group
+      - BHP Billiton
 
   - canonical_symbol: CBA.AX
     yahoo_symbol: CBA.AX
@@ -400,11 +530,21 @@ securities:
   # --- Taiwan ---
   - canonical_symbol: 2330.TW
     yahoo_symbol: 2330.TW
+    local_ticker: "2330"
     exchange_code: TWSE
     country: TW
+    currency: TWD
     economy_rank: 22
     asset_type: EQUITY
     name: Taiwan Semiconductor Manufacturing Co. Ltd.
+    sector: Information Technology
+    mapping_priority: 1
+    is_adr: false
+    adr_ticker: TSM
+    aliases:
+      - TSMC
+      - Taiwan Semiconductor
+      - Taiwan Semiconductor Manufacturing
 
   - canonical_symbol: 2002.TW
     yahoo_symbol: 2002.TW
@@ -425,11 +565,20 @@ securities:
   # --- Brazil ---
   - canonical_symbol: PETR4.SA
     yahoo_symbol: PETR4.SA
+    local_ticker: PETR4
     exchange_code: BVMF
     country: BR
+    currency: BRL
     economy_rank: 12
     asset_type: EQUITY
     name: Petróleo Brasileiro S.A. – Petrobras
+    sector: Energy
+    mapping_priority: 1
+    is_adr: false
+    adr_ticker: PBR
+    aliases:
+      - Petrobras
+      - Petroleo Brasileiro
 
   - canonical_symbol: VALE3.SA
     yahoo_symbol: VALE3.SA
@@ -450,11 +599,18 @@ securities:
   # --- Hong Kong ---
   - canonical_symbol: 0700.HK
     yahoo_symbol: 0700.HK
+    local_ticker: "0700"
     exchange_code: HKEX
     country: HK
+    currency: HKD
     economy_rank: 25
     asset_type: EQUITY
     name: Tencent Holdings Limited
+    sector: Communication Services
+    mapping_priority: 1
+    aliases:
+      - Tencent
+      - Tencent Holdings
 
   - canonical_symbol: 0005.HK
     yahoo_symbol: 0005.HK
@@ -467,11 +623,19 @@ securities:
   # --- Singapore ---
   - canonical_symbol: D05.SI
     yahoo_symbol: D05.SI
+    local_ticker: D05
     exchange_code: SGX
     country: SG
+    currency: SGD
     economy_rank: 37
     asset_type: EQUITY
     name: DBS Group Holdings Ltd
+    sector: Financials
+    mapping_priority: 1
+    aliases:
+      - DBS
+      - DBS Group
+      - DBS Bank
 
   - canonical_symbol: EWS
     yahoo_symbol: EWS
@@ -493,11 +657,18 @@ securities:
   # --- Switzerland ---
   - canonical_symbol: NESN.SW
     yahoo_symbol: NESN.SW
+    local_ticker: NESN
     exchange_code: SIX
     country: CH
+    currency: CHF
     economy_rank: 20
     asset_type: EQUITY
     name: Nestlé S.A.
+    sector: Consumer Staples
+    mapping_priority: 1
+    aliases:
+      - Nestle
+      - Nestle SA
 
   - canonical_symbol: ROG.SW
     yahoo_symbol: ROG.SW
@@ -510,11 +681,20 @@ securities:
   # --- Netherlands ---
   - canonical_symbol: ASML.AS
     yahoo_symbol: ASML.AS
+    local_ticker: ASML
     exchange_code: Euronext
     country: NL
+    currency: EUR
     economy_rank: 17
     asset_type: EQUITY
     name: ASML Holding N.V.
+    sector: Information Technology
+    mapping_priority: 1
+    is_adr: false
+    adr_ticker: ASML
+    aliases:
+      - ASML
+      - ASML Holding
 
   # --- Mexico ---
   - canonical_symbol: AMXL.MX
@@ -554,11 +734,104 @@ securities:
   # --- Malaysia ---
   - canonical_symbol: 1155.KL
     yahoo_symbol: 1155.KL
+    local_ticker: "1155"
     exchange_code: BM
     country: MY
+    currency: MYR
     economy_rank: 38
     asset_type: EQUITY
     name: Malayan Banking Berhad (Maybank)
+    sector: Financials
+    mapping_priority: 1
+    aliases:
+      - Maybank
+      - Malayan Banking
+
+  # --- Spain --- (seed coverage)
+  - canonical_symbol: ITX.MC
+    yahoo_symbol: ITX.MC
+    local_ticker: ITX
+    exchange_code: BME
+    country: ES
+    currency: EUR
+    economy_rank: 16
+    asset_type: EQUITY
+    name: Industria de Diseño Textil S.A. (Inditex)
+    sector: Consumer Discretionary
+    mapping_priority: 1
+    aliases:
+      - Inditex
+      - Zara
+      - Industria de Diseno Textil
+
+  - canonical_symbol: SAN.MC
+    yahoo_symbol: SAN.MC
+    local_ticker: SAN
+    exchange_code: BME
+    country: ES
+    currency: EUR
+    economy_rank: 16
+    asset_type: EQUITY
+    name: Banco Santander S.A.
+    sector: Financials
+    mapping_priority: 1
+    is_adr: false
+    adr_ticker: SAN
+    aliases:
+      - Santander
+      - Banco Santander
+
+  - canonical_symbol: EWP
+    yahoo_symbol: EWP
+    exchange_code: NYSE
+    country: ES
+    currency: USD
+    economy_rank: 16
+    asset_type: ETF
+    name: iShares MSCI Spain ETF
+    is_adr: true
+    mapping_priority: 5
+
+  # --- Italy --- (seed coverage)
+  - canonical_symbol: ENEL.MI
+    yahoo_symbol: ENEL.MI
+    local_ticker: ENEL
+    exchange_code: BIT
+    country: IT
+    currency: EUR
+    economy_rank: 10
+    asset_type: EQUITY
+    name: Enel S.p.A.
+    sector: Utilities
+    mapping_priority: 1
+    aliases:
+      - Enel
+
+  - canonical_symbol: ISP.MI
+    yahoo_symbol: ISP.MI
+    local_ticker: ISP
+    exchange_code: BIT
+    country: IT
+    currency: EUR
+    economy_rank: 10
+    asset_type: EQUITY
+    name: Intesa Sanpaolo S.p.A.
+    sector: Financials
+    mapping_priority: 1
+    aliases:
+      - Intesa Sanpaolo
+      - Intesa
+
+  - canonical_symbol: EWI
+    yahoo_symbol: EWI
+    exchange_code: NYSE
+    country: IT
+    currency: USD
+    economy_rank: 10
+    asset_type: ETF
+    name: iShares MSCI Italy ETF
+    is_adr: true
+    mapping_priority: 5
 
 # Known aliases for common alternate forms
 # These allow SBI.NSE -> SBIN.NS resolution etc.
