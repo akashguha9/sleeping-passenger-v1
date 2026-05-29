@@ -59,12 +59,14 @@ try:
     from scripts.core.external_evidence_router import ExternalEvidenceRouter
     from scripts.external_adapters.base import ExternalEvidence
     from scripts.external_adapters.registry import ExternalAdapterRegistry
+    from scripts import external_evidence_weight_readback as weight_readback
     from scripts.runtime_common import REPO_ROOT, utc_timestamp
 except ModuleNotFoundError:  # pragma: no cover - script-style env
     from advisory_contract import advisory_safety_stamps, human_only_stamp
     from core.external_evidence_router import ExternalEvidenceRouter
     from external_adapters.base import ExternalEvidence
     from external_adapters.registry import ExternalAdapterRegistry
+    import external_evidence_weight_readback as weight_readback  # type: ignore[no-redef]
     from runtime_common import REPO_ROOT, utc_timestamp
 
 try:
@@ -108,6 +110,15 @@ _KNOWN_PERMISSIONS = frozenset(
 # Safety classes external evidence can never upgrade past.
 _SAFETY_VETO_CLASSES = frozenset({"DIABLO", "NO_NEW_RISK", "CHAOS_VETO"})
 _CLASS_WATCHLIST = "WATCHLIST"
+
+# Paper-only calibration mode (Section 4 p_i).  Real-money sizing is PROHIBITED.
+CALIBRATION_MODE_PAPER_ONLY = "PAPER_ONLY"
+REAL_MONEY_SIZING_IMPACT = "PROHIBITED"
+
+# Calibration-block proof statuses.
+CALIBRATION_PROOF_APPLIED = "PAPER_ONLY_CALIBRATED_READBACK"
+CALIBRATION_PROOF_DISABLED = "CALIBRATION_DISABLED_NO_READBACK"
+CALIBRATION_PROOF_ERROR_SAFE = "CALIBRATION_READBACK_FAILED_SAFE_DEFAULT"
 
 
 def _clip(value: float, low: float, high: float) -> float:
@@ -222,12 +233,37 @@ def _empty_bundle(
         "external_evidence_items": [],
         "max_positive_score_delta": MAX_POSITIVE_SCORE_DELTA,
         "max_negative_score_delta": MAX_NEGATIVE_SCORE_DELTA,
+        # Calibration readback (paper-only).  Defaults to a disabled, zero-impact
+        # block so every consumer (frontend / persistence / markdown) finds it.
+        "external_evidence_score_delta_raw_uncalibrated": 0.0,
+        "external_evidence_score_delta_paper_calibrated": 0.0,
+        "external_evidence_score_delta_final": 0.0,
+        "external_evidence_calibration": _disabled_calibration_block(),
         "notes": list(notes or []),
         "generated_at_utc": utc_timestamp(),
         "safety": advisory_safety_stamps(),
         "execution": human_only_stamp(),
     }
     return bundle
+
+
+def _disabled_calibration_block(
+    proof_status: str = CALIBRATION_PROOF_DISABLED,
+) -> dict[str, Any]:
+    """A zero-impact calibration block (disabled / no accepted evidence)."""
+    return {
+        "enabled": False,
+        "applied_to_score_delta": False,
+        "mode": CALIBRATION_MODE_PAPER_ONLY,
+        "calibrated_items_count": 0,
+        "cold_start_items_count": 0,
+        "mature_items_count": 0,
+        "max_positive_score_delta": MAX_POSITIVE_SCORE_DELTA,
+        "max_negative_score_delta": MAX_NEGATIVE_SCORE_DELTA,
+        "real_money_weight_allowed": False,
+        "real_money_sizing_impact": REAL_MONEY_SIZING_IMPACT,
+        "proof_status": proof_status,
+    }
 
 
 def _route_one(
@@ -388,6 +424,100 @@ def _failed_item(
     return item
 
 
+def _open_calibration_conn(
+    calibration_conn: Any,
+    calibration_db_path: Path | None,
+) -> tuple[Any, bool]:
+    """Return ``(conn_or_None, owned)``.
+
+    An explicit ``calibration_conn`` is used as-is (never closed here).
+    Otherwise the canonical SQLite store is opened lazily via the persistence
+    layer.  Any open failure degrades to ``(None, False)`` so calibration falls
+    back to the error-safe default rather than breaking the daily run.
+    """
+    if calibration_conn is not None:
+        return calibration_conn, False
+    try:
+        try:
+            from scripts.external_evidence_persistence import _open as _open_db
+        except ModuleNotFoundError:  # pragma: no cover - script-style env
+            from external_evidence_persistence import _open as _open_db  # type: ignore[no-redef]
+        return _open_db(calibration_db_path), True
+    except Exception:  # noqa: BLE001 - calibration DB is optional / failed-safe
+        return None, False
+
+
+def _apply_calibration_pass(
+    accepted: list[dict[str, Any]],
+    conn: Any,
+) -> dict[str, Any]:
+    """Apply paper-only calibrated weights to each accepted item, in place.
+
+    For each item:
+        delta_i_raw        = a_i * r_i * q_i
+        c_i_final          = bucket effective weight (sample-gated + harm-damped)
+        p_i                = 1.0 (paper / advisory context only)
+        delta_i_calibrated = delta_i_raw * c_i_final * p_i
+
+    The item's ``score_delta`` is overwritten with ``delta_i_calibrated`` so the
+    bundle sum is the paper-calibrated contribution; the uncalibrated raw value
+    is preserved under ``score_delta_raw_uncalibrated``.
+
+    Returns aggregate counters used to build the bundle calibration block.
+    """
+    cold = 0
+    mature = 0
+    error_safe = 0
+    for item in accepted:
+        a_i = float(item.get("alignment_score") or 0.0)
+        r_i = float(item.get("router_safety_multiplier") or 0.0)
+        q_i = float(item.get("evidence_quality_multiplier") or 0.0)
+        delta_raw = a_i * r_i * q_i
+
+        cal = weight_readback.calibrated_weight_for_item(conn, item)
+        c_final = float(cal["effective_weight"])
+        p_i = weight_readback.paper_only_eligibility(
+            CALIBRATION_MODE_PAPER_ONLY, str(item.get("status") or "")
+        )
+        delta_calibrated = round(delta_raw * c_final * p_i, 6)
+
+        item["score_delta_raw_uncalibrated"] = round(delta_raw, 6)
+        item["score_delta"] = delta_calibrated
+        item["score_delta_paper_calibrated"] = delta_calibrated
+        item["calibration_bucket_id"] = cal["bucket_id"]
+        item["calibration_confidence_band"] = cal["confidence_band"]
+        item["calibration_sample_count"] = cal["sample_count"]
+        item["calibration_help_rate"] = cal["help_rate"]
+        item["calibration_harm_rate"] = cal["harm_rate"]
+        item["calibration_false_confidence_rate"] = cal["false_confidence_rate"]
+        item["calibration_raw_reliability"] = cal["raw_reliability"]
+        item["calibration_sample_multiplier"] = cal["sample_multiplier"]
+        item["calibration_advisory_weight"] = cal["advisory_weight"]
+        item["calibration_effective_weight"] = cal["effective_weight"]
+        item["calibration_harm_damping"] = cal["harm_damping"]
+        item["calibration_weight_source"] = cal["weight_source"]
+        item["calibration_reliability_label"] = cal["reliability_label"]
+        item["calibration_operator_message"] = cal["operator_message"]
+        item["paper_only_weight_applied"] = bool(p_i > 0.0)
+        item["real_money_weight_allowed"] = False
+        item["real_money_sizing_impact"] = REAL_MONEY_SIZING_IMPACT
+
+        label = cal["reliability_label"]
+        if cal["weight_source"] == weight_readback.WEIGHT_SOURCE_ERROR_SAFE:
+            error_safe += 1
+        if label == weight_readback.LABEL_COLD_START:
+            cold += 1
+        elif label == weight_readback.LABEL_MATURE:
+            mature += 1
+
+    return {
+        "calibrated_items_count": len(accepted),
+        "cold_start_items_count": cold,
+        "mature_items_count": mature,
+        "error_safe_items_count": error_safe,
+    }
+
+
 def build_external_evidence_bundle(
     *,
     config_path: Path | None = None,
@@ -396,6 +526,9 @@ def build_external_evidence_bundle(
     adapter_context: dict[str, Any] | None = None,
     registry: ExternalAdapterRegistry | None = None,
     router: ExternalEvidenceRouter | None = None,
+    apply_calibration: bool = True,
+    calibration_conn: Any = None,
+    calibration_db_path: Path | None = None,
 ) -> dict[str, Any]:
     """Run the advisory external-evidence enrichment stage.
 
@@ -455,8 +588,48 @@ def build_external_evidence_bundle(
     rejected = [i for i in items if i.get("_rejected")]
     errored = [i for i in items if i.get("_errored")]
 
-    delta_raw = sum(float(i.get("score_delta") or 0.0) for i in accepted)
-    delta_ext = round(_clip(delta_raw, MAX_NEGATIVE_SCORE_DELTA, MAX_POSITIVE_SCORE_DELTA), 6)
+    # Legacy (uncalibrated) per-item contribution: w_i * a_i * r_i * q_i.
+    delta_legacy = sum(float(i.get("score_delta") or 0.0) for i in accepted)
+
+    # Paper-only calibrated readback.  delta_i_raw drops the generic w_i in
+    # favour of the bucket-learned weight c_i_final (Section 4).  Applied only
+    # when there is accepted evidence; degrades safe on any DB failure.
+    calib_counts = {
+        "calibrated_items_count": 0,
+        "cold_start_items_count": 0,
+        "mature_items_count": 0,
+        "error_safe_items_count": 0,
+    }
+    calibration_applied = False
+    if apply_calibration and accepted:
+        conn, owned = _open_calibration_conn(calibration_conn, calibration_db_path)
+        try:
+            calib_counts = _apply_calibration_pass(accepted, conn)
+            calibration_applied = True
+        except Exception:  # noqa: BLE001 - calibration never breaks the bundle
+            calibration_applied = False
+        finally:
+            if owned and conn is not None:
+                try:
+                    conn.close()
+                except Exception:  # pragma: no cover - defensive
+                    pass
+
+    if calibration_applied:
+        delta_raw_uncalibrated = sum(
+            float(i.get("score_delta_raw_uncalibrated") or 0.0) for i in accepted
+        )
+        delta_calibrated_raw = sum(
+            float(i.get("score_delta") or 0.0) for i in accepted
+        )
+    else:
+        delta_raw_uncalibrated = delta_legacy
+        delta_calibrated_raw = delta_legacy
+
+    delta_ext = round(
+        _clip(delta_calibrated_raw, MAX_NEGATIVE_SCORE_DELTA, MAX_POSITIVE_SCORE_DELTA),
+        6,
+    )
 
     if not items:
         status = STATUS_NO_ENABLED_ADAPTERS
@@ -482,7 +655,33 @@ def build_external_evidence_bundle(
     bundle["external_evidence_error_count"] = len(errored)
     bundle["external_evidence_score_delta"] = delta_ext
     bundle["external_evidence_decision_impact"] = impact
-    bundle["external_evidence_score_delta_raw"] = round(delta_raw, 6)
+    bundle["external_evidence_score_delta_raw"] = round(delta_raw_uncalibrated, 6)
+    bundle["external_evidence_score_delta_raw_uncalibrated"] = round(
+        delta_raw_uncalibrated, 6
+    )
+    bundle["external_evidence_score_delta_paper_calibrated"] = delta_ext
+    bundle["external_evidence_score_delta_final"] = delta_ext
+
+    if calibration_applied and status == STATUS_ACCEPTED:
+        proof = (
+            CALIBRATION_PROOF_ERROR_SAFE
+            if calib_counts.get("error_safe_items_count")
+            else CALIBRATION_PROOF_APPLIED
+        )
+        bundle["external_evidence_calibration"] = {
+            "enabled": True,
+            "applied_to_score_delta": True,
+            "mode": CALIBRATION_MODE_PAPER_ONLY,
+            "calibrated_items_count": calib_counts["calibrated_items_count"],
+            "cold_start_items_count": calib_counts["cold_start_items_count"],
+            "mature_items_count": calib_counts["mature_items_count"],
+            "max_positive_score_delta": MAX_POSITIVE_SCORE_DELTA,
+            "max_negative_score_delta": MAX_NEGATIVE_SCORE_DELTA,
+            "real_money_weight_allowed": False,
+            "real_money_sizing_impact": REAL_MONEY_SIZING_IMPACT,
+            "proof_status": proof,
+        }
+
     bundle["external_evidence_items"] = [_public_item(i) for i in items]
     return bundle
 
@@ -616,6 +815,44 @@ def render_external_evidence_markdown(bundle: dict[str, Any]) -> str:
         "create a buy/sell, call a broker, or override a chaos/safety veto. "
         "Human review required."
     )
+    lines.append("")
+    lines.append(render_external_evidence_reliability_block(bundle))
+    return "\n".join(lines)
+
+
+def render_external_evidence_reliability_block(bundle: dict[str, Any]) -> str:
+    """Render the compact EXTERNAL EVIDENCE RELIABILITY operator block (Section 10).
+
+    Paper-only by contract: it always states ``Mode: PAPER_ONLY`` and
+    ``Real-money sizing: PROHIBITED`` when calibration is active, and never
+    emits any execution-instruction wording.
+    """
+    cal = bundle.get("external_evidence_calibration") or {}
+    lines: list[str] = ["EXTERNAL EVIDENCE RELIABILITY"]
+    if not cal.get("enabled") or not cal.get("applied_to_score_delta"):
+        lines.append("- Disabled")
+        lines.append("- No decision impact")
+        return "\n".join(lines)
+    lines.append(f"- Mode: {cal.get('mode', CALIBRATION_MODE_PAPER_ONLY)}")
+    lines.append(f"- Real-money sizing: {REAL_MONEY_SIZING_IMPACT}")
+    lines.append(f"- Items: {bundle.get('external_evidence_accepted_count', 0)}")
+    lines.append(f"- Calibrated: {cal.get('calibrated_items_count', 0)}")
+    lines.append(f"- Cold start: {cal.get('cold_start_items_count', 0)}")
+    lines.append(f"- Mature paper-only: {cal.get('mature_items_count', 0)}")
+    lines.append(
+        f"- Raw delta: {bundle.get('external_evidence_score_delta_raw_uncalibrated', 0.0)}"
+    )
+    lines.append(
+        "- Paper-calibrated delta: "
+        f"{bundle.get('external_evidence_score_delta_paper_calibrated', 0.0)}"
+    )
+    lines.append(
+        f"- Final delta: {bundle.get('external_evidence_score_delta_final', 0.0)}"
+    )
+    lines.append(
+        f"- Max boost/penalty: +{MAX_POSITIVE_SCORE_DELTA} / {MAX_NEGATIVE_SCORE_DELTA}"
+    )
+    lines.append("- Warning: evidence reliability is advisory only")
     return "\n".join(lines)
 
 
@@ -659,9 +896,12 @@ __all__ = [
     "STATUS_ROUTER_REJECTED",
     "IMPACT_NONE",
     "IMPACT_ADVISORY_CONTEXT_ONLY",
+    "CALIBRATION_MODE_PAPER_ONLY",
+    "REAL_MONEY_SIZING_IMPACT",
     "build_external_evidence_bundle",
     "apply_external_evidence_to_score",
     "render_external_evidence_markdown",
+    "render_external_evidence_reliability_block",
 ]
 
 

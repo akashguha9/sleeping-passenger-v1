@@ -473,6 +473,18 @@ def _write_artifacts(result: dict[str, Any], context_md: str) -> None:
             "accepted_count": (result.get("external_evidence") or {}).get(
                 "external_evidence_accepted_count"
             ),
+            "score_delta_raw_uncalibrated": (
+                result.get("external_evidence") or {}
+            ).get("external_evidence_score_delta_raw_uncalibrated"),
+            "score_delta_paper_calibrated": (
+                result.get("external_evidence") or {}
+            ).get("external_evidence_score_delta_paper_calibrated"),
+            "score_delta_final": (result.get("external_evidence") or {}).get(
+                "external_evidence_score_delta_final"
+            ),
+            "calibration": (result.get("external_evidence") or {}).get(
+                "external_evidence_calibration"
+            ),
         },
         "external_evidence_persistence": _persistence_summary(
             result.get("external_evidence_persistence") or {}

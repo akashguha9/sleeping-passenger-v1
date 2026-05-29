@@ -222,10 +222,29 @@ execution permissions, and only writes outcome/calibration records. A second
 `--apply` run creates zero duplicates. `--source-name` selects trades that have
 at least one snapshot from that source.
 
+## 7b. Readback into paper-only scoring
+
+As of the *paper-only calibrated weight readback* sprint, `w_b` is no longer
+record-only. `scripts/external_evidence_weight_readback.py` reads the bucket
+back at signal time and the advisory scoring stage multiplies the resulting
+**effective paper weight** `c_i_final` into each item's raw contribution:
+
+```
+delta_i_raw        = a_i * r_i * q_i          (the generic confidence proxy w_i is dropped)
+c_i_final          = clip(min(w_b, sample_cap) * harm_damping, 0.10, 1.25)
+delta_i_calibrated = delta_i_raw * c_i_final * p_i   (p_i = 1 for paper/advisory)
+Delta_ext_paper    = clip(sum_i delta_i_calibrated, -1.00, +0.50)
+```
+
+This affects **paper / advisory analysis only**. It does **not** affect
+execution or real-money sizing: every readback carries
+`real_money_weight_allowed = False` and `real_money_sizing_impact = "PROHIBITED"`,
+and even a mature (`n_b >= 50`) bucket stays paper-only until an explicit,
+audited operator-approval flow exists. Full detail:
+[`EXTERNAL_EVIDENCE_WEIGHT_READBACK.md`](EXTERNAL_EVIDENCE_WEIGHT_READBACK.md).
+
 ## 8. Current limitations
 
-- Calibration weights feed **future paper analysis only** — they are not yet
-  read back into the signal-time score-delta math.
 - Real-money sizing remains prohibited; there is no operator approval flow yet.
 - No frontend card displays snapshots/outcomes/weights.
 - Live adapters (including Kronos) remain disabled by default, so a default
@@ -237,10 +256,10 @@ at least one snapshot from that source.
 
 ## 9. Next sprint after this one
 
-1. **Read calibrated `w_b` back into the score-delta** as an advisory-only
-   prior (still paper-only, still clamped).
-2. **Frontend evidence card**: surface snapshots, outcomes, and per-source
-   reliability — read-only, advisory-only copy.
+1. ~~**Read calibrated `w_b` back into the score-delta**~~ — **done** (paper-only,
+   clamped; see §7b and `EXTERNAL_EVIDENCE_WEIGHT_READBACK.md`).
+2. **Mount the frontend reliability card** (`ExternalEvidenceReliabilityCard.tsx`
+   is implemented + unit-tested but not yet wired into a page/route).
 3. **Operator approval flow** for any real-money use of a mature bucket
    (`n_b >= 50`), gated behind explicit, audited consent — still not part of
    automatic sizing.

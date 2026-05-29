@@ -270,6 +270,14 @@ APPROVED_DOMAINS: tuple[str, ...] = (
     # sizing stays PROHIBITED, real_money_weight_allowed=False; no broker
     # execution, no order placement, no API trading writes.
     "weight_readback",    # external_evidence_weight_readback.py — paper-only w_b readback
+    # Real-provider + C_global activation sprint — advisory-only, read-only
+    # provider resolver + secret-safe logging + country-coverage proof.  Network
+    # is touched only with explicit --allow-network; broker/trading providers are
+    # non-selectable; no order placement, no execution, no API trading writes.
+    # Credential values are never logged (only *_present booleans).
+    "real_price_provider",       # real_price_provider.py — P_price priority resolver (read-only quotes)
+    "provider_secret_redaction", # provider_secret_redaction.py — secret-safe provider logging
+    "coverage_proof",            # country_coverage_proof.py — C_global per-country proof (also "country_coverage")
 )
 
 # Explicit allowlist for individual files / directories whose name does

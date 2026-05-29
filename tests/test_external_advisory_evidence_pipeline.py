@@ -191,25 +191,37 @@ def test_external_evidence_attached_to_daily_payload(tmp_path: Path) -> None:
 
 # ----------------------------------------------------------------------- test 4
 def test_external_evidence_score_delta_clamped() -> None:
-    # Large positive evidence -> capped at +0.50.
+    # Large positive evidence -> capped at +0.50, even AFTER paper-only
+    # calibration (cold-start buckets discount each item, so enough items are
+    # needed to push the calibrated sum past the +0.50 cap).
     pos = FakeAdapter(
         {"enabled": True},
         evidence_type=ExternalEvidenceType.AGENT_COMMITTEE,
         alignment=1.0,
-        n=3,
+        n=6,
     )
     bundle_pos = build_external_evidence_bundle(
         framework_config={"enabled": True}, registry=_isolated_registry(pos)
     )
+    # Raw (uncalibrated, a*r*q) sum exceeds the cap...
     assert bundle_pos["external_evidence_score_delta_raw"] > MAX_POSITIVE_SCORE_DELTA
+    assert (
+        bundle_pos["external_evidence_score_delta_raw_uncalibrated"]
+        > MAX_POSITIVE_SCORE_DELTA
+    )
+    # ...and the paper-calibrated, clamped delta lands exactly on the cap.
     assert bundle_pos["external_evidence_score_delta"] == MAX_POSITIVE_SCORE_DELTA
+    assert (
+        bundle_pos["external_evidence_score_delta_paper_calibrated"]
+        == MAX_POSITIVE_SCORE_DELTA
+    )
 
-    # Large negative evidence -> capped at -1.00.
+    # Large negative evidence -> capped at -1.00 after calibration.
     neg = FakeAdapter(
         {"enabled": True},
         evidence_type=ExternalEvidenceType.AGENT_COMMITTEE,
         alignment=-1.0,
-        n=3,
+        n=10,
     )
     bundle_neg = build_external_evidence_bundle(
         framework_config={"enabled": True}, registry=_isolated_registry(neg)

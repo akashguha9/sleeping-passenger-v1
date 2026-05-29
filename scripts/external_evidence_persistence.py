@@ -133,6 +133,19 @@ CREATE TABLE IF NOT EXISTS external_evidence_snapshots (
     noise_penalty REAL,
     alignment_bonus REAL,
     downside_penalty REAL,
+    -- Paper-only calibration readback (additive; nullable / default-safe).
+    calibration_bucket_id TEXT,
+    calibration_confidence_band TEXT,
+    calibration_sample_count INTEGER,
+    calibration_advisory_weight REAL,
+    calibration_effective_weight REAL,
+    calibration_harm_damping REAL,
+    calibration_weight_source TEXT,
+    calibration_reliability_label TEXT,
+    score_delta_raw_uncalibrated REAL,
+    score_delta_paper_calibrated REAL,
+    paper_only_weight_applied INTEGER NOT NULL DEFAULT 0,
+    real_money_weight_allowed INTEGER NOT NULL DEFAULT 0,
     payload_json TEXT NOT NULL,
     payload_summary TEXT,
     reason TEXT,
@@ -248,13 +261,60 @@ CREATE TABLE IF NOT EXISTS external_evidence_calibration_buckets (
 """
 
 
+# Additive paper-only calibration columns.  Stored as (name, column-def) so the
+# same list drives both the CREATE TABLE body (above) and the idempotent
+# ALTER TABLE migration for databases that predate this sprint.
+_CALIBRATION_SNAPSHOT_COLUMNS: tuple[tuple[str, str], ...] = (
+    ("calibration_bucket_id", "TEXT"),
+    ("calibration_confidence_band", "TEXT"),
+    ("calibration_sample_count", "INTEGER"),
+    ("calibration_advisory_weight", "REAL"),
+    ("calibration_effective_weight", "REAL"),
+    ("calibration_harm_damping", "REAL"),
+    ("calibration_weight_source", "TEXT"),
+    ("calibration_reliability_label", "TEXT"),
+    ("score_delta_raw_uncalibrated", "REAL"),
+    ("score_delta_paper_calibrated", "REAL"),
+    ("paper_only_weight_applied", "INTEGER NOT NULL DEFAULT 0"),
+    ("real_money_weight_allowed", "INTEGER NOT NULL DEFAULT 0"),
+)
+
+
 # ----------------------------------------------------------------------- helpers
+def _migrate_calibration_columns(conn: sqlite3.Connection) -> None:
+    """Idempotently ALTER TABLE to add any missing calibration columns.
+
+    For a fresh DB the columns already exist (CREATE TABLE body).  For a DB that
+    predates this sprint, each missing column is added with ``ADD COLUMN`` —
+    purely additive, never destructive, and old rows still load (new columns
+    read as NULL / their declared default).
+    """
+    try:
+        existing = {
+            row[1]
+            for row in conn.execute(
+                "PRAGMA table_info(external_evidence_snapshots)"
+            ).fetchall()
+        }
+    except sqlite3.Error:  # pragma: no cover - table absent is handled by CREATE
+        return
+    if not existing:
+        return
+    for name, coldef in _CALIBRATION_SNAPSHOT_COLUMNS:
+        if name not in existing:
+            conn.execute(
+                f"ALTER TABLE external_evidence_snapshots ADD COLUMN {name} {coldef}"
+            )
+
+
 def ensure_external_evidence_schema(conn: sqlite3.Connection) -> None:
     """Idempotently create the external-evidence tables + indexes.
 
-    Safe to run repeatedly; never drops or rewrites existing data.
+    Safe to run repeatedly; never drops or rewrites existing data.  Also runs
+    the additive calibration-column migration for pre-existing databases.
     """
     conn.executescript(_SCHEMA_SQL)
+    _migrate_calibration_columns(conn)
     conn.commit()
 
 
@@ -439,6 +499,22 @@ def normalize_external_evidence_item(
         "noise_penalty": _f(payload_summary.get("KRONOS_NOISE_PENALTY")),
         "alignment_bonus": _f(payload_summary.get("KRONOS_ALIGNMENT_BONUS")),
         "downside_penalty": _f(payload_summary.get("KRONOS_DOWNSIDE_PENALTY")),
+        # Paper-only calibration readback (additive; null-safe for old rows).
+        "calibration_bucket_id": _s(item.get("calibration_bucket_id")) or None,
+        "calibration_confidence_band": _s(item.get("calibration_confidence_band"))
+        or None,
+        "calibration_sample_count": item.get("calibration_sample_count"),
+        "calibration_advisory_weight": _f(item.get("calibration_advisory_weight")),
+        "calibration_effective_weight": _f(item.get("calibration_effective_weight")),
+        "calibration_harm_damping": _f(item.get("calibration_harm_damping")),
+        "calibration_weight_source": _s(item.get("calibration_weight_source")) or None,
+        "calibration_reliability_label": _s(item.get("calibration_reliability_label"))
+        or None,
+        "score_delta_raw_uncalibrated": _f(item.get("score_delta_raw_uncalibrated")),
+        "score_delta_paper_calibrated": _f(item.get("score_delta_paper_calibrated")),
+        # Hard safety stamps — forced, never trusted from the adapter.
+        "paper_only_weight_applied": 1 if item.get("paper_only_weight_applied") else 0,
+        "real_money_weight_allowed": 0,
         # Payloads (summary kept small; full payload retained for calibration).
         "payload_json": json.dumps(payload_summary, sort_keys=True, default=str),
         "payload_summary": _short_summary(payload_summary),
@@ -488,7 +564,13 @@ _SNAPSHOT_COLUMNS = (
     "score_delta_raw", "score_delta_clamped", "alignment_score",
     "reliability_weight", "router_multiplier", "evidence_quality",
     "confidence_raw", "confidence_calibrated", "risk_score", "downside_risk",
-    "noise_penalty", "alignment_bonus", "downside_penalty", "payload_json",
+    "noise_penalty", "alignment_bonus", "downside_penalty",
+    "calibration_bucket_id", "calibration_confidence_band",
+    "calibration_sample_count", "calibration_advisory_weight",
+    "calibration_effective_weight", "calibration_harm_damping",
+    "calibration_weight_source", "calibration_reliability_label",
+    "score_delta_raw_uncalibrated", "score_delta_paper_calibrated",
+    "paper_only_weight_applied", "real_money_weight_allowed", "payload_json",
     "payload_summary", "reason", "proof_status", "generated_at_utc",
     "persisted_at_utc", "model_version", "adapter_version", "router_version",
     "scoring_version", "outcome_known", "outcome_linked_at_utc",
@@ -666,6 +748,8 @@ def _row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
         d["ai_execution_count"] = 0
     if "real_money_sizing_impact" in d:
         d["real_money_sizing_impact"] = REAL_MONEY_SIZING_IMPACT
+    if "real_money_weight_allowed" in d:
+        d["real_money_weight_allowed"] = False
     return d
 
 

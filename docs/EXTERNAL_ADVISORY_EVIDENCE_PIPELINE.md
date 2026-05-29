@@ -231,5 +231,6 @@ weight `w_b` (`external_evidence_calibration_buckets`). See
 | Canonical evidence persistence | **wired (SQLite `external_evidence_snapshots`)** |
 | Moltbook outcome calibration | **wired (`external_evidence_outcomes` + buckets)** |
 | Calibration backfill | **wired (dry-run by default)** |
-| Frontend display | future-only (not wired) |
-| Real-money sizing impact | **PROHIBITED (calibration is paper-only)** |
+| Calibration readback (`w_b` → score-delta) | **wired / paper-only** (`scripts/external_evidence_weight_readback.py`; see `docs/EXTERNAL_EVIDENCE_WEIGHT_READBACK.md`) |
+| Frontend reliability card | implemented + unit-tested, **not mounted yet** (`ExternalEvidenceReliabilityCard.tsx`) |
+| Real-money sizing impact | **PROHIBITED** (calibration readback is paper-only; `real_money_weight_allowed=false`) |
