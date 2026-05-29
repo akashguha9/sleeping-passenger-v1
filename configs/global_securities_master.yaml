@@ -329,6 +329,20 @@ securities:
       - VW
       - Volkswagen Group
 
+  - canonical_symbol: RHM.DE
+    yahoo_symbol: RHM.DE
+    local_ticker: RHM
+    exchange_code: FSE
+    country: DE
+    currency: EUR
+    economy_rank: 4
+    asset_type: EQUITY
+    name: Rheinmetall AG
+    sector: Industrials
+    mapping_priority: 1
+    aliases:
+      - Rheinmetall
+
   # --- India ---
   - canonical_symbol: RELIANCE.NS
     yahoo_symbol: RELIANCE.NS

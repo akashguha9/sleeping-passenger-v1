@@ -30,10 +30,12 @@ from typing import Any, Iterable
 try:
     from scripts.advisory_contract import advisory_safety_stamps
     from scripts.entity_ticker_mapper import DEFAULT_THETA_MAP, map_event_to_tickers
+    from scripts.news_entity_country_enrichment import enrich_news_event
     from scripts.top30_country_coverage import canonical_country, country_from_ticker
 except ModuleNotFoundError:  # pragma: no cover - script-style env
     from advisory_contract import advisory_safety_stamps
     from entity_ticker_mapper import DEFAULT_THETA_MAP, map_event_to_tickers
+    from news_entity_country_enrichment import enrich_news_event
     from top30_country_coverage import canonical_country, country_from_ticker
 
 
@@ -114,6 +116,60 @@ def _headline(raw: dict[str, Any]) -> str | None:
     return None
 
 
+def _entity_name(raw: dict[str, Any]) -> str:
+    for key in ("entity_name", "issuer_name", "company", "company_name", "name"):
+        value = str(raw.get(key) or "").strip()
+        if value:
+            return value
+    return ""
+
+
+def _raw_ticker(raw: dict[str, Any]) -> str:
+    for key in ("ticker", "ticker_or_identifier", "symbol"):
+        value = str(raw.get(key) or "").strip()
+        if value:
+            return value
+    return ""
+
+
+def _enrich_news_raw(
+    raw: dict[str, Any],
+    *,
+    db_path: Path | None,
+    securities_master_path: Path | None,
+    theta_map: float,
+) -> dict[str, Any]:
+    """Return a copy of a news raw_payload with deterministic enrichment.
+
+    Only injects ``entity_name`` (and ticker) when a *valid* news mapping is
+    found; always writes back a confidently-enriched country. Honest + safe:
+    a low-confidence / ambiguous headline mention never fabricates an entity,
+    and the failure reason is preserved for evidence feedback.
+    """
+    try:
+        enr = enrich_news_event(
+            raw,
+            db_path=db_path,
+            securities_master_path=securities_master_path,
+            theta_map=theta_map,
+        )
+    except Exception:  # pragma: no cover - enrichment must never break ingestion
+        return raw
+    out = dict(raw)
+    if enr.get("valid_news_mapping"):
+        out["entity_name"] = enr["entity_name"]
+        if enr.get("ticker"):
+            out["ticker"] = enr["ticker"]
+    if enr.get("country") and enr["country"] != "UNKNOWN":
+        out.setdefault("country", enr["country"])
+    out["country_confidence"] = enr.get("country_confidence")
+    out["country_method"] = enr.get("country_method")
+    out["entity_extraction_confidence"] = enr.get("entity_extraction_confidence")
+    if not enr.get("valid_news_mapping") and enr.get("mapping_failure_reason"):
+        out["news_mapping_failure_reason"] = enr["mapping_failure_reason"]
+    return out
+
+
 def _country(raw: dict[str, Any]) -> str | None:
     return (
         canonical_country(raw.get("country"))
@@ -145,6 +201,18 @@ def normalize_signal_event_row(
     fetched_at = db_row.get("fetched_at") or raw.get("fetched_at")
     ts_iso = event_timestamp_utc(raw, fetched_at)
     age_hours, fresh_flag, score = freshness(now_utc, ts_iso, ttl_hours)
+
+    # News rows usually arrive with entity_name=null/country=null. Run a
+    # deterministic, advisory enrichment pass that only injects an entity when a
+    # valid (extraction + mapping + country) news mapping is found, and that
+    # writes back a confidently-enriched country even without a tradable map.
+    if event_type == "news" and not _entity_name(raw) and not _raw_ticker(raw):
+        raw = _enrich_news_raw(
+            raw,
+            db_path=db_path,
+            securities_master_path=securities_master_path,
+            theta_map=theta_map,
+        )
 
     mapped = map_event_to_tickers(
         raw,

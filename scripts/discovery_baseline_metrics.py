@@ -46,6 +46,7 @@ REQUIRED_METRIC_KEYS: tuple[str, ...] = (
     "B_US", "B_US_venue", "USA_bias_violation",
     "R_live", "R_static", "R_memory", "R_phantom",
     "mapped_events_count", "unmapped_events_count",
+    "H_price_coverage",
 )
 
 
@@ -62,11 +63,51 @@ def _event_candidate(event: dict[str, Any], best: dict[str, Any]) -> dict[str, A
     }
 
 
+def discovery_guard_status() -> dict[str, Any]:
+    """Lightweight, read-only guard/release status for the metrics report.
+
+    Reports whether the external-evidence backfill is guarded and the derived
+    mutation-guard release impact, without running the full (artifact-heavy)
+    release gate. Degrades to UNKNOWN rather than raising.
+    """
+    try:
+        from scripts.local_deploy_preflight import (
+            classify_mutation_script_severity,
+            evaluate_mutation_guard_impact,
+            scan_mutation_script_guarding,
+        )
+    except Exception:  # pragma: no cover - defensive
+        return {
+            "external_evidence_guard_status": "UNKNOWN",
+            "mutation_guard_unguarded": [],
+            "release_gate_status": "UNKNOWN",
+        }
+    cov = scan_mutation_script_guarding()
+    backfill = "external_evidence_calibration_backfill.py"
+    ee_status = "GUARDED" if backfill in cov["guarded"] else (
+        "UNGUARDED" if backfill in cov["unguarded"] else "ABSENT"
+    )
+    high = sum(
+        1 for n in cov["unguarded"]
+        if classify_mutation_script_severity(n) == "HIGH"
+    )
+    impact = evaluate_mutation_guard_impact(
+        len(cov["guarded"]), cov["unguarded"], high_severity_count=high
+    )
+    return {
+        "external_evidence_guard_status": ee_status,
+        "mutation_guard_unguarded": cov["unguarded"],
+        "release_gate_status": impact["mutation_guard_release_impact"],
+    }
+
+
 def compute_discovery_metrics(
     payload: dict[str, Any] | None = None,
     *,
     db_path: Any = None,
+    price_rows: list[dict[str, Any]] | None = None,
     baseline: dict[str, Any] | None = None,
+    include_guards: bool = False,
 ) -> dict[str, Any]:
     """Compute the full discovery metric set from a daily payload.
 
@@ -101,9 +142,23 @@ def compute_discovery_metrics(
             unmapped_n += 1
         candidates.append(_event_candidate(event, best))
 
-    coverage = build_country_coverage_from_payload(payload, mapping_rows=mapping_rows)
+    if price_rows is None:
+        price_rows = payload.get("price_movers", {}).get("movers", []) or []
+    coverage = build_country_coverage_from_payload(
+        payload, mapping_rows=mapping_rows, price_rows=price_rows
+    )
     bias = compute_usa_bias(candidates)
     contamination = compute_contamination_ratios(candidates)
+
+    holding_rows = [
+        r for r in price_rows
+        if str(r.get("row_class") or "").upper() == "EXISTING_POSITION_REVIEW"
+    ]
+    if holding_rows:
+        h_valid = sum(1 for r in holding_rows if r.get("valid_price"))
+        h_price_coverage = round(h_valid / max(1, len(holding_rows)), 4)
+    else:
+        h_price_coverage = 0.0
 
     metrics: dict[str, Any] = {}
     metrics.update(coverage["ratios"])  # C_*
@@ -116,6 +171,7 @@ def compute_discovery_metrics(
     metrics["R_phantom"] = contamination["R_phantom"]
     metrics["mapped_events_count"] = mapped_n
     metrics["unmapped_events_count"] = unmapped_n
+    metrics["H_price_coverage"] = h_price_coverage
 
     report: dict[str, Any] = {
         "generated_at_utc": utc_timestamp(),
@@ -129,6 +185,8 @@ def compute_discovery_metrics(
         "contamination_warnings": contamination["warnings"],
         "safety": advisory_safety_stamps(),
     }
+    if include_guards:
+        report["guards"] = discovery_guard_status()
     if baseline is not None:
         base_metrics = baseline.get("metrics", baseline)
         deltas: dict[str, Any] = {}
@@ -176,6 +234,7 @@ def main(argv: list[str] | None = None) -> int:  # pragma: no cover - CLI
 __all__ = [
     "REQUIRED_METRIC_KEYS",
     "compute_discovery_metrics",
+    "discovery_guard_status",
     "render_metrics_markdown",
 ]
 

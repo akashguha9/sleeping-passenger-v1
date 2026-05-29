@@ -257,6 +257,19 @@ APPROVED_DOMAINS: tuple[str, ...] = (
     # trading writes.  (discovery_baseline_metrics.py is already covered by the
     # "discovery" domain above.)
     "global_filings",     # global_filings_loader.py — honest UK/EU filings provider status
+    # Combined P0–P3 global-discovery sprint — advisory-only, read-only
+    # deterministic news entity/country enrichment + the safe price-refresh
+    # orchestrator.  Scores/gates/enrichment only; no broker execution, no order
+    # placement, no API trading writes.  (refresh_live_price_marks.py and
+    # run_daily_discovery_refresh.py are covered by the "refresh_live" /
+    # "live_price_marks" / "discovery" / "daily" domains above.)
+    "news_entity",        # news_entity_country_enrichment.py — deterministic news enrichment
+    # Paper-only calibrated weight readback sprint — advisory-only, read-only
+    # module that reads the Moltbook-learned per-bucket advisory weight w_b back
+    # into the external-evidence score-delta for PAPER analysis only.  Real-money
+    # sizing stays PROHIBITED, real_money_weight_allowed=False; no broker
+    # execution, no order placement, no API trading writes.
+    "weight_readback",    # external_evidence_weight_readback.py — paper-only w_b readback
 )
 
 # Explicit allowlist for individual files / directories whose name does
