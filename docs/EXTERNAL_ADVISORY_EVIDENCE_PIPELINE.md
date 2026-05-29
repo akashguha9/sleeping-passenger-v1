@@ -170,26 +170,55 @@ Three independent guards:
    score delta clamped to `[-1.00, +0.50]`; veto classes preserved; only-positive
    evidence capped at `WATCHLIST`.
 
-## 11. How Moltbook calibration should later evaluate accepted evidence
+## 11. Persistence is now wired (canonical SQLite snapshot store)
 
-When close-event snapshots exist, Moltbook should pair each
-`ACCEPTED_EVIDENCE_ONLY` item's `score_delta` / alignment with the realized
-outcome to derive a per-source reliability weight `w_i` and a router safety
-multiplier prior. Until calibrated, `w_i` stays uncalibrated and external
-evidence cannot influence real-money sizing. This is **future-only** — no
-calibration is wired today.
+Accepted / rejected / error evidence items are now persisted as **immutable
+evidence-at-time-t** snapshots in the canonical SQLite DB
+(`runtime/mvp_local.db`), table `external_evidence_snapshots`. The wiring lives
+in `scripts/external_evidence_persistence.py` and is called from
+`run_daily_synthesis()` immediately after the bundle is built:
 
-## 12. Current limitations
+```
+build_external_evidence_bundle()
+    -> persist_external_evidence_bundle(bundle, {"daily_run_id": run_date})
+    -> result["external_evidence_persistence"] summary
+```
+
+- Snapshot ids are deterministic (`SHA256` over run/signal/ticker/source/type/
+  minute-bucket/route), so re-running a daily synthesis is an idempotent no-op.
+- Disabled bundles write nothing (`status=DISABLED`); empty bundles write
+  nothing (`status=NO_EVIDENCE`); any failure degrades to `ERROR_SAFE` and the
+  daily run is never blocked.
+- SQLite is canonical; `jsonl_is_canonical` is always `false`.
+
+## 12. Moltbook calibration is now wired (post-outcome learning)
+
+`scripts/external_evidence_moltbook_calibration.py` closes the loop. When a
+paper/manual trade closes, `record_external_evidence_outcome_for_trade()` loads
+the original snapshot(s), compares forecast/context against the realized
+outcome, writes one advisory learning record per snapshot
+(`external_evidence_outcomes`), and updates a conservative per-source advisory
+weight `w_b` (`external_evidence_calibration_buckets`). See
+`docs/EXTERNAL_EVIDENCE_MOLTBOOK_CALIBRATION.md` for the full math.
+
+- Open trades never learn (`OUTCOME_NOT_FINAL`); missing prices never learn
+  (`INSUFFICIENT_OUTCOME_DATA`); evidence is judged only after the close.
+- Weights are **advisory/paper-only**: `real_money_weight_allowed=0` and
+  `real_money_sizing_impact=PROHIBITED` unconditionally in this sprint.
+- A dry-run-by-default backfill exists at
+  `scripts/external_evidence_calibration_backfill.py`.
+
+## 13. Current limitations
 
 - The live daily pipeline **attaches** the bundle as advisory context; it does
   not mutate the existing per-candidate scores (those use a different CQS/EQS
   scale). `apply_external_evidence_to_score()` is the tested, pure scoring
   function for any future per-candidate application.
-- No persistence of accepted evidence (no canonical close-event store yet).
-- No Moltbook calibration of external evidence yet.
+- Calibration weights feed **future paper analysis only**; they are not yet
+  read back into the score-delta math, and real-money sizing remains prohibited.
 - No frontend card is mounted (no real enabled payload reaches the UI).
 - External adapters are disabled by default; enabling is an explicit operator
-  decision.
+  decision. With adapters disabled, the daily run persists zero snapshots.
 
 ## Status table
 
@@ -199,6 +228,8 @@ calibration is wired today.
 | ExternalEvidenceRouter | wired (per-item routing) |
 | KronosAdapter | registered, disabled by default |
 | Daily synthesis invocation | wired |
+| Canonical evidence persistence | **wired (SQLite `external_evidence_snapshots`)** |
+| Moltbook outcome calibration | **wired (`external_evidence_outcomes` + buckets)** |
+| Calibration backfill | **wired (dry-run by default)** |
 | Frontend display | future-only (not wired) |
-| Moltbook calibration | future-only (not wired) |
-| Real-money sizing impact | prohibited before evidence is calibrated |
+| Real-money sizing impact | **PROHIBITED (calibration is paper-only)** |

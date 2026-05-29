@@ -41,6 +41,9 @@ try:
         build_external_evidence_bundle,
         render_external_evidence_markdown,
     )
+    from scripts.external_evidence_persistence import (
+        persist_external_evidence_bundle,
+    )
     from scripts.fresh_market_discovery import build_fresh_market_discovery
     from scripts.minimum_daily_universe import minimum_universe_metadata
     from scripts.portfolio_truth_gate import build_portfolio_truth_gate
@@ -64,6 +67,9 @@ except ModuleNotFoundError:  # pragma: no cover - script-style env
     from external_advisory_evidence import (
         build_external_evidence_bundle,
         render_external_evidence_markdown,
+    )
+    from external_evidence_persistence import (
+        persist_external_evidence_bundle,
     )
     from fresh_market_discovery import build_fresh_market_discovery
     from minimum_daily_universe import minimum_universe_metadata
@@ -171,6 +177,28 @@ def run_daily_synthesis(
     # Runs after candidate generation, before the final advisory synthesis.
     external_evidence = build_external_evidence_bundle(pipeline_context={})
 
+    # Persist accepted/rejected/error evidence as immutable snapshots-at-time-t
+    # in the canonical SQLite store.  Disabled bundles write nothing; any
+    # persistence failure degrades to ERROR_SAFE and NEVER blocks the daily run.
+    run_date = payload["verified_holdings"].get("run_date")
+    try:
+        external_evidence_persistence = persist_external_evidence_bundle(
+            external_evidence, {"daily_run_id": run_date}
+        )
+    except Exception:  # noqa: BLE001 - persistence is never allowed to break the run
+        external_evidence_persistence = {
+            "enabled": False,
+            "status": "ERROR_SAFE",
+            "persisted_count": 0,
+            "skipped_count": 0,
+            "snapshot_ids": [],
+            "decision_impact": "NONE",
+            "proof_status": "PERSISTENCE_FAILED_SAFE_NO_DECISION_IMPACT",
+            "canonical_store": "SQLITE",
+            "jsonl_is_canonical": False,
+            "real_money_sizing_impact": "PROHIBITED",
+        }
+
     return {
         "run_date": payload["verified_holdings"].get("run_date"),
         "payload": payload,
@@ -183,6 +211,7 @@ def run_daily_synthesis(
         "usa_bias": discovery_metrics["usa_bias"],
         "contamination": discovery_metrics["contamination"],
         "external_evidence": external_evidence,
+        "external_evidence_persistence": external_evidence_persistence,
         "l_today": discovery.get("l_today", []),
         "safety": advisory_safety_stamps(),
         "execution": human_only_stamp(),
@@ -390,6 +419,24 @@ def render_portfolio_truth_context(result: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def _persistence_summary(persistence: dict[str, Any]) -> dict[str, Any]:
+    """Frontend-safe external-evidence persistence summary (no payload blobs)."""
+    return {
+        "status": persistence.get("status"),
+        "enabled": persistence.get("enabled"),
+        "persisted_count": persistence.get("persisted_count"),
+        "skipped_count": persistence.get("skipped_count"),
+        "snapshot_ids": persistence.get("snapshot_ids", []),
+        "proof_status": persistence.get("proof_status"),
+        "canonical_store": persistence.get("canonical_store", "SQLITE"),
+        "decision_impact": persistence.get("decision_impact"),
+        "real_money_sizing_impact": persistence.get(
+            "real_money_sizing_impact", "PROHIBITED"
+        ),
+        "jsonl_is_canonical": False,
+    }
+
+
 def _write_artifacts(result: dict[str, Any], context_md: str) -> None:
     CONTEXT_MD_PATH.parent.mkdir(parents=True, exist_ok=True)
     CONTEXT_MD_PATH.write_text(context_md, encoding="utf-8")
@@ -427,6 +474,9 @@ def _write_artifacts(result: dict[str, Any], context_md: str) -> None:
                 "external_evidence_accepted_count"
             ),
         },
+        "external_evidence_persistence": _persistence_summary(
+            result.get("external_evidence_persistence") or {}
+        ),
         "safety": result["safety"],
     }
     CONTEXT_JSON_PATH.write_text(json.dumps(summary, indent=2), encoding="utf-8")
