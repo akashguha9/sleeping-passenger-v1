@@ -1371,6 +1371,25 @@ except ModuleNotFoundError:  # pragma: no cover
     pass
 
 
+# ---------------------------------------------------------------------------
+# External-evidence reliability route — extracted into
+# scripts.api.routers.external_evidence_router (Kanté continuation, B).
+# Read-only: serves the daily external-evidence reliability artifact (or an
+# on-demand DISABLED bundle) so the frontend reliability card can mount.
+# The pure builder is re-exported below so tests can patch it:
+#   GET /external-evidence/reliability
+# ---------------------------------------------------------------------------
+try:
+    from scripts.api.routers.external_evidence_router import (  # noqa: E402
+        build_router as _build_external_evidence_router,
+        build_external_evidence_reliability_payload as _build_external_evidence_reliability_payload,  # noqa: F401,E501
+        get_external_evidence_reliability,  # noqa: F401 — re-exported handler
+    )
+    if _FASTAPI_AVAILABLE:
+        app.include_router(_build_external_evidence_router())
+except ModuleNotFoundError:  # pragma: no cover
+    pass
+
 
 # ---------------------------------------------------------------------------
 # Live-sources / live-signals routes — extracted into

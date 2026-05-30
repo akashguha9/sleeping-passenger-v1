@@ -762,6 +762,48 @@ export async function runLiveRefresh(): Promise<LiveRefreshRunResponse> {
   });
 }
 
+// External-evidence reliability — read-only advisory-only surface.
+//
+// Fetches GET /external-evidence/reliability.  The backend route never
+// mutates state, never calls a broker, and returns an honest DISABLED /
+// NO_PAYLOAD envelope when external adapters are off (the default).  The
+// response is shaped so it can be passed straight to the
+// ExternalEvidenceReliabilityCard as its `bundle` prop.  Returns null on
+// any failure so the page can render its offline notice.
+export interface ExternalEvidenceReliabilityResponse {
+  status: 'OK' | 'DISABLED' | 'NO_PAYLOAD' | 'ERROR_SAFE' | string;
+  mode: string;
+  decision_impact: string;
+  source?: string;
+  artifact_present?: boolean;
+  real_money_sizing_impact: string;
+  real_money_weight_allowed: boolean;
+  human_execution_required: boolean;
+  execution_gate: string;
+  broker_api_called: boolean;
+  ai_execution_count: number;
+  external_evidence_status?: string;
+  external_evidence_enabled?: boolean;
+  external_evidence_decision_impact?: string;
+  external_evidence_accepted_count?: number;
+  external_evidence_score_delta_raw_uncalibrated?: number | null;
+  external_evidence_score_delta_paper_calibrated?: number | null;
+  external_evidence_score_delta_final?: number | null;
+  external_evidence_calibration?: Record<string, unknown> | null;
+  external_evidence_items?: unknown[];
+  external_evidence_operator_readiness?: Record<string, unknown> | null;
+}
+
+export async function getExternalEvidenceReliability(): Promise<ExternalEvidenceReliabilityResponse | null> {
+  try {
+    return await apiFetch<ExternalEvidenceReliabilityResponse>(
+      '/external-evidence/reliability',
+    );
+  } catch {
+    return null;
+  }
+}
+
 export function getCsvExportUrl(
   type:
     | 'signal-inbox'

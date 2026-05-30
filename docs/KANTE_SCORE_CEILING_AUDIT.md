@@ -185,3 +185,131 @@ safety vetoes, a fine-grained source-health maturity ladder, and a compact
 operator reliability block. **No trading capability was added.** Real-money
 readiness remains intentionally near the floor (2/10) because no closed paper
 outcomes exist yet — and no score may be called a "proven edge" until they do.
+
+---
+
+# Kanté Continuation — From 8.3 Toward 8.6
+
+This continuation sprint adds defensive-midfield reliability work on top of the
+8.3 baseline. As before, nothing here trades, sizes real money, or unlocks a
+broker — every artifact, route, and verdict preserves
+`execution_gate=LOCKED`, `broker_api_called=false`, `ai_execution_count=0`,
+`real_money_sizing_impact=PROHIBITED`.
+
+## What changed
+
+1. **Canary artifact safety hardening.** The canonical writer
+   (`scripts/kante_real_provider_canary.py`) now stamps every emitted artifact
+   with the full advisory contract at the top level —
+   `advisory_only`, `human_execution_required`, `execution_gate=LOCKED`,
+   `broker_api_called=false`, `ai_execution_count=0`,
+   `real_money_sizing_impact=PROHIBITED`, `real_money_weight_allowed=false`,
+   `operator_execution_required=true`,
+   `proof_status=ADVISORY_ONLY_CANARY_ARTIFACT` — and stamps every nested
+   provider/source row (`decision_impact=ADVISORY_CONTEXT_ONLY`,
+   `execution_permission=WATCH_ONLY`). The strict runtime-artifact coherence
+   gate stays green; the stamps come from the writer, never a manual JSON
+   patch.
+
+2. **Frontend reliability mount.** A read-only backend route
+   `GET /external-evidence/reliability`
+   (`scripts/api/routers/external_evidence_router.py`) serves the daily
+   external-evidence reliability bundle (or an honest DISABLED / NO_PAYLOAD /
+   ERROR_SAFE envelope) with secrets stripped defensively. The previously
+   orphaned `ExternalEvidenceReliabilityCard` is now mounted on a dedicated
+   read-only page (`/external-evidence`) linked from the sidebar. The daily
+   synthesis pipeline persists `runtime/release/external_evidence_reliability.json`
+   so the card surfaces real daily context once adapters are enabled.
+
+3. **Paper-outcome collection readiness.**
+   `scripts/paper_outcome_collection_readiness.py` reports how close the MVP is
+   to a statistically usable calibration — closed-outcome counts, linked
+   external-evidence counts, bucket maturity bands, and a single
+   `calibration_readiness_score` with an honest readiness label
+   (`COLD_START` → `EARLY_SAMPLE` → `PROVISIONAL` → `PAPER_CALIBRATED`). It
+   fabricates nothing; the current truthful state is `COLD_START`.
+
+4. **Guarded LIVE_VERIFIED path.**
+   `scripts.source_health_maturity.verify_live_source_readiness` is a strict,
+   formal gate: a source is LIVE_VERIFIED only when configured ∧ enabled ∧
+   ¬mock ∧ fresh canonical rows ∧ fully safety-stamped ∧ no provider error.
+   Any failure yields a non-live status (DISABLED / CONFIG_MISSING / MOCK_ONLY
+   / STALE / NO_FRESH_ROWS / FILTERED_EMPTY / DEGRADED / ERROR_SAFE) with an
+   explicit blocker list.
+
+## Which scores moved (and why some did not)
+
+- **Frontend explainability 8 → 9**: the reliability card is finally mounted on
+  a real route with honest disabled/calibrated states.
+- **Source-health maturity 9 → 9.3**: a formal, testable LIVE_VERIFIED gate now
+  exists with an auditable blocker list.
+- **Daily runtime usefulness 8 → 8.5**: the daily artifact now carries the
+  paper-outcome readiness summary so the operator sees the calibration gap.
+- **CI stability 8 → 9** and **Test coverage 9 → 9.2**: new deterministic tests
+  across canary, route, readiness, and live verification.
+- **Real-money readiness 2 → 2.5 (max)**: still floored — see below.
+- Quant sophistication, external-evidence architecture, advisory safety,
+  human-execution discipline, chaos-veto integrity, fake-confidence resistance,
+  complexity health **did not move**: this sprint added reliability surfacing
+  and guards, not new modelling power or new safety primitives.
+
+## Why safety can be 10 while real-money readiness stays 2–2.5
+
+Safety is a property of what the system *refuses* to do — it never trades,
+never sizes money, never lets evidence override a veto. That refusal is
+complete and proven, so safety is 10. Real-money readiness is a property of
+*proven edge*, which requires closed outcomes we do not yet have. The two are
+orthogonal: a perfectly safe system with zero proven outcomes is exactly where
+this MVP is.
+
+## Why 50–100 closed paper outcomes are the real next bottleneck
+
+Calibration buckets stay cold-start until ~50 closed outcomes back them. Until
+then, every calibrated weight is a conservative paper-only prior, the
+fake-confidence audit discounts everything, and no source bucket can mature.
+The readiness module makes this gap explicit and measurable.
+
+## Why LIVE_VERIFIED is not the same as trading readiness
+
+LIVE_VERIFIED is a *data-quality* verdict: "this read-only source produced
+fresh canonical rows and is fully safety-stamped." It says nothing about edge,
+sizing, or execution. A LIVE_VERIFIED source still carries
+`execution_gate=LOCKED` and `real_money_sizing_impact=PROHIBITED`. Live data ≠
+permission to act on it.
+
+## Why frontend explainability matters for operator discipline
+
+The operator is the only executor. Surfacing reliability honestly — cold-start
+counts, paper-calibrated deltas, real-money-prohibited banners, missing-evidence
+prompts — is what keeps a human from mistaking advisory context for a
+permission to trade. An unmounted card teaches nothing; a mounted, honest card
+reinforces the discipline every day.
+
+## Expected scorecard after this sprint (if fully green)
+
+| # | Segment | Before | Target |
+|---|---------|--------|--------|
+| 1 | Signal richness | 8 | 8.2 |
+| 2 | Quant sophistication | 9 | 9 |
+| 3 | Data/model diversity | 8 | 8.3 |
+| 4 | Technical defensibility | 9 | 9.2 |
+| 5 | Daily runtime usefulness | 8 | 8.5 |
+| 6 | External evidence architecture | 9 | 9 |
+| 7 | Source-health maturity | 9 | 9.3 |
+| 8 | Advisory-only safety | 10 | 10 |
+| 9 | Human-execution discipline | 10 | 10 |
+| 10 | DIABLO / chaos-veto integrity | 10 | 10 |
+| 11 | Fake-confidence resistance | 10 | 10 |
+| 12 | Persistence maturity | 8 | 8.2 |
+| 13 | Moltbook learning value | 8 | 8.5 |
+| 14 | Frontend explainability | 8 | 9 |
+| 15 | Test coverage | 9 | 9.2 |
+| 16 | CI stability | 8 | 9 |
+| 17 | Maintainability | 8 | 8.2 |
+| 18 | Complexity health | 8 | 8 |
+| 19 | Investor impressiveness | 8 | 8.5 |
+| 20 | Real-money readiness | 2 | 2.5 (hard ceiling) |
+| 21 | Year-1 survival compatibility | 9 | 9.3 |
+| 22 | Overall MVP score | 8.3 | ~8.6 |
+
+Real-money readiness cannot exceed 2.5 until real closed paper evidence exists.

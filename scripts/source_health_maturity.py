@@ -335,6 +335,158 @@ def _classify(
     return LIVE_ADVISORY
 
 
+def verify_live_source_readiness(source_result: dict[str, Any]) -> dict[str, Any]:
+    """Strict, guarded LIVE_VERIFIED gate for a single source result.
+
+    LIVE_VERIFIED is granted ONLY when every condition below holds — a mock,
+    stub, stale, no-canonical-row, or unstamped source can never be marked
+    live::
+
+        configured ∧ enabled ∧ ¬mock_mode
+        ∧ rows_seen > 0 ∧ rows_accepted > 0 ∧ canonical_rows_written > 0
+        ∧ last_fresh_signal_at_utc exists ∧ age_hours ≤ ttl_hours
+        ∧ advisory_only ∧ execution_gate = LOCKED
+        ∧ broker_api_called = false ∧ ai_execution_count = 0
+        ∧ decision_impact ∈ {NONE, ADVISORY_CONTEXT_ONLY}
+        ∧ secrets_redacted ∧ no_execution_language ∧ provider_error is None
+
+    LIVE_VERIFIED is a *data-quality* verdict only.  It NEVER unlocks
+    execution, NEVER sizes real money, and NEVER changes the locked safety
+    posture.  Returns a proof dict; never raises.
+    """
+    r = dict(source_result or {})
+
+    configured = bool(r.get("configured"))
+    enabled = bool(r.get("enabled"))
+    disabled_intentionally = bool(r.get("disabled_intentionally"))
+    mock_mode = bool(r.get("mock_mode") or r.get("is_mock") or r.get("is_stub"))
+    rows_seen = int(r.get("rows_seen") or 0)
+    rows_accepted = int(r.get("rows_accepted") or 0)
+    rows_filtered = int(r.get("rows_filtered") or 0)
+    canonical_written = int(
+        r.get("canonical_rows_written")
+        if r.get("canonical_rows_written") is not None
+        else (r.get("canonical_written") or 0)
+    )
+    last_fresh = r.get("last_fresh_signal_at_utc")
+
+    ttl = _f(r.get("freshness_ttl_hours"))
+    if ttl is None:
+        ttl = _f(r.get("ttl_hours"))
+    if ttl is None:
+        ttl = 24.0
+    age = _f(r.get("freshness_age_hours"))
+    if age is None:
+        age = _f(r.get("age_hours"))
+    if age is None:
+        age = freshness_age_hours(last_fresh, r.get("now_utc"))
+
+    advisory_only = r.get("advisory_only") is True
+    execution_gate = str(r.get("execution_gate") or "")
+    broker_api_called = r.get("broker_api_called")
+    ai_execution_count = r.get("ai_execution_count")
+    decision_impact = r.get("decision_impact")
+    secrets_redacted = r.get("secrets_redacted") is True
+    no_execution_language = r.get("no_execution_language") is True
+    provider_error = r.get("provider_error")
+
+    blockers: list[str] = []
+    if not configured:
+        blockers.append("not_configured")
+    if not enabled:
+        blockers.append("not_enabled")
+    if mock_mode:
+        blockers.append("mock_mode")
+    if rows_seen <= 0:
+        blockers.append("no_rows_seen")
+    if rows_accepted <= 0:
+        blockers.append("no_rows_accepted")
+    if canonical_written <= 0:
+        blockers.append("no_canonical_rows_written")
+    if last_fresh in (None, "", 0):
+        blockers.append("missing_last_fresh_signal_at_utc")
+    if age is None or (ttl is not None and age > ttl):
+        blockers.append("stale_or_unknown_freshness")
+    if not advisory_only:
+        blockers.append("advisory_only_not_true")
+    if execution_gate != "LOCKED":
+        blockers.append("execution_gate_not_locked")
+    if broker_api_called is not False:
+        blockers.append("broker_api_called_not_false")
+    if ai_execution_count != 0:
+        blockers.append("ai_execution_count_not_zero")
+    if decision_impact not in (IMPACT_NONE, IMPACT_ADVISORY_CONTEXT_ONLY):
+        blockers.append("decision_impact_invalid")
+    if not secrets_redacted:
+        blockers.append("secrets_not_redacted")
+    if not no_execution_language:
+        blockers.append("execution_language_not_cleared")
+    if provider_error is not None:
+        blockers.append("provider_error_present")
+
+    live_verified = not blockers
+
+    # Status by safety precedence (safest verdict first) — never LIVE_VERIFIED
+    # unless every condition above passed.
+    if live_verified:
+        status = LIVE_VERIFIED
+    elif disabled_intentionally or not enabled:
+        status = DISABLED
+    elif not configured:
+        status = CONFIG_MISSING
+    elif provider_error is not None:
+        status = ERROR_SAFE
+    elif mock_mode:
+        status = MOCK_ONLY
+    elif "stale_or_unknown_freshness" in blockers or "missing_last_fresh_signal_at_utc" in blockers:
+        status = STALE
+    elif rows_seen > 0 and rows_accepted == 0 and rows_filtered > 0:
+        status = FILTERED_EMPTY
+    elif canonical_written <= 0:
+        status = NO_FRESH_ROWS
+    else:
+        status = DEGRADED
+
+    out: dict[str, Any] = {
+        "report": "live_source_readiness_verification",
+        "source_name": r.get("source_name") or r.get("source") or "unknown",
+        "status": status,
+        "live_verified": live_verified,
+        "live_verified_blockers": blockers,
+        "configured": configured,
+        "enabled": enabled,
+        "mock_mode": mock_mode,
+        "rows_seen": rows_seen,
+        "rows_accepted": rows_accepted,
+        "canonical_rows_written": canonical_written,
+        "freshness_age_hours": None if age is None else round(age, 6),
+        "freshness_ttl_hours": round(ttl, 6),
+        "secrets_redacted": secrets_redacted,
+        "no_execution_language": no_execution_language,
+        "provider_error": provider_error,
+        "decision_impact": (
+            decision_impact
+            if decision_impact in (IMPACT_NONE, IMPACT_ADVISORY_CONTEXT_ONLY)
+            else IMPACT_NONE
+        ),
+        "proof_status": (
+            "LIVE_VERIFIED_FRESH_CANONICAL_READONLY"
+            if live_verified
+            else f"{status}_NOT_LIVE_VERIFIED"
+        ),
+    }
+    # Unconditional safety posture — identical whether or not live-verified.
+    out.update(_contract.advisory_safety_stamps())
+    out["advisory_only"] = True
+    out["human_execution_required"] = True
+    out["execution_gate"] = "LOCKED"
+    out["broker_api_called"] = False
+    out["ai_execution_count"] = 0
+    out["real_money_sizing_impact"] = "PROHIBITED"
+    out["real_money_weight_allowed"] = False
+    return out
+
+
 def build_source_health_maturity_summary(
     sources: list[dict[str, Any]] | None,
 ) -> dict[str, Any]:
@@ -395,4 +547,5 @@ __all__ = [
     "configured_enabled_score",
     "compute_source_health_score",
     "build_source_health_maturity_summary",
+    "verify_live_source_readiness",
 ]

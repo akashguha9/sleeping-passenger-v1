@@ -94,3 +94,118 @@ def test_live_verified_only_for_fresh_canonical_non_mock() -> None:
     out = shm.compute_source_health_score(_fresh_live())
     assert out["maturity_label"] == shm.LIVE_VERIFIED
     assert out["decision_impact"] == shm.IMPACT_ADVISORY_CONTEXT_ONLY
+
+
+# --- Workstream D — guarded verify_live_source_readiness --------------------
+
+def _verifiable(**over):
+    """A source_result that satisfies every LIVE_VERIFIED condition."""
+    base = {
+        "source_name": "alpha_readonly",
+        "configured": True,
+        "enabled": True,
+        "mock_mode": False,
+        "rows_seen": 12,
+        "rows_accepted": 10,
+        "rows_filtered": 2,
+        "canonical_rows_written": 10,
+        "last_fresh_signal_at_utc": "2026-05-30T11:00:00Z",
+        "freshness_age_hours": 1.0,
+        "freshness_ttl_hours": 24.0,
+        "advisory_only": True,
+        "execution_gate": "LOCKED",
+        "broker_api_called": False,
+        "ai_execution_count": 0,
+        "decision_impact": "ADVISORY_CONTEXT_ONLY",
+        "secrets_redacted": True,
+        "no_execution_language": True,
+        "provider_error": None,
+    }
+    base.update(over)
+    return base
+
+
+def test_fresh_readonly_source_can_live_verify() -> None:
+    out = shm.verify_live_source_readiness(_verifiable())
+    assert out["live_verified"] is True
+    assert out["status"] == shm.LIVE_VERIFIED
+    assert out["live_verified_blockers"] == []
+
+
+def test_mock_source_cannot_live_verify() -> None:
+    out = shm.verify_live_source_readiness(_verifiable(mock_mode=True))
+    assert out["live_verified"] is False
+    assert out["status"] == shm.MOCK_ONLY
+    assert "mock_mode" in out["live_verified_blockers"]
+
+
+def test_stale_source_cannot_live_verify() -> None:
+    out = shm.verify_live_source_readiness(
+        _verifiable(freshness_age_hours=48.0, freshness_ttl_hours=24.0)
+    )
+    assert out["live_verified"] is False
+    assert out["status"] == shm.STALE
+    assert "stale_or_unknown_freshness" in out["live_verified_blockers"]
+
+
+def test_no_canonical_rows_cannot_live_verify() -> None:
+    out = shm.verify_live_source_readiness(_verifiable(canonical_rows_written=0))
+    assert out["live_verified"] is False
+    assert out["status"] == shm.NO_FRESH_ROWS
+    assert "no_canonical_rows_written" in out["live_verified_blockers"]
+
+
+def test_missing_safety_stamps_cannot_live_verify() -> None:
+    out = shm.verify_live_source_readiness(
+        _verifiable(
+            advisory_only=None,
+            execution_gate=None,
+            secrets_redacted=None,
+            no_execution_language=None,
+        )
+    )
+    assert out["live_verified"] is False
+    assert out["status"] != shm.LIVE_VERIFIED
+    for b in (
+        "advisory_only_not_true",
+        "execution_gate_not_locked",
+        "secrets_not_redacted",
+        "execution_language_not_cleared",
+    ):
+        assert b in out["live_verified_blockers"]
+
+
+def test_live_verified_still_locked() -> None:
+    out = shm.verify_live_source_readiness(_verifiable())
+    assert out["live_verified"] is True
+    assert out["execution_gate"] == "LOCKED"
+    assert out["broker_api_called"] is False
+    assert out["ai_execution_count"] == 0
+    assert out["human_execution_required"] is True
+
+
+def test_live_verified_no_real_money_sizing() -> None:
+    out = shm.verify_live_source_readiness(_verifiable())
+    assert out["real_money_sizing_impact"] == "PROHIBITED"
+    assert out["real_money_weight_allowed"] is False
+
+
+def test_no_mock_live_claims_after_continuation() -> None:
+    # Every non-clean variant must refuse the LIVE_VERIFIED verdict.
+    variants = [
+        _verifiable(mock_mode=True),
+        _verifiable(is_stub=True),
+        _verifiable(configured=False),
+        _verifiable(enabled=False),
+        _verifiable(rows_accepted=0, rows_seen=5, rows_filtered=5),
+        _verifiable(canonical_rows_written=0),
+        _verifiable(last_fresh_signal_at_utc=None, freshness_age_hours=None),
+        _verifiable(provider_error="HTTP_500"),
+        _verifiable(broker_api_called=True),
+        _verifiable(ai_execution_count=1),
+    ]
+    for v in variants:
+        out = shm.verify_live_source_readiness(v)
+        assert out["live_verified"] is False
+        assert out["status"] != shm.LIVE_VERIFIED
+        assert out["execution_gate"] == "LOCKED"

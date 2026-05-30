@@ -47,6 +47,9 @@ try:
     from scripts.external_evidence_persistence import (
         persist_external_evidence_bundle,
     )
+    from scripts.paper_outcome_collection_readiness import (
+        build_from_db as build_paper_outcome_readiness_from_db,
+    )
     from scripts.fresh_market_discovery import build_fresh_market_discovery
     from scripts.minimum_daily_universe import minimum_universe_metadata
     from scripts.portfolio_truth_gate import build_portfolio_truth_gate
@@ -77,6 +80,9 @@ except ModuleNotFoundError:  # pragma: no cover - script-style env
     from external_evidence_persistence import (
         persist_external_evidence_bundle,
     )
+    from paper_outcome_collection_readiness import (
+        build_from_db as build_paper_outcome_readiness_from_db,
+    )
     from fresh_market_discovery import build_fresh_market_discovery
     from minimum_daily_universe import minimum_universe_metadata
     from portfolio_truth_gate import build_portfolio_truth_gate
@@ -91,6 +97,11 @@ except ModuleNotFoundError:  # pragma: no cover - script-style env
 
 CONTEXT_MD_PATH = REPO_ROOT / "runtime" / "daily_portfolio_truth_context.md"
 CONTEXT_JSON_PATH = REPO_ROOT / "runtime" / "daily_synthesis_context.json"
+# Read-only artifact consumed by GET /external-evidence/reliability so the
+# frontend reliability card can mount.  Stamped advisory-only / paper-only.
+RELIABILITY_ARTIFACT_PATH = (
+    REPO_ROOT / "runtime" / "release" / "external_evidence_reliability.json"
+)
 
 
 def _compute_why_today_scores(
@@ -219,6 +230,19 @@ def run_daily_synthesis(
             "proof_status": "OPERATOR_READINESS_FAILED_SAFE",
         }
 
+    # Paper-outcome collection readiness — how close calibration is to leaving
+    # cold-start.  Read-only; honest COLD_START when no closed outcomes exist.
+    try:
+        paper_outcome_readiness = build_paper_outcome_readiness_from_db()
+    except Exception:  # noqa: BLE001 - readiness never breaks the run
+        paper_outcome_readiness = {
+            "report": "paper_outcome_collection_readiness",
+            "readiness_label": "COLD_START",
+            "closed_paper_outcomes_count": 0,
+            "real_money_sizing_impact": "PROHIBITED",
+            "proof_status": "PAPER_OUTCOME_READINESS_FAILED_SAFE",
+        }
+
     return {
         "run_date": payload["verified_holdings"].get("run_date"),
         "payload": payload,
@@ -233,6 +257,7 @@ def run_daily_synthesis(
         "external_evidence": external_evidence,
         "external_evidence_persistence": external_evidence_persistence,
         "external_evidence_operator_readiness": external_evidence_operator_readiness,
+        "paper_outcome_collection_readiness": paper_outcome_readiness,
         "l_today": discovery.get("l_today", []),
         "safety": advisory_safety_stamps(),
         "execution": human_only_stamp(),
@@ -458,6 +483,26 @@ def _persistence_summary(persistence: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _paper_outcome_readiness_summary(readiness: dict[str, Any]) -> dict[str, Any]:
+    """Frontend-safe paper-outcome collection readiness summary."""
+    return {
+        "readiness_label": readiness.get("readiness_label", "COLD_START"),
+        "closed_paper_outcomes_count": readiness.get("closed_paper_outcomes_count", 0),
+        "target_minimum": readiness.get("target_minimum", 50),
+        "target_preferred": readiness.get("target_preferred", 100),
+        "linked_external_evidence_outcomes_count": readiness.get(
+            "linked_external_evidence_outcomes_count", 0
+        ),
+        "bucket_count": readiness.get("bucket_count", 0),
+        "mature_bucket_count": readiness.get("mature_bucket_count", 0),
+        "calibration_readiness_score": readiness.get("calibration_readiness_score", 0.0),
+        "next_required_action": readiness.get("next_required_action", ""),
+        "real_money_sizing_impact": readiness.get(
+            "real_money_sizing_impact", "PROHIBITED"
+        ),
+    }
+
+
 def _write_artifacts(result: dict[str, Any], context_md: str) -> None:
     CONTEXT_MD_PATH.parent.mkdir(parents=True, exist_ok=True)
     CONTEXT_MD_PATH.write_text(context_md, encoding="utf-8")
@@ -510,9 +555,38 @@ def _write_artifacts(result: dict[str, Any], context_md: str) -> None:
         "external_evidence_persistence": _persistence_summary(
             result.get("external_evidence_persistence") or {}
         ),
+        "paper_outcome_collection_readiness": _paper_outcome_readiness_summary(
+            result.get("paper_outcome_collection_readiness") or {}
+        ),
         "safety": result["safety"],
     }
     CONTEXT_JSON_PATH.write_text(json.dumps(summary, indent=2), encoding="utf-8")
+
+    # External-evidence reliability artifact (read-only, advisory-only).  The
+    # full bundle (with per-source items) + operator readiness are surfaced
+    # here so GET /external-evidence/reliability can serve them to the
+    # frontend reliability card.  Stamped so the strict release-artifact
+    # coherence gate recognises it.
+    reliability_artifact = {
+        "report": "external_evidence_reliability",
+        "run_date": result.get("run_date"),
+        "external_evidence": result.get("external_evidence") or {},
+        "external_evidence_operator_readiness": (
+            result.get("external_evidence_operator_readiness") or {}
+        ),
+        "mode": "PAPER_ONLY",
+        "real_money_sizing_impact": "PROHIBITED",
+        "real_money_weight_allowed": False,
+        "human_execution_required": True,
+        "operator_execution_required": True,
+        "proof_status": "EXTERNAL_EVIDENCE_RELIABILITY_PAPER_ONLY",
+        **advisory_safety_stamps(),
+        "safety": advisory_safety_stamps(),
+    }
+    RELIABILITY_ARTIFACT_PATH.parent.mkdir(parents=True, exist_ok=True)
+    RELIABILITY_ARTIFACT_PATH.write_text(
+        json.dumps(reliability_artifact, indent=2), encoding="utf-8"
+    )
 
     coverage = result.get("country_coverage")
     if coverage:

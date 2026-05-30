@@ -41,6 +41,7 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { href: '/moltbook', label: 'Moltbook', icon: '◑' },
       { href: '/cockpit', label: 'Cockpit', icon: '◳' },
+      { href: '/external-evidence', label: 'Evidence Reliability', icon: '◍' },
       { href: '/exports', label: 'Exports', icon: '▤' },
     ],
   },
