@@ -27,78 +27,55 @@ import sys
 from pathlib import Path
 from typing import Any
 
-try:
-    from scripts.advisory_contract import advisory_safety_stamps, human_only_stamp
-    from scripts.anti_staleness import build_anti_staleness
-    from scripts.candidate_executable_split import build_candidate_executable_split
-    from scripts.daily_payload import load_daily_payload, normalize_ticker
-    from scripts.discovery_bias_metrics import (
-        compute_contamination_ratios,
-        compute_usa_bias,
-        render_bias_markdown,
-    )
-    from scripts.external_advisory_evidence import (
-        build_external_evidence_bundle,
-        render_external_evidence_markdown,
-    )
-    from scripts.external_evidence_operator_readiness import (
-        build_external_evidence_operator_readiness,
-    )
-    from scripts.external_evidence_persistence import (
-        persist_external_evidence_bundle,
-    )
-    from scripts.paper_outcome_collection_readiness import (
-        build_from_db as build_paper_outcome_readiness_from_db,
-    )
-    from scripts.calibration_corpus_quality import (
-        build_from_db as build_corpus_quality_from_db,
-    )
-    from scripts.fresh_market_discovery import build_fresh_market_discovery
-    from scripts.minimum_daily_universe import minimum_universe_metadata
-    from scripts.portfolio_truth_gate import build_portfolio_truth_gate
-    from scripts.runtime_common import REPO_ROOT
-    from scripts.top30_country_coverage import (
-        build_country_coverage_from_payload,
-        country_from_ticker,
-        render_country_coverage_markdown,
-    )
-    from scripts.why_today import why_today_score
-except ModuleNotFoundError:  # pragma: no cover - script-style env
-    from advisory_contract import advisory_safety_stamps, human_only_stamp
-    from anti_staleness import build_anti_staleness
-    from candidate_executable_split import build_candidate_executable_split
-    from daily_payload import load_daily_payload, normalize_ticker
-    from discovery_bias_metrics import (
-        compute_contamination_ratios,
-        compute_usa_bias,
-        render_bias_markdown,
-    )
-    from external_advisory_evidence import (
-        build_external_evidence_bundle,
-        render_external_evidence_markdown,
-    )
-    from external_evidence_operator_readiness import (
-        build_external_evidence_operator_readiness,
-    )
-    from external_evidence_persistence import (
-        persist_external_evidence_bundle,
-    )
-    from paper_outcome_collection_readiness import (
-        build_from_db as build_paper_outcome_readiness_from_db,
-    )
-    from calibration_corpus_quality import (
-        build_from_db as build_corpus_quality_from_db,
-    )
-    from fresh_market_discovery import build_fresh_market_discovery
-    from minimum_daily_universe import minimum_universe_metadata
-    from portfolio_truth_gate import build_portfolio_truth_gate
-    from runtime_common import REPO_ROOT
-    from top30_country_coverage import (
-        build_country_coverage_from_payload,
-        country_from_ticker,
-        render_country_coverage_markdown,
-    )
-    from why_today import why_today_score
+# Repo-root bootstrap.  Make the ``scripts`` package importable in every
+# execution mode before any project import runs:
+#   * package mode (``python -m pytest``, ``python -m scripts.*``) already has
+#     the repo root on ``sys.path``;
+#   * direct script mode (``python scripts/daily_synthesis_pipeline.py``) starts
+#     with ``scripts/`` on ``sys.path`` instead, so the canonical
+#     ``from scripts.X import ...`` lines below would otherwise fail.
+# With the repo root guaranteed on ``sys.path`` and ``scripts/__init__.py``
+# present, a single set of package imports resolves deterministically — no
+# brittle namespace-package fallback that could mask a genuinely missing module.
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
+from scripts.advisory_contract import advisory_safety_stamps, human_only_stamp
+from scripts.anti_staleness import build_anti_staleness
+from scripts.candidate_executable_split import build_candidate_executable_split
+from scripts.daily_payload import load_daily_payload, normalize_ticker
+from scripts.discovery_bias_metrics import (
+    compute_contamination_ratios,
+    compute_usa_bias,
+    render_bias_markdown,
+)
+from scripts.external_advisory_evidence import (
+    build_external_evidence_bundle,
+    render_external_evidence_markdown,
+)
+from scripts.external_evidence_operator_readiness import (
+    build_external_evidence_operator_readiness,
+)
+from scripts.external_evidence_persistence import (
+    persist_external_evidence_bundle,
+)
+from scripts.paper_outcome_collection_readiness import (
+    build_from_db as build_paper_outcome_readiness_from_db,
+)
+from scripts.calibration_corpus_quality import (
+    build_from_db as build_corpus_quality_from_db,
+)
+from scripts.fresh_market_discovery import build_fresh_market_discovery
+from scripts.minimum_daily_universe import minimum_universe_metadata
+from scripts.portfolio_truth_gate import build_portfolio_truth_gate
+from scripts.runtime_common import REPO_ROOT
+from scripts.top30_country_coverage import (
+    build_country_coverage_from_payload,
+    country_from_ticker,
+    render_country_coverage_markdown,
+)
+from scripts.why_today import why_today_score
 
 
 CONTEXT_MD_PATH = REPO_ROOT / "runtime" / "daily_portfolio_truth_context.md"
