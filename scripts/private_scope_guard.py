@@ -288,6 +288,12 @@ APPROVED_DOMAINS: tuple[str, ...] = (
     "veto_integrity",    # veto_integrity_proof.py — DIABLO/chaos/no-new-risk proof pack
     # source_health_maturity.py is covered by the "source" domain above;
     # external_evidence_operator_readiness.py is covered by "operator".
+    # Kanté continuation sprint — advisory-only paper-outcome collection
+    # readiness report.  Pure compute + read-only DB counts over closed-trade
+    # outcomes and calibration buckets; fabricates no outcomes, writes no trade
+    # rows, never marks paper readiness as real-money readiness.  Real-money
+    # sizing stays PROHIBITED; no broker execution, no order placement.
+    "paper_outcome",     # paper_outcome_collection_readiness.py — calibration-readiness report (read-only)
 )
 
 # Explicit allowlist for individual files / directories whose name does
