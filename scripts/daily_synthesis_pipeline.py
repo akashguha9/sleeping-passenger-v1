@@ -508,9 +508,14 @@ def _paper_outcome_readiness_summary(readiness: dict[str, Any]) -> dict[str, Any
     """Frontend-safe paper-outcome collection readiness summary."""
     return {
         "readiness_label": readiness.get("readiness_label", "COLD_START"),
+        "calibration_stage": readiness.get(
+            "calibration_stage", readiness.get("readiness_label", "COLD_START")
+        ),
         "closed_paper_outcomes_count": readiness.get("closed_paper_outcomes_count", 0),
         "target_minimum": readiness.get("target_minimum", 50),
         "target_preferred": readiness.get("target_preferred", 100),
+        "closed_outcome_progress_50": readiness.get("closed_outcome_progress_50", 0.0),
+        "closed_outcome_progress_100": readiness.get("closed_outcome_progress_100", 0.0),
         "linked_external_evidence_outcomes_count": readiness.get(
             "linked_external_evidence_outcomes_count", 0
         ),

@@ -141,11 +141,21 @@ def build_paper_outcome_collection_readiness(
 
     label = _readiness_label(closed)
 
+    # Operator-facing 50/100 progress bars + the human-readable calibration
+    # stage.  ``calibration_stage`` is the same band as ``readiness_label``
+    # (0-29 COLD_START, 30-49 EARLY_SAMPLE, 50-99 PROVISIONAL, 100+
+    # PAPER_CALIBRATED) — surfaced under an explicit name for the dashboard.
+    closed_outcome_progress_50 = min(closed / float(TARGET_MINIMUM), 1.0)
+    closed_outcome_progress_100 = min(closed / float(TARGET_PREFERRED), 1.0)
+
     out: dict[str, Any] = {
         "report": "paper_outcome_collection_readiness",
         "closed_paper_outcomes_count": closed,
         "target_minimum": TARGET_MINIMUM,
         "target_preferred": TARGET_PREFERRED,
+        "closed_outcome_progress_50": round(closed_outcome_progress_50, 6),
+        "closed_outcome_progress_100": round(closed_outcome_progress_100, 6),
+        "calibration_stage": label,
         "linked_external_evidence_outcomes_count": linked,
         "bucket_count": bucket_count,
         "cold_bucket_count": cold,

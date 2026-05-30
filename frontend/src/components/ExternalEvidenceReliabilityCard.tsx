@@ -50,6 +50,10 @@ export interface PaperOutcomeReadinessView {
   target_preferred?: number | null;
   calibration_readiness_score?: number | null;
   next_required_action?: string | null;
+  // Kanté Closed-Outcome Corpus sprint — 50/100 progress + named stage.
+  closed_outcome_progress_50?: number | null;
+  closed_outcome_progress_100?: number | null;
+  calibration_stage?: string | null;
 }
 
 export interface CalibrationCorpusQualityView {
@@ -74,6 +78,9 @@ export interface ExternalEvidenceReliabilityView {
   calibration_corpus_quality?: CalibrationCorpusQualityView | null;
   live_verified_blockers?: string[] | null;
   real_money_readiness_ceiling?: number | string | null;
+  // Kanté Closed-Outcome Corpus sprint — top missing fields + next actions.
+  top_missing_fields?: string[] | null;
+  next_operator_actions?: string[] | null;
 }
 
 interface Props {
@@ -134,10 +141,13 @@ function PaperOutcomeReadinessSection({
   const readiness = bundle?.paper_outcome_readiness ?? null;
   const corpus = bundle?.calibration_corpus_quality ?? null;
   const blockers = bundle?.live_verified_blockers ?? null;
+  const topMissingFields = bundle?.top_missing_fields ?? null;
+  const nextActions = bundle?.next_operator_actions ?? null;
 
   const closed = readiness?.closed_paper_outcomes_count ?? null;
   const targetMin = readiness?.target_minimum ?? 50;
   const targetPref = readiness?.target_preferred ?? 100;
+  const stage = readiness?.calibration_stage ?? readiness?.readiness_label ?? 'COLD_START';
   const realMoneyCeiling = bundle?.real_money_readiness_ceiling ?? 'LOW BY DESIGN';
 
   return (
@@ -149,14 +159,19 @@ function PaperOutcomeReadinessSection({
         Paper-Outcome Readiness
       </div>
       <dl className="mt-1 grid grid-cols-2 gap-x-3 gap-y-1 text-[11px] text-slate-300">
-        <dt className="text-slate-500">Readiness</dt>
+        <dt className="text-slate-500">Calibration stage</dt>
         <dd className="text-right font-mono" data-testid="reliability-paper-outcome-label">
-          {readiness?.readiness_label ?? 'UNKNOWN'}
+          {stage}
         </dd>
 
         <dt className="text-slate-500">Closed outcomes</dt>
         <dd className="text-right font-mono" data-testid="reliability-paper-outcome-progress">
           {closed ?? 0} / {targetMin} · {closed ?? 0} / {targetPref}
+        </dd>
+
+        <dt className="text-slate-500">Minimum / preferred</dt>
+        <dd className="text-right font-mono" data-testid="reliability-paper-outcome-targets">
+          {closed ?? 0} / {targetMin} minimum · {closed ?? 0} / {targetPref} preferred
         </dd>
 
         <dt className="text-slate-500">Corpus quality</dt>
@@ -174,13 +189,44 @@ function PaperOutcomeReadinessSection({
           className="text-right font-mono text-rose-200"
           data-testid="reliability-real-money-readiness"
         >
-          {typeof realMoneyCeiling === 'number' ? `${realMoneyCeiling} / 10` : realMoneyCeiling}
+          {typeof realMoneyCeiling === 'number'
+            ? `${realMoneyCeiling} / 10 (low by design)`
+            : realMoneyCeiling}
         </dd>
       </dl>
 
-      <p className="mt-1 text-[10px] leading-snug text-slate-400" data-testid="reliability-next-action">
-        Next: {readiness?.next_required_action || corpus?.operator_next_action || 'Collect closed paper outcomes.'}
+      <p
+        className="mt-1 text-[10px] leading-snug text-rose-200/80"
+        data-testid="reliability-real-money-low-by-design"
+      >
+        Real-money readiness remains low by design.
       </p>
+
+      {topMissingFields && topMissingFields.length > 0 ? (
+        <p
+          className="mt-1 text-[10px] leading-snug text-slate-400"
+          data-testid="reliability-top-missing-fields"
+        >
+          Top missing fields: {topMissingFields.join(', ')}
+        </p>
+      ) : null}
+
+      {nextActions && nextActions.length > 0 ? (
+        <ol
+          className="mt-1 list-decimal pl-4 text-[10px] leading-snug text-slate-400"
+          data-testid="reliability-next-operator-actions"
+        >
+          {nextActions.slice(0, 5).map((action, idx) => (
+            <li key={idx} data-testid="reliability-next-operator-action">
+              {action}
+            </li>
+          ))}
+        </ol>
+      ) : (
+        <p className="mt-1 text-[10px] leading-snug text-slate-400" data-testid="reliability-next-action">
+          Next: {readiness?.next_required_action || corpus?.operator_next_action || 'Collect closed paper outcomes.'}
+        </p>
+      )}
 
       {blockers && blockers.length > 0 ? (
         <p

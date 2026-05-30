@@ -206,17 +206,34 @@ def _paper_readiness_fields(artifact: dict[str, Any] | None) -> dict[str, Any]:
             readiness = readiness or None
             corpus = corpus or None
 
+    closed_count = 0
     readiness_view = None
     if isinstance(readiness, dict):
+        closed_count = int(readiness.get("closed_paper_outcomes_count") or 0)
+        target_min = readiness.get("target_minimum", 50) or 50
+        target_pref = readiness.get("target_preferred", 100) or 100
         readiness_view = {
             "readiness_label": readiness.get("readiness_label"),
-            "closed_paper_outcomes_count": readiness.get("closed_paper_outcomes_count"),
-            "target_minimum": readiness.get("target_minimum", 50),
-            "target_preferred": readiness.get("target_preferred", 100),
+            "closed_paper_outcomes_count": closed_count,
+            "target_minimum": target_min,
+            "target_preferred": target_pref,
             "calibration_readiness_score": readiness.get("calibration_readiness_score"),
             "next_required_action": readiness.get("next_required_action"),
+            # Kanté Closed-Outcome Corpus sprint — 50/100 progress + stage.
+            "closed_outcome_progress_50": readiness.get(
+                "closed_outcome_progress_50",
+                min(closed_count / float(target_min), 1.0),
+            ),
+            "closed_outcome_progress_100": readiness.get(
+                "closed_outcome_progress_100",
+                min(closed_count / float(target_pref), 1.0),
+            ),
+            "calibration_stage": readiness.get(
+                "calibration_stage", readiness.get("readiness_label")
+            ),
         }
     corpus_view = None
+    top_missing_fields: list[str] = []
     if isinstance(corpus, dict):
         corpus_view = {
             "corpus_quality_score": corpus.get("corpus_quality_score"),
@@ -225,13 +242,61 @@ def _paper_readiness_fields(artifact: dict[str, Any] | None) -> dict[str, Any]:
             "operator_next_action": corpus.get("operator_next_action"),
             "n_closed": corpus.get("n_closed"),
         }
+        missing_summary = corpus.get("missing_fields_summary")
+        if isinstance(missing_summary, dict):
+            top_missing_fields = [
+                k
+                for k, _ in sorted(
+                    missing_summary.items(), key=lambda kv: kv[1], reverse=True
+                )
+            ][:5]
 
     return {
         "paper_outcome_readiness": readiness_view,
         "calibration_corpus_quality": corpus_view,
         "live_verified_blockers": blockers,
         "real_money_readiness_ceiling": REAL_MONEY_READINESS_CEILING,
+        "top_missing_fields": top_missing_fields,
+        "next_operator_actions": _next_operator_actions(readiness, corpus, closed_count),
     }
+
+
+def _next_operator_actions(
+    readiness: dict[str, Any] | None,
+    corpus: dict[str, Any] | None,
+    closed_count: int,
+) -> list[str]:
+    """The next (up to 5) operator actions for the 50/100 outcome push.
+
+    Read-only, advisory wording only — never an execution / trade CTA.  Derived
+    from the read-only readiness + corpus reports, deduped, capped at five.
+    """
+    actions: list[str] = []
+    if isinstance(readiness, dict) and readiness.get("next_required_action"):
+        actions.append(str(readiness["next_required_action"]))
+    if isinstance(corpus, dict) and corpus.get("operator_next_action"):
+        actions.append(str(corpus["operator_next_action"]))
+    remaining_50 = max(0, 50 - closed_count)
+    remaining_100 = max(0, 100 - closed_count)
+    if remaining_50 > 0:
+        actions.append(
+            f"Collect {remaining_50} more closed paper outcomes to reach the "
+            "50-outcome minimum."
+        )
+    if remaining_100 > 0:
+        actions.append(
+            f"Collect {remaining_100} more to reach the 100-outcome preferred target."
+        )
+    actions.append(
+        "Link closed outcomes to external-evidence snapshots via "
+        "calibration_corpus_builder (dry-run first)."
+    )
+    actions.append("Real-money readiness remains low by design — keep sizing prohibited.")
+    deduped: list[str] = []
+    for a in actions:
+        if a and a not in deduped:
+            deduped.append(a)
+    return deduped[:5]
 
 
 def build_external_evidence_reliability_payload(
