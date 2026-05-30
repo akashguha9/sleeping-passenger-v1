@@ -481,9 +481,126 @@ def render_portfolio_truth_context(result: dict[str, Any]) -> str:
         lines.append(render_external_evidence_markdown(external_evidence))
         lines.append("")
 
+    # --- Synthesis evidence readiness + classification invariants (P3) ---
+    lines.append("------------------------------------------------------------")
+    lines.append(render_evidence_readiness_block(result))
+    lines.append("")
     lines.append("Reminder: advisory only. No broker action. No execution. Human review required.")
     lines.append("============================================================")
     return "\n".join(lines)
+
+
+def render_evidence_readiness_block(result):
+    """Render the synthesis evidence-readiness + classification invariants block.
+
+    Surfaces the proof metrics the five-model synthesis must reason over and
+    binds the hard classification rules. Advisory only; no execution.
+    """
+    coverage = result.get("country_coverage") or {}
+    ratios = coverage.get("ratios", {}) if isinstance(coverage, dict) else {}
+    # ``countries`` may be a dict-of-rows ({name: row}) or a list of row dicts
+    # (each carrying a ``country`` key) depending on the producer — normalize to
+    # a list of (name, row) pairs so this block is shape-agnostic.
+    raw_countries = coverage.get("countries", []) if isinstance(coverage, dict) else []
+    if isinstance(raw_countries, dict):
+        country_rows = list(raw_countries.items())
+    elif isinstance(raw_countries, (list, tuple)):
+        country_rows = [
+            (r.get("country"), r)
+            for r in raw_countries
+            if isinstance(r, dict) and r.get("country") is not None
+        ]
+    else:
+        country_rows = []
+    c_global = ratios.get("C_global", 0.0) or 0.0
+    candidates = result.get("candidates", []) or []
+    l_today = len(candidates)
+    h_price = result.get("H_price_coverage", 0.0) or 0.0
+    payload_stale = result.get("payload_stale", True)
+    sqlite_fresh = result.get("sqlite_fresh_rows_count", 0) or 0
+    provider_attempts = result.get("provider_attempts", {}) or {}
+    new_risk_allowed = bool(result.get("new_risk_allowed", False))
+
+    ev = compute_synthesis_evidence_score(
+        {
+            "C_global": c_global,
+            "L_today_count": l_today,
+            "H_price_coverage": h_price,
+            "payload_stale": payload_stale,
+            "sqlite_fresh_rows_count": sqlite_fresh,
+            "provider_attempts": provider_attempts,
+        }
+    )
+    lines = []
+    lines.append("## Synthesis Evidence Readiness (ADVISORY)")
+    lines.append("synthesis_evidence_score: %s" % ev["synthesis_evidence_score"])
+    lines.append("C_global: %s" % c_global)
+    lines.append("L_today_count: %s" % l_today)
+    lines.append("H_price_coverage: %s" % h_price)
+    lines.append("payload_stale: %s" % payload_stale)
+    lines.append("sqlite_fresh_rows_count: %s" % sqlite_fresh)
+    lines.append(
+        "provider_attempts_observed: %s" % (len(provider_attempts) > 0)
+    )
+    lines.append("new_risk_allowed: %s" % new_risk_allowed)
+    lines.append("")
+    lines.append("### Hard Classification Invariants")
+    if not c_global or c_global <= 0:
+        lines.append("- C_global=0: models MUST say global discovery not fully live.")
+    else:
+        lines.append("- C_global>0: at least one country is end-to-end covered.")
+    lines.append(
+        "- A candidate NOT in L_today MUST NOT be classified BUY_CANDIDATE."
+    )
+    lines.append(
+        "- If price_support=1 but news_support=0 or mapping_support=0: "
+        "classify as PRICE_CONFIRMED_WATCH only (data-insufficient)."
+    )
+    lines.append(
+        "- new_risk_allowed=%s: real-money sizing is PROHIBITED; advisory only, "
+        "human execution required." % new_risk_allowed
+    )
+    # Per-country watch/candidate hints from coverage layers.
+    for country, v in sorted(country_rows, key=lambda kv: str(kv[0])):
+        if not isinstance(v, dict):
+            continue
+        price = v.get("price_support", 0)
+        news = v.get("news_support", 0)
+        mapping = v.get("mapping_support", 0)
+        if v.get("coverage") == 1:
+            lines.append(
+                "- %s: COVERAGE-BACKED watch/candidate (advisory)." % country
+            )
+        elif price and (not news or not mapping):
+            lines.append(
+                "- %s: PRICE_CONFIRMED_WATCH only (data-insufficient)." % country
+            )
+    return "\n".join(lines)
+
+
+def compute_synthesis_evidence_score(evidence):
+    """Compute the synthesis evidence-readiness score (0.0-1.0).
+
+    synthesis_evidence_score =
+        0.20*C_global_positive + 0.20*L_today_nonempty
+        + 0.20*H_price_coverage_ok + 0.20*payload_fresh
+        + 0.20*provider_status_observed
+    """
+    c_global = evidence.get("C_global", 0.0) or 0.0
+    l_today = evidence.get("L_today_count", 0) or 0
+    h_price = evidence.get("H_price_coverage", 0.0) or 0.0
+    payload_stale = evidence.get("payload_stale", True)
+    sqlite_fresh = evidence.get("sqlite_fresh_rows_count", 0) or 0
+    provider_attempts = evidence.get("provider_attempts", {}) or {}
+    components = {
+        "C_global_positive": 1 if c_global > 0 else 0,
+        "L_today_nonempty": 1 if l_today > 0 else 0,
+        "H_price_coverage_ok": 1 if h_price >= 0.80 else 0,
+        "payload_fresh": 1 if (payload_stale is False or sqlite_fresh > 0) else 0,
+        "provider_status_observed": 1 if len(provider_attempts) > 0 else 0,
+    }
+    score = round(0.20 * sum(components.values()), 4)
+    return {"synthesis_evidence_score": score, "components": components}
 
 
 def _persistence_summary(persistence: dict[str, Any]) -> dict[str, Any]:

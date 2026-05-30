@@ -603,6 +603,12 @@ def run_daily_refresh(
         and report["ai_execution_count"] == 0
     )
 
+    # Consolidated operator Kante report (P4) — advisory-only. Attached to the
+    # in-memory report so the secret-leak guard below also scans it; main()
+    # persists it to a file ONLY when --operator-report-out is given.
+    report["operator_report"] = build_operator_kante_report(
+        report, coverage_proof, country_focus=country_focus, env=env
+    )
     # Defensive secret-leak guard: the report must not contain any raw secret.
     if no_secrets_in_logs:
         secrets = collect_secret_values(_SECRET_ENVS, env)
@@ -612,7 +618,8 @@ def run_daily_refresh(
     return report
 
 
-def main(argv: list[str] | None = None) -> int:  # pragma: no cover - CLI
+def build_arg_parser() -> argparse.ArgumentParser:
+    """Construct the operator daily-refresh CLI parser (real-canary flags)."""
     parser = argparse.ArgumentParser(
         prog="run_daily_discovery_refresh.py",
         description=(
@@ -648,6 +655,14 @@ def main(argv: list[str] | None = None) -> int:  # pragma: no cover - CLI
     parser.add_argument("--json", action="store_true")
     parser.add_argument("--legacy-price-only", action="store_true",
                         help="Run the legacy price-only flow (run_refresh).")
+    parser.add_argument("--operator-report-out", default=None,
+                        help="Write the consolidated operator Kante report JSON here "
+                             "(advisory-only; off by default).")
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:  # pragma: no cover - CLI
+    parser = build_arg_parser()
     args = parser.parse_args(argv)
 
     now_utc = datetime.now(timezone.utc)
@@ -689,6 +704,11 @@ def main(argv: list[str] | None = None) -> int:  # pragma: no cover - CLI
     (report_dir / "daily_refresh_report.json").write_text(
         json.dumps(report, indent=2, default=str), encoding="utf-8"
     )
+    if args.operator_report_out:
+        Path(args.operator_report_out).write_text(
+            json.dumps(report.get("operator_report", {}), indent=2, default=str),
+            encoding="utf-8",
+        )
 
     if args.json:
         print(json.dumps(report, indent=2, default=str))
@@ -703,7 +723,68 @@ def main(argv: list[str] | None = None) -> int:  # pragma: no cover - CLI
     return 0
 
 
-__all__ = ["run_refresh", "run_daily_refresh", "_mock_price_provider", "DEFAULT_HOLDINGS"]
+def _next_missing_layers(coverage_proof, country_focus=None):
+    """Honest 'what's still missing' list for the focus (or most-ready) country."""
+    rows = coverage_proof.get("country_rows", []) or []
+    if country_focus:
+        for r in rows:
+            if r.get("country") == country_focus and not r.get("coverage"):
+                return ["%s:%s" % (country_focus, layer) for layer in r.get("missing_layers", [])]
+    uncovered = [r for r in rows if not r.get("coverage")]
+    if not uncovered:
+        return []
+    best = max(uncovered, key=lambda r: r.get("target_readiness", 0.0))
+    return ["%s:%s" % (best.get("country"), layer) for layer in best.get("missing_layers", [])]
+
+
+def build_operator_kante_report(report, coverage_proof, *, country_focus=None, env=None):
+    """Consolidate ONE secret-free, advisory-only daily operator report (P4).
+
+    Pure projection of an already-computed refresh ``report`` + ``coverage_proof``;
+    it never calls a broker, never places an order, never allows new real-money
+    risk. The execution invariants are hard-coded LOCKED. Returns a plain dict;
+    the caller decides whether to persist it (NOT written by default).
+    """
+    summary = report.get("country_coverage_summary", {}) or {}
+    coverage_by_country = {
+        r.get("country"): r.get("coverage", 0)
+        for r in (coverage_proof.get("country_rows", []) or [])
+    }
+    rows_written = report.get("rows_written_signal_events", 0) or 0
+    gate = report.get("new_risk_gate", {}) or {}
+    out = {
+        "run_timestamp_utc": report.get("run_timestamp_utc"),
+        "provider_attempts": report.get("providers_attempted", []),
+        "rows_written_signal_events": rows_written,
+        "news_rows_written_signal_events": report.get("news_rows_written_signal_events", 0),
+        "filings_rows_written_signal_events": report.get("filings_rows_written_signal_events", 0),
+        "L_today_count": report.get("L_today_count", 0),
+        "H_price_coverage": report.get("H_price_coverage", 0.0),
+        "C_global": report.get("C_global", 0.0),
+        "C_price": report.get("C_price", 0.0),
+        "C_news": report.get("C_news", 0.0),
+        "C_mapping": report.get("C_mapping", 0.0),
+        "coverage_by_country": coverage_by_country,
+        "first_covered_country": summary.get("first_covered_country"),
+        "payload_stale": rows_written == 0,
+        "sqlite_fresh_rows_count": rows_written,
+        # Advisory paper-candidate gate only; real money is unconditionally
+        # prohibited (see execution invariants below).
+        "new_risk_allowed": bool(gate.get("new_risk_allowed", False)),
+        "execution_gate": "LOCKED",
+        "broker_api_called": False,
+        "ai_execution_count": 0,
+        "warnings": report.get("warnings", []),
+        "next_missing_layers": _next_missing_layers(coverage_proof, country_focus),
+    }
+    # Self-check: prove this report leaks no configured secret value.
+    out["secret_leak_check_passed"] = assert_no_secret(
+        out, collect_secret_values(_SECRET_ENVS, env)
+    )
+    return out
+
+
+__all__ = ["run_refresh", "run_daily_refresh", "_mock_price_provider", "DEFAULT_HOLDINGS", "build_arg_parser", "build_operator_kante_report"]
 
 
 if __name__ == "__main__":  # pragma: no cover
