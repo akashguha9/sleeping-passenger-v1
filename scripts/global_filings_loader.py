@@ -43,10 +43,27 @@ STATUS_PROVIDER_NOT_CONFIGURED = "PROVIDER_NOT_CONFIGURED"  # needs an absent ke
 STATUS_LIVE_VERIFIED = "LIVE_VERIFIED"                  # attempted + fresh rows present
 STATUS_OK_EMPTY = "OK_EMPTY"                            # attempted, zero fresh rows
 STATUS_DEGRADED_PROVIDER_ERROR = "DEGRADED_PROVIDER_ERROR"
+# Network / real-fetch honest fallbacks (mission P2). None is an instruction.
+STATUS_NETWORK_DISABLED = "NETWORK_DISABLED"
+STATUS_PROVIDER_TIMEOUT = "PROVIDER_TIMEOUT"
+STATUS_PROVIDER_ERROR = "PROVIDER_ERROR"
+STATUS_PROVIDER_RATE_LIMITED = "PROVIDER_RATE_LIMITED"
+STATUS_PROVIDER_AUTH_FAILED = "PROVIDER_AUTH_FAILED"
+STATUS_DEGRADED_EMPTY = "DEGRADED_EMPTY"
+
+# Read-only request timeout for any real fetch (bounded; never blocks forever).
+FILINGS_HTTP_TIMEOUT_SECONDS = 8.0
 
 FILINGS_TTL_HOURS = 72.0
 # Mapping reason for a real but unlisted/private Companies House entity.
 PRIVATE_UNLISTED_REASON = "PRIVATE_COMPANY_OR_UNLISTED"
+# Companies House listing-status vocabulary (mission P2).
+LISTED_MAPPED = "LISTED_MAPPED"
+PRIVATE_COMPANY_OR_UNLISTED = "PRIVATE_COMPANY_OR_UNLISTED"
+UNKNOWN_LISTING_STATUS = "UNKNOWN_LISTING_STATUS"
+
+# Source-URL env names a keyless RNS feed may use (Mode B). Value never logged.
+RNS_SOURCE_URL_ENVS: tuple[str, ...] = ("LSE_RNS_SOURCE_URL", "RNS_SOURCE_URL")
 
 # Provider registry. ``implemented`` is False for every entry today: we have
 # wiring + honest status, not a live fetch. ``env_key`` names the credential a
@@ -306,19 +323,22 @@ def normalize_uk_rns_row(
     ticker = str(raw.get("ticker") or "").strip().upper()
     mapping = _map_entity(entity_name, ticker, "GB")
     fresh = _row_freshness_score(raw, now_utc)
+    fetched_at = raw.get("fetched_at_utc") or utc_timestamp()
     return {
         "source_name": "UK_RNS",
+        "source_type": str(raw.get("source_type") or "disclosure"),
         "provider": "lse_rns",
         "country": "United Kingdom",
         "jurisdiction": "UK",
         "event_type": str(raw.get("event_type") or "regulatory"),
         "entity_name": entity_name or (mapping.get("entity_name") or None),
         "ticker": mapping.get("ticker") or (ticker or None),
-        "exchange": mapping.get("exchange") or "",
+        "exchange": mapping.get("exchange") or "LSE",
         "headline": str(raw.get("headline") or raw.get("title") or "").strip() or None,
         "summary": raw.get("summary"),
         "url": raw.get("url") or raw.get("source_url"),
         "published_at_utc": raw.get("published_at_utc") or raw.get("published_at"),
+        "fetched_at_utc": fetched_at,
         "freshness": "FRESH_TODAY" if fresh > 0 else "STALE",
         "freshness_score": fresh,
         "is_live": fresh > 0,
@@ -354,19 +374,34 @@ def normalize_companies_house_row(
 
     mapped_ok = mapping.get("mapping_status") == "MAPPED" and mapping.get("ticker")
     failure_reason = mapping.get("mapping_failure_reason")
+    mapping_conf = float(mapping.get("mapping_confidence") or 0.0) if mapped_ok else 0.0
     tradable = False
     if mapped_ok:
-        tradable = True
+        listed_status = LISTED_MAPPED
     elif company_number:
         # A real registered company that does not resolve to a listed ticker.
         failure_reason = PRIVATE_UNLISTED_REASON
+        listed_status = PRIVATE_COMPANY_OR_UNLISTED
+    else:
+        listed_status = UNKNOWN_LISTING_STATUS
+    # tradable_candidate = 1[ conf>=theta AND ticker not null AND LISTED_MAPPED ].
+    if (
+        mapped_ok
+        and mapping.get("ticker")
+        and mapping_conf >= DEFAULT_THETA_MAP
+        and listed_status == LISTED_MAPPED
+    ):
+        tradable = True
+    fetched_at = raw.get("fetched_at_utc") or utc_timestamp()
 
     return {
         "source_name": "UK_COMPANIES_HOUSE",
+        "source_type": str(raw.get("source_type") or "registry_filing"),
         "provider": "companies_house",
         "country": "United Kingdom",
         "jurisdiction": "UK",
         "event_type": str(raw.get("event_type") or "filing"),
+        "filing_type": raw.get("filing_type") or raw.get("category") or raw.get("type"),
         "entity_name": entity_name or None,
         "company_number": company_number or None,
         "ticker": mapping.get("ticker") if mapped_ok else None,
@@ -374,11 +409,13 @@ def normalize_companies_house_row(
         "headline": str(raw.get("headline") or raw.get("description") or "").strip() or None,
         "url": raw.get("url"),
         "published_at_utc": raw.get("published_at_utc") or raw.get("published_at"),
+        "fetched_at_utc": fetched_at,
         "freshness": "FRESH_TODAY" if fresh > 0 else "STALE",
         "freshness_score": fresh,
         "is_live": fresh > 0,
+        "listed_status": listed_status,
         "mapping_status": mapping.get("mapping_status", "UNMAPPED") if mapped_ok else "UNMAPPED",
-        "mapping_confidence": float(mapping.get("mapping_confidence") or 0.0) if mapped_ok else 0.0,
+        "mapping_confidence": mapping_conf,
         "mapping_failure_reason": failure_reason,
         "tradable_candidate": tradable,
         "provider_status": STATUS_LIVE_VERIFIED if fresh > 0 else STATUS_OK_EMPTY,
@@ -510,6 +547,250 @@ def build_uk_filing_events(
     return events, meta
 
 
+# ---------------------------------------------------------------------------
+# Real read-only fetch paths — network-gated, secret-safe, injectable.
+# ---------------------------------------------------------------------------
+# A ``transport`` is a zero-arg batch fetcher returning a list of raw rows. It
+# is the deterministic test seam (no network). The real network path is taken
+# only when ``allow_network=True`` AND the provider is configured; it is bounded
+# by ``FILINGS_HTTP_TIMEOUT_SECONDS`` and never raises through to the caller.
+# Credential VALUES are never logged or returned — only ``*_present`` booleans.
+
+FilingsTransport = "Callable[[], list[dict[str, Any]]]"
+
+
+def _env_present(name: str | None, env: dict[str, str] | None) -> bool:
+    if not name:
+        return False
+    source = os.environ if env is None else env
+    return bool(str(source.get(name) or "").strip())
+
+
+def _present_source_url_env(env: dict[str, str] | None) -> str | None:
+    """Return the NAME of the first configured RNS source-URL env, or None."""
+    for name in RNS_SOURCE_URL_ENVS:
+        if _env_present(name, env):
+            return name
+    return None
+
+
+def rns_config_state(env: dict[str, str] | None = None) -> dict[str, Any]:
+    """Secret-safe RNS provider config: Mode A (key) / Mode B (source URL) / NONE."""
+    api_present = _env_present("LSE_RNS_API_KEY", env)
+    src_env = _present_source_url_env(env)
+    if api_present:
+        mode = "API_KEY"
+    elif src_env:
+        mode = "SOURCE_URL"
+    else:
+        mode = "NONE"
+    return {
+        "provider": "lse_rns",
+        "mode": mode,
+        "api_key_env": "LSE_RNS_API_KEY",
+        "api_key_present": api_present,
+        "source_url_env": src_env,          # NAME only, never the URL value
+        "source_url_present": src_env is not None,
+        "configured": mode != "NONE",
+    }
+
+
+def companies_house_config_state(env: dict[str, str] | None = None) -> dict[str, Any]:
+    """Secret-safe Companies House provider config."""
+    api_present = _env_present("COMPANIES_HOUSE_API_KEY", env)
+    return {
+        "provider": "companies_house",
+        "mode": "API_KEY" if api_present else "NONE",
+        "api_key_env": "COMPANIES_HOUSE_API_KEY",
+        "api_key_present": api_present,
+        "configured": api_present,
+    }
+
+
+def _provider_meta(
+    state: dict[str, Any],
+    status: str,
+    *,
+    attempted: bool,
+    is_live: bool = False,
+    fresh: int = 0,
+    rows: int = 0,
+    reason: str | None = None,
+) -> dict[str, Any]:
+    """Honest, secret-safe meta block for a filings fetch."""
+    safe_state = {k: v for k, v in state.items()}  # already secret-safe (booleans + names)
+    return {
+        "provider": state["provider"],
+        "status": status,
+        "is_live": bool(is_live),
+        "attempted": bool(attempted),
+        "fresh_row_count": fresh,
+        "row_count": rows,
+        "config": safe_state,
+        "executable_allowed": False,
+        "reason": reason,
+        "generated_at_utc": utc_timestamp(),
+        "safety": advisory_safety_stamps(),
+    }
+
+
+def _fetch_filings_adapter(
+    state: dict[str, Any],
+    normalizer,
+    real_transport_builder,
+    *,
+    allow_network: bool,
+    env: dict[str, str] | None,
+    transport,
+    fixture_rows: list[dict[str, Any]] | None,
+    now_utc: datetime | None,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Shared honest fetch: offline injection or network-gated real fetch."""
+    rows: list[dict[str, Any]] | None = None
+    attempted = False
+
+    if fixture_rows is not None:
+        rows, attempted = list(fixture_rows), True
+    elif transport is not None:
+        attempted = True
+        try:
+            rows = list(transport() or [])
+        except Exception:  # noqa: BLE001 - transport failure is honest, never fatal
+            return [], _provider_meta(state, STATUS_PROVIDER_ERROR, attempted=True)
+    else:
+        if not allow_network:
+            return [], _provider_meta(
+                state, STATUS_NETWORK_DISABLED, attempted=False,
+                reason="network disabled; no marks fetched",
+            )
+        if not state["configured"]:
+            return [], _provider_meta(
+                state, STATUS_PROVIDER_NOT_CONFIGURED, attempted=False,
+                reason="no API key / source URL configured",
+            )
+        real = real_transport_builder(env)
+        if real is None:
+            return [], _provider_meta(
+                state, STATUS_PROVIDER_NOT_CONFIGURED, attempted=False,
+                reason="configured but no usable read-only endpoint",
+            )
+        attempted = True
+        try:
+            rows = list(real() or [])
+        except TimeoutError:
+            return [], _provider_meta(state, STATUS_PROVIDER_TIMEOUT, attempted=True)
+        except Exception:  # noqa: BLE001 - network failure degrades honestly
+            return [], _provider_meta(state, STATUS_PROVIDER_ERROR, attempted=True)
+
+    events = [normalizer(r, now_utc=now_utc) for r in (rows or []) if isinstance(r, dict)]
+    fresh = sum(1 for e in events if e.get("freshness_score", 0) > 0)
+    if fresh > 0:
+        status, is_live = STATUS_LIVE_VERIFIED, True
+    elif attempted:
+        status, is_live = STATUS_OK_EMPTY, False
+    else:  # pragma: no cover - guarded above
+        status, is_live = STATUS_PROVIDER_NOT_CONFIGURED, False
+    meta = _provider_meta(
+        state, status, attempted=attempted, is_live=is_live, fresh=fresh, rows=len(events)
+    )
+    return events, meta
+
+
+def _rns_real_transport(env: dict[str, str] | None):  # pragma: no cover - network
+    """Build a read-only RNS source-URL fetcher (Mode B), or None.
+
+    Only the source-URL feed is wired as a genuine read-only fetch. An API-key
+    without a configured endpoint cannot be fetched honestly, so this returns
+    None (the caller then reports PROVIDER_NOT_CONFIGURED with a reason).
+    """
+    src_env = _present_source_url_env(env)
+    if not src_env:
+        return None
+    source = os.environ if env is None else env
+    url = str(source.get(src_env) or "").strip()
+    if not url:
+        return None
+
+    def _fetch() -> list[dict[str, Any]]:
+        import json as _json
+        import urllib.request
+
+        req = urllib.request.Request(
+            url, headers={"User-Agent": "sleeping-passenger-advisory/1.0"}
+        )
+        with urllib.request.urlopen(req, timeout=FILINGS_HTTP_TIMEOUT_SECONDS) as resp:
+            if getattr(resp, "status", 200) != 200:
+                return []
+            data = _json.loads(resp.read().decode("utf-8"))
+        if isinstance(data, dict):
+            data = data.get("rows") or data.get("items") or data.get("data") or []
+        return [r for r in data if isinstance(r, dict)]
+
+    return _fetch
+
+
+def _companies_house_real_transport(env: dict[str, str] | None):  # pragma: no cover - network
+    """No generic batch endpoint without a query target — honest None.
+
+    Companies House requires a company-number / search query per request; a
+    keyless generic 'latest filings' batch does not exist. A real adapter would
+    need operator-supplied query targets, so we return None here and report
+    NOT_CONFIGURED rather than fabricate. Tests inject ``transport``/fixtures.
+    """
+    return None
+
+
+def fetch_uk_rns_filings(
+    *,
+    allow_network: bool = False,
+    env: dict[str, str] | None = None,
+    transport=None,
+    fixture_rows: list[dict[str, Any]] | None = None,
+    now_utc: datetime | None = None,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Fetch UK RNS disclosures (real or injected) with honest status.
+
+    Modes: A (LSE_RNS_API_KEY), B (LSE_RNS_SOURCE_URL / RNS_SOURCE_URL), C none.
+    Network is touched only when ``allow_network=True``. Secret values never
+    appear in the returned meta (only ``*_present`` booleans + env names).
+    """
+    return _fetch_filings_adapter(
+        rns_config_state(env),
+        normalize_uk_rns_row,
+        _rns_real_transport,
+        allow_network=allow_network,
+        env=env,
+        transport=transport,
+        fixture_rows=fixture_rows,
+        now_utc=now_utc,
+    )
+
+
+def fetch_companies_house_filings(
+    *,
+    allow_network: bool = False,
+    env: dict[str, str] | None = None,
+    transport=None,
+    fixture_rows: list[dict[str, Any]] | None = None,
+    now_utc: datetime | None = None,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Fetch Companies House registry filings (real or injected), honest status.
+
+    Private/unlisted rows are retained as evidence (``tradable_candidate=False``)
+    by the normalizer; they are never treated as tradable candidates.
+    """
+    return _fetch_filings_adapter(
+        companies_house_config_state(env),
+        normalize_companies_house_row,
+        _companies_house_real_transport,
+        allow_network=allow_network,
+        env=env,
+        transport=transport,
+        fixture_rows=fixture_rows,
+        now_utc=now_utc,
+    )
+
+
 __all__ = [
     "STATUS_ACTIVE",
     "STATUS_NOT_ACTIVE",
@@ -517,7 +798,17 @@ __all__ = [
     "STATUS_LIVE_VERIFIED",
     "STATUS_OK_EMPTY",
     "STATUS_DEGRADED_PROVIDER_ERROR",
+    "STATUS_NETWORK_DISABLED",
+    "STATUS_PROVIDER_TIMEOUT",
+    "STATUS_PROVIDER_ERROR",
+    "STATUS_PROVIDER_RATE_LIMITED",
+    "STATUS_PROVIDER_AUTH_FAILED",
+    "STATUS_DEGRADED_EMPTY",
     "PRIVATE_UNLISTED_REASON",
+    "LISTED_MAPPED",
+    "PRIVATE_COMPANY_OR_UNLISTED",
+    "UNKNOWN_LISTING_STATUS",
+    "RNS_SOURCE_URL_ENVS",
     "describe_filings_provider",
     "available_filings_providers",
     "load_uk_eu_filings",
@@ -526,4 +817,8 @@ __all__ = [
     "load_uk_rns_filings",
     "load_companies_house_filings",
     "build_uk_filing_events",
+    "rns_config_state",
+    "companies_house_config_state",
+    "fetch_uk_rns_filings",
+    "fetch_companies_house_filings",
 ]

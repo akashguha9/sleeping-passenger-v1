@@ -278,6 +278,15 @@ APPROVED_DOMAINS: tuple[str, ...] = (
     "real_price_provider",       # real_price_provider.py — P_price priority resolver (read-only quotes)
     "provider_secret_redaction", # provider_secret_redaction.py — secret-safe provider logging
     "coverage_proof",            # country_coverage_proof.py — C_global per-country proof (also "country_coverage")
+    # N'Golo Kanté score-ceiling sprint — advisory-only invisible-defensive-work
+    # layer: fake-confidence audit, veto-integrity proof, source-health maturity,
+    # and the operator-readiness reliability block.  Pure compute over existing
+    # calibration/bundle/veto data.  No broker execution, no order placement, no
+    # API trading writes; positive influence can only be removed, never added.
+    "fake_confidence",   # fake_confidence_audit.py — overconfidence score + hard block
+    "veto_integrity",    # veto_integrity_proof.py — DIABLO/chaos/no-new-risk proof pack
+    # source_health_maturity.py is covered by the "source" domain above;
+    # external_evidence_operator_readiness.py is covered by "operator".
 )
 
 # Explicit allowlist for individual files / directories whose name does

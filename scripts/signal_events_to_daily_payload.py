@@ -54,6 +54,7 @@ FILINGS_SOURCES: frozenset[str] = frozenset(
         "rbi",
         "eu_esef",
         "uk_companies_house",
+        "lse_rns",
         "china_disclosure",
         "singapore_acra_sgx",
     }
