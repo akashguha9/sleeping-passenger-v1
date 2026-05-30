@@ -8,6 +8,7 @@ workers/iterations.
 """
 from __future__ import annotations
 
+import concurrent.futures
 import json
 import sqlite3
 from pathlib import Path
@@ -15,6 +16,7 @@ from pathlib import Path
 import pytest
 
 from scripts import cockpit_concurrency_stress_probe as probe
+from scripts import diagnostics_snapshot_cache as diag_cache
 from scripts import persistence
 
 
@@ -341,3 +343,77 @@ def test_write_contention_bounds():
     )
     assert rep["writer_lock_hold_ms"] <= probe.MAX_WRITER_LOCK_HOLD_MS
     assert rep["reads_during_lock"] <= probe.MAX_CONTENTION_READS
+
+
+# ---------------------------------------------------------------------------
+# Full-suite flake fix — concurrent diagnostics-cache refresh must not race.
+#
+# Root cause of the two intermittent full-suite failures: the shared diagnostics
+# snapshot cache wrote to a FIXED temp path and renamed it, so two probe workers
+# recomputing a cold/invalid cache concurrently collided on the destination
+# (PermissionError on Windows).  That surfaced as failed_operations>0 -> BLOCK.
+# These guard the fix without weakening the probe.
+# ---------------------------------------------------------------------------
+
+
+def test_concurrent_cache_refresh_never_races(monkeypatch, tmp_path):
+    """Many concurrent snapshot writers must all succeed and leave a valid file.
+
+    Reproduces the original flake (fixed-temp-path replace race) and proves the
+    unique-temp + serialized-rename writer is concurrency-safe.
+    """
+    monkeypatch.setattr(diag_cache, "CACHE_DIR", tmp_path / "diag")
+    monkeypatch.setattr(diag_cache, "CACHE_FILE", tmp_path / "diag" / "snap.json")
+
+    errors: list[str] = []
+
+    def _writer(_n: int) -> None:
+        try:
+            diag_cache.refresh(collector=lambda db: {"x": {"status": "OK"}})
+        except Exception as exc:  # noqa: BLE001 - we want the failure recorded
+            errors.append(repr(exc))
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=16) as pool:
+        list(pool.map(_writer, range(32)))
+
+    assert errors == [], f"concurrent cache writes raced: {errors[:3]}"
+    # The cache file is whole, valid JSON, and no staging temp files leaked.
+    blob = json.loads((tmp_path / "diag" / "snap.json").read_text(encoding="utf-8"))
+    assert blob["cache_role"] == "derived_non_canonical"
+    assert list((tmp_path / "diag").glob("*.tmp")) == []
+
+
+def test_probe_diagnostics_op_concurrent_on_cold_cache(empty_db, monkeypatch, tmp_path):
+    """The diagnostics_service probe op survives concurrent cold-cache recompute.
+
+    With the shared cache invalidated, many workers hitting the op at once must
+    not raise — exactly the path that intermittently failed under full-suite load.
+    """
+    monkeypatch.setattr(diag_cache, "CACHE_DIR", tmp_path / "diag")
+    monkeypatch.setattr(diag_cache, "CACHE_FILE", tmp_path / "diag" / "snap.json")
+
+    errors: list[str] = []
+
+    def _op(_n: int) -> None:
+        try:
+            probe._op_diagnostics_service_read(empty_db, 500)
+        except Exception as exc:  # noqa: BLE001
+            errors.append(repr(exc))
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=12) as pool:
+        list(pool.map(_op, range(24)))
+
+    assert errors == [], f"diagnostics op raced under concurrency: {errors[:3]}"
+
+
+def test_readonly_connect_sets_busy_timeout(empty_db):
+    """Read-only connections set a busy_timeout so a transient lock waits."""
+    conn = probe._readonly_connect(empty_db)
+    assert conn is not None
+    try:
+        # busy_timeout is now non-zero (we set 5000ms); a fresh connection
+        # without our PRAGMA would report 0.
+        timeout_ms = conn.execute("PRAGMA busy_timeout").fetchone()[0]
+        assert timeout_ms >= 5000
+    finally:
+        conn.close()

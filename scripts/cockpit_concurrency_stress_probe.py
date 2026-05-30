@@ -166,6 +166,13 @@ def _readonly_connect(db_path: Path) -> sqlite3.Connection | None:
     except sqlite3.Error:
         return None
     conn.row_factory = sqlite3.Row
+    # busy_timeout makes a read wait for a transient writer lock (up to 5s)
+    # instead of erroring immediately with "database is locked" under the
+    # concurrent read load this probe deliberately generates.
+    try:
+        conn.execute("PRAGMA busy_timeout = 5000")
+    except sqlite3.Error:  # pragma: no cover - defensive; ro conn still usable
+        pass
     return conn
 
 

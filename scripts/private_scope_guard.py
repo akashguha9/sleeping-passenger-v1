@@ -285,6 +285,11 @@ APPROVED_DOMAINS: tuple[str, ...] = (
     # non-selectable; no order placement, no execution. Secret values never
     # logged (only *_present booleans).
     "news_provider",             # news_provider_chain.py — read-only news provider fallback chain
+    # Kanté real C_global activation sprint — advisory-only, read-only operator
+    # news canary (GDELT_PUBLIC -> NEWSAPI -> EVENT_REGISTRY) focused on one
+    # entity (Rheinmetall -> RHM.DE). Network only with --allow-network; never
+    # persists, never trades, never runs synthesis; secrets never logged.
+    "news_canary",               # rheinmetall_news_canary.py — read-only Rheinmetall news canary
     # N'Golo Kanté score-ceiling sprint — advisory-only invisible-defensive-work
     # layer: fake-confidence audit, veto-integrity proof, source-health maturity,
     # and the operator-readiness reliability block.  Pure compute over existing

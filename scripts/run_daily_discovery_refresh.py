@@ -33,6 +33,10 @@ try:
         fetch_companies_house_filings,
         fetch_uk_rns_filings,
     )
+    from scripts.news_provider_fallback_chain import (
+        RHEINMETALL_QUERIES,
+        fetch_news_chain,
+    )
     from scripts.provider_secret_redaction import assert_no_secret, collect_secret_values
     from scripts.real_price_provider import (
         build_mock_price_transport,
@@ -55,6 +59,7 @@ except ModuleNotFoundError:  # pragma: no cover - script-style env
         fetch_companies_house_filings,
         fetch_uk_rns_filings,
     )
+    from news_provider_fallback_chain import RHEINMETALL_QUERIES, fetch_news_chain
     from provider_secret_redaction import assert_no_secret, collect_secret_values
     from real_price_provider import build_mock_price_transport, resolve_price_provider
     from refresh_live_price_marks import (
@@ -211,6 +216,77 @@ def _persist_raw_rows(
     return written
 
 
+def _deterministic_news_fixture_transport(
+    now_utc: datetime,
+) -> Callable[[str], "list[dict[str, Any]]"]:
+    """Offline GDELT-shaped transport for tests / --use-mock-providers.
+
+    Returns ONE fresh Rheinmetall article for any Rheinmetall-focused query and
+    nothing otherwise. The article carries NO pre-baked ticker — the fallback
+    chain's deterministic enrichment + entity->ticker mapping is what resolves
+    Germany / RHM.DE, so this exercises the genuine normalize->enrich->map->
+    persist path rather than asserting a fixture ticker. It is a labelled
+    OFFLINE FIXTURE, never a real-network claim.
+    """
+    seendate = now_utc.strftime("%Y%m%dT%H%M%SZ")
+
+    def _transport(query: str) -> list[dict[str, Any]]:
+        if "rheinmetall" not in str(query).lower():
+            return []
+        return [
+            {
+                "title": "Rheinmetall confirms expanded defense order backlog",
+                "seendate": seendate,
+                "sourcecountry": "Germany",
+                "url": "https://example.test/rheinmetall-order-backlog",
+                "language": "English",
+            }
+        ]
+
+    return _transport
+
+
+def _persist_news_chain_rows(
+    rows: list[dict[str, Any]] | None,
+    db_path: Path | None,
+    now_utc: datetime,
+) -> int:
+    """Persist FRESH normalized news-chain rows into ``signal_events``.
+
+    Each row is written under its own provider source_name (gdelt / newsapi /
+    event_registry) so the canonical news bridge consumes it on payload rebuild.
+    Idempotent on a deterministic event_id (provider|ticker-or-url|published).
+    Only genuinely-fresh rows (``is_live``) are persisted — a stale or empty
+    chain writes nothing, never fabricated.
+    """
+    if not rows:
+        return 0
+    try:
+        import scripts.persistence as _persistence
+    except ModuleNotFoundError:  # pragma: no cover
+        import persistence as _persistence  # type: ignore
+    fetched_at = now_utc.replace(microsecond=0).isoformat()
+    written = 0
+    for idx, row in enumerate(rows):
+        if not isinstance(row, dict) or not row.get("is_live"):
+            continue
+        provider = str(row.get("provider") or row.get("source_name") or "gdelt").strip() or "gdelt"
+        published = str(row.get("published_at_utc") or row.get("published_at") or fetched_at)
+        ident = str(row.get("ticker") or row.get("url") or row.get("headline") or idx)
+        event_id = f"{provider}_{ident}_{published}"
+        payload = dict(row)
+        payload.setdefault("source_name", provider)
+        payload.setdefault("event_type", "news")
+        try:
+            if _persistence.insert_signal_event(
+                event_id, provider, payload, fetched_at, db_path=db_path
+            ):
+                written += 1
+        except Exception:  # noqa: BLE001 - persistence failure is non-fatal
+            continue
+    return written
+
+
 def _build_refresh_universe(
     *,
     holdings: list[str],
@@ -251,6 +327,7 @@ def run_daily_refresh(
     max_rows: int = 100,
     country_focus: str | None = None,
     target_ticker: str | None = None,
+    news_queries: tuple[str, ...] | None = None,
     holdings: list[str] | None = None,
     candidate_tickers: list[str] | None = None,
     holding_countries: dict[str, str] | None = None,
@@ -258,6 +335,7 @@ def run_daily_refresh(
     market_state: str = "unknown",
     no_secrets_in_logs: bool = True,
     env: dict[str, str] | None = None,
+    news_transports: dict[str, Callable[[str], "list[dict[str, Any]]"]] | None = None,
 ) -> dict[str, Any]:
     """Full operator daily-refresh flow. Returns the honest report dict.
 
@@ -309,7 +387,6 @@ def run_daily_refresh(
     # --- Attempt UK RNS / Companies House disclosures (network-gated). ---
     uk_rns_rows = None
     uk_ch_rows = None
-    mock_news_rows = None
     if use_mock_providers:
         iso = now_utc.replace(microsecond=0).isoformat()
         uk_rns_rows = [
@@ -322,14 +399,6 @@ def run_daily_refresh(
              "headline": "Annual accounts", "published_at_utc": iso,
              "freshness_score": 1.0},
         ]
-        # Deterministic Germany news (offline fixture) so the FULL flow can prove
-        # coverage(Germany)=1 end-to-end under --use-mock-providers. This is a
-        # labelled offline fixture, NEVER a real-network claim.
-        mock_news_rows = [
-            {"entity_name": "Rheinmetall", "ticker": "RHM.DE", "country": "Germany",
-             "headline": "Rheinmetall confirms expanded defense order backlog",
-             "published_at_utc": iso, "freshness_score": 1.0},
-        ]
     rns_events, rns_meta = fetch_uk_rns_filings(
         allow_network=allow_network, env=env, fixture_rows=uk_rns_rows, now_utc=now_utc
     )
@@ -337,13 +406,41 @@ def run_daily_refresh(
         allow_network=allow_network, env=env, fixture_rows=uk_ch_rows, now_utc=now_utc
     )
 
-    # --- Persist fetched UK disclosure raw rows so the canonical filings bridge
-    #     (signal_events -> today_filings_events) consumes them on rebuild. Only
-    #     genuinely-fetched rows are persisted; never fabricated. ---
+    # --- News fallback chain (GDELT -> NewsAPI -> Event Registry). ---
+    # Under --use-mock-providers we inject ONE deterministic offline GDELT
+    # transport (no network, no key) that returns a fresh Rheinmetall article;
+    # the chain's own normalize->enrich->map path resolves Germany / RHM.DE so
+    # the FULL flow can prove coverage(Germany)=1 end-to-end without faking a
+    # ticker. Under --allow-network the chain presses the real read-only
+    # providers; without either, every keyed provider degrades honestly and the
+    # chain returns no rows.
+    chain_transports = news_transports
+    if chain_transports is None and use_mock_providers:
+        chain_transports = {"gdelt": _deterministic_news_fixture_transport(now_utc)}
+    news_chain = fetch_news_chain(
+        allow_network=allow_network,
+        transports=chain_transports,
+        env=env,
+        now_utc=now_utc,
+        db_path=db_path,
+        queries=news_queries or RHEINMETALL_QUERIES,
+    )
+
+    # --- Persist fetched raw rows so the canonical bridges (signal_events ->
+    #     today_*_events) consume them on rebuild. Only genuinely-fetched /
+    #     genuinely-fresh rows are persisted; never fabricated. ---
+    filings_rows_written = 0
+    news_rows_written = 0
     if not dry_run:
-        _persist_raw_rows("lse_rns", uk_rns_rows, db_path, now_utc, event_type="filing")
-        _persist_raw_rows("uk_companies_house", uk_ch_rows, db_path, now_utc, event_type="filing")
-        _persist_raw_rows("gdelt", mock_news_rows, db_path, now_utc, event_type="news")
+        filings_rows_written += _persist_raw_rows(
+            "lse_rns", uk_rns_rows, db_path, now_utc, event_type="filing"
+        )
+        filings_rows_written += _persist_raw_rows(
+            "uk_companies_house", uk_ch_rows, db_path, now_utc, event_type="filing"
+        )
+        news_rows_written = _persist_news_chain_rows(
+            news_chain.get("rows"), db_path, now_utc
+        )
 
     # --- Rebuild the five regenerable payloads (skipped on dry_run). ---
     payloads_rebuilt = False
@@ -404,18 +501,28 @@ def run_daily_refresh(
     l_today_count = _fresh(payload_news) + _fresh(payload_filings)
 
     # --- Provider status roll-up (secret-safe). ---
+    news_first_live = news_chain.get("first_live_provider")
+    news_reports = news_chain.get("provider_reports", [])
     provider_statuses = [
         {"provider": "price:" + (price_res["provider"] or "none"), "status": price_res["status"]},
         {"provider": rns_meta["provider"], "status": rns_meta["status"], "is_live": rns_meta["is_live"]},
         {"provider": ch_meta["provider"], "status": ch_meta["status"], "is_live": ch_meta["is_live"]},
+    ] + [
+        {"provider": "news:" + str(r.get("provider")), "status": r.get("status"),
+         "is_live": r.get("status") == "LIVE_VERIFIED"}
+        for r in news_reports
     ]
+    news_providers_configured = sum(
+        1 for d in news_chain.get("configured_providers", []) if d.get("configured")
+    )
     providers_configured = sum(
         1 for d in price_res["configured_providers"] if d["configured"]
-    ) + sum(1 for m in (rns_meta, ch_meta) if m["config"]["configured"])
+    ) + sum(1 for m in (rns_meta, ch_meta) if m["config"]["configured"]) + news_providers_configured
     providers_live_verified = (
         (1 if price_refresh.get("status") == "LIVE_PRICE_VERIFIED" else 0)
         + (1 if rns_meta["is_live"] else 0)
         + (1 if ch_meta["is_live"] else 0)
+        + (1 if news_first_live else 0)
     )
 
     if coverage["H_price_coverage"] < 0.80:
@@ -434,9 +541,27 @@ def run_daily_refresh(
         "providers_attempted": provider_statuses,
         "providers_configured": providers_configured,
         "providers_live_verified": providers_live_verified,
-        "rows_fetched": len(rns_events) + len(ch_events),
-        "rows_written_signal_events": price_refresh.get("written", 0),
+        "rows_fetched": len(rns_events) + len(ch_events) + len(news_chain.get("rows", [])),
+        # Total genuine signal_events writes this run: price marks + persisted
+        # filings raw rows + persisted fresh news-chain rows. Honest: 0 when no
+        # provider/fixture returned a persistable row.
+        "rows_written_signal_events": (
+            price_refresh.get("written", 0) + filings_rows_written + news_rows_written
+        ),
+        "news_rows_written_signal_events": news_rows_written,
+        "filings_rows_written_signal_events": filings_rows_written,
         "price_marks_written": price_refresh.get("written", 0),
+        "news_chain": {
+            "mode": news_chain.get("mode"),
+            "first_live_provider": news_chain.get("first_live_provider"),
+            "fresh_row_count": news_chain.get("fresh_row_count"),
+            "mapped_row_count": news_chain.get("mapped_row_count"),
+            "unmapped_row_count": news_chain.get("unmapped_row_count"),
+            "news_layer_present": news_chain.get("news_layer_present"),
+            "missing_layers": news_chain.get("missing_layers"),
+            "provider_reports": news_chain.get("provider_reports"),
+            "secret_leak_check_passed": news_chain.get("secret_leak_check_passed"),
+        },
         "price_status": price_refresh.get("status", price_res["status"]),
         "price_provider": price_res["provider"],
         "payloads_rebuilt": payloads_rebuilt,
@@ -503,6 +628,9 @@ def main(argv: list[str] | None = None) -> int:  # pragma: no cover - CLI
     parser.add_argument("--max-rows", type=int, default=100)
     parser.add_argument("--country-focus", type=str, default=None)
     parser.add_argument("--target-ticker", type=str, default=None)
+    parser.add_argument("--news-query", action="append", default=None,
+                        help="News query for the fallback chain (repeatable). "
+                             "Defaults to the Rheinmetall query set.")
     parser.add_argument("--use-mock-providers", action="store_true",
                         help="Deterministic offline fixture providers (no network).")
     parser.add_argument("--skip-network", action="store_true",
@@ -548,6 +676,7 @@ def main(argv: list[str] | None = None) -> int:  # pragma: no cover - CLI
             max_rows=args.max_rows,
             country_focus=args.country_focus,
             target_ticker=args.target_ticker,
+            news_queries=tuple(args.news_query) if args.news_query else None,
             holdings=holdings,
             candidate_tickers=candidates,
             now_utc=now_utc,

@@ -27,6 +27,8 @@ from __future__ import annotations
 import argparse
 import importlib
 import json
+import os
+import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -49,6 +51,17 @@ DEFAULT_TTL_SECONDS = 300
 
 CANONICAL_TRUTH_SOURCE = "sqlite"
 CACHE_ROLE = "derived_non_canonical"
+
+# Serializes the final atomic replace of the single shared cache file. Two
+# threads writing concurrently (e.g. the cockpit concurrency stress probe
+# driving many readers while one recomputes a cold cache) must not collide on
+# the destination — on Windows ``os.replace`` into an open/locked file raises
+# PermissionError. Each writer stages to its OWN unique temp file (so the
+# staging writes never clash), then this lock serializes the rename so the
+# replace itself is always single-writer. The cache stays atomic and
+# derived/non-canonical.
+_WRITE_LOCK = threading.Lock()
+_TMP_SEQ = 0
 
 # (subreport_name, module, build_function, recovery_command).  Each builder
 # accepts a single ``db_path`` argument and returns a dict.
@@ -168,11 +181,43 @@ def build_snapshot(
 
 
 def write_snapshot(snapshot: dict[str, Any]) -> Path:
-    """Persist ``snapshot`` to the cache file (atomically)."""
+    """Persist ``snapshot`` to the cache file (atomically, concurrency-safe).
+
+    Each caller stages to a UNIQUE temp file (pid + thread id + sequence) so
+    concurrent writers never overwrite each other's staging file, then the
+    final rename is serialized under ``_WRITE_LOCK`` with a small bounded retry
+    so a transient Windows file-lock on the destination does not raise. The
+    rename remains atomic, so a reader always sees a whole snapshot.
+    """
+    global _TMP_SEQ
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    tmp = CACHE_FILE.with_suffix(".json.tmp")
+    with _WRITE_LOCK:
+        _TMP_SEQ += 1
+        seq = _TMP_SEQ
+    tmp = CACHE_FILE.with_name(
+        f"{CACHE_FILE.stem}.{os.getpid()}.{threading.get_ident()}.{seq}.json.tmp"
+    )
     tmp.write_text(json.dumps(snapshot, indent=2, default=str), encoding="utf-8")
-    tmp.replace(CACHE_FILE)
+    try:
+        with _WRITE_LOCK:
+            last_exc: OSError | None = None
+            for attempt in range(5):
+                try:
+                    os.replace(tmp, CACHE_FILE)
+                    last_exc = None
+                    break
+                except PermissionError as exc:  # pragma: no cover - timing-dependent
+                    last_exc = exc
+                    time.sleep(0.02 * (attempt + 1))
+            if last_exc is not None:
+                raise last_exc
+    finally:
+        # Best-effort cleanup if our staging file survived (e.g. replace failed).
+        try:
+            if tmp.exists():
+                tmp.unlink()
+        except OSError:  # pragma: no cover - best-effort
+            pass
     return CACHE_FILE
 
 
