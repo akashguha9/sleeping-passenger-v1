@@ -260,6 +260,127 @@ def executable_candidate(
     )
 
 
+# ---------------------------------------------------------------------------
+# Kanté defensive why-today adjustment — sprint P6.
+# ---------------------------------------------------------------------------
+# A purely DEFENSIVE layer: it rewards a name whose country is actually covered
+# and PUNISHES a price-only name whose country still lacks live news / mapping.
+# It NEVER creates a buy and NEVER unlocks execution — the hard guards below
+# always win. A price-confirmed name with a live-news/mapping gap can at best be
+# a WATCH classification, never executable.
+
+KANTE_COVERAGE_QUALITY_BONUS = 0.10
+KANTE_LIVE_NEWS_GAP_PENALTY = 0.20
+KANTE_MAPPING_GAP_PENALTY = 0.20
+KANTE_PROVIDER_REDUNDANCY_BONUS = 0.05
+KANTE_REDUNDANCY_THRESHOLD = 0.50
+
+# Non-executable classifications a price-confirmed name may receive when its
+# country has a live-evidence gap (defensive, watch-only).
+KANTE_WATCHLIST_DATA_INSUFFICIENT = "WATCHLIST_DATA_INSUFFICIENT"
+KANTE_PRICE_CONFIRMED_WATCH = "PRICE_CONFIRMED_WATCH"
+KANTE_COVERAGE_COMPLETE = "COVERAGE_COMPLETE_CANDIDATE"
+
+
+def kante_why_today_adjustment(
+    *,
+    country_coverage: Any = 0,
+    price_support: bool = False,
+    news_support: bool = False,
+    mapping_support: bool = False,
+    valid_price: bool = False,
+    provider_redundancy_score: Any = 0.0,
+) -> float:
+    """Raw Kanté why-today adjustment (may be negative). Defensive only.
+
+    raw = coverage_quality_bonus + provider_redundancy_bonus
+          - live_news_gap_penalty - mapping_gap_penalty
+    """
+    try:
+        coverage = float(country_coverage)
+    except (TypeError, ValueError):
+        coverage = 0.0
+    try:
+        redundancy = float(provider_redundancy_score)
+    except (TypeError, ValueError):
+        redundancy = 0.0
+
+    coverage_quality_bonus = KANTE_COVERAGE_QUALITY_BONUS if coverage > 0 else 0.0
+    live_news_gap_penalty = (
+        KANTE_LIVE_NEWS_GAP_PENALTY if (price_support and not news_support) else 0.0
+    )
+    mapping_gap_penalty = (
+        KANTE_MAPPING_GAP_PENALTY if (price_support and not mapping_support) else 0.0
+    )
+    provider_redundancy_bonus = (
+        KANTE_PROVIDER_REDUNDANCY_BONUS
+        if (valid_price and redundancy >= KANTE_REDUNDANCY_THRESHOLD)
+        else 0.0
+    )
+    return round(
+        coverage_quality_bonus
+        + provider_redundancy_bonus
+        - live_news_gap_penalty
+        - mapping_gap_penalty,
+        4,
+    )
+
+
+def extended_why_today_kante(
+    base_why_today: Any,
+    *,
+    country_coverage: Any = 0,
+    price_support: bool = False,
+    news_support: bool = False,
+    mapping_support: bool = False,
+    valid_price: bool = False,
+    provider_redundancy_score: Any = 0.0,
+) -> float:
+    """clamp(base_why_today + raw_kante_adjustment, 0, 1)."""
+    try:
+        base = float(base_why_today)
+    except (TypeError, ValueError):
+        base = 0.0
+    adj = kante_why_today_adjustment(
+        country_coverage=country_coverage,
+        price_support=price_support,
+        news_support=news_support,
+        mapping_support=mapping_support,
+        valid_price=valid_price,
+        provider_redundancy_score=provider_redundancy_score,
+    )
+    return round(max(0.0, min(1.0, base + adj)), 4)
+
+
+def kante_candidate_classification(
+    *,
+    in_l_today: bool,
+    is_static_universe_only: bool,
+    price_support: bool,
+    news_support: bool,
+    mapping_support: bool,
+    in_phantom_closed_sold: bool = False,
+) -> str:
+    """Defensive classification for a candidate (never an execution unlock).
+
+    A name not in L_today, or static-universe fallback, or phantom/closed/sold
+    is never executable. A price-confirmed name with a mapping gap is at best
+    WATCHLIST_DATA_INSUFFICIENT; with a news gap, PRICE_CONFIRMED_WATCH. Only a
+    fully-covered name reaches COVERAGE_COMPLETE_CANDIDATE (still advisory).
+    """
+    if in_phantom_closed_sold:
+        return "PHANTOM_QUARANTINE"
+    if is_static_universe_only or not in_l_today:
+        return "RESEARCH_ONLY_STATIC" if is_static_universe_only else "MODEL_PRIOR_ONLY"
+    if price_support and not mapping_support:
+        return KANTE_WATCHLIST_DATA_INSUFFICIENT
+    if price_support and not news_support:
+        return KANTE_PRICE_CONFIRMED_WATCH
+    if price_support and news_support and mapping_support:
+        return KANTE_COVERAGE_COMPLETE
+    return KANTE_WATCHLIST_DATA_INSUFFICIENT
+
+
 def classify_non_live(
     *,
     in_holdings: bool,

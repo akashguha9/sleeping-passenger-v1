@@ -50,6 +50,15 @@ PROVIDER_ENV: dict[str, str | None] = {
     POLYGON: "POLYGON_API_KEY",
 }
 
+# A provider may accept more than one env-var spelling for its key. The first
+# entry is the *canonical* one reported in ``api_key_env``; any alias also
+# satisfies ``provider_configured`` (e.g. POLYGON honours MASSIVE_API_KEY).
+PROVIDER_ENV_ALIASES: dict[str, tuple[str, ...]] = {
+    TWELVE_DATA: ("TWELVE_DATA_API_KEY",),
+    ALPHA_VANTAGE: ("ALPHA_VANTAGE_API_KEY",),
+    POLYGON: ("POLYGON_API_KEY", "MASSIVE_API_KEY"),
+}
+
 # Broker / trading / execution providers are NEVER selectable as a price source.
 # A request to prefer one of these is refused (returns no callable).
 FORBIDDEN_PROVIDERS: frozenset[str] = frozenset(
@@ -94,12 +103,21 @@ def provider_requires_key(provider: str) -> bool:
     return PROVIDER_ENV.get(provider) is not None
 
 
+def provider_env_names(provider: str) -> tuple[str, ...]:
+    """Every env-var spelling that satisfies this provider's key (canonical first)."""
+    env_key = PROVIDER_ENV.get(provider)
+    if env_key is None:
+        return ()
+    return PROVIDER_ENV_ALIASES.get(provider, (env_key,))
+
+
 def provider_configured(provider: str, env: Mapping[str, str] | None = None) -> bool:
-    """A provider is configured when it needs no key, or its key is present."""
+    """A provider is configured when it needs no key, or ANY of its key env
+    names (canonical or alias) is present. POLYGON honours MASSIVE_API_KEY."""
     env_key = PROVIDER_ENV.get(provider)
     if env_key is None:
         return provider in PROVIDER_ENV  # public provider (Yahoo) is always configured
-    return key_present(env_key, env)
+    return any(key_present(name, env) for name in provider_env_names(provider))
 
 
 def describe_price_providers(env: Mapping[str, str] | None = None) -> list[dict[str, Any]]:
@@ -107,6 +125,13 @@ def describe_price_providers(env: Mapping[str, str] | None = None) -> list[dict[
     out: list[dict[str, Any]] = []
     for name in PRICE_PROVIDER_PRIORITY:
         fields = provider_key_fields(name, PROVIDER_ENV.get(name), env)
+        # Honour every accepted env-var spelling (e.g. POLYGON/MASSIVE) so the
+        # *_present boolean agrees with ``configured``. Secret VALUES are never
+        # added here — only booleans and the env-var NAMES.
+        aliases = provider_env_names(name)
+        if len(aliases) > 1:
+            fields["api_key_env_aliases"] = list(aliases)
+            fields["api_key_present"] = any(key_present(a, env) for a in aliases)
         fields["configured"] = provider_configured(name, env)
         fields["category"] = "READ_ONLY_MARKET_DATA"
         out.append(fields)
@@ -198,15 +223,250 @@ def _yahoo_http_quote(ticker: str) -> dict[str, Any] | None:  # pragma: no cover
         return None
 
 
+# ---------------------------------------------------------------------------
+# Keyed-provider symbol normalization + quote parsers (P4).
+# ---------------------------------------------------------------------------
+# Each provider speaks a slightly different symbol dialect. We NEVER replace the
+# operator's original ticker — we derive a best-effort ``provider_symbol`` and
+# preserve ``original_ticker`` alongside it. Exchange-suffix -> (venue prefix,
+# country) used to build prefixed provider symbols (e.g. XETRA:RHM, LON:SHEL).
+_SUFFIX_VENUE: dict[str, tuple[str, str]] = {
+    ".DE": ("XETRA", "Germany"),
+    ".F": ("XETRA", "Germany"),
+    ".L": ("LON", "United Kingdom"),
+    ".NS": ("NSE", "India"),
+    ".BO": ("BSE", "India"),
+    ".T": ("TYO", "Japan"),
+    ".TW": ("TPE", "Taiwan"),
+    ".KS": ("KRX", "South Korea"),
+    ".PA": ("EPA", "France"),
+    ".AS": ("AMS", "Netherlands"),
+    ".MI": ("BIT", "Italy"),
+    ".MC": ("BME", "Spain"),
+    ".SA": ("BVMF", "Brazil"),
+    ".TO": ("TSX", "Canada"),
+    ".AX": ("ASX", "Australia"),
+    ".SI": ("SGX", "Singapore"),
+    ".HK": ("HKG", "Hong Kong"),
+    ".SS": ("SHA", "China"),
+    ".SZ": ("SHE", "China"),
+}
+
+# Providers that accept a ``VENUE:BASE`` prefixed symbol for non-US listings.
+_PREFIXED_SYMBOL_PROVIDERS = frozenset({TWELVE_DATA, POLYGON, ALPHA_VANTAGE})
+
+
+def normalize_for_provider(ticker: str, provider: str) -> dict[str, Any]:
+    """Best-effort provider symbol for ``ticker`` — original is NEVER replaced.
+
+    Returns ``{original_ticker, provider_symbol, provider, resolved_exchange,
+    country}``. Yahoo keeps the native suffixed symbol; the keyed providers get
+    a ``VENUE:BASE`` form for non-US listings (e.g. RHM.DE -> XETRA:RHM, SHEL.L
+    -> LON:SHEL, RELIANCE.NS -> NSE:RELIANCE, 7203.T -> TYO:7203). Bare US
+    tickers are passed through unchanged (MSFT -> MSFT).
+    """
+    original = str(ticker).strip()
+    upper = original.upper()
+    suffix = ""
+    base = upper
+    if "." in upper:
+        base, suf = upper.rsplit(".", 1)
+        suffix = "." + suf
+    venue, country = _SUFFIX_VENUE.get(suffix, ("", "United States" if not suffix else ""))
+    if provider == YAHOO or not suffix:
+        provider_symbol = original
+    elif provider in _PREFIXED_SYMBOL_PROVIDERS and venue:
+        provider_symbol = f"{venue}:{base}"
+    else:
+        provider_symbol = original
+    return {
+        "original_ticker": original,
+        "provider_symbol": provider_symbol,
+        "provider": provider,
+        "resolved_exchange": venue or ("US" if not suffix else ""),
+        "country": country or None,
+    }
+
+
+def _epoch_to_iso(value: Any) -> str | None:
+    """Convert an epoch (seconds or milliseconds) to a UTC ISO string, or None."""
+    try:
+        num = float(value)
+    except (TypeError, ValueError):
+        return None
+    if num <= 0:
+        return None
+    if num > 1e12:  # milliseconds
+        num /= 1000.0
+    try:
+        return datetime.fromtimestamp(num, tz=timezone.utc).isoformat()
+    except (OverflowError, OSError, ValueError):
+        return None
+
+
+def parse_twelve_data_quote(
+    payload: Any, *, currency_hint: str | None = None
+) -> dict[str, Any] | None:
+    """Map a Twelve Data ``/quote`` JSON body into the canonical raw-quote dict.
+
+    Returns None on an error/empty body (honest empty). Pure — no network.
+    """
+    if not isinstance(payload, dict):
+        return None
+    if str(payload.get("status") or "").lower() == "error":
+        return None
+    price = payload.get("close") or payload.get("price")
+    if price is None:
+        return None
+    ts = payload.get("timestamp")
+    ts_iso = _epoch_to_iso(ts) if ts is not None else None
+    if ts_iso is None:
+        ts_iso = str(payload.get("datetime") or "").strip() or None
+    if ts_iso is None:
+        return None
+    return {
+        "price": price,
+        "timestamp_utc": ts_iso,
+        "currency": payload.get("currency") or currency_hint,
+        "previous_close": payload.get("previous_close"),
+        "open": payload.get("open"),
+        "high": payload.get("high"),
+        "low": payload.get("low"),
+        "volume": payload.get("volume"),
+    }
+
+
+def parse_alpha_vantage_quote(
+    payload: Any, *, currency_hint: str | None = None
+) -> dict[str, Any] | None:
+    """Map an Alpha Vantage ``GLOBAL_QUOTE`` body into the canonical raw quote.
+
+    Alpha Vantage's GLOBAL_QUOTE does not return a currency, so a venue-derived
+    ``currency_hint`` is used (US listings default to USD by the caller). Pure.
+    """
+    if not isinstance(payload, dict):
+        return None
+    quote = payload.get("Global Quote") or payload.get("globalQuote") or payload
+    if not isinstance(quote, dict):
+        return None
+    price = quote.get("05. price") or quote.get("price")
+    day = quote.get("07. latest trading day") or quote.get("latest_trading_day")
+    if price is None or not day:
+        return None
+    return {
+        "price": price,
+        "timestamp_utc": str(day).strip(),
+        "currency": currency_hint,
+        "previous_close": quote.get("08. previous close"),
+        "open": quote.get("02. open"),
+        "high": quote.get("03. high"),
+        "low": quote.get("04. low"),
+        "volume": quote.get("06. volume"),
+    }
+
+
+def parse_polygon_quote(
+    payload: Any, *, currency_hint: str | None = None
+) -> dict[str, Any] | None:
+    """Map a Polygon ``/v2/aggs/ticker/{t}/prev`` body into the canonical raw quote.
+
+    Polygon (and the MASSIVE alias) return aggregate bars; we read the most
+    recent result's close. Pure — no network.
+    """
+    if not isinstance(payload, dict):
+        return None
+    results = payload.get("results")
+    if not isinstance(results, list) or not results:
+        return None
+    bar = results[0]
+    if not isinstance(bar, dict):
+        return None
+    price = bar.get("c")
+    ts_iso = _epoch_to_iso(bar.get("t"))
+    if price is None or ts_iso is None:
+        return None
+    return {
+        "price": price,
+        "timestamp_utc": ts_iso,
+        "currency": currency_hint,
+        "open": bar.get("o"),
+        "high": bar.get("h"),
+        "low": bar.get("l"),
+        "volume": bar.get("v"),
+    }
+
+
+def _keyed_http_quote(provider: str, ticker: str) -> dict[str, Any] | None:  # pragma: no cover - network
+    """Best-effort read-only fetch for a key-gated provider. Never raises.
+
+    Read-only quote/aggregate endpoints only — NO broker, NO order, NO trading
+    endpoint is ever reached. Bounded by ``HTTP_TIMEOUT_SECONDS``. The API key
+    is read from the environment at call time and is NEVER logged.
+    """
+    import json as _json
+    import os
+    import urllib.parse
+    import urllib.request
+
+    norm = normalize_for_provider(ticker, provider)
+    sym = norm["provider_symbol"]
+    currency_hint = "USD" if not norm["resolved_exchange"] or norm["resolved_exchange"] == "US" else None
+
+    def _key() -> str | None:
+        for name in provider_env_names(provider):
+            val = os.environ.get(name, "").strip()
+            if val:
+                return val
+        return None
+
+    key = _key()
+    if not key:
+        return None
+    if provider == TWELVE_DATA:
+        url = (
+            "https://api.twelvedata.com/quote?symbol="
+            f"{urllib.parse.quote(sym)}&apikey={urllib.parse.quote(key)}"
+        )
+        parser = parse_twelve_data_quote
+    elif provider == ALPHA_VANTAGE:
+        url = (
+            "https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol="
+            f"{urllib.parse.quote(sym)}&apikey={urllib.parse.quote(key)}"
+        )
+        parser = parse_alpha_vantage_quote
+    elif provider == POLYGON:
+        url = (
+            f"https://api.polygon.io/v2/aggs/ticker/{urllib.parse.quote(sym)}/prev"
+            f"?adjusted=true&apiKey={urllib.parse.quote(key)}"
+        )
+        parser = parse_polygon_quote
+    else:
+        return None
+
+    req = urllib.request.Request(
+        url, headers={"User-Agent": "sleeping-passenger-advisory/1.0"}
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT_SECONDS) as resp:
+            if getattr(resp, "status", 200) != 200:
+                return None
+            data = _json.loads(resp.read().decode("utf-8"))
+    except Exception:  # noqa: BLE001 - network failure is non-fatal
+        return None
+    return parser(data, currency_hint=currency_hint)
+
+
 def _default_real_transport(provider: str) -> PriceTransport | None:
     """The real read-only fetcher for a provider, or None when unimplemented.
 
-    Only Yahoo's public endpoint is wired as a real fetch today. The key-gated
-    providers return None here (no live adapter yet) so they degrade honestly
-    rather than pretending; tests inject ``transports`` to exercise them.
+    Yahoo uses its public endpoint; the key-gated providers (Twelve Data, Alpha
+    Vantage, Polygon/MASSIVE) use their read-only quote/aggregate endpoints. All
+    are read-only — no broker/order/trading endpoint is ever reached.
     """
     if provider == YAHOO:
         return _yahoo_http_quote
+    if provider in (TWELVE_DATA, ALPHA_VANTAGE, POLYGON):
+        return lambda ticker, _p=provider: _keyed_http_quote(_p, ticker)
     return None
 
 
@@ -314,6 +574,74 @@ def resolve_price_provider(
     }
 
 
+def resolve_price_provider_chain(
+    *,
+    allow_network: bool = False,
+    env: Mapping[str, str] | None = None,
+    transports: Mapping[str, PriceTransport] | None = None,
+    now_utc: datetime | None = None,
+) -> dict[str, Any]:
+    """Resolve a PER-TICKER FAILOVER callable across the P_price priority chain.
+
+    Unlike :func:`resolve_price_provider` (which selects a single provider), this
+    returns a callable that, for each ticker, tries every selectable provider in
+    priority order until one yields a normalized mark — implementing::
+
+        selected_provider(t) = first p in P_price with valid normalized quote(t)
+
+    A provider is in the chain when it has an injected transport (offline,
+    deterministic) OR is configured AND ``allow_network`` is True AND a real
+    read-only adapter exists. Broker/execution providers are never in the chain.
+
+    Returns a dict with ``chain`` (provider names, in order), ``callable``
+    (``ticker -> mark|None``; the mark's ``provider`` field names the provider
+    that actually answered), secret-safe ``configured_providers``, and the
+    advisory LOCKED stamps.
+    """
+    now_utc = now_utc or datetime.now(timezone.utc)
+    transports = dict(transports or {})
+    descriptors = describe_price_providers(env)
+
+    chain: list[tuple[str, PriceTransport]] = []
+    for name in PRICE_PROVIDER_PRIORITY:
+        if name in FORBIDDEN_PROVIDERS:
+            continue
+        injected = transports.get(name)
+        if injected is not None:
+            chain.append((name, injected))
+            continue
+        if provider_configured(name, env) and allow_network:
+            real = _default_real_transport(name)
+            if real is not None:
+                chain.append((name, real))
+
+    def _failover(ticker: str) -> dict[str, Any] | None:
+        for provider, fetch in chain:
+            try:
+                raw = fetch(ticker)
+            except Exception:  # noqa: BLE001 - per-provider failure is safe
+                continue
+            mark = _normalize_raw_quote(str(ticker), raw, provider, now_utc)
+            if mark is not None:
+                return mark
+        return None
+
+    status = PROVIDER_SELECTED if chain else (
+        NETWORK_DISABLED if (not allow_network and not transports)
+        else PRICE_PROVIDER_NOT_CONFIGURED
+    )
+    return {
+        "chain": [name for name, _ in chain],
+        "status": status,
+        "callable": _failover if chain else None,
+        "allow_network": bool(allow_network),
+        "configured_providers": descriptors,
+        "broker_api_called": False,
+        "ai_execution_count": 0,
+        "execution_gate": "LOCKED",
+    }
+
+
 def build_mock_price_transport(
     now_utc: datetime | None = None,
     universe: Mapping[str, tuple[str, float]] | None = None,
@@ -375,9 +703,16 @@ __all__ = [
     "PRICE_PROVIDER_AUTH_FAILED",
     "SYMBOL_UNSUPPORTED",
     "PROVIDER_SELECTED",
+    "PROVIDER_ENV_ALIASES",
     "provider_requires_key",
     "provider_configured",
+    "provider_env_names",
     "describe_price_providers",
     "resolve_price_provider",
+    "resolve_price_provider_chain",
+    "normalize_for_provider",
+    "parse_twelve_data_quote",
+    "parse_alpha_vantage_quote",
+    "parse_polygon_quote",
     "build_mock_price_transport",
 ]
