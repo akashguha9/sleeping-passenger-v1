@@ -44,6 +44,9 @@ try:
         redact_secret_patterns,
         validate_ai_interpretation_payload,
     )
+    from scripts.leverage_policy import (
+        validate_leverage_policy as _validate_leverage_policy,
+    )
 except ModuleNotFoundError:
     from runtime_common import LOG_DIR, append_jsonl, utc_timestamp  # type: ignore[no-redef]
     from global_signal_fabric import build_global_signal_fabric_report  # type: ignore[no-redef]
@@ -57,6 +60,9 @@ except ModuleNotFoundError:
     from ai_output_schema import (  # type: ignore[no-redef]
         redact_secret_patterns,
         validate_ai_interpretation_payload,
+    )
+    from leverage_policy import (  # type: ignore[no-redef]
+        validate_leverage_policy as _validate_leverage_policy,
     )
 
 # Optional SQLite persistence — falls back gracefully to JSONL if unavailable
@@ -1177,6 +1183,7 @@ def log_manual_trade(
     notes: str = "",
     logged_by: str = "human",
     leverage: float = 1.0,
+    country: str = "",
     invalidation_level: str = "",
     expected_horizon: str = "",
     risk_reason: str = "",
@@ -1235,11 +1242,23 @@ def log_manual_trade(
         )
     else:
         leverage_val = float(leverage)
-    if leverage_val < _LEVERAGE_MIN or leverage_val > _LEVERAGE_MAX:
-        return _error_response(
+
+    # Risk-control: enforce the per-jurisdiction leverage ceiling.
+    #   India equity -> max 4x long;  rest-of-world -> spot-only (max 1x).
+    # This is a validation gate, NOT execution: it refuses to persist an
+    # out-of-policy record and explains why, instead of silently clamping.
+    # The rejection carries the full advisory-only safety stamps so it can
+    # never be read as an execution grant.  India is detected from the
+    # ``country`` field when supplied, else from the ticker (.NS/.BO suffix
+    # or NSE:/BSE: prefix).
+    _lev_check = _validate_leverage_policy(ticker, country or None, leverage_val)
+    if not _lev_check.valid:
+        _resp = _error_response(
             "log_manual_trade",
-            f"leverage must be between {_LEVERAGE_MIN} and {_LEVERAGE_MAX}",
+            _lev_check.detail or "leverage policy violation",
         )
+        _resp.update(_lev_check.to_dict())
+        return _resp
 
     # Seed/demo/probe rejection.  This entry point is what stamps a row
     # with created_via='manual_trade_log', which is what makes the row

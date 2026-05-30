@@ -269,7 +269,11 @@ def _sprint3_artifact_block(
     return out
 
 
-def _operator_live_refresh_proof_block() -> dict[str, Any]:
+def _operator_live_refresh_proof_block(
+    *,
+    summary: dict[str, Any] | None = None,
+    now: datetime | None = None,
+) -> dict[str, Any]:
     """Build the ``operator_live_refresh`` proof block + fake-LIVE detection.
 
     Returns a dict carrying:
@@ -278,6 +282,14 @@ def _operator_live_refresh_proof_block() -> dict[str, Any]:
       * warnings, blocking_reasons
       * fake_live_verified_detected — True if any evidence row claims
         LIVE_VERIFIED but is missing timestamp or source url.
+
+    Test seams (production behaviour unchanged — ``evaluate`` calls with no
+    args):
+      * ``summary`` — inject a deterministic artifact instead of reading the
+        real ``OPERATOR_SUMMARY_PATH`` from the runtime tree.
+      * ``now`` — inject a fixed clock so staleness is decided against a
+        pinned time, never wall-clock.  This is what makes the gate's
+        ``age_hours > ttl_hours`` decision hermetic and time-bomb free.
     """
     block: dict[str, Any] = {
         "attempted": False,
@@ -298,14 +310,15 @@ def _operator_live_refresh_proof_block() -> dict[str, Any]:
             "operator_live_provider_refresh module unavailable"
         )
         return block
-    summary = _operator_live_refresh.read_summary()
+    if summary is None:
+        summary = _operator_live_refresh.read_summary()
     if not isinstance(summary, dict):
         block["warnings"].append(
             "operator live provider refresh not run; LPQ capped at "
             "fixture/offline score"
         )
         return block
-    evidence = _operator_live_refresh.operator_artifact_valid(summary)
+    evidence = _operator_live_refresh.operator_artifact_valid(summary, now=now)
     block.update({
         "attempted": evidence.get("attempted", False),
         "valid": evidence.get("valid", False),

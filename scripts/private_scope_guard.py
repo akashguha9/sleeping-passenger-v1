@@ -328,6 +328,12 @@ EXPLICIT_IN_SCOPE: frozenset[str] = frozenset({
     "fixtures",
     "__init__.py",
     "__pycache__",
+    # Hackathon sprint — advisory-only risk-control + admission layer.
+    # Pure modules; no broker execution, no order placement, no AI trade
+    # execution.  Names lack an approved-domain substring but they are core
+    # MVP risk surface, so they are explicitly in scope.
+    "leverage_policy.py",   # India 4x / RoW spot-only leverage ceiling (validation)
+    "admission_gates.py",   # central advisory veto/admission contract
 })
 
 # Modules deliberately marked OUT_OF_SCOPE inside ``scripts/``.  This

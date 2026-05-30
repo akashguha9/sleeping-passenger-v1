@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { getDiagnosticsCockpit, type CockpitResponse } from '@/lib/apiClient';
 import { AdvisoryOnlyBadge } from '@/components/AdvisoryOnlyBadge';
+import { CalibrationUncertaintyCard } from '@/components/CalibrationUncertaintyCard';
 
 function Stat({ label, value }: { label: string; value: string | number }) {
   return (
@@ -157,6 +158,35 @@ export default function CockpitPage() {
         Human execution required. No broker action is performed. AI execution count is always{' '}
         <span className="text-emerald-400 font-mono font-bold">0</span>.
       </div>
+
+      {/* Calibration / uncertainty — ALWAYS visible (even offline) so a
+          green-looking dashboard can never hide N_real = 0 / uncalibrated.
+          Read from an optionally-typed view of the cockpit payload; safe
+          defaults reflect the truthful current state when absent. */}
+      {(() => {
+        const calib = (
+          data as {
+            calibration?: {
+              n_real?: number;
+              n_valid_p?: number;
+              calibration_status?: string;
+              predictive_claim_allowed?: boolean;
+              brier?: number | null;
+              ece?: number | null;
+            };
+          } | null
+        )?.calibration;
+        return (
+          <CalibrationUncertaintyCard
+            nReal={calib?.n_real ?? 0}
+            nValidP={calib?.n_valid_p ?? 0}
+            calibrationStatus={calib?.calibration_status ?? 'INSUFFICIENT_EVIDENCE'}
+            predictiveClaimAllowed={calib?.predictive_claim_allowed ?? false}
+            brier={calib?.brier ?? null}
+            ece={calib?.ece ?? null}
+          />
+        );
+      })()}
 
       {loading ? (
         <div className="text-center py-16 text-slate-500 text-sm">Loading cockpit…</div>

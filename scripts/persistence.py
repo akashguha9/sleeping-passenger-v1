@@ -1347,37 +1347,63 @@ def upsert_moltbook_learning_entry(
                 "updated": True,
                 "idempotency_key": idempotency_key,
             }
-        # New insert.
-        conn.execute(
-            "INSERT INTO moltbook_entries"
-            " (entry_id, event_id, ticker, original_signal_thesis,"
-            "  ai_interpretation, user_reflection, final_human_decision,"
-            "  manual_trade_log_id, outcome, mistake_type, lesson_learned,"
-            "  bias_detected, recalibration_note, future_rule_update,"
-            "  logged_at, advisory_status, human_review_required,"
-            "  execution_mode, ai_execution_count,"
-            "  trade_id, source_trade_state, event_type, outcome_quality,"
-            "  learning_direction, entry_price, exit_price, exit_quantity,"
-            "  stop_loss_price, take_profit_price, realized_pl,"
-            "  booked_percent, ride_percent, mistake_tags, success_tags,"
-            "  lesson, notes, created_at, updated_at, idempotency_key)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,"
-            "         ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (
-                entry_id, event_id, str(ticker).upper(),
-                original_signal_thesis, ai_interpretation, user_reflection,
-                final_human_decision, trade_id, outcome, mistake_type,
-                lesson_learned, bias_detected, recalibration_note,
-                future_rule_update, created_at,
-                _ADVISORY_STATUS, 1, _EXECUTION_MODE, _AI_EXECUTION_COUNT,
-                trade_id, source_trade_state, event_type, outcome_quality,
-                learning_direction, entry_price, exit_price, exit_quantity,
-                stop_loss_price, take_profit_price, realized_pl,
-                booked_percent, ride_percent, mistake_tags, success_tags,
-                lesson, notes, created_at, updated_at, idempotency_key,
-            ),
-        )
-        conn.commit()
+        # New insert.  Wrap in an IntegrityError guard: between our SELECT
+        # above and this INSERT, a concurrent writer may have inserted the
+        # same non-empty idempotency_key (the partial UNIQUE index then
+        # fires).  Recover idempotently by returning the existing row instead
+        # of letting the IntegrityError propagate as a 500.  If no row carries
+        # this key, the violation is unrelated (e.g. a duplicate entry_id PK)
+        # and MUST still raise — we never swallow unrelated DB errors.
+        try:
+            conn.execute(
+                "INSERT INTO moltbook_entries"
+                " (entry_id, event_id, ticker, original_signal_thesis,"
+                "  ai_interpretation, user_reflection, final_human_decision,"
+                "  manual_trade_log_id, outcome, mistake_type, lesson_learned,"
+                "  bias_detected, recalibration_note, future_rule_update,"
+                "  logged_at, advisory_status, human_review_required,"
+                "  execution_mode, ai_execution_count,"
+                "  trade_id, source_trade_state, event_type, outcome_quality,"
+                "  learning_direction, entry_price, exit_price, exit_quantity,"
+                "  stop_loss_price, take_profit_price, realized_pl,"
+                "  booked_percent, ride_percent, mistake_tags, success_tags,"
+                "  lesson, notes, created_at, updated_at, idempotency_key)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,"
+                "         ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    entry_id, event_id, str(ticker).upper(),
+                    original_signal_thesis, ai_interpretation, user_reflection,
+                    final_human_decision, trade_id, outcome, mistake_type,
+                    lesson_learned, bias_detected, recalibration_note,
+                    future_rule_update, created_at,
+                    _ADVISORY_STATUS, 1, _EXECUTION_MODE, _AI_EXECUTION_COUNT,
+                    trade_id, source_trade_state, event_type, outcome_quality,
+                    learning_direction, entry_price, exit_price, exit_quantity,
+                    stop_loss_price, take_profit_price, realized_pl,
+                    booked_percent, ride_percent, mistake_tags, success_tags,
+                    lesson, notes, created_at, updated_at, idempotency_key,
+                ),
+            )
+            conn.commit()
+        except sqlite3.IntegrityError:
+            conn.rollback()
+            raced = None
+            if idempotency_key:
+                raced = conn.execute(
+                    "SELECT entry_id, created_at FROM moltbook_entries"
+                    " WHERE idempotency_key = ?",
+                    (idempotency_key,),
+                ).fetchone()
+            if raced is None:
+                # Unrelated integrity violation — do NOT swallow it.
+                raise
+            return {
+                "entry_id": raced["entry_id"],
+                "created": False,
+                "updated": False,
+                "raced_duplicate": True,
+                "idempotency_key": idempotency_key,
+            }
         return {
             "entry_id": entry_id,
             "created": True,

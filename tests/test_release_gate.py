@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import time
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -142,7 +143,35 @@ def _pin_fresh_stress_summary(tmp_path, monkeypatch):
         _comp_reg, "SOURCE_LICENSE_REGISTER_PATH", register_path, raising=False
     )
 
+    # Operator live-provider refresh artifact.  The release gate reads
+    # ``operator_live_provider_refresh.OPERATOR_SUMMARY_PATH`` to decide LPQ
+    # uplift, and a *stale* on-disk artifact (age > 24h TTL) downgrades the
+    # verdict PASS -> WARN.  On a developer laptop the real artifact ages past
+    # the TTL between runs, so PASS-expecting tests would flake purely on
+    # wall-clock time (the original time-bomb).  Pin the path to an absent
+    # tmp file so the gate takes the deterministic "not run" branch (which,
+    # by design, does NOT downgrade the verdict).  Tests that exercise the
+    # STALE/fresh paths write to ``operator_refresh_summary_path`` and inject
+    # a fixed clock instead of relying on the real artifact.
+    from scripts import operator_live_provider_refresh as _olpr
+    operator_summary_path = sprint_dir / "operator_live_provider_refresh_summary.json"
+    monkeypatch.setattr(
+        _olpr, "OPERATOR_SUMMARY_PATH", operator_summary_path, raising=False
+    )
+
     yield summary_file
+
+
+@pytest.fixture
+def operator_refresh_summary_path(tmp_path):
+    """Path the autouse fixture pins ``OPERATOR_SUMMARY_PATH`` to.
+
+    Same ``tmp_path``-derived location as the autouse fixture's
+    ``sprint_dir / operator_live_provider_refresh_summary.json`` so a test
+    can write a deterministic fresh/stale artifact there and have the gate
+    read it.
+    """
+    return tmp_path / "_release" / "operator_live_provider_refresh_summary.json"
 
 
 def _no_backend(monkeypatch):
@@ -599,3 +628,122 @@ def test_release_gate_passes_when_compliance_artifacts_seeded(tmp_path):
     assert block["compliance_privacy_present"] is True
     assert block["compliance_register_present"] is True
     assert block["compliance_missing_config_enabled_providers"] == []
+
+
+# ---------------------------------------------------------------------------
+# Objective 1 — hermetic release-gate tests (no wall-clock / no real runtime
+# artifact dependency).  The original time-bomb: a clean-DB PASS test read the
+# real ``operator_live_provider_refresh_summary.json`` and WARNed once that
+# artifact aged past its 24h TTL — i.e. correctness depended on the current
+# date.  These tests pin the artifact path (autouse fixture) and inject a
+# FIXED clock so staleness is decided deterministically.
+# ---------------------------------------------------------------------------
+
+_FIXED_NOW = datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+
+
+def _operator_summary(generated_at: datetime, *, ttl_hours: float = 24.0) -> dict:
+    """A well-formed operator-refresh artifact (operator_run + ok + providers)."""
+    return {
+        "report": "operator_live_provider_refresh_summary",
+        "operator_run": True,
+        "ok": True,
+        "generated_at_utc": generated_at.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "ttl_hours": ttl_hours,
+        "providers_live_verified": ["yfinance"],
+        "previous_live_payload_quality_score": 8.2,
+        "live_payload_quality_score": 8.4,
+        "providers_evidence": [
+            {
+                "provider": "yfinance",
+                "status": "OK",
+                "verification_status": "LIVE_VERIFIED",
+                "latest_provider_timestamp_utc": generated_at.strftime(
+                    "%Y-%m-%dT%H:%M:%SZ"
+                ),
+                "sample_source_urls": ["https://example.test/quote"],
+                "sample_asset_tags": ["AAPL"],
+                "last_error": None,
+            }
+        ],
+    }
+
+
+def test_release_gate_clean_fixture_is_green(tmp_path):
+    """A clean DB with the operator artifact pinned-absent is PASS, and the
+    verdict does not depend on the real runtime tree."""
+    db = _clean_db(tmp_path)
+    result = release_gate.evaluate(db, check_backend=False)
+    assert result["verdict"] == "PASS", result["reasons"]
+    assert result["fail_count"] == 0
+    # The proof block took the deterministic "not run" branch, not the real
+    # artifact.
+    assert result["release_gate_proof"]["operator_live_refresh"]["attempted"] is False
+
+
+def test_release_gate_stale_provider_fixture_is_warn():
+    """A *stale* operator artifact (age > TTL) downgrades PASS -> WARN.  We
+    decide staleness against a FIXED clock, never wall-clock."""
+    stale = _operator_summary(_FIXED_NOW - timedelta(hours=48))
+    block = release_gate._operator_live_refresh_proof_block(
+        summary=stale, now=_FIXED_NOW
+    )
+    assert block["attempted"] is True
+    assert block["fresh"] is False
+    assert any("STALE" in w for w in block["warnings"]), block["warnings"]
+    # age is computed against the injected clock: 48h, deterministic.
+    assert block["age_hours"] == pytest.approx(48.0, abs=0.01)
+
+
+def test_release_gate_future_clock_does_not_flake():
+    """Same fresh artifact judged at two very different injected 'now' values:
+    fresh-vs-stale is a pure function of (artifact_ts, now), so a clock far in
+    the future flips fresh->stale deterministically instead of flaking."""
+    fresh_artifact = _operator_summary(_FIXED_NOW)
+
+    near = release_gate._operator_live_refresh_proof_block(
+        summary=fresh_artifact, now=_FIXED_NOW + timedelta(hours=1)
+    )
+    far = release_gate._operator_live_refresh_proof_block(
+        summary=fresh_artifact, now=_FIXED_NOW + timedelta(days=365)
+    )
+    assert near["fresh"] is True
+    assert far["fresh"] is False
+    # Re-running with the SAME injected clock yields the SAME answer (no
+    # dependence on real time).
+    far_again = release_gate._operator_live_refresh_proof_block(
+        summary=fresh_artifact, now=_FIXED_NOW + timedelta(days=365)
+    )
+    assert far_again["age_hours"] == far["age_hours"]
+
+
+def test_release_gate_ci_without_runtime_artifacts_is_deterministic(tmp_path):
+    """On a clean CI checkout the pinned artifact path does not exist, so the
+    gate is deterministically PASS with no real-file dependency — running it
+    twice gives the identical verdict."""
+    db = _clean_db(tmp_path)
+    r1 = release_gate.evaluate(db, check_backend=False)
+    r2 = release_gate.evaluate(db, check_backend=False)
+    assert r1["verdict"] == r2["verdict"] == "PASS"
+    assert r1["release_gate_proof"]["operator_live_refresh"]["attempted"] is False
+    assert r2["release_gate_proof"]["operator_live_refresh"]["attempted"] is False
+
+
+def test_release_gate_does_not_read_real_runtime_when_fixture_provided(monkeypatch):
+    """When a summary is injected, the proof block must NOT touch the real
+    ``read_summary`` (i.e. the real runtime artifact path)."""
+    from scripts import operator_live_provider_refresh as _olpr
+
+    called = {"read": False}
+
+    def _boom(*_a, **_k):  # pragma: no cover - must never run
+        called["read"] = True
+        raise AssertionError("real read_summary must not be called")
+
+    monkeypatch.setattr(release_gate._operator_live_refresh, "read_summary", _boom)
+    block = release_gate._operator_live_refresh_proof_block(
+        summary=_operator_summary(_FIXED_NOW), now=_FIXED_NOW
+    )
+    assert called["read"] is False
+    assert block["fresh"] is True
+    assert block["attempted"] is True

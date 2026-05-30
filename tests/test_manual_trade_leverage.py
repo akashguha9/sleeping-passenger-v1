@@ -42,9 +42,12 @@ def test_log_manual_trade_accepts_leverage(tmp_path, monkeypatch):
     monkeypatch.setattr(api, "MANUAL_TRADE_LOG", tmp_path / "trades.jsonl")
     monkeypatch.setattr(api, "_DB_AVAILABLE", False)
 
+    # India equity (.NS) permits up to 4x long, so 3.5x is in-policy and is
+    # accepted + persisted.  (A rest-of-world ticker at 3.5x is now rejected
+    # by the leverage-policy gate — see tests/test_leverage_ceiling_enforced.py.)
     result = api.log_manual_trade(
-        event_id="EVT_LOG_SPY",
-        ticker="SPY",
+        event_id="EVT_LOG_RELIANCE",
+        ticker="RELIANCE.NS",
         side="BUY",
         quantity=10.0,
         price=450.0,
@@ -268,14 +271,18 @@ def test_safety_invariants_preserved_with_leverage(tmp_path, monkeypatch):
     api = _api()
     monkeypatch.setattr(api, "MANUAL_TRADE_LOG", tmp_path / "trades.jsonl")
     monkeypatch.setattr(api, "_DB_AVAILABLE", False)
+    # India equity at an in-policy 3.0x so the row is accepted; the point of
+    # this test is that the safety stamps ride along on the leverage-bearing
+    # accepted path.  (Leverage-policy *rejection* stamps are covered by
+    # tests/test_leverage_ceiling_enforced.py.)
     result = api.log_manual_trade(
-        event_id="EVT_LOG_TSLA",
-        ticker="TSLA",
+        event_id="EVT_LOG_TCS",
+        ticker="TCS.NS",
         side="SELL",
         quantity=1.0,
         price=250.0,
         thesis="safety check",
-        leverage=5.0,
+        leverage=3.0,
     )
     assert result["advisory_status"] == "ADVISORY_ONLY"
     assert result["execution_mode"] == "HUMAN_ONLY"
