@@ -251,6 +251,8 @@ def _paper_readiness_fields(artifact: dict[str, Any] | None) -> dict[str, Any]:
                 )
             ][:5]
 
+    review_queue = _review_queue_fields()
+
     return {
         "paper_outcome_readiness": readiness_view,
         "calibration_corpus_quality": corpus_view,
@@ -258,6 +260,48 @@ def _paper_readiness_fields(artifact: dict[str, Any] | None) -> dict[str, Any]:
         "real_money_readiness_ceiling": REAL_MONEY_READINESS_CEILING,
         "top_missing_fields": top_missing_fields,
         "next_operator_actions": _next_operator_actions(readiness, corpus, closed_count),
+        **review_queue,
+    }
+
+
+def _review_queue_fields() -> dict[str, Any]:
+    """Read-only staging / review-queue counts for the reliability card.
+
+    Sourced from the canonical ``paper_outcome_staging`` table via the read-only
+    review queue + staging counters.  Degrades to all-zero (honest empty) when
+    no outcomes are staged.  Never writes; never enables sizing.
+    """
+    counts: dict[str, Any] = {}
+    queue: dict[str, Any] = {}
+    try:
+        try:
+            from scripts.paper_outcome_staging import count_staging as _count
+            from scripts.paper_outcome_review_queue import build_from_db as _queue
+        except ModuleNotFoundError:  # pragma: no cover - script-style env
+            from paper_outcome_staging import count_staging as _count  # type: ignore
+            from paper_outcome_review_queue import build_from_db as _queue  # type: ignore
+        counts = _count() or {}
+        queue = _queue() or {}
+    except Exception:  # noqa: BLE001 - degrade honestly, never crash the route
+        counts, queue = {}, {}
+
+    top_blockers = [
+        str(entry.get("blocker"))
+        for entry in (queue.get("top_blockers") or [])
+        if isinstance(entry, dict) and entry.get("blocker")
+    ][:5]
+    blocker_counts = queue.get("blocker_counts") or {}
+
+    return {
+        "staged_outcomes_count": int(counts.get("staged_outcomes_count") or 0),
+        "calibration_ready_count": int(queue.get("calibration_ready_count") or 0),
+        "review_required_count": int(queue.get("review_required_count") or 0),
+        "rejected_outcomes_count": int(queue.get("rejected_count") or 0),
+        "duplicate_skipped_count": int(blocker_counts.get("duplicate_trade_id") or 0),
+        "auto_link_count": int(counts.get("auto_link_count") or 0),
+        "review_link_count": int(counts.get("review_link_count") or 0),
+        "no_link_count": int(counts.get("no_link_count") or 0),
+        "top_outcome_blockers": top_blockers,
     }
 
 

@@ -258,6 +258,54 @@ CREATE TABLE IF NOT EXISTS external_evidence_calibration_buckets (
     last_updated_utc TEXT,
     proof_status TEXT
 );
+
+CREATE TABLE IF NOT EXISTS paper_outcome_staging (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    staging_key TEXT UNIQUE NOT NULL,
+    trade_id TEXT NOT NULL,
+    signal_id TEXT,
+    ticker TEXT NOT NULL,
+    entry_timestamp_utc TEXT,
+    exit_timestamp_utc TEXT,
+    entry_price REAL,
+    exit_price REAL,
+    exit_reason TEXT,
+    holding_days INTEGER,
+    realized_return_pct REAL,
+    realized_r_multiple REAL,
+    outcome_y_0_or_1 INTEGER,
+    source TEXT,
+    classification TEXT,
+    outcome_quality_score REAL,
+    link_status TEXT,
+    link_confidence REAL,
+    external_evidence_snapshot_id TEXT,
+    operator_review_required INTEGER NOT NULL DEFAULT 1,
+    valid_for_calibration INTEGER NOT NULL DEFAULT 0,
+    moltbook_learning_status TEXT,
+    proof_status TEXT,
+    advisory_only INTEGER NOT NULL DEFAULT 1,
+    human_execution_required INTEGER NOT NULL DEFAULT 1,
+    execution_gate TEXT NOT NULL DEFAULT 'LOCKED',
+    broker_api_called INTEGER NOT NULL DEFAULT 0,
+    ai_execution_count INTEGER NOT NULL DEFAULT 0,
+    real_money_sizing_impact TEXT NOT NULL DEFAULT 'PROHIBITED',
+    real_money_weight_allowed INTEGER NOT NULL DEFAULT 0,
+    created_at_utc TEXT NOT NULL,
+    updated_at_utc TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_paper_outcome_staging_trade_id
+    ON paper_outcome_staging(trade_id);
+CREATE INDEX IF NOT EXISTS idx_paper_outcome_staging_signal_id
+    ON paper_outcome_staging(signal_id);
+CREATE INDEX IF NOT EXISTS idx_paper_outcome_staging_ticker
+    ON paper_outcome_staging(ticker);
+CREATE INDEX IF NOT EXISTS idx_paper_outcome_staging_classification
+    ON paper_outcome_staging(classification);
+CREATE INDEX IF NOT EXISTS idx_paper_outcome_staging_valid
+    ON paper_outcome_staging(valid_for_calibration);
+CREATE INDEX IF NOT EXISTS idx_paper_outcome_staging_link_status
+    ON paper_outcome_staging(link_status);
 """
 
 

@@ -269,4 +269,67 @@ describe('ExternalEvidenceReliabilityCard', () => {
       /LOW BY DESIGN/,
     );
   });
+
+  // --- Kanté Outcome Corpus Hardening (WS-E) --------------------------------
+  function reviewQueueBundle(
+    overrides: Partial<ExternalEvidenceReliabilityView> = {},
+  ): ExternalEvidenceReliabilityView {
+    return readinessBundle({
+      staged_outcomes_count: 7,
+      calibration_ready_count: 3,
+      review_required_count: 4,
+      rejected_outcomes_count: 1,
+      duplicate_skipped_count: 2,
+      auto_link_count: 3,
+      review_link_count: 2,
+      no_link_count: 2,
+      top_outcome_blockers: [
+        'missing_external_evidence_link',
+        'missing_signal_id',
+        'bad_return_math',
+      ],
+      ...overrides,
+    });
+  }
+
+  // ----------------------------------------------------------------- WS-E 1
+  it('shows review-queue counts (ready / review / rejected / staged / dup)', () => {
+    render(<ExternalEvidenceReliabilityCard bundle={reviewQueueBundle()} />);
+    expect(screen.getByTestId('reliability-review-queue')).toBeTruthy();
+    expect(screen.getByTestId('reliability-staged-count').textContent).toMatch(/7/);
+    expect(screen.getByTestId('reliability-calibration-ready-count').textContent).toMatch(/3/);
+    expect(screen.getByTestId('reliability-review-required-count').textContent).toMatch(/4/);
+    expect(screen.getByTestId('reliability-rejected-count').textContent).toMatch(/1/);
+    expect(screen.getByTestId('reliability-duplicate-skipped-count').textContent).toMatch(/2/);
+    expect(screen.getByTestId('reliability-link-counts').textContent).toMatch(/3 \/ 2 \/ 2/);
+  });
+
+  // ----------------------------------------------------------------- WS-E 2
+  it('shows the top outcome blockers', () => {
+    render(<ExternalEvidenceReliabilityCard bundle={reviewQueueBundle()} />);
+    const blockers = screen.getByTestId('reliability-top-outcome-blockers').textContent ?? '';
+    expect(blockers).toMatch(/missing_external_evidence_link/);
+    expect(blockers).toMatch(/missing_signal_id/);
+    expect(blockers).toMatch(/bad_return_math/);
+  });
+
+  // ----------------------------------------------------------------- WS-E 3
+  it('review-queue block has no action buttons or links', () => {
+    const { container } = render(
+      <ExternalEvidenceReliabilityCard bundle={reviewQueueBundle()} />,
+    );
+    expect(container.querySelectorAll('button').length).toBe(0);
+    expect(container.querySelectorAll('a').length).toBe(0);
+  });
+
+  // ----------------------------------------------------------------- WS-E 4
+  it('review-queue block emits no forbidden execution language', () => {
+    const { container } = render(
+      <ExternalEvidenceReliabilityCard bundle={reviewQueueBundle()} />,
+    );
+    const blob = (container.textContent ?? '').toLowerCase();
+    for (const pattern of FORBIDDEN) {
+      expect(blob).not.toMatch(pattern);
+    }
+  });
 });

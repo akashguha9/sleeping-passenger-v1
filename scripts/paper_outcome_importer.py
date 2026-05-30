@@ -40,13 +40,19 @@ from typing import Any
 try:
     from scripts import paper_outcome_intake as _intake
     from scripts import operator_permission_guard as _guard
+    from scripts import paper_outcome_staging as _staging
 except ModuleNotFoundError:  # pragma: no cover - script-style fallback
     import paper_outcome_intake as _intake  # type: ignore[no-redef]
     import operator_permission_guard as _guard  # type: ignore[no-redef]
+    import paper_outcome_staging as _staging  # type: ignore[no-redef]
 
 
 REAL_MONEY_SIZING_IMPACT = "PROHIBITED"
 _PROOF = "PAPER_OUTCOME_IMPORTER_PAPER_ONLY"
+
+# Operation name for the canonical staging write (distinct from the audit-only
+# JSON write so the guard audit trail names each boundary explicitly).
+_STAGING_OPERATION_NAME = "paper_outcome_importer_stage"
 
 # The importer's ``--apply`` writes only the audit-only normalized JSON, and is
 # authorized by the central operator permission guard inside
@@ -285,6 +291,100 @@ def apply_import(
     )
 
 
+# --- guarded apply (canonical paper_outcome_staging write) ------------------
+
+
+def _write_staging_records(
+    records: list[dict[str, Any]],
+    *,
+    include_rejected: bool,
+    db_path: Path | None,
+    conn: Any = None,
+) -> dict[str, Any]:
+    """Insert eligible normalized records into the canonical staging table.
+
+    Eligibility: a *closed* row (open trades are skipped, never staged) whose
+    classification is VALID_FOR_CALIBRATION or NEEDS_OPERATOR_REVIEW.  Rejected
+    rows are skipped unless ``include_rejected``.  Duplicates (same content
+    ``staging_key``) are skipped.  Returns the per-row counts; never invents.
+    """
+    staged = 0
+    skipped_duplicate = 0
+    skipped_open = 0
+    skipped_rejected = 0
+    owned = conn is None
+    if conn is None:
+        conn = _staging._eep._open(db_path)
+    try:
+        for rec in records:
+            if _staging.is_open_outcome(rec):
+                skipped_open += 1
+                continue
+            classification = _str(rec.get("intake_classification"))
+            if (
+                classification == _intake.REJECTED_INSUFFICIENT_PROOF
+                and not include_rejected
+            ):
+                skipped_rejected += 1
+                continue
+            row = _staging.build_staging_row(rec)
+            status = _staging.insert_staging_row(row, conn=conn)
+            if status == "inserted":
+                staged += 1
+            else:
+                skipped_duplicate += 1
+        if owned:
+            conn.commit()
+    finally:
+        if owned:
+            conn.close()
+    return {
+        "staged_count": staged,
+        "skipped_duplicate": skipped_duplicate,
+        "skipped_open": skipped_open,
+        "skipped_rejected": skipped_rejected,
+    }
+
+
+def apply_staging(
+    report: dict[str, Any],
+    *,
+    db_path: Path | None = None,
+    operator_role: str | None = None,
+    include_rejected: bool = False,
+) -> dict[str, Any]:
+    """Write valid/review rows to canonical staging via the operator guard.
+
+    Fail-closed: a denied operator role raises :class:`PermissionError` and
+    nothing is staged.  Open trades are never staged, rejected rows are skipped
+    unless ``include_rejected``, and duplicates are skipped — the staging table
+    is advisory, paper-only, and never affects real-money sizing.
+    """
+    intake_report = report.get("intake_report") or report
+    records = list(intake_report.get("normalized_records") or [])
+    decision = _guard.build_apply_decision(
+        _STAGING_OPERATION_NAME,
+        _guard.OperationClass.AUDIT_ONLY_WRITE,
+        str(db_path) if db_path else None,
+        operator_role=operator_role,
+        reason="stage closed paper outcomes into canonical paper_outcome_staging",
+    )
+    # decision is allowed past this point (build_apply_decision raises on deny).
+    counts = _write_staging_records(
+        records, include_rejected=include_rejected, db_path=db_path
+    )
+    counts.update(
+        {
+            "staging_written": True,
+            "permission_allowed": bool(decision.allowed),
+            "include_rejected": bool(include_rejected),
+            "real_money_sizing_impact": REAL_MONEY_SIZING_IMPACT,
+            "proof_status": _PROOF,
+        }
+    )
+    return counts
+
+
 # --- CLI --------------------------------------------------------------------
 
 
@@ -315,6 +415,17 @@ def _build_parser() -> argparse.ArgumentParser:
         default=None,
         help="normalized JSON output path (default runtime/paper_outcome_intake/)",
     )
+    p.add_argument("--db-path", default=None, help="canonical DB path for staging")
+    p.add_argument(
+        "--no-stage",
+        action="store_true",
+        help="skip the canonical paper_outcome_staging write (audit-JSON only)",
+    )
+    p.add_argument(
+        "--include-rejected",
+        action="store_true",
+        help="also stage REJECTED_INSUFFICIENT_PROOF rows (default: skipped)",
+    )
     p.add_argument("--json", action="store_true", help="emit the JSON report")
     return p
 
@@ -336,7 +447,8 @@ def main(argv: list[str] | None = None) -> int:
         _emit(report, json_mode=args.json)
         return 0
 
-    # --apply: build the report, then guarded audit-only normalized write.
+    # --apply: build the report, then guarded audit-only normalized write,
+    # then (unless --no-stage) the guarded canonical staging write.
     report = build_import_report(rows, applied=True)
     output_path = (
         Path(args.output)
@@ -351,6 +463,26 @@ def main(argv: list[str] | None = None) -> int:
         print(f"[DENY] {exc}")
         return 2
     report.update(write_result)
+
+    if not args.no_stage:
+        db_path = Path(args.db_path) if args.db_path else None
+        try:
+            staging_result = apply_staging(
+                report,
+                db_path=db_path,
+                operator_role=args.operator_role,
+                include_rejected=args.include_rejected,
+            )
+        except PermissionError as exc:
+            print(f"[DENY] {exc}")
+            return 2
+        report.update(staging_result)
+        # Mirror the canonical valid/review/rejected tallies under the
+        # sprint-named keys for the operator report.
+        report["valid_count"] = report["valid_for_calibration"]
+        report["review_count"] = report["needs_operator_review"]
+        report["rejected_count"] = report["rejected_insufficient_proof"]
+
     _emit(report, json_mode=args.json)
     return 0
 
@@ -368,6 +500,11 @@ def _emit(report: dict[str, Any], *, json_mode: bool) -> None:
     print(f"  duplicates      : {len(report['duplicate_trade_ids'])}")
     print(f"  imported        : {report['imported_count']}")
     print(f"  skipped         : {report['skipped_count']}")
+    if report.get("staging_written"):
+        print(f"  staged          : {report.get('staged_count')}")
+        print(f"  skipped_open    : {report.get('skipped_open')}")
+        print(f"  skipped_dup     : {report.get('skipped_duplicate')}")
+        print(f"  skipped_rejected: {report.get('skipped_rejected')}")
     print(f"  real-money      : {report['real_money_sizing_impact']}")
     if report.get("written"):
         print(f"  written         : {report.get('output_path')}")
@@ -382,6 +519,7 @@ __all__ = [
     "build_import_report",
     "load_rows",
     "apply_import",
+    "apply_staging",
     "main",
 ]
 

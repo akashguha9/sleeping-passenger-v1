@@ -81,6 +81,16 @@ export interface ExternalEvidenceReliabilityView {
   // Kanté Closed-Outcome Corpus sprint — top missing fields + next actions.
   top_missing_fields?: string[] | null;
   next_operator_actions?: string[] | null;
+  // Kanté Outcome Corpus Hardening sprint — staging / review-queue counts.
+  staged_outcomes_count?: number | null;
+  calibration_ready_count?: number | null;
+  review_required_count?: number | null;
+  rejected_outcomes_count?: number | null;
+  duplicate_skipped_count?: number | null;
+  auto_link_count?: number | null;
+  review_link_count?: number | null;
+  no_link_count?: number | null;
+  top_outcome_blockers?: string[] | null;
 }
 
 interface Props {
@@ -150,6 +160,16 @@ function PaperOutcomeReadinessSection({
   const stage = readiness?.calibration_stage ?? readiness?.readiness_label ?? 'COLD_START';
   const realMoneyCeiling = bundle?.real_money_readiness_ceiling ?? 'LOW BY DESIGN';
 
+  const stagedCount = bundle?.staged_outcomes_count ?? 0;
+  const calibrationReady = bundle?.calibration_ready_count ?? 0;
+  const reviewRequired = bundle?.review_required_count ?? 0;
+  const rejectedCount = bundle?.rejected_outcomes_count ?? 0;
+  const duplicateSkipped = bundle?.duplicate_skipped_count ?? 0;
+  const autoLink = bundle?.auto_link_count ?? 0;
+  const reviewLink = bundle?.review_link_count ?? 0;
+  const noLink = bundle?.no_link_count ?? 0;
+  const outcomeBlockers = bundle?.top_outcome_blockers ?? null;
+
   return (
     <div
       className="mt-3 border-t border-slate-700/40 pt-2"
@@ -201,6 +221,55 @@ function PaperOutcomeReadinessSection({
       >
         Real-money readiness remains low by design.
       </p>
+
+      <div
+        className="mt-2 border-t border-slate-800/60 pt-2"
+        data-testid="reliability-review-queue"
+      >
+        <div className="font-mono text-[10px] uppercase tracking-wider text-slate-400">
+          Outcome Review Queue
+        </div>
+        <dl className="mt-1 grid grid-cols-2 gap-x-3 gap-y-1 text-[11px] text-slate-300">
+          <dt className="text-slate-500">Staged outcomes</dt>
+          <dd className="text-right font-mono" data-testid="reliability-staged-count">
+            {stagedCount}
+          </dd>
+
+          <dt className="text-slate-500">Calibration-ready</dt>
+          <dd className="text-right font-mono" data-testid="reliability-calibration-ready-count">
+            {calibrationReady}
+          </dd>
+
+          <dt className="text-slate-500">Review required</dt>
+          <dd className="text-right font-mono" data-testid="reliability-review-required-count">
+            {reviewRequired}
+          </dd>
+
+          <dt className="text-slate-500">Rejected</dt>
+          <dd className="text-right font-mono" data-testid="reliability-rejected-count">
+            {rejectedCount}
+          </dd>
+
+          <dt className="text-slate-500">Duplicate skipped</dt>
+          <dd className="text-right font-mono" data-testid="reliability-duplicate-skipped-count">
+            {duplicateSkipped}
+          </dd>
+
+          <dt className="text-slate-500">Auto / Review / No-link</dt>
+          <dd className="text-right font-mono" data-testid="reliability-link-counts">
+            {autoLink} / {reviewLink} / {noLink}
+          </dd>
+        </dl>
+
+        {outcomeBlockers && outcomeBlockers.length > 0 ? (
+          <p
+            className="mt-1 text-[10px] leading-snug text-slate-400"
+            data-testid="reliability-top-outcome-blockers"
+          >
+            Top blockers: {outcomeBlockers.slice(0, 5).join(', ')}
+          </p>
+        ) : null}
+      </div>
 
       {topMissingFields && topMissingFields.length > 0 ? (
         <p

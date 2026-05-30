@@ -400,3 +400,93 @@ is `EMPTY` / `WEAK`. The next genuine ceiling lift is not more code — it is th
 operator accumulating real closed paper outcomes through the intake + checklist
 discipline so the corpus can mature (paper-only) and the per-source reliability
 can leave cold-start.
+
+---
+
+## Kanté Outcome Corpus Hardening — From 8.9 Toward 9.1
+
+The 8.9 ceiling was not bounded by model sophistication; it was bounded by
+**outcome-corpus quality**. A closed paper outcome had no canonical home: it
+lived either in an audit-only JSON blob (not queryable, not idempotent across
+runs) or — only once auto-linked — as an advisory `external_evidence_outcomes`
+row. This sprint adds the missing middle and makes the closed-outcome workflow
+canonical, idempotent, auditable, and operator-friendly — while keeping
+real-money sizing **PROHIBITED**.
+
+### Canonical staging table — `paper_outcome_staging`
+A new additive `CREATE TABLE IF NOT EXISTS paper_outcome_staging` (in
+`external_evidence_persistence._SCHEMA_SQL`, ensured on `_open`) is the
+paper-only calibration staging area. Each row carries the intake classification,
+`outcome_quality_score`, linkage status + confidence, the evidence-snapshot id,
+operator-review / valid-for-calibration flags, the Moltbook learning status, and
+the unconditional advisory / no-execution / real-money-prohibited stamps. Indexes
+cover `trade_id`, `signal_id`, `ticker`, `classification`, `valid_for_calibration`,
+`link_status`.
+
+**Idempotency:** `staging_key = SHA256(trade_id | signal_id | ticker |
+entry_ts | exit_ts | entry_price | exit_price)` with a `UNIQUE` constraint and
+`INSERT OR IGNORE`. Re-importing the same outcome is a no-op (`skipped_duplicate`),
+never a doubled row. Numeric components are normalized so `100` and `100.0`
+hash identically. This table is **not execution and not a real-money store.**
+
+### Importer apply behavior — `paper_outcome_importer.py`
+`--apply` remains dry-run-by-default and operator-guarded. It still writes the
+audit-only normalized JSON, and now *also* stages valid / review rows into the
+canonical table via `apply_staging` (a second guarded `AUDIT_ONLY_WRITE`
+boundary, VIEWER denied, fail-closed). Open trades are skipped (`skipped_open`),
+rejected rows are skipped unless `--include-rejected`, and duplicates are
+skipped (`skipped_duplicate`). The report adds `staged_count`,
+`skipped_open`, `skipped_duplicate`, `skipped_rejected`, plus the canonical
+`valid_count` / `review_count` / `rejected_count`. `--no-stage` opts out.
+
+### Operator review queue — `paper_outcome_review_queue.py`
+A read-only, no-writes-by-default queue over the staging table. For each row it
+emits the blockers (`missing_signal_id`, `bad_return_math`, `missing_exit_price`,
+`missing_entry_price`, `missing_external_evidence_link`, `missing_moltbook_record`,
+`invalid_time_order`, `proof_status_weak`, `duplicate_trade_id`,
+`open_trade_not_closed`), ranks them by frequency, computes the weighted
+`blocker_priority_score` (0.30 missing-price + 0.25 invalid-return-math +
+0.20 missing-signal-link + 0.15 missing-evidence-link + 0.10 weak-proof), and
+reports `calibration_ready_count` / `review_required_count` / `rejected_count`
+plus the next ≤5 operator actions (advisory wording only — never a trade CTA).
+
+### Builder staging flow — `calibration_corpus_builder.py`
+The dry-run-first pipeline now stages each valid closed outcome (with its link
+status / confidence / snapshot id and Moltbook learning status) before recording
+the advisory outcome. On `--apply` the write is idempotent and shares the
+outcome-recording transaction; on dry-run the builder *simulates* the staging
+count (read-only check against existing `staging_key`s) and writes nothing. Open
+trades are never staged. Report adds `staged_count` / `staged_skipped_duplicate`.
+
+### Frontend blockers — `ExternalEvidenceReliabilityCard.tsx`
+The card gains an **Outcome Review Queue** block (rendered in both disabled and
+active states): staged outcomes, calibration-ready / review-required / rejected
+counts, duplicate-skipped count, AUTO / REVIEW / NO-LINK counts, and the top-5
+outcome blockers. The backend `external_evidence_router` builds these read-only
+from `paper_outcome_staging` + the review queue. **No buttons, no trade CTAs, no
+"ready for real money", no execution language.**
+
+### Concurrency flake audit
+The previously-intermittent
+`test_cockpit_concurrency_stress_probe.py::test_json_mode_emits_valid_json` was
+already resolved by the diagnostics-cache write-race fix (unique-temp +
+serialized-rename + `busy_timeout`). It was re-verified stable (repeated runs,
+green) this sprint. JSON mode separates the JSON payload from non-JSON summary
+output via `--no-summary --json`, so logs cannot contaminate the parsed payload.
+The test was **not weakened and not skipped.**
+
+### Why real-money readiness remains low
+Unchanged hard ceiling of **2.5–3.0**. No broker, no orders, no autonomous
+trading, no real-money sizing. Every staged row, every report, and every card
+state stamps `advisory_only`, `execution_gate=LOCKED`, `broker_api_called=false`,
+`ai_execution_count=0`, `real_money_sizing_impact=PROHIBITED`. The corpus
+workflow is now canonical and auditable; the execution gate does not open.
+
+### Why 50–100 outcomes are still required
+The staging table, review queue, builder, and card are all ready to consume a
+real corpus, but the corpus is still empty: with zero staged outcomes the review
+queue honestly reports `calibration_ready_count=0` and the corpus label stays
+`EMPTY`. Real-money readiness **cannot** exceed 3.0 until actual closed paper
+outcomes exist. The next genuine ceiling lift is the operator accumulating
+50–100 closed paper outcomes through the importer + review-queue discipline so
+the corpus can mature (paper-only).

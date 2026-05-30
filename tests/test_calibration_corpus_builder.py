@@ -81,6 +81,16 @@ def _buckets(db: Path):
         conn.close()
 
 
+def _staged(db: Path):
+    conn = eep._open(db)
+    try:
+        return [dict(r) for r in conn.execute(
+            "SELECT * FROM paper_outcome_staging"
+        )]
+    finally:
+        conn.close()
+
+
 # --- 9: dry-run reports only, writes nothing --------------------------------
 def test_corpus_builder_dry_run_reports_only(tmp_path: Path):
     db = tmp_path / "mvp_local.db"
@@ -149,6 +159,54 @@ def test_corpus_builder_idempotent_buckets(tmp_path: Path):
     assert len(buckets_after_second) == 1
     assert buckets_after_second[0]["sample_count"] == 1
     assert len(_outcomes(db)) == 1
+
+
+# --- 11: builder dry-run simulates staging (writes nothing) -----------------
+def test_corpus_builder_dry_run_simulates_staging(tmp_path: Path):
+    db = tmp_path / "mvp_local.db"
+    _persist_snapshot(db)
+
+    report = run_corpus_build([_sheet_row()], apply=False, db_path=db)
+    assert report["mode"] == "DRY_RUN"
+    # Dry-run simulates the staging count but writes nothing.
+    assert report["staged_count"] == 1
+    assert _staged(db) == []
+
+
+# --- 12: builder apply writes staging + advisory outcomes idempotently ------
+def test_corpus_builder_apply_stages_idempotently(tmp_path: Path):
+    db = tmp_path / "mvp_local.db"
+    _persist_snapshot(db)
+
+    first = run_corpus_build([_sheet_row()], apply=True, db_path=db)
+    assert first["staged_count"] == 1
+    assert first["outcomes_recorded"] == 1
+    staged = _staged(db)
+    assert len(staged) == 1
+    assert staged[0]["trade_id"] == "T-1"
+    assert staged[0]["link_status"] == "AUTO_LINK"
+    assert staged[0]["moltbook_learning_status"] == "RECORDED"
+    assert staged[0]["real_money_sizing_impact"] == "PROHIBITED"
+
+    # Re-running the same row stages nothing new (idempotent content key).
+    second = run_corpus_build([_sheet_row()], apply=True, db_path=db)
+    assert second["staged_count"] == 0
+    assert second["staged_skipped_duplicate"] == 1
+    assert len(_staged(db)) == 1
+
+
+# --- 13: builder skips open trades (never staged) ---------------------------
+def test_corpus_builder_open_trade_not_staged(tmp_path: Path):
+    db = tmp_path / "mvp_local.db"
+    _persist_snapshot(db)
+
+    open_row = _sheet_row()
+    del open_row["SELL PRICE"]
+    del open_row["EXIT_TIMESTAMP_UTC"]
+
+    report = run_corpus_build([open_row], apply=True, db_path=db)
+    assert report["staged_count"] == 0
+    assert _staged(db) == []
 
 
 if __name__ == "__main__":  # pragma: no cover

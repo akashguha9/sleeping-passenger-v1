@@ -49,6 +49,7 @@ try:
     from scripts import paper_outcome_collection_readiness as _readiness
     from scripts import calibration_corpus_quality as _corpus
     from scripts import operator_permission_guard as _guard
+    from scripts import paper_outcome_staging as _staging
 except ModuleNotFoundError:  # pragma: no cover - script-style fallback
     import paper_outcome_importer as _importer  # type: ignore[no-redef]
     import paper_outcome_intake as _intake  # type: ignore[no-redef]
@@ -59,6 +60,7 @@ except ModuleNotFoundError:  # pragma: no cover - script-style fallback
     import paper_outcome_collection_readiness as _readiness  # type: ignore[no-redef]
     import calibration_corpus_quality as _corpus  # type: ignore[no-redef]
     import operator_permission_guard as _guard  # type: ignore[no-redef]
+    import paper_outcome_staging as _staging  # type: ignore[no-redef]
 
 
 OPERATION_NAME = "calibration_corpus_builder"
@@ -159,6 +161,8 @@ def run_corpus_build(
     outcomes_recorded = 0
     buckets_updated = 0
     skipped_open_or_invalid = 0
+    staged_count = 0
+    staged_skipped_duplicate = 0
     per_outcome: list[dict[str, Any]] = []
 
     # One shared connection for the whole apply pass so records commit together.
@@ -167,6 +171,19 @@ def run_corpus_build(
     if apply:
         conn = _eep._open(db_path)
         owned = True
+
+    # Read-only set of staging keys that already exist, so dry-run can honestly
+    # *simulate* how many rows it would newly stage (no writes in dry-run).
+    existing_staging_keys: set[str] = set()
+    if not apply:
+        try:
+            existing_staging_keys = {
+                _s(r.get("staging_key"))
+                for r in _staging.load_staging_rows(db_path)
+            }
+        except Exception:  # noqa: BLE001 - missing table → empty, honestly
+            existing_staging_keys = set()
+    simulated_keys: set[str] = set()
 
     processed = 0
     try:
@@ -214,6 +231,39 @@ def run_corpus_build(
                     outcomes_recorded += recorded_here
                     buckets_updated += buckets_here
 
+            # --- canonical staging write (apply) / simulation (dry-run) -------
+            # Open trades never reach here (intake rejects them), but guard again
+            # defensively — only a closed valid outcome is ever staged.
+            snapshot_id = None
+            if best == _linker.AUTO_LINK and link.get("candidates"):
+                snapshot_id = _s(link["candidates"][0].get("snapshot_id"))
+            staging_row = _staging.build_staging_row(
+                record,
+                link_status=best,
+                link_confidence=link["best_link_confidence"],
+                external_evidence_snapshot_id=snapshot_id,
+                moltbook_learning_status=(
+                    "RECORDED" if recorded_here > 0 else "PENDING"
+                ),
+            )
+            stage_status = "DRY_RUN_SIMULATED"
+            if _staging.is_open_outcome(record):
+                stage_status = "SKIPPED_OPEN"
+            elif apply:
+                stage_status = _staging.insert_staging_row(staging_row, conn=conn)
+                if stage_status == "inserted":
+                    staged_count += 1
+                else:
+                    staged_skipped_duplicate += 1
+            else:
+                key = staging_row["staging_key"]
+                if key in existing_staging_keys or key in simulated_keys:
+                    staged_skipped_duplicate += 1
+                    stage_status = "DRY_RUN_DUPLICATE"
+                else:
+                    simulated_keys.add(key)
+                    staged_count += 1
+
             per_outcome.append(
                 {
                     "trade_id": _s(record.get("trade_id")),
@@ -224,6 +274,7 @@ def run_corpus_build(
                     "checklist_label": checklist["readiness_label"],
                     "checklist_missing_critical": checklist["missing_critical_checks"],
                     "record_status": record_status,
+                    "stage_status": stage_status,
                     "records_created": recorded_here,
                     "buckets_updated": buckets_here,
                 }
@@ -252,6 +303,8 @@ def run_corpus_build(
         "linked_review": linked_review,
         "no_link": no_link,
         "skipped_open_or_invalid": skipped_open_or_invalid,
+        "staged_count": staged_count,
+        "staged_skipped_duplicate": staged_skipped_duplicate,
         "outcomes_recorded": outcomes_recorded,
         "buckets_updated": buckets_updated,
         "corpus_quality_before": corpus_before.get("corpus_quality_score"),
@@ -373,6 +426,8 @@ def _emit(report: dict[str, Any], *, json_mode: bool) -> None:
     print(f"  linked_auto       : {report['linked_auto']}")
     print(f"  linked_review     : {report['linked_review']}")
     print(f"  no_link           : {report['no_link']}")
+    print(f"  staged            : {report['staged_count']}")
+    print(f"  staged_dup        : {report['staged_skipped_duplicate']}")
     print(f"  outcomes_recorded : {report['outcomes_recorded']}")
     print(f"  buckets_updated   : {report['buckets_updated']}")
     print(

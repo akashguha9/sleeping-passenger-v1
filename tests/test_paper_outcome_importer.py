@@ -12,8 +12,10 @@ from pathlib import Path
 
 import pytest
 
+import scripts.paper_outcome_staging as staging
 from scripts.paper_outcome_importer import (
     apply_import,
+    apply_staging,
     build_import_report,
     main,
     normalize_row,
@@ -117,6 +119,83 @@ def test_importer_apply_requires_guard(tmp_path, monkeypatch):
     assert res["written"] is True
     assert res["canonical_store_written"] is False
     assert out_path.exists()
+
+
+# --- 5: importer apply writes staging only under the operator guard ----------
+def test_importer_apply_stages_under_guard(tmp_path, monkeypatch):
+    monkeypatch.setenv("MVP_OPERATOR_GUARD_AUDIT_PATH", str(tmp_path / "audit.jsonl"))
+    monkeypatch.setenv("MVP_OPERATOR_RECEIPT_DIR", str(tmp_path / "receipts"))
+    db = tmp_path / "mvp_local.db"
+    report = build_import_report([_sheet_row()], applied=True)
+
+    # VIEWER may not stage → fail closed, nothing written.
+    with pytest.raises(PermissionError):
+        apply_staging(report, db_path=db, operator_role="VIEWER")
+    assert staging.load_staging_rows(db) == []
+
+    # OPERATOR is allowed → the valid row is staged.
+    res = apply_staging(report, db_path=db, operator_role="OPERATOR")
+    assert res["staged_count"] == 1
+    assert res["staging_written"] is True
+    rows = staging.load_staging_rows(db)
+    assert len(rows) == 1
+    assert rows[0]["trade_id"] == "T-1"
+    assert rows[0]["real_money_sizing_impact"] == "PROHIBITED"
+
+
+# --- 6: importer dry-run writes nothing to staging --------------------------
+def test_importer_dry_run_stages_nothing(tmp_path, monkeypatch):
+    import scripts.paper_outcome_intake as intake
+
+    intake_dir = tmp_path / "intake_store"
+    monkeypatch.setattr(intake, "_DEFAULT_INTAKE_DIR", intake_dir, raising=False)
+    db = tmp_path / "mvp_local.db"
+
+    src = tmp_path / "outcomes.json"
+    src.write_text(json.dumps([_sheet_row()]), encoding="utf-8")
+
+    rc = main(["--input", str(src), "--db-path", str(db)])  # no --apply
+    assert rc == 0
+    assert staging.load_staging_rows(db) == []
+
+
+# --- 7: rejected outcome is not staged by default ---------------------------
+def test_importer_rejected_not_staged_by_default(tmp_path, monkeypatch):
+    monkeypatch.setenv("MVP_OPERATOR_GUARD_AUDIT_PATH", str(tmp_path / "audit.jsonl"))
+    monkeypatch.setenv("MVP_OPERATOR_RECEIPT_DIR", str(tmp_path / "receipts"))
+    db = tmp_path / "mvp_local.db"
+
+    # A row with no proof + bad math + no signal → REJECTED_INSUFFICIENT_PROOF.
+    bad = _sheet_row(
+        SIGNAL_ID="", PROOF_STATUS="", **{"REALIZED_RETURN_%": "999.0"}
+    )
+    report = build_import_report([bad], applied=True)
+    res = apply_staging(report, db_path=db, operator_role="OPERATOR")
+    assert res["staged_count"] == 0
+    assert res["skipped_rejected"] >= 1
+    assert staging.load_staging_rows(db) == []
+
+    # …but include_rejected stages it for explicit operator triage.
+    res2 = apply_staging(
+        report, db_path=db, operator_role="OPERATOR", include_rejected=True
+    )
+    assert res2["staged_count"] == 1
+
+
+# --- open trades are never staged -------------------------------------------
+def test_importer_skips_open_trades(tmp_path, monkeypatch):
+    monkeypatch.setenv("MVP_OPERATOR_GUARD_AUDIT_PATH", str(tmp_path / "audit.jsonl"))
+    monkeypatch.setenv("MVP_OPERATOR_RECEIPT_DIR", str(tmp_path / "receipts"))
+    db = tmp_path / "mvp_local.db"
+
+    open_row = _sheet_row()
+    del open_row["SELL PRICE"]
+    del open_row["EXIT_TIMESTAMP_UTC"]
+    report = build_import_report([open_row], applied=True)
+    res = apply_staging(report, db_path=db, operator_role="OPERATOR")
+    assert res["skipped_open"] >= 1
+    assert res["staged_count"] == 0
+    assert staging.load_staging_rows(db) == []
 
 
 # --- safety stamp ------------------------------------------------------------
