@@ -402,6 +402,104 @@ def get_kalshi_source_health() -> dict:
     return fn()
 
 
+# ---------------------------------------------------------------------------
+# Wiring Sprint — canonical source-truth route.
+#
+# Surfaces the source_freshness_contract as the single canonical-status reducer
+# so the API separates *provider API health* from *canonical fresh rows*.  A
+# source with api_health_status == OK but rows_added == 0 is reported as
+# ZERO_FRESH_ROWS (DEGRADED), never LIVE_CANONICAL — impossible to fake.
+# ---------------------------------------------------------------------------
+
+
+def _canonical_age_hours(created_at: Any, now_dt: Any) -> float | None:
+    import datetime as _dt
+
+    if not created_at:
+        return None
+    try:
+        cdt = _dt.datetime.fromisoformat(str(created_at).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if cdt.tzinfo is None:
+        cdt = cdt.replace(tzinfo=_dt.timezone.utc)
+    return round((now_dt - cdt).total_seconds() / 3600.0, 6)
+
+
+def build_canonical_source_truth(
+    source_run_rows: list,
+    *,
+    now_iso: str | None = None,
+    ttl_hours: float = 24.0,
+) -> dict:
+    """Pure builder — classify each source's canonical truth.
+
+    ``source_run_rows`` are rows shaped like ``persistence.get_source_run_log``
+    output (``source``, ``status``, ``rows_added``, ``rows_filtered``,
+    ``created_at`` ...).  Read-only; no DB or network access.
+    """
+    import datetime as _dt
+
+    try:
+        from scripts.source_freshness_contract import classify_canonical_status
+    except ModuleNotFoundError:  # pragma: no cover
+        from source_freshness_contract import classify_canonical_status  # type: ignore
+
+    if now_iso:
+        now_dt = _dt.datetime.fromisoformat(str(now_iso).replace("Z", "+00:00"))
+        if now_dt.tzinfo is None:
+            now_dt = now_dt.replace(tzinfo=_dt.timezone.utc)
+    else:
+        now_dt = _dt.datetime.now(_dt.timezone.utc)
+
+    sources: list[dict] = []
+    for row in source_run_rows or []:
+        if not isinstance(row, dict):
+            continue
+        created_at = row.get("created_at") or row.get("fetched_at") or row.get("timestamp_utc")
+        age_hours = _canonical_age_hours(created_at, now_dt)
+        rows_added = int(row.get("rows_added") or 0)
+        rows_filtered = int(row.get("rows_filtered") or 0)
+        classified = classify_canonical_status(
+            api_health_status=str(row.get("status") or row.get("api_health_status") or ""),
+            rows_added=rows_added,
+            age_hours=age_hours,
+            ttl_hours=ttl_hours,
+            mock_flag=bool(row.get("mock_flag", False)),
+            backfill_only=bool(row.get("backfill_only", False)),
+            filtered=rows_filtered > 0,
+        )
+        sources.append({
+            "source": row.get("source") or row.get("source_name"),
+            "api_health_status": classified["api_health_status"],
+            "canonical_signal_status": classified["canonical_signal_status"],
+            "rows_added": rows_added,
+            "latest_canonical_signal_timestamp": created_at,
+            "canonical_age_hours": age_hours,
+            "is_live_canonical": classified["live_canonical"],
+            "source_truth_score": classified["C_s"],
+            "freshness_score": classified["freshness_score"],
+        })
+
+    live = [s for s in sources if s["is_live_canonical"]]
+    return {
+        "operation": "get_source_canonical_truth",
+        "sources": sources,
+        "live_canonical_count": len(live),
+        "source_count": len(sources),
+        **_watchdog_safety_payload(),
+    }
+
+
+def get_source_canonical_truth() -> dict:
+    """Route handler — resolves the run-log via ``scripts.api_server`` at
+    request time so test patches still bite."""
+    import scripts.api_server as _srv
+
+    run_log_fn = getattr(_srv, "_get_source_run_log", _get_source_run_log)
+    return build_canonical_source_truth(run_log_fn(limit=50))
+
+
 def build_router():
     router = APIRouter()
     router.get("/source-health")(get_source_health)
@@ -409,4 +507,5 @@ def build_router():
     router.get("/source-health/watchdog")(get_source_health_watchdog)
     router.get("/source-health/kalshi")(get_kalshi_source_health)
     router.get("/kalshi/source-health")(get_kalshi_source_health)
+    router.get("/source-health/canonical-truth")(get_source_canonical_truth)
     return router

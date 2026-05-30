@@ -334,6 +334,12 @@ EXPLICIT_IN_SCOPE: frozenset[str] = frozenset({
     # MVP risk surface, so they are explicitly in scope.
     "leverage_policy.py",   # India 4x / RoW spot-only leverage ceiling (validation)
     "admission_gates.py",   # central advisory veto/admission contract
+    # Wiring Sprint — advisory-only live decision-path orchestrator.  Pure
+    # module: source freshness -> probability -> Moltbook -> capacity ->
+    # admission gates -> snapshot.  No broker execution, no order placement,
+    # no AI trade execution.  Core MVP "score them, capture the decision"
+    # surface, so explicitly in scope.
+    "live_decision_path.py",
 })
 
 # Modules deliberately marked OUT_OF_SCOPE inside ``scripts/``.  This

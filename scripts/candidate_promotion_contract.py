@@ -23,8 +23,10 @@ from typing import Any, Iterable
 
 try:
     from scripts import advisory_contract as _contract
+    from scripts.admission_gates import evaluate_admission_gates as _evaluate_admission_gates
 except ModuleNotFoundError:  # pragma: no cover
     import advisory_contract as _contract  # type: ignore[no-redef]
+    from admission_gates import evaluate_admission_gates as _evaluate_admission_gates  # type: ignore[no-redef]
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_SUMMARY_PATH = (
@@ -183,11 +185,51 @@ def evaluate_candidate(candidate: dict[str, Any]) -> dict[str, Any]:
     else:
         state = "RESEARCH_CANDIDATE"
 
+    # --- Wiring Sprint: central admission-gate contract (additive) -------
+    # Reduce the existing candidate flags onto the admission_gates input so a
+    # DIABLO / stale / zero-fresh-rows / leverage-invalid / capacity-exhausted
+    # / moltbook-blocked candidate is forced to its BLOCKED_BY_* class by ONE
+    # shared veto contract.  Metadata-only: candidate_state + existing keys are
+    # untouched so prior tests stay green.
+    if stale_quarantine or live_source_block:
+        _gate_data_freshness = 0.0
+    else:
+        _gate_data_freshness = _f("data_freshness", 1.0)
+    _gate_input = {
+        "base_candidate": True,
+        "state": "DIABLO" if any_diablo else str(candidate.get("state") or ""),
+        "shock_override": candidate.get("shock_override"),
+        "chaos_risk": _f("chaos_risk", 0.0),
+        "data_freshness": _gate_data_freshness,
+        "leverage_valid": gates["LPQ_ge_threshold"]
+        and _bool(candidate.get("leverage_valid"), default=True),
+        "portfolio_capacity_ok": portfolio_truth_ok
+        and _bool(candidate.get("portfolio_capacity_ok"), default=True),
+        "moltbook_block": _bool(candidate.get("moltbook_block"), default=False),
+        "advisory_only": advisory_only,
+        "human_execution_required": human_review,
+    }
+    _gate = _evaluate_admission_gates(_gate_input)
+    gate_result = {
+        "gate_passed": bool(_gate.admitted),
+        "final_advisory_class": _gate.advisory_class,
+        "blocked_by": list(_gate.blocking_reasons),
+        "gate_vector": dict(_gate.gates),
+        "safety_stamps": {
+            "advisory_only": True,
+            "human_execution_required": True,
+            "execution_gate": "LOCKED",
+            "broker_api_called": False,
+            "ai_execution_count": 0,
+        },
+    }
+
     return {
         "id": candidate.get("id"),
         "candidate_state": state,
         "candidate_may_be_actionable_for_human_review": bool(can_promote),
         "gates": gates,
+        "gate_result": gate_result,
         "downgrade_reasons": downgrade_reasons,
         "formula_components": {
             "CQS_final": cqs, "EQS": eqs, "FCS": fcs, "ERS": ers,
