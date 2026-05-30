@@ -792,6 +792,11 @@ export interface ExternalEvidenceReliabilityResponse {
   external_evidence_calibration?: Record<string, unknown> | null;
   external_evidence_items?: unknown[];
   external_evidence_operator_readiness?: Record<string, unknown> | null;
+  // Kanté Ceiling Push II — paper-outcome readiness + corpus-quality clarity.
+  paper_outcome_readiness?: Record<string, unknown> | null;
+  calibration_corpus_quality?: Record<string, unknown> | null;
+  live_verified_blockers?: string[] | null;
+  real_money_readiness_ceiling?: number | string | null;
 }
 
 export async function getExternalEvidenceReliability(): Promise<ExternalEvidenceReliabilityResponse | null> {

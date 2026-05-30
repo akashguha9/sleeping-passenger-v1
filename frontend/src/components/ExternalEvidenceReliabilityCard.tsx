@@ -43,6 +43,23 @@ export interface ExternalEvidenceCalibrationView {
   real_money_sizing_impact?: string | null;
 }
 
+export interface PaperOutcomeReadinessView {
+  readiness_label?: string | null;
+  closed_paper_outcomes_count?: number | null;
+  target_minimum?: number | null;
+  target_preferred?: number | null;
+  calibration_readiness_score?: number | null;
+  next_required_action?: string | null;
+}
+
+export interface CalibrationCorpusQualityView {
+  corpus_quality_score?: number | null;
+  corpus_label?: string | null;
+  top_blocker?: string | null;
+  operator_next_action?: string | null;
+  n_closed?: number | null;
+}
+
 export interface ExternalEvidenceReliabilityView {
   external_evidence_status?: string | null;
   external_evidence_enabled?: boolean | null;
@@ -52,6 +69,11 @@ export interface ExternalEvidenceReliabilityView {
   external_evidence_score_delta_paper_calibrated?: number | null;
   external_evidence_calibration?: ExternalEvidenceCalibrationView | null;
   external_evidence_items?: SourceReliabilityView[] | null;
+  // Kanté Ceiling Push II — paper-outcome readiness + corpus quality clarity.
+  paper_outcome_readiness?: PaperOutcomeReadinessView | null;
+  calibration_corpus_quality?: CalibrationCorpusQualityView | null;
+  live_verified_blockers?: string[] | null;
+  real_money_readiness_ceiling?: number | string | null;
 }
 
 interface Props {
@@ -91,6 +113,91 @@ function statusLabel(status: string, calApplied: boolean): string {
   return 'Evidence-only';
 }
 
+function fmtScore(value: number | null | undefined): string {
+  if (value === null || value === undefined || Number.isNaN(value)) return '—';
+  return value.toFixed(3);
+}
+
+/**
+ * Paper-outcome readiness + corpus-quality clarity block.
+ *
+ * Rendered in BOTH the disabled and active card states because calibration
+ * readiness is meaningful even while external adapters are disabled. It states
+ * the hard truth: real-money readiness is LOW BY DESIGN, and calibration cannot
+ * leave cold-start until enough closed paper outcomes exist. Read-only; no CTA.
+ */
+function PaperOutcomeReadinessSection({
+  bundle,
+}: {
+  bundle?: ExternalEvidenceReliabilityView | null;
+}) {
+  const readiness = bundle?.paper_outcome_readiness ?? null;
+  const corpus = bundle?.calibration_corpus_quality ?? null;
+  const blockers = bundle?.live_verified_blockers ?? null;
+
+  const closed = readiness?.closed_paper_outcomes_count ?? null;
+  const targetMin = readiness?.target_minimum ?? 50;
+  const targetPref = readiness?.target_preferred ?? 100;
+  const realMoneyCeiling = bundle?.real_money_readiness_ceiling ?? 'LOW BY DESIGN';
+
+  return (
+    <div
+      className="mt-3 border-t border-slate-700/40 pt-2"
+      data-testid="reliability-paper-outcome-readiness"
+    >
+      <div className="font-mono text-[10px] uppercase tracking-wider text-slate-400">
+        Paper-Outcome Readiness
+      </div>
+      <dl className="mt-1 grid grid-cols-2 gap-x-3 gap-y-1 text-[11px] text-slate-300">
+        <dt className="text-slate-500">Readiness</dt>
+        <dd className="text-right font-mono" data-testid="reliability-paper-outcome-label">
+          {readiness?.readiness_label ?? 'UNKNOWN'}
+        </dd>
+
+        <dt className="text-slate-500">Closed outcomes</dt>
+        <dd className="text-right font-mono" data-testid="reliability-paper-outcome-progress">
+          {closed ?? 0} / {targetMin} · {closed ?? 0} / {targetPref}
+        </dd>
+
+        <dt className="text-slate-500">Corpus quality</dt>
+        <dd className="text-right font-mono" data-testid="reliability-corpus-quality">
+          {fmtScore(corpus?.corpus_quality_score)} · {corpus?.corpus_label ?? 'EMPTY'}
+        </dd>
+
+        <dt className="text-slate-500">Top blocker</dt>
+        <dd className="text-right font-mono" data-testid="reliability-top-blocker">
+          {corpus?.top_blocker ?? '—'}
+        </dd>
+
+        <dt className="text-slate-500">Real-money readiness</dt>
+        <dd
+          className="text-right font-mono text-rose-200"
+          data-testid="reliability-real-money-readiness"
+        >
+          {typeof realMoneyCeiling === 'number' ? `${realMoneyCeiling} / 10` : realMoneyCeiling}
+        </dd>
+      </dl>
+
+      <p className="mt-1 text-[10px] leading-snug text-slate-400" data-testid="reliability-next-action">
+        Next: {readiness?.next_required_action || corpus?.operator_next_action || 'Collect closed paper outcomes.'}
+      </p>
+
+      {blockers && blockers.length > 0 ? (
+        <p
+          className="mt-1 text-[10px] leading-snug text-slate-500"
+          data-testid="reliability-live-verified-blockers"
+        >
+          LIVE_VERIFIED blockers: {blockers.join(', ')}
+        </p>
+      ) : null}
+
+      <p className="mt-1 text-[10px] leading-snug text-amber-200/80" data-testid="reliability-cold-start-message">
+        Calibration cannot leave cold-start until enough closed paper outcomes exist.
+      </p>
+    </div>
+  );
+}
+
 export function ExternalEvidenceReliabilityCard({ bundle }: Props) {
   const status = String(bundle?.external_evidence_status || '').toUpperCase();
   const calibration = bundle?.external_evidence_calibration ?? null;
@@ -113,6 +220,7 @@ export function ExternalEvidenceReliabilityCard({ bundle }: Props) {
         <div className="mt-2 text-slate-400" data-testid="reliability-disabled">
           External evidence disabled or unavailable. No decision impact.
         </div>
+        <PaperOutcomeReadinessSection bundle={bundle} />
       </div>
     );
   }
@@ -253,6 +361,8 @@ export function ExternalEvidenceReliabilityCard({ bundle }: Props) {
           );
         })}
       </ul>
+
+      <PaperOutcomeReadinessSection bundle={bundle} />
 
       <p
         className="mt-2 border-t border-slate-700/40 pt-2 text-[10px] text-slate-500"

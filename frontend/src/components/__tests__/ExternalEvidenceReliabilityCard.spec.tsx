@@ -186,4 +186,87 @@ describe('ExternalEvidenceReliabilityCard', () => {
       /Calibration unavailable\. Conservative paper-only default applied\./,
     );
   });
+
+  // --- Kanté Ceiling Push II (WS-D) -----------------------------------------
+  function readinessBundle(
+    overrides: Partial<ExternalEvidenceReliabilityView> = {},
+  ): ExternalEvidenceReliabilityView {
+    return paperCalibratedBundle({
+      paper_outcome_readiness: {
+        readiness_label: 'COLD_START',
+        closed_paper_outcomes_count: 12,
+        target_minimum: 50,
+        target_preferred: 100,
+        calibration_readiness_score: 0.05,
+        next_required_action: 'Log closed paper outcomes: 12/30 to leave cold-start.',
+      },
+      calibration_corpus_quality: {
+        corpus_quality_score: 0.18,
+        corpus_label: 'WEAK',
+        top_blocker: 'insufficient_outcome_volume',
+        operator_next_action: 'Continue accumulating closed paper outcomes (12/100).',
+        n_closed: 12,
+      },
+      live_verified_blockers: ['not_enabled', 'no_canonical_rows_written'],
+      real_money_readiness_ceiling: 'LOW BY DESIGN',
+      ...overrides,
+    });
+  }
+
+  // ----------------------------------------------------------------- WS-D 1
+  it('shows the paper-outcome readiness label and closed count', () => {
+    render(<ExternalEvidenceReliabilityCard bundle={readinessBundle()} />);
+    expect(screen.getByTestId('reliability-paper-outcome-readiness')).toBeTruthy();
+    expect(screen.getByTestId('reliability-paper-outcome-label').textContent).toMatch(
+      /COLD_START/,
+    );
+  });
+
+  // ----------------------------------------------------------------- WS-D 2
+  it('shows the 50 / 100 target progress', () => {
+    render(<ExternalEvidenceReliabilityCard bundle={readinessBundle()} />);
+    const progress = screen.getByTestId('reliability-paper-outcome-progress').textContent ?? '';
+    expect(progress).toMatch(/12 \/ 50/);
+    expect(progress).toMatch(/12 \/ 100/);
+  });
+
+  // ----------------------------------------------------------------- WS-D 3
+  it('shows LOW BY DESIGN real-money readiness', () => {
+    render(<ExternalEvidenceReliabilityCard bundle={readinessBundle()} />);
+    expect(screen.getByTestId('reliability-real-money-readiness').textContent).toMatch(
+      /LOW BY DESIGN/,
+    );
+    expect(screen.getByTestId('reliability-cold-start-message').textContent).toMatch(
+      /Calibration cannot leave cold-start until enough closed paper outcomes exist\./,
+    );
+  });
+
+  // ----------------------------------------------------------------- WS-D 4
+  it('has no action buttons', () => {
+    const { container } = render(
+      <ExternalEvidenceReliabilityCard bundle={readinessBundle()} />,
+    );
+    expect(container.querySelectorAll('button').length).toBe(0);
+    expect(container.querySelectorAll('a').length).toBe(0);
+  });
+
+  // ----------------------------------------------------------------- WS-D 5
+  it('shows readiness honestly even in the disabled state', () => {
+    const disabled: ExternalEvidenceReliabilityView = {
+      external_evidence_status: 'DISABLED',
+      external_evidence_enabled: false,
+      paper_outcome_readiness: {
+        readiness_label: 'COLD_START',
+        closed_paper_outcomes_count: 0,
+        target_minimum: 50,
+        target_preferred: 100,
+      },
+      real_money_readiness_ceiling: 'LOW BY DESIGN',
+    };
+    render(<ExternalEvidenceReliabilityCard bundle={disabled} />);
+    expect(screen.getByTestId('reliability-disabled')).toBeTruthy();
+    expect(screen.getByTestId('reliability-real-money-readiness').textContent).toMatch(
+      /LOW BY DESIGN/,
+    );
+  });
 });

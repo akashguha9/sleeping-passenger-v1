@@ -160,6 +160,80 @@ def _build_bundle_on_demand() -> dict[str, Any] | None:
         return None
 
 
+REAL_MONEY_READINESS_CEILING = "LOW BY DESIGN"
+
+
+def _paper_readiness_fields(artifact: dict[str, Any] | None) -> dict[str, Any]:
+    """Read-only paper-outcome readiness + corpus-quality clarity fields.
+
+    Prefers values already embedded in the daily artifact; otherwise computes
+    them on demand from the read-only loaders.  Never raises, never mutates,
+    never enables sizing.  Real-money readiness is reported as LOW BY DESIGN.
+    """
+    readiness: dict[str, Any] | None = None
+    corpus: dict[str, Any] | None = None
+    blockers: list[str] = []
+
+    if isinstance(artifact, dict):
+        readiness = (
+            artifact.get("paper_outcome_collection_readiness")
+            or artifact.get("paper_outcome_readiness")
+        )
+        corpus = artifact.get("calibration_corpus_quality")
+        blockers = list(artifact.get("live_verified_blockers") or [])
+
+    if readiness is None or corpus is None:
+        try:
+            try:
+                from scripts.paper_outcome_collection_readiness import (
+                    build_from_db as _readiness_from_db,
+                )
+                from scripts.calibration_corpus_quality import (
+                    build_from_db as _corpus_from_db,
+                )
+            except ModuleNotFoundError:  # pragma: no cover - script-style env
+                from paper_outcome_collection_readiness import (  # type: ignore
+                    build_from_db as _readiness_from_db,
+                )
+                from calibration_corpus_quality import (  # type: ignore
+                    build_from_db as _corpus_from_db,
+                )
+            if readiness is None:
+                readiness = _readiness_from_db()
+            if corpus is None:
+                corpus = _corpus_from_db()
+        except Exception:  # noqa: BLE001 - degrade honestly, never crash the route
+            readiness = readiness or None
+            corpus = corpus or None
+
+    readiness_view = None
+    if isinstance(readiness, dict):
+        readiness_view = {
+            "readiness_label": readiness.get("readiness_label"),
+            "closed_paper_outcomes_count": readiness.get("closed_paper_outcomes_count"),
+            "target_minimum": readiness.get("target_minimum", 50),
+            "target_preferred": readiness.get("target_preferred", 100),
+            "calibration_readiness_score": readiness.get("calibration_readiness_score"),
+            "next_required_action": readiness.get("next_required_action"),
+        }
+    corpus_view = None
+    if isinstance(corpus, dict):
+        corpus_view = {
+            "corpus_quality_score": corpus.get("corpus_quality_score"),
+            "corpus_label": corpus.get("corpus_label"),
+            "top_blocker": corpus.get("top_blocker"),
+            "operator_next_action": corpus.get("operator_next_action"),
+            "n_closed": corpus.get("n_closed"),
+        }
+
+    return {
+        "paper_outcome_readiness": readiness_view,
+        "calibration_corpus_quality": corpus_view,
+        "live_verified_blockers": blockers,
+        "real_money_readiness_ceiling": REAL_MONEY_READINESS_CEILING,
+    }
+
+
 def build_external_evidence_reliability_payload(
     *,
     artifact_path: Path | None = None,
@@ -189,28 +263,34 @@ def build_external_evidence_reliability_payload(
             "operator_readiness"
         )
 
+    paper_fields = _paper_readiness_fields(artifact)
+
     if bundle is None:
         built = on_demand()
         if built is None:
             # Could not build at all → honest error-safe / no-payload envelope.
-            return _envelope(
+            env = _envelope(
                 status=STATUS_NO_PAYLOAD,
                 bundle=None,
                 readiness=None,
                 safety=safety,
                 source="none",
             )
+            env.update(paper_fields)
+            return env
         bundle = built.get("bundle")
         readiness = built.get("operator_readiness")
         source = "on_demand"
 
-    return _envelope(
+    env = _envelope(
         status=None,
         bundle=bundle,
         readiness=readiness,
         safety=safety,
         source=source or "unknown",
     )
+    env.update(paper_fields)
+    return env
 
 
 def _envelope(

@@ -279,6 +279,12 @@ APPROVED_DOMAINS: tuple[str, ...] = (
     "provider_secret_redaction", # provider_secret_redaction.py — secret-safe provider logging
     "coverage_proof",            # country_coverage_proof.py — C_global per-country proof (also "country_coverage")
     "real_provider_canary",      # kante_real_provider_canary.py — read-only price canary + REAL_RUN coverage proof; network only with --allow-network, no broker/order, secrets never logged
+    # Kanté news/mapping + C_global unlock sprint — advisory-only, read-only
+    # news provider fallback chain (GDELT_PUBLIC -> NEWSAPI -> EVENT_REGISTRY).
+    # Network only with explicit allow_network; broker/trading providers are
+    # non-selectable; no order placement, no execution. Secret values never
+    # logged (only *_present booleans).
+    "news_provider",             # news_provider_chain.py — read-only news provider fallback chain
     # N'Golo Kanté score-ceiling sprint — advisory-only invisible-defensive-work
     # layer: fake-confidence audit, veto-integrity proof, source-health maturity,
     # and the operator-readiness reliability block.  Pure compute over existing
@@ -293,7 +299,18 @@ APPROVED_DOMAINS: tuple[str, ...] = (
     # outcomes and calibration buckets; fabricates no outcomes, writes no trade
     # rows, never marks paper readiness as real-money readiness.  Real-money
     # sizing stays PROHIBITED; no broker execution, no order placement.
-    "paper_outcome",     # paper_outcome_collection_readiness.py — calibration-readiness report (read-only)
+    "paper_outcome",     # paper_outcome_collection_readiness.py / paper_outcome_intake.py — calibration-readiness report + intake validation (read-only)
+    # Kanté Ceiling Push II — advisory-only invisible-defensive-work layer:
+    # paper-outcome intake validation, calibration-corpus quality, operator
+    # readiness checklist, LIVE_VERIFIED proof packaging, and runtime artifact
+    # hygiene.  Pure compute / read-only over existing outcome + source data;
+    # never invents outcomes, never marks mock/stale sources live, never writes
+    # canonical trade rows.  No broker execution, no order placement, no API
+    # trading writes; real-money sizing stays PROHIBITED.  (paper_outcome_intake
+    # is covered by "paper_outcome"; calibration_corpus_quality by "calibration";
+    # operator_readiness_checklist by "operator"; runtime_artifact_hygiene by
+    # "hygiene"; only the LIVE_VERIFIED proof pack needs a new narrow domain.)
+    "live_verified",     # live_verified_proof_pack.py — LIVE_VERIFIED proof packaging (data-quality verdict only, never execution readiness)
 )
 
 # Explicit allowlist for individual files / directories whose name does

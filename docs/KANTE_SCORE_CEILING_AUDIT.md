@@ -313,3 +313,90 @@ reinforces the discipline every day.
 | 22 | Overall MVP score | 8.3 | ~8.6 |
 
 Real-money readiness cannot exceed 2.5 until real closed paper evidence exists.
+
+---
+
+## Kanté Ceiling Push II — From 8.6 Toward 8.8
+
+This second invisible-work sprint adds no flashy features and no execution. It
+deepens the defensive-midfield layer that lets the real ceiling rise once
+closed paper outcomes finally exist. Every output below is advisory-only,
+`execution_gate = LOCKED`, `broker_api_called = false`, `ai_execution_count = 0`,
+`real_money_sizing_impact = PROHIBITED`, `real_money_weight_allowed = false`.
+
+### Paper outcome intake — `scripts/paper_outcome_intake.py`
+Validates + normalizes closed paper-trade outcomes *before* they reach
+calibration / Moltbook. It never invents an outcome, is **dry-run by default**,
+and only writes an audit-only normalized JSON artifact under
+`runtime/paper_outcome_intake/` through the operator permission guard (there is
+no canonical paper-outcome trade store yet, so none is invented — the canonical
+write path is future-only). Per-row maths:
+
+```
+R_actual                     = (P_exit - P_entry) / P_entry
+realized_return_pct_expected = 100 * R_actual
+return_error                 = abs(realized_return_pct_input - realized_return_pct_expected)
+valid_return_math            = return_error <= 0.05
+outcome_y_0_or_1_expected    = 1 if realized_return_pct > 0 else 0
+holding_days_expected        = ceil((exit - entry) / 86400 seconds)
+
+outcome_quality_score =
+    0.25 * has_required_ids + 0.25 * valid_price_math + 0.20 * valid_time_order
+  + 0.15 * valid_outcome_label + 0.15 * valid_proof_status
+
+VALID_FOR_CALIBRATION       if score >= 0.90
+NEEDS_OPERATOR_REVIEW       if 0.60 <= score < 0.90
+REJECTED_INSUFFICIENT_PROOF if score < 0.60
+```
+
+### Calibration corpus quality — `scripts/calibration_corpus_quality.py`
+Makes the corpus auditable, not merely counted: validity / linkage / bucket
+coverage / review + rejection burden combine into a single quality score and an
+honest label (`EMPTY` / `WEAK` / `DEVELOPING` / `USABLE_PAPER_ONLY` /
+`STRONG_PAPER_ONLY`). `STRONG_PAPER_ONLY` requires score ≥ 0.90 **and** ≥ 100
+closed outcomes — and even then does **not** enable real-money sizing.
+
+### Operator readiness checklist — `scripts/operator_readiness_checklist.py`
+The twelve human checks required before a paper trade is marked
+calibration-worthy (`thesis_recorded` … `real_money_sizing_prohibited`).
+`checklist_completion_rate = passed_checks / total_checks` →
+`BLOCKED` / `REVIEW_REQUIRED` / `READY_FOR_PAPER_CALIBRATION`. A missing
+critical check (invalidation, outcome math, or real-money-prohibited
+confirmation) caps the label at `REVIEW_REQUIRED`. The checklist grants **no
+execution permission** under any input.
+
+### Reliability card enhancement — `ExternalEvidenceReliabilityCard.tsx`
+The mounted card now also shows the paper-outcome readiness label, closed-count
+progress toward **50 / 100**, the corpus quality score + label, the top blocker,
+the next required action, the LIVE_VERIFIED blockers summary, and the
+real-money readiness ceiling rendered as **LOW BY DESIGN**. It carries no action
+buttons and the standing message: *Calibration cannot leave cold-start until
+enough closed paper outcomes exist.*
+
+### LIVE_VERIFIED proof pack — `scripts/live_verified_proof_pack.py`
+Packages the strict `verify_live_source_readiness` gate into operator/investor
+proof: per-field evidence, a weighted `live_verification_readiness_score`, and a
+coarse label (`NOT_CONFIGURED` / `MOCK_ONLY` / `STALE` / `DEGRADED` /
+`READY_TO_VERIFY` / `LIVE_VERIFIED`). A mock / stub / stale / unstamped source
+can never be LIVE_VERIFIED, and **LIVE_VERIFIED is a data-quality verdict, never
+execution readiness**.
+
+### Runtime artifact hygiene — `scripts/runtime_artifact_hygiene.py`
+Read-only PASS / WARN / FAIL checker that catches stale, unstamped, oversized,
+secret-bearing, or broker/AI-execution-leaking runtime artifacts before they
+break CI. It never deletes a file and never mutates an artifact — remediation is
+a human decision.
+
+### Why real-money readiness remains low
+Real-money readiness stays at a hard ceiling of **2.5–3.0**. There is **no
+broker** integration, no order placement, no autonomous trading, and no
+real-money sizing anywhere in this sprint. The readiness-gate clarity improves;
+the gate itself does not open.
+
+### Why the next real ceiling requires actual paper outcomes
+Every layer above is now ready to consume **50–100 paper** closed outcomes, but
+none exist yet, so calibration honestly reports cold-start and the corpus label
+is `EMPTY` / `WEAK`. The next genuine ceiling lift is not more code — it is the
+operator accumulating real closed paper outcomes through the intake + checklist
+discipline so the corpus can mature (paper-only) and the per-source reliability
+can leave cold-start.

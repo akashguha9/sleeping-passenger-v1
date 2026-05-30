@@ -50,6 +50,9 @@ try:
     from scripts.paper_outcome_collection_readiness import (
         build_from_db as build_paper_outcome_readiness_from_db,
     )
+    from scripts.calibration_corpus_quality import (
+        build_from_db as build_corpus_quality_from_db,
+    )
     from scripts.fresh_market_discovery import build_fresh_market_discovery
     from scripts.minimum_daily_universe import minimum_universe_metadata
     from scripts.portfolio_truth_gate import build_portfolio_truth_gate
@@ -82,6 +85,9 @@ except ModuleNotFoundError:  # pragma: no cover - script-style env
     )
     from paper_outcome_collection_readiness import (
         build_from_db as build_paper_outcome_readiness_from_db,
+    )
+    from calibration_corpus_quality import (
+        build_from_db as build_corpus_quality_from_db,
     )
     from fresh_market_discovery import build_fresh_market_discovery
     from minimum_daily_universe import minimum_universe_metadata
@@ -243,6 +249,20 @@ def run_daily_synthesis(
             "proof_status": "PAPER_OUTCOME_READINESS_FAILED_SAFE",
         }
 
+    # Calibration corpus quality — auditable corpus (validity / linkage /
+    # bucket coverage / review + rejection burden).  Read-only; honest EMPTY
+    # when no closed outcomes exist.
+    try:
+        calibration_corpus_quality = build_corpus_quality_from_db()
+    except Exception:  # noqa: BLE001 - corpus quality never breaks the run
+        calibration_corpus_quality = {
+            "report": "calibration_corpus_quality",
+            "corpus_label": "EMPTY",
+            "n_closed": 0,
+            "real_money_sizing_impact": "PROHIBITED",
+            "proof_status": "CALIBRATION_CORPUS_QUALITY_FAILED_SAFE",
+        }
+
     return {
         "run_date": payload["verified_holdings"].get("run_date"),
         "payload": payload,
@@ -258,6 +278,7 @@ def run_daily_synthesis(
         "external_evidence_persistence": external_evidence_persistence,
         "external_evidence_operator_readiness": external_evidence_operator_readiness,
         "paper_outcome_collection_readiness": paper_outcome_readiness,
+        "calibration_corpus_quality": calibration_corpus_quality,
         "l_today": discovery.get("l_today", []),
         "safety": advisory_safety_stamps(),
         "execution": human_only_stamp(),
@@ -503,6 +524,23 @@ def _paper_outcome_readiness_summary(readiness: dict[str, Any]) -> dict[str, Any
     }
 
 
+def _corpus_quality_summary(corpus: dict[str, Any]) -> dict[str, Any]:
+    """Frontend-safe calibration corpus quality summary."""
+    return {
+        "corpus_label": corpus.get("corpus_label", "EMPTY"),
+        "corpus_quality_score": corpus.get("corpus_quality_score", 0.0),
+        "n_closed": corpus.get("n_closed", 0),
+        "n_valid": corpus.get("n_valid", 0),
+        "n_linked": corpus.get("n_linked", 0),
+        "n_bucketed": corpus.get("n_bucketed", 0),
+        "top_blocker": corpus.get("top_blocker", "no_closed_paper_outcomes"),
+        "operator_next_action": corpus.get("operator_next_action", ""),
+        "real_money_sizing_impact": corpus.get(
+            "real_money_sizing_impact", "PROHIBITED"
+        ),
+    }
+
+
 def _write_artifacts(result: dict[str, Any], context_md: str) -> None:
     CONTEXT_MD_PATH.parent.mkdir(parents=True, exist_ok=True)
     CONTEXT_MD_PATH.write_text(context_md, encoding="utf-8")
@@ -558,6 +596,9 @@ def _write_artifacts(result: dict[str, Any], context_md: str) -> None:
         "paper_outcome_collection_readiness": _paper_outcome_readiness_summary(
             result.get("paper_outcome_collection_readiness") or {}
         ),
+        "calibration_corpus_quality": _corpus_quality_summary(
+            result.get("calibration_corpus_quality") or {}
+        ),
         "safety": result["safety"],
     }
     CONTEXT_JSON_PATH.write_text(json.dumps(summary, indent=2), encoding="utf-8")
@@ -573,6 +614,12 @@ def _write_artifacts(result: dict[str, Any], context_md: str) -> None:
         "external_evidence": result.get("external_evidence") or {},
         "external_evidence_operator_readiness": (
             result.get("external_evidence_operator_readiness") or {}
+        ),
+        "paper_outcome_collection_readiness": _paper_outcome_readiness_summary(
+            result.get("paper_outcome_collection_readiness") or {}
+        ),
+        "calibration_corpus_quality": _corpus_quality_summary(
+            result.get("calibration_corpus_quality") or {}
         ),
         "mode": "PAPER_ONLY",
         "real_money_sizing_impact": "PROHIBITED",
