@@ -41,6 +41,9 @@ try:
         build_external_evidence_bundle,
         render_external_evidence_markdown,
     )
+    from scripts.external_evidence_operator_readiness import (
+        build_external_evidence_operator_readiness,
+    )
     from scripts.external_evidence_persistence import (
         persist_external_evidence_bundle,
     )
@@ -67,6 +70,9 @@ except ModuleNotFoundError:  # pragma: no cover - script-style env
     from external_advisory_evidence import (
         build_external_evidence_bundle,
         render_external_evidence_markdown,
+    )
+    from external_evidence_operator_readiness import (
+        build_external_evidence_operator_readiness,
     )
     from external_evidence_persistence import (
         persist_external_evidence_bundle,
@@ -199,6 +205,20 @@ def run_daily_synthesis(
             "real_money_sizing_impact": "PROHIBITED",
         }
 
+    # Compact operator-readiness reliability block (paper-only, honest when the
+    # framework is disabled).  Additive: never alters the existing bundle/markdown.
+    try:
+        external_evidence_operator_readiness = (
+            build_external_evidence_operator_readiness(external_evidence)
+        )
+    except Exception:  # noqa: BLE001 - readiness summary never breaks the run
+        external_evidence_operator_readiness = {
+            "data_available": False,
+            "mode": "DISABLED",
+            "real_money_sizing_impact": "PROHIBITED",
+            "proof_status": "OPERATOR_READINESS_FAILED_SAFE",
+        }
+
     return {
         "run_date": payload["verified_holdings"].get("run_date"),
         "payload": payload,
@@ -212,6 +232,7 @@ def run_daily_synthesis(
         "contamination": discovery_metrics["contamination"],
         "external_evidence": external_evidence,
         "external_evidence_persistence": external_evidence_persistence,
+        "external_evidence_operator_readiness": external_evidence_operator_readiness,
         "l_today": discovery.get("l_today", []),
         "safety": advisory_safety_stamps(),
         "execution": human_only_stamp(),

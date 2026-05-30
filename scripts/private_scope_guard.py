@@ -278,6 +278,7 @@ APPROVED_DOMAINS: tuple[str, ...] = (
     "real_price_provider",       # real_price_provider.py — P_price priority resolver (read-only quotes)
     "provider_secret_redaction", # provider_secret_redaction.py — secret-safe provider logging
     "coverage_proof",            # country_coverage_proof.py — C_global per-country proof (also "country_coverage")
+    "real_provider_canary",      # kante_real_provider_canary.py — read-only price canary + REAL_RUN coverage proof; network only with --allow-network, no broker/order, secrets never logged
     # N'Golo Kanté score-ceiling sprint — advisory-only invisible-defensive-work
     # layer: fake-confidence audit, veto-integrity proof, source-health maturity,
     # and the operator-readiness reliability block.  Pure compute over existing

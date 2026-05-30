@@ -234,3 +234,30 @@ weight `w_b` (`external_evidence_calibration_buckets`). See
 | Calibration readback (`w_b` → score-delta) | **wired / paper-only** (`scripts/external_evidence_weight_readback.py`; see `docs/EXTERNAL_EVIDENCE_WEIGHT_READBACK.md`) |
 | Frontend reliability card | implemented + unit-tested, **not mounted yet** (`ExternalEvidenceReliabilityCard.tsx`) |
 | Real-money sizing impact | **PROHIBITED** (calibration readback is paper-only; `real_money_weight_allowed=false`) |
+
+---
+
+## Kanté score-ceiling sprint update
+
+Two defensive layers and one operator readout now sit on top of the pipeline:
+
+| Layer | Module | Status |
+|-------|--------|--------|
+| Fake-confidence audit (OCR + hard positive-delta block) | `scripts/fake_confidence_audit.py` | **wired / paper-only** |
+| Veto-integrity proof pack (`S_final = min(S_candidate, S_base)`) | `scripts/veto_integrity_proof.py` | **wired** |
+| Source-health maturity ladder (12 labels) | `scripts/source_health_maturity.py` | **wired** |
+| Operator reliability block (`EXTERNAL EVIDENCE RELIABILITY — PAPER ONLY`) | `scripts/external_evidence_operator_readiness.py` | **wired** |
+
+**What improved:** every positive external delta is now provably subordinate to
+DIABLO / CHAOS_VETO / NO_NEW_RISK, a HIGH fake-confidence bucket cannot boost,
+mock/stub sources can never be `LIVE_VERIFIED`, and the operator sees one compact
+honest reliability readout.
+
+**What remains future-only:** the frontend reliability card is still **not
+mounted** (the daily payload does not yet expose the bundle to the frontend API);
+live adapters remain disabled by default; per-source thresholds and operator
+approval are not built.
+
+**Why real-money readiness stays low:** no closed paper outcomes, no live
+calibration proof, real-money sizing PROHIBITED by design. Safety scores measure
+the unbreakability of the *no-execution* posture, not trading readiness.

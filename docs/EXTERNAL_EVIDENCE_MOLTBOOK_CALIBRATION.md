@@ -264,3 +264,24 @@ audited operator-approval flow exists. Full detail:
    (`n_b >= 50`), gated behind explicit, audited consent — still not part of
    automatic sizing.
 4. **Per-source threshold tuning** once enough closed outcomes exist.
+
+---
+
+## Kanté score-ceiling sprint update
+
+The Moltbook-learned bucket fields (`help_rate`, `harm_rate`,
+`false_confidence_rate`, `sample_count`, `advisory_weight`) now feed the
+**fake-confidence audit** and the **operator reliability block**:
+
+- `build_fake_confidence_summary(buckets)` reports the best source bucket (largest
+  mature, low-risk sample) and the worst (highest harm / false-confidence rate).
+- A `HIGH_FAKE_CONFIDENCE_RISK` bucket is hard-blocked from adding positive delta.
+
+**What improved:** the learning loop's harm / false-confidence signal is now
+surfaced and acted on, not just stored.
+
+**What remains future-only:** the buckets are cold-start until 50–100 closed
+paper outcomes exist; no score may be called a "proven edge" without them.
+
+**Why real-money readiness stays low:** `real_money_sizing_impact=PROHIBITED` and
+`real_money_weight_allowed=false` are unchanged across all calibration paths.

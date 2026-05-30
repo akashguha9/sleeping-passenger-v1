@@ -172,3 +172,28 @@ under `EXTERNAL EVIDENCE RELIABILITY`.
 2. **Per-source threshold tuning** once enough closed outcomes exist.
 3. **Operator approval flow** for any real-money use of a mature bucket — gated
    behind explicit, audited consent; still never automatic sizing.
+
+---
+
+## Kanté score-ceiling sprint update
+
+The weight-readback `effective_weight` (`c_i_final`) is now cross-checked by the
+**fake-confidence audit** (`scripts/fake_confidence_audit.py`). For each bucket
+it computes an `overconfidence_score` (OCR):
+
+```
+OCR = clip(0.50*false_confidence_rate + 0.30*harm_rate + 0.20*max(advisory_weight - help_rate, 0), 0, 1)
+```
+
+**What improved:** a bucket that learned a high weight but keeps being
+wrong-while-sure is now labelled `HIGH_FAKE_CONFIDENCE_RISK` and can **never add
+positive score delta** (`apply_fake_confidence_block` forces a positive delta to
+0). Bad evidence loses influence faster than good evidence gains it.
+
+**What remains future-only:** the OCR needs real closed paper outcomes to become
+meaningful — until then every bucket is `COLD_START_UNKNOWN` (not "low risk").
+
+**Why real-money readiness stays low:** `real_money_weight_allowed=false` is
+unchanged; a mature, low-OCR bucket is still paper-only. A 10/10 on safety
+segments does not imply trading readiness — only 50–100 closed paper outcomes
+can move real-money readiness, and no score is a "proven edge" without them.
