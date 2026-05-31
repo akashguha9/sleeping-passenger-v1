@@ -235,8 +235,14 @@ def executable_candidate(
     country_coverage_confidence: float,
     in_phantom_closed_sold: bool,
     is_static_universe_only: bool = False,
+    news_support: bool = True,
+    mapping_support: bool = True,
+    in_l_today: bool = True,
     advisory_only: bool = True,
     human_review_required: bool = True,
+    execution_gate: str = "LOCKED",
+    broker_api_called: bool = False,
+    ai_execution_count: int = 0,
     theta_map: float = 0.70,
     why_today_min: float = 0.70,
     source_health_min: float = 0.70,
@@ -245,6 +251,25 @@ def executable_candidate(
 
     A STATIC_UNIVERSE_FALLBACK name can NEVER be executable, regardless of any
     other signal — that invariant is enforced here first.
+
+    Beyond the score/price/mapping floors, this lowest-level gate now *directly*
+    requires the live-evidence and advisory-safety contract:
+
+        news_support(country(t)) == 1
+        mapping_support(country(t)) == 1
+        valid_price(t) == True
+        t in L_today
+        advisory_only == True
+        human_review_required == True
+        execution_gate == "LOCKED"
+        broker_api_called == False
+        ai_execution_count == 0
+
+    A static / fallback / prior-only (not-in-L_today) / phantom candidate can
+    therefore never satisfy this predicate. The advisory-safety stamps are also
+    hard requirements: an unlocked gate, a called broker API, or any AI
+    execution count makes a candidate non-executable by definition — a broken
+    safety invariant must never read as an executable green light.
     """
     if is_static_universe_only:
         return False
@@ -255,8 +280,14 @@ def executable_candidate(
         and mapping_confidence >= theta_map
         and country_coverage_confidence > 0
         and not in_phantom_closed_sold
+        and news_support
+        and mapping_support
+        and in_l_today
         and advisory_only
         and human_review_required
+        and execution_gate == "LOCKED"
+        and not broker_api_called
+        and int(ai_execution_count) == 0
     )
 
 

@@ -77,6 +77,43 @@ def test_no_live_candidates_warning():
     assert "STATIC_CONTAMINATION_HIGH" in c["warnings"]
 
 
+def test_b_us_formula_matches_spec():
+    # B_US = N_US / max(1, N_total); USA_bias_violation = max(0, B_US - 0.35).
+    cands = [_us("AAPL"), _us("MSFT"), _us("NVDA"), _foreign("RHM.DE", "Germany"), _foreign("7203.T", "Japan")]
+    bias = compute_usa_bias(cands)
+    assert bias["N_US"] == 3
+    assert bias["N_total"] == 5
+    assert bias["B_US"] == round(3 / max(1, 5), 4)
+    assert bias["USA_bias_violation"] == round(max(0.0, bias["B_US"] - B_US_CAP), 4)
+
+
+def test_b_us_uses_max_1_denominator_when_empty():
+    bias = compute_usa_bias([])
+    assert bias["N_total"] == 0
+    # Denominator is max(1, N_total) -> never a ZeroDivisionError; B_US == 0.
+    assert bias["B_US"] == 0.0
+    assert bias["USA_bias_violation"] == 0.0
+
+
+def test_us_heavy_static_fallback_cannot_masquerade_as_global_discovery():
+    cands = [
+        {"ticker": t, "country": "United States", "exchange": "NASDAQ",
+         "source_class": "STATIC_FALLBACK"}
+        for t in ("AAPL", "MSFT", "NVDA", "AMZN", "GOOGL")
+    ]
+    bias = compute_usa_bias(cands)
+    contamination = compute_contamination_ratios(cands)
+    # 100% US -> bias violation is flagged, not silently treated as global.
+    assert bias["B_US"] == 1.0
+    assert bias["USA_bias_violation"] == round(1.0 - B_US_CAP, 4)
+    assert "USA_BIAS_ELEVATED" in bias["status"]
+    # 100% static + 0% live-discovered -> cannot be claimed as global discovery.
+    assert contamination["R_static"] == 1.0
+    assert contamination["R_live"] == 0.0
+    assert "STATIC_CONTAMINATION_HIGH" in contamination["warnings"]
+    assert "NO_LIVE_DISCOVERED_CANDIDATES" in contamination["warnings"]
+
+
 def test_render_markdown_contains_metrics():
     bias = compute_usa_bias([_us("AAPL")])
     c = compute_contamination_ratios([{"ticker": "AAPL", "source_class": "STATIC_FALLBACK"}])

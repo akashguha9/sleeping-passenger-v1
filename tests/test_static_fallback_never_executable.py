@@ -70,6 +70,47 @@ def test_extended_score_penalizes_static_and_phantom():
     assert phantom == 0.0
 
 
+def _clean_executable_kwargs():
+    return dict(
+        why_today_score_value=1.0,
+        source_health_score=1.0,
+        valid_price=True,
+        mapping_confidence=1.0,
+        country_coverage_confidence=1.0,
+        in_phantom_closed_sold=False,
+        is_static_universe_only=False,
+    )
+
+
+def test_executable_candidate_directly_requires_news_and_mapping_support():
+    base = _clean_executable_kwargs()
+    assert executable_candidate(**base) is True
+    assert executable_candidate(**base, news_support=False) is False
+    assert executable_candidate(**base, mapping_support=False) is False
+
+
+def test_executable_candidate_requires_membership_in_l_today():
+    base = _clean_executable_kwargs()
+    # A prior-only candidate (absent from L_today) can never be executable.
+    assert executable_candidate(**base, in_l_today=False) is False
+
+
+def test_executable_candidate_requires_valid_price():
+    base = _clean_executable_kwargs()
+    base["valid_price"] = False
+    assert executable_candidate(**base) is False
+
+
+def test_executable_candidate_requires_locked_advisory_contract():
+    base = _clean_executable_kwargs()
+    # Any broken safety invariant makes the candidate non-executable by definition.
+    assert executable_candidate(**base, execution_gate="UNLOCKED") is False
+    assert executable_candidate(**base, broker_api_called=True) is False
+    assert executable_candidate(**base, ai_execution_count=1) is False
+    assert executable_candidate(**base, advisory_only=False) is False
+    assert executable_candidate(**base, human_review_required=False) is False
+
+
 def test_classify_non_live_buckets():
     assert classify_non_live(
         in_holdings=False, in_static_universe=True, in_phantom_closed_sold=False, in_yesterday=False

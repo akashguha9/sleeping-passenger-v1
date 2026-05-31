@@ -582,6 +582,9 @@ def build_country_coverage_from_payload(
     universe_records: list[dict[str, Any]] | None = None,
     theta_map: float = DEFAULT_THETA_MAP,
     top30: list[str] | None = None,
+    proof_kind: str = "FIXTURE",
+    sqlite_fresh_rows_count: int = 0,
+    payload_stale: bool | None = None,
 ) -> dict[str, Any]:
     """Derive the coverage inputs from a loaded daily payload and compute coverage.
 
@@ -590,6 +593,17 @@ def build_country_coverage_from_payload(
     * price countries come from ``price_rows`` where ``valid_price`` is truthy.
     * news/filings countries come from fresh rows in the payload.
     * mapping countries come from ``mapping_rows`` with confidence >= theta_map.
+
+    Provenance is attached honestly (it never alters the C_global computation):
+
+    * ``proof_kind`` — "FIXTURE" (default; static committed payload) vs "REAL_RUN"
+      (caller proved the rows came from a live refresh). Never conflated.
+    * ``payload_stale`` — True iff no fresh news/filings row was found today.
+      A caller that knows the payload's age may override it explicitly.
+    * ``sqlite_fresh_rows_count`` — fresh rows the caller bridged from canonical
+      SQLite (0 in the pure-payload legacy path).
+    * ``proof_sources_used`` — which fresh-evidence sources actually contributed
+      (SQLITE_BRIDGE / PAYLOAD_FRESH / NONE_FRESH).
     """
     universe_countries: list[str] = []
     synthesis_countries: list[str] = []
@@ -626,20 +640,29 @@ def build_country_coverage_from_payload(
         fr = str(row.get("freshness") or "").upper()
         return fr in {"FRESH_TODAY", "UPDATED_TODAY", "FRESH", "LIVE"}
 
+    # Count fresh payload rows independently of country resolution — a fresh
+    # row proves the payload is not stale even if its country is UNKNOWN.
+    fresh_payload_rows = 0
     for row in payload.get("news_events", {}).get("events", []) or []:
+        fresh = _is_fresh_row(row)
+        if fresh:
+            fresh_payload_rows += 1
         country = _row_country(row)
         if not country:
             continue
         synthesis_countries.append(country)
-        if _is_fresh_row(row):
+        if fresh:
             news_countries.append(country)
 
     for row in payload.get("filings_events", {}).get("events", []) or []:
+        fresh = _is_fresh_row(row)
+        if fresh:
+            fresh_payload_rows += 1
         country = _row_country(row)
         if not country:
             continue
         synthesis_countries.append(country)
-        if _is_fresh_row(row):
+        if fresh:
             filings_countries.append(country)
 
     price_countries: list[str] = []
@@ -674,6 +697,24 @@ def build_country_coverage_from_payload(
     result["theta_map"] = theta_map
     result["generated_at_utc"] = utc_timestamp()
     result["safety"] = advisory_safety_stamps()
+
+    # --- Provenance (additive; does NOT touch C_global) ---------------------
+    try:
+        sqlite_fresh = int(sqlite_fresh_rows_count or 0)
+    except (TypeError, ValueError):
+        sqlite_fresh = 0
+    stale = (fresh_payload_rows == 0) if payload_stale is None else bool(payload_stale)
+    sources_used: list[str] = []
+    if sqlite_fresh > 0:
+        sources_used.append("SQLITE_BRIDGE")
+    if fresh_payload_rows > 0 and not stale:
+        sources_used.append("PAYLOAD_FRESH")
+    if not sources_used:
+        sources_used.append("NONE_FRESH")
+    result["proof_kind"] = str(proof_kind or "FIXTURE").upper()
+    result["payload_stale"] = stale
+    result["sqlite_fresh_rows_count"] = sqlite_fresh
+    result["proof_sources_used"] = sources_used
     return result
 
 

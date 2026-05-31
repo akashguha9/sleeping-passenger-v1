@@ -38,10 +38,10 @@ from typing import Any
 
 try:
     from scripts.advisory_contract import advisory_safety_stamps
-    from scripts.leverage_policy import is_india_instrument
+    from scripts.leverage_policy import INDIA_MAX_LEVERAGE, is_india_instrument
 except ModuleNotFoundError:  # pragma: no cover - script-style fallback
     from advisory_contract import advisory_safety_stamps  # type: ignore[no-redef]
-    from leverage_policy import is_india_instrument  # type: ignore[no-redef]
+    from leverage_policy import INDIA_MAX_LEVERAGE, is_india_instrument  # type: ignore[no-redef]
 
 BASE_RISK_PCT: float = 0.005       # 0.5% capital at risk per advisory idea
 MAX_POSITION_PCT: float = 0.10     # 10% max single position notional
@@ -57,6 +57,80 @@ BLOCKED_BY_PORTFOLIO_CAPACITY = "BLOCKED_BY_PORTFOLIO_CAPACITY"
 
 def _clip(x: float, lo: float, hi: float) -> float:
     return max(lo, min(hi, x))
+
+
+NEW_INDIA_ADD_BLOCKED = "NEW_INDIA_ADD_BLOCKED_UNRESOLVED_RISK"
+
+
+def new_india_add_allowed(
+    *,
+    ticker: str | None = None,
+    country: str | None = None,
+    existing_india_risk_unresolved: bool = False,
+    existing_india_leverage: float = 1.0,
+    existing_india_position_count: int = 0,
+    live_price_visibility_ok: bool = True,
+    live_risk_visibility_ok: bool = True,
+) -> dict[str, Any]:
+    """Hard binary gate for opening a NEW India candidate. Advisory, never executes.
+
+    ``new_india_add_allowed`` is ``False`` (a hard block, not a soft downgrade)
+    when, for an Indian instrument, ANY of the following holds:
+
+    * existing India risk is unresolved, OR
+    * existing India exposure is at the 4x leverage ceiling AND live price OR
+      live risk visibility is degraded.
+
+    This gate ONLY governs NEW India adds. It deliberately carries no power over
+    the review/management of an *existing* India holding — the returned
+    ``existing_position_review_unaffected`` flag makes that contract explicit. A
+    non-India instrument is out of scope and is always allowed by this gate.
+    """
+    stamps = advisory_safety_stamps()
+    is_india = is_india_instrument(ticker, country)
+    try:
+        lev = float(existing_india_leverage)
+    except (TypeError, ValueError):
+        lev = 1.0
+
+    reasons: list[str] = []
+    at_leverage_ceiling = lev >= INDIA_MAX_LEVERAGE
+    visibility_degraded = not (live_price_visibility_ok and live_risk_visibility_ok)
+
+    if is_india:
+        if existing_india_risk_unresolved:
+            reasons.append(
+                "existing India risk is unresolved; no new India add permitted"
+            )
+        if at_leverage_ceiling and visibility_degraded:
+            reasons.append(
+                f"existing India exposure at {lev:g}x ceiling "
+                f"(>= {INDIA_MAX_LEVERAGE:g}x) with degraded live price/risk "
+                "visibility; no new India add permitted"
+            )
+
+    allowed = not (is_india and reasons)
+
+    return {
+        "ticker": (ticker or "").strip(),
+        "is_india_instrument": is_india,
+        "new_india_add_allowed": allowed,
+        "applies_to": "NEW_INDIA_CANDIDATE_ONLY",
+        "existing_position_review_unaffected": True,
+        "existing_india_position_count": int(existing_india_position_count or 0),
+        "existing_india_leverage": lev,
+        "live_price_visibility_ok": bool(live_price_visibility_ok),
+        "live_risk_visibility_ok": bool(live_risk_visibility_ok),
+        "advisory_class": NEW_INDIA_ADD_BLOCKED if not allowed else ADVISORY_CANDIDATE,
+        "blocking_reasons": reasons,
+        # Advisory-only invariants — present whether allowed or blocked.
+        "advisory_status": stamps.get("advisory_status"),
+        "execution_gate": stamps["execution_gate"],
+        "broker_api_called": stamps["broker_api_called"],
+        "ai_execution_count": stamps["ai_execution_count"],
+        "human_execution_required": True,
+        "executes_trade": False,
+    }
 
 
 def compute_downside_risk_pct(
@@ -207,6 +281,8 @@ __all__ = [
     "ADVISORY_CANDIDATE",
     "WAIT",
     "BLOCKED_BY_PORTFOLIO_CAPACITY",
+    "NEW_INDIA_ADD_BLOCKED",
     "compute_downside_risk_pct",
+    "new_india_add_allowed",
     "evaluate_capacity",
 ]
