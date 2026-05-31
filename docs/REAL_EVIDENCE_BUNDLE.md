@@ -3,8 +3,8 @@
 > **ADVISORY ONLY. NOT real-money ready. No trading edge is claimed.**
 > This system places no orders and calls no broker API (`execution_gate = LOCKED`, `broker_api_called = false`).
 
-- Generated (UTC): `2026-05-31T11:17:12Z`
-- Repo commit: `39a4dd7e158228fc138ea48c491a766aa8dfb31f`
+- Generated (UTC): `2026-05-31T12:35:57Z`
+- Repo commit: `45044b68ece74d03f2b8bbcdfdfccdeb7ccdd5dd`
 - Predictive claim allowed: **False**
 - Real-money ready: **False**
 
@@ -17,17 +17,19 @@
 - Real canonical rows scored: **49** / 10000 (scoring_coverage 0.0049)
 - Complete six-axis vectors: 49 (score_quality_coverage 0.0049)
 - Sources scored: ['market_data', 'sec_edgar', 'yfinance']
-- Decision-time valid probabilities (n_valid_p): **57**
+- Decision-time valid probabilities (n_valid_p): **85**
 - Score vector / model version: `real-row-score-v1` / `advisory-logistic-v1`
 - Real rows are now scored AND consumed into decision snapshots; the probabilities are advisory-only and **uncalibrated**.
 - Calibration status: **INSUFFICIENT_EVIDENCE** (N_real_forward < 200 ⇒ predictive claim LOCKED).
 - Signal edge is **NOT proven**. Real-money readiness is **NO**.
 
-## Decision snapshots & outcomes
-- Decision snapshots: 210 (valid p: 57)
+## Decision snapshots & outcomes (the forward loop)
+- Decision snapshots: 260 (valid p: 85)
 - Real-forward (p, y) pairs: **0**
 - Historical-proxy pairs (research only): 0
 - Excluded: 0 {}
+- Outcome coverage: 0.0 (needed to reach 200: 200)
+- A real-forward pair is created ONLY when a decision's horizon has elapsed in real calendar time AND a real entry/exit price exists; historical proxy / open / unresolved decisions never count.
 
 ## Calibration
 
@@ -43,9 +45,9 @@ CalibrationAllowed = I(N>=200) · I(Brier<=0.25) · I(ECE<=0.10)
 - Predictive claim allowed: **False**
 
 ## Evidence score (documentation metric, NOT a trading claim)
-- S_evidence = **0.05798**
-- Components: {'source_truth_score': 0.0, 'scoring_coverage': 0.0049, 'snapshot_coverage': 0.285, 'outcome_coverage': 0.0, 'calibration_gate_score': 0.0, 'reproducibility_score': 0.0}
-- Weights: {'source': 0.2, 'scoring': 0.2, 'snapshot': 0.2, 'outcome': 0.2, 'calibration': 0.1, 'reproducibility': 0.1}
+- S_evidence = **0.085735**
+- Components: {'source_truth_score': 0.0, 'scoring_coverage': 0.0049, 'snapshot_coverage': 0.425, 'outcome_coverage': 0.0, 'calibration_gate_score': 0.0, 'reproducibility_score': 0.0}
+- Weights: {'source': 0.15, 'scoring': 0.15, 'snapshot': 0.2, 'outcome': 0.25, 'calibration': 0.15, 'reproducibility': 0.1}
 
 ## Reproducibility
 

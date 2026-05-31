@@ -367,6 +367,13 @@ EXPLICIT_IN_SCOPE: frozenset[str] = frozenset({
     "run_daily_live_advisory_decisions.py",  # fresh canonical rows -> decision snapshots (grows n_valid_p)
     "attach_due_outcomes.py",                # elapsed-horizon real outcomes; never labels open trades
     "refresh_real_evidence.py",              # one-command offline-by-default evidence refresh
+    # Close the Outcome Loop sprint — advisory-only, read-only real-price
+    # evidence helper for outcome attachment.  Reads real ingested OHLCV bars
+    # from signal_events (market_data) and supplies entry/exit prices to
+    # attach_due_outcomes; returns None when a real bar is missing (never
+    # fabricates).  No broker execution, no order placement, no API trading
+    # writes.  Sibling to attach_due_outcomes.py / outcome_labeling_flow.py.
+    "real_price_outcome_evidence.py",
 })
 
 # Modules deliberately marked OUT_OF_SCOPE inside ``scripts/``.  This
