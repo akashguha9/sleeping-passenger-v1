@@ -209,5 +209,112 @@ def test_report_preserves_advisory_invariants(tmp_path):
     assert report["predictive_claim_allowed"] is False
 
 
+# --------------------------------------------------------------------------- #
+# First Real Rows + Kanté Score Push sprint — Phase 1 required cases.
+# --------------------------------------------------------------------------- #
+
+# --- real vs fixture distinction ------------------------------------------
+def test_real_canary_summary_distinguishes_real_from_fixture(tmp_path):
+    db = _db(tmp_path)
+    fixtures = {
+        # canary_real True -> counts toward real_source_activation_count
+        "sec_edgar": {"records": _records(5, "sec"), "canary_real": True, "api_health_status": "OK"},
+        # canary_real False -> fixture activation only
+        "polymarket": {"records": _records(5, "pm"), "canary_real": False, "api_health_status": "OK"},
+    }
+    report = canary.run_canary(["sec_edgar", "polymarket"], fixtures=fixtures, db_path=db)
+    assert report["real_source_activation_count"] == 1
+    assert report["fixture_source_activation_count"] == 1
+    by_name = {s["source_name"]: s for s in report["per_source"]}
+    assert by_name["sec_edgar"]["canary_real"] is True
+    assert by_name["polymarket"]["canary_real"] is False
+    assert by_name["sec_edgar"]["activated"] is True
+    assert by_name["polymarket"]["activated"] is True
+
+
+# --- live rows count only when canary_real True ---------------------------
+def test_live_canary_rows_count_only_when_canary_real_true(tmp_path):
+    db = _db(tmp_path)
+    # Same rows, two truth labels: only the canary_real=True one is a REAL row.
+    real = canary.run_source_canary(
+        "sec_edgar", records=_records(4, "r"), db_path=db, canary_real=True
+    )
+    fixture = canary.run_source_canary(
+        "polymarket", records=_records(4, "f"), db_path=db, canary_real=False
+    )
+    assert real["activated"] and real["canary_real"] is True
+    assert fixture["activated"] and fixture["canary_real"] is False
+    # Both persisted canonical rows, but only `real` is a real-source activation.
+    assert real["is_live_canonical"] and fixture["is_live_canonical"]
+
+
+# --- failure does not fake live -------------------------------------------
+def test_real_canary_failure_does_not_fake_live(tmp_path, monkeypatch):
+    def _fail(source_name, max_rows):
+        return [], "DEGRADED", "skipped: host unreachable"
+
+    monkeypatch.setattr(canary, "_real_loader_records", _fail)
+    report = canary.run_canary(
+        ["sec_edgar", "gdelt"], allow_network=True, db_path=_db(tmp_path)
+    )
+    assert report["real_source_activation_count"] == 0
+    for s in report["per_source"]:
+        assert s["is_live_canonical"] is False
+        assert s["canonical_signal_status"] != "LIVE_CANONICAL"
+
+
+# --- 3-source threshold reports actual count ------------------------------
+def test_three_source_activation_threshold_reports_actual_count(tmp_path):
+    db = _db(tmp_path)
+    # Two real activations + one zero-row source -> threshold NOT met, count honest.
+    fixtures = {
+        "yfinance": {"records": _records(3, "y"), "canary_real": True, "api_health_status": "OK"},
+        "polymarket": {"records": _records(3, "p"), "canary_real": True, "api_health_status": "OK"},
+        "gdelt": {"records": [], "canary_real": True, "api_health_status": "UNHEALTHY"},
+    }
+    report = canary.run_canary(
+        ["yfinance", "polymarket", "gdelt"], fixtures=fixtures, db_path=db
+    )
+    assert report["real_source_activation_count"] == 2
+    assert report["source_activation_target_met"] is False  # 2 < 3, never faked
+
+    # Now add the third real source -> threshold met, reported truthfully.
+    fixtures["sec_edgar"] = {
+        "records": _records(3, "s"), "canary_real": True, "api_health_status": "OK"
+    }
+    report2 = canary.run_canary(
+        ["yfinance", "polymarket", "gdelt", "sec_edgar"], fixtures=fixtures, db_path=_db(tmp_path)
+    )
+    assert report2["real_source_activation_count"] == 3
+    assert report2["source_activation_target_met"] is True
+
+
+# --- source_run_log records real canary status ----------------------------
+def test_source_run_log_records_real_canary_status(tmp_path):
+    db = _db(tmp_path)
+    fixtures = {
+        "sec_edgar": {"records": _records(4, "s"), "canary_real": True, "api_health_status": "OK"},
+    }
+    report = canary.run_canary(["sec_edgar"], fixtures=fixtures, db_path=db,
+                               write_source_run_log=True)
+    assert report["source_run_log_written"] == 1
+    log = persistence.get_source_run_log(db_path=db)
+    statuses = {row["source_name"]: row["status"] for row in log}
+    assert statuses["sec_edgar"] == "LIVE_CANONICAL"
+
+
+# --- sec_edgar is a wired real loader source ------------------------------
+def test_sec_edgar_is_a_known_real_loader_source(tmp_path, monkeypatch):
+    seen: list[str] = []
+
+    def _spy(source_name, max_rows):
+        seen.append(source_name)
+        return [], "DEGRADED", "patched"
+
+    monkeypatch.setattr(canary, "_real_loader_records", _spy)
+    canary.run_canary(["sec_edgar"], allow_network=True, db_path=_db(tmp_path))
+    assert seen == ["sec_edgar"]
+
+
 if __name__ == "__main__":  # pragma: no cover
     raise SystemExit(pytest.main([__file__, "-q"]))

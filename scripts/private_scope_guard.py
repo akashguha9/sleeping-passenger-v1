@@ -350,6 +350,13 @@ EXPLICIT_IN_SCOPE: frozenset[str] = frozenset({
     "real_evidence_bundle.py",        # composes the honest, reproducible evidence bundle
     "portfolio_correlation_guard.py", # cross-position correlation/exposure guard; missing data => UNKNOWN => block
     "dead_code_inventory.py",         # read-only dead-code/maintainability map; never deletes
+    # First Real Rows + Kanté Score Push sprint — advisory-only evidence
+    # production + read-only surface.  Pure compute / read-then-record SQLite;
+    # no broker execution, no order placement, no API trading writes.  Core MVP
+    # evidence/risk surface, so explicitly in scope.
+    "run_daily_live_advisory_decisions.py",  # fresh canonical rows -> decision snapshots (grows n_valid_p)
+    "attach_due_outcomes.py",                # elapsed-horizon real outcomes; never labels open trades
+    "refresh_real_evidence.py",              # one-command offline-by-default evidence refresh
 })
 
 # Modules deliberately marked OUT_OF_SCOPE inside ``scripts/``.  This
