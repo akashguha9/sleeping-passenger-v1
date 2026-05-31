@@ -115,10 +115,10 @@ def test_evidence_score_uses_scoring_coverage(scored_db):
     comps = b["s_evidence"]["components"]
     assert "scoring_coverage" in comps
     assert comps["scoring_coverage"] == pytest.approx(2 / 3, abs=1e-6)
-    # Close-the-Outcome-Loop re-weighting: scoring carries 0.15.
-    assert b["s_evidence"]["weights"]["scoring"] == 0.15
+    # Real-Forward Outcome Maturation re-weighting: scoring carries 0.10.
+    assert b["s_evidence"]["weights"]["scoring"] == 0.10
     # The scoring component must actually move the total (weight * value > 0).
-    assert b["s_evidence"]["score"] >= 0.15 * comps["scoring_coverage"]
+    assert b["s_evidence"]["score"] >= 0.10 * comps["scoring_coverage"]
 
 
 # --- 5. S_evidence uses snapshot coverage --------------------------------- #
@@ -128,7 +128,13 @@ def test_evidence_score_uses_snapshot_coverage(scored_db):
     assert "snapshot_coverage" in comps
     # 2 valid p / 200 target.
     assert comps["snapshot_coverage"] == pytest.approx(2 / 200, abs=1e-6)
-    assert b["s_evidence"]["weights"]["snapshot"] == 0.20
+    # Real-Forward Outcome Maturation sprint re-weights S_evidence: snapshot 0.12,
+    # forward_eligibility 0.15, plus a daily_maturation component (0.10).  Weights
+    # still sum to 1.0.
+    assert b["s_evidence"]["weights"]["snapshot"] == 0.12
+    assert b["s_evidence"]["weights"]["forward_eligibility"] == 0.15
+    assert b["s_evidence"]["weights"]["daily_maturation"] == 0.10
+    assert sum(b["s_evidence"]["weights"].values()) == pytest.approx(1.0, abs=1e-9)
 
 
 # --- 6. score unavailable reasons ----------------------------------------- #
