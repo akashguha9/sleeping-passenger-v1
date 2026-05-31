@@ -715,6 +715,20 @@ def build_country_coverage_from_payload(
     result["payload_stale"] = stale
     result["sqlite_fresh_rows_count"] = sqlite_fresh
     result["proof_sources_used"] = sources_used
+    # How many rows each evidence source actually contributed to the proof. A
+    # consumer can now see, without guessing, how much weight came from the live
+    # payload vs the SQLite bridge vs the committed fixture.
+    payload_rows_considered = (
+        len(payload.get("news_events", {}).get("events", []) or [])
+        + len(payload.get("filings_events", {}).get("events", []) or [])
+    )
+    result["payload_rows_considered"] = payload_rows_considered
+    result["sqlite_rows_considered"] = sqlite_fresh
+    # In the pure-payload legacy path the committed payload *is* the fixture; once
+    # a caller proves a REAL_RUN those same rows are no longer fixture rows.
+    result["fixture_rows_considered"] = (
+        payload_rows_considered if result["proof_kind"] == "FIXTURE" else 0
+    )
     return result
 
 

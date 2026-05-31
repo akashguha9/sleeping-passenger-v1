@@ -48,6 +48,7 @@ from scripts.daily_payload import load_daily_payload, normalize_ticker
 from scripts.discovery_bias_metrics import (
     compute_contamination_ratios,
     compute_usa_bias,
+    global_breadth_claim_allowed,
     render_bias_markdown,
 )
 from scripts.external_advisory_evidence import (
@@ -422,12 +423,13 @@ def render_portfolio_truth_context(result: dict[str, Any]) -> str:
         lines.append(render_country_coverage_markdown(coverage))
         lines.append("")
 
-    # --- USA bias + fallback contamination ---
+    # --- USA bias + fallback contamination + global-breadth claim gate ---
     usa_bias = result.get("usa_bias")
     contamination = result.get("contamination")
     if usa_bias and contamination:
+        breadth = _global_breadth_from_result(result, usa_bias)
         lines.append("------------------------------------------------------------")
-        lines.append(render_bias_markdown(usa_bias, contamination))
+        lines.append(render_bias_markdown(usa_bias, contamination, breadth))
         lines.append("")
 
     # --- Price validity + existing-risk visibility (Section 9) ---
@@ -465,6 +467,36 @@ def render_portfolio_truth_context(result: dict[str, Any]) -> str:
     lines.append("Reminder: advisory only. No broker action. No execution. Human review required.")
     lines.append("============================================================")
     return "\n".join(lines)
+
+
+def _covered_country_count(coverage):
+    """Count countries proven end-to-end covered (coverage == 1) in a coverage dict."""
+    if not isinstance(coverage, dict):
+        return 0
+    raw = coverage.get("countries", [])
+    rows = raw.values() if isinstance(raw, dict) else (raw or [])
+    count = 0
+    for row in rows:
+        if isinstance(row, dict) and row.get("coverage") == 1:
+            count += 1
+    return count
+
+
+def _global_breadth_from_result(result, usa_bias):
+    """Compute the global-breadth claim gate from a synthesis result + bias dict.
+
+    Truthful gate only: C_global, covered_country_count, B_US, and the effective
+    country count must all clear their thresholds before the synthesis may claim
+    proven global breadth. Never fabricates candidates.
+    """
+    coverage = result.get("country_coverage") or {}
+    ratios = coverage.get("ratios", {}) if isinstance(coverage, dict) else {}
+    c_global = ratios.get("C_global", 0.0) or 0.0
+    return global_breadth_claim_allowed(
+        usa_bias,
+        c_global=c_global,
+        covered_country_count=_covered_country_count(coverage),
+    )
 
 
 def render_evidence_readiness_block(result):
@@ -520,6 +552,25 @@ def render_evidence_readiness_block(result):
         "provider_attempts_observed: %s" % (len(provider_attempts) > 0)
     )
     lines.append("new_risk_allowed: %s" % new_risk_allowed)
+
+    # --- USA-bias control metrics + global-breadth claim gate (P1) ----------
+    usa_bias = result.get("usa_bias") or {}
+    if usa_bias:
+        breadth = _global_breadth_from_result(result, usa_bias)
+        lines.append("")
+        lines.append("### USA Bias Control (ADVISORY)")
+        lines.append("B_US: %s (cap %s)" % (usa_bias.get("B_US"), usa_bias.get("B_US_cap")))
+        lines.append("B_US_venue: %s" % usa_bias.get("B_US_venue"))
+        lines.append("USA_bias_violation: %s" % usa_bias.get("USA_bias_violation"))
+        lines.append("country_concentration_hhi: %s" % usa_bias.get("country_concentration_hhi"))
+        lines.append("effective_country_count: %s" % usa_bias.get("effective_country_count"))
+        lines.append(
+            "global_breadth_claim_allowed: %s" % breadth["global_breadth_claim_allowed"]
+        )
+        lines.append(breadth["claim_statement"])
+        if usa_bias.get("status"):
+            lines.append("usa_bias_status: %s" % ", ".join(usa_bias["status"]))
+
     lines.append("")
     lines.append("### Hard Classification Invariants")
     if not c_global or c_global <= 0:

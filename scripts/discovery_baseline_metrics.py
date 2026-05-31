@@ -28,13 +28,18 @@ try:
     from scripts.discovery_bias_metrics import (
         compute_contamination_ratios,
         compute_usa_bias,
+        global_breadth_claim_allowed,
     )
     from scripts.entity_ticker_mapper import map_event_to_tickers
     from scripts.runtime_common import utc_timestamp
     from scripts.top30_country_coverage import build_country_coverage_from_payload
 except ModuleNotFoundError:  # pragma: no cover - script-style env
     from advisory_contract import advisory_safety_stamps
-    from discovery_bias_metrics import compute_contamination_ratios, compute_usa_bias
+    from discovery_bias_metrics import (
+        compute_contamination_ratios,
+        compute_usa_bias,
+        global_breadth_claim_allowed,
+    )
     from entity_ticker_mapper import map_event_to_tickers
     from runtime_common import utc_timestamp
     from top30_country_coverage import build_country_coverage_from_payload
@@ -160,11 +165,24 @@ def compute_discovery_metrics(
     else:
         h_price_coverage = 0.0
 
+    covered_country_count = sum(
+        1 for row in coverage.get("countries", []) if isinstance(row, dict) and row.get("coverage") == 1
+    )
+    breadth = global_breadth_claim_allowed(
+        bias,
+        c_global=coverage["ratios"].get("C_global", 0.0),
+        covered_country_count=covered_country_count,
+    )
+
     metrics: dict[str, Any] = {}
     metrics.update(coverage["ratios"])  # C_*
     metrics["B_US"] = bias["B_US"]
     metrics["B_US_venue"] = bias["B_US_venue"]
+    metrics["B_non_US"] = bias["B_non_US"]
     metrics["USA_bias_violation"] = bias["USA_bias_violation"]
+    metrics["country_concentration_hhi"] = bias["country_concentration_hhi"]
+    metrics["effective_country_count"] = bias["effective_country_count"]
+    metrics["global_breadth_claim_allowed"] = breadth["global_breadth_claim_allowed"]
     metrics["R_live"] = contamination["R_live"]
     metrics["R_static"] = contamination["R_static"]
     metrics["R_memory"] = contamination["R_memory"]
@@ -181,6 +199,8 @@ def compute_discovery_metrics(
         "filings_event_count": len(filings),
         "metrics": metrics,
         "global_discovery_status": coverage["global_discovery_status"],
+        "global_breadth_claim_allowed": breadth["global_breadth_claim_allowed"],
+        "global_breadth_claim_statement": breadth["claim_statement"],
         "usa_bias_status": bias["status"],
         "contamination_warnings": contamination["warnings"],
         "safety": advisory_safety_stamps(),
