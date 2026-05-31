@@ -34,6 +34,7 @@ solely by the real-forward calibration corpus (N>=200, Brier<=0.25, ECE<=0.10).
 """
 from __future__ import annotations
 
+import json
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
@@ -114,6 +115,75 @@ def _get_commit_hash() -> str:
     except Exception:  # pragma: no cover - defensive
         pass
     return "UNKNOWN"
+
+
+def _clip01(x: float) -> float:
+    return max(0.0, min(1.0, float(x)))
+
+
+def _build_forward_throughput_block(
+    db_path: str | Path,
+    *,
+    forward_eligible_after: int,
+    n_pending_horizon: int,
+    n_due_forward: int,
+    n_real_forward_pairs: int,
+) -> dict[str, Any]:
+    """Additive forward-throughput evidence block (this sprint).
+
+    Reads the optional sprint-start baseline artifact and computes the honest
+    before/after deltas, the ``ThroughputImprovementScore`` and the live
+    top-missing lists.  ``ThroughputImprovementScore`` is a *reported* sub-metric
+    only — it NEVER feeds the predictive-claim gate (which stays governed solely
+    by N>=200 real-forward pairs clearing Brier/ECE).
+    """
+    baseline_path = REPO_ROOT / "runtime" / "release" / "forward_throughput_baseline.json"
+    forward_eligible_before = 0
+    reasons_before: dict[str, Any] = {}
+    if baseline_path.exists():
+        try:
+            b = json.loads(baseline_path.read_text(encoding="utf-8"))
+            forward_eligible_before = int(b.get("forward_eligible_before", 0))
+            reasons_before = {
+                "MISSING_TICKER": b.get("missing_ticker_before", 0),
+                "MISSING_ENTRY_PRICE": b.get("missing_entry_price_before", 0),
+                "MISSING_PROBABILITY": b.get("missing_probability_before", 0),
+            }
+        except (OSError, json.JSONDecodeError, ValueError):
+            pass
+
+    top_missing_entry_price_tickers: list[Any] = []
+    try:
+        try:
+            from scripts.forward_eligibility_diagnostics import forward_eligibility_diagnostics
+        except ModuleNotFoundError:  # pragma: no cover - script-style env
+            from forward_eligibility_diagnostics import forward_eligibility_diagnostics  # type: ignore
+        diag = forward_eligibility_diagnostics(db_path=db_path)
+        top_missing_entry_price_tickers = diag.get("top_missing_entry_price_tickers", [])
+    except Exception:  # pragma: no cover - never crash the bundle
+        pass
+
+    throughput_improvement_score = round(
+        _clip01((forward_eligible_after - forward_eligible_before)
+                / max(1, forward_eligible_before)),
+        6,
+    )
+    return {
+        "forward_eligible_before": forward_eligible_before,
+        "forward_eligible_after": forward_eligible_after,
+        "eligibility_gain": forward_eligible_after - forward_eligible_before,
+        "reason_baseline": reasons_before,
+        "top_missing_entry_price_tickers": top_missing_entry_price_tickers,
+        "throughput_improvement_score": throughput_improvement_score,
+        "n_pending_horizon": n_pending_horizon,
+        "n_due_forward": n_due_forward,
+        "n_real_forward_pairs": n_real_forward_pairs,
+        "n_needed_to_200": max(0, N_OUTCOME_TARGET - n_real_forward_pairs),
+        # Throughput improvement NEVER unlocks a predictive claim.
+        "predictive_claim_allowed": False,
+        "edge_claimed": False,
+        "real_money_ready": False,
+    }
 
 
 def _split_canary_sources(canary_report: Mapping[str, Any]) -> tuple[list[str], list[str]]:
@@ -254,6 +324,13 @@ def build_evidence_bundle(
             "predictive_claim_allowed": False,
             "edge_claimed": False,
         },
+        "forward_throughput": _build_forward_throughput_block(
+            db_path,
+            forward_eligible_after=int(forward["n_forward_outcome_eligible"]),
+            n_pending_horizon=int(forward["n_pending_horizon"]),
+            n_due_forward=int(forward["n_due_forward"]),
+            n_real_forward_pairs=int(calibration["n_real_forward"]),
+        ),
         "calibration": {
             "status": calibration["calibration_status"],
             "predictive_claim_allowed": calibration["predictive_claim_allowed"],
@@ -377,6 +454,21 @@ def render_markdown(bundle: Mapping[str, Any]) -> str:
         "a binary outcome can be measured after its horizon closes; it is NOT a "
         "predictive claim and NOT an edge claim.",
         "",
+        "## Forward-eligible throughput (Increase Forward-Eligible Throughput Sprint)",
+        f"- Forward-eligible: **{_ft(bundle).get('forward_eligible_before', 0)} → "
+        f"{_ft(bundle).get('forward_eligible_after', 0)}** "
+        f"(gain {_ft(bundle).get('eligibility_gain', 0)})",
+        f"- Throughput improvement score (reported, NOT a gate): "
+        f"{_ft(bundle).get('throughput_improvement_score', 0.0)}",
+        f"- Sprint-start reason baseline: {_ft(bundle).get('reason_baseline', {})}",
+        f"- Top missing-OHLCV scored tickers (now): "
+        f"{_ft(bundle).get('top_missing_entry_price_tickers', [])}",
+        f"- Pending horizon: {_ft(bundle).get('n_pending_horizon', 0)}  "
+        f"Real-forward pairs: {_ft(bundle).get('n_real_forward_pairs', 0)}  "
+        f"Needed to 200: {_ft(bundle).get('n_needed_to_200', N_OUTCOME_TARGET)}",
+        "- Throughput improvement raises *eligibility*, never calibration. It does "
+        "NOT unlock a predictive claim, an edge claim, or real-money readiness.",
+        "",
         "## Calibration",
         "",
         "```",
@@ -425,6 +517,11 @@ def _fc(bundle: Mapping[str, Any]) -> dict[str, Any]:
         "default_prediction_horizon_days": 5, "target_return_threshold": 0.0,
         "target_source": "DEFAULT_FORWARD_SNAPSHOT_CONTRACT_V1", "n_needed_to_200": 200,
     })
+
+
+def _ft(bundle: Mapping[str, Any]) -> dict[str, Any]:
+    """Forward-throughput sub-dict with safe defaults for older bundles."""
+    return dict(bundle.get("forward_throughput") or {})
 
 
 def _sc(bundle: Mapping[str, Any]) -> dict[str, Any]:

@@ -383,6 +383,76 @@ def _count_forward_eligibility(db_path: Any) -> dict[str, Any]:
     return out
 
 
+def build_forward_throughput(db_path: Any) -> dict[str, Any]:
+    """Forward-eligible throughput visibility (read-only, advisory-only).
+
+    Surfaces the before/after eligibility picture for the operator card.  The
+    ``*_after`` figures + top-missing lists are computed live from the scored
+    decision-candidate universe; the ``*_before`` baseline is read from the
+    optional persisted artifact ``forward_throughput_baseline.json`` when present
+    (written by the sprint run / refresh), else mirrored to the live value so the
+    delta is honestly 0 rather than invented.
+    """
+    base = {
+        "forward_eligible_before": 0,
+        "forward_eligible_after": 0,
+        "eligibility_rate_before": 0.0,
+        "eligibility_rate_after": 0.0,
+        "missing_ticker_before": 0,
+        "missing_ticker_after": 0,
+        "missing_entry_price_before": 0,
+        "missing_entry_price_after": 0,
+        "missing_probability_before": 0,
+        "missing_probability_after": 0,
+        "top_missing_entry_price_tickers": [],
+        "top_missing_ticker_sources": [],
+        "predictive_claim_allowed": False,
+        "calibration_status": INSUFFICIENT_EVIDENCE,
+    }
+    try:
+        try:
+            from scripts.forward_eligibility_diagnostics import forward_eligibility_diagnostics
+        except ModuleNotFoundError:  # pragma: no cover - script-style env
+            from forward_eligibility_diagnostics import forward_eligibility_diagnostics  # type: ignore
+        diag = forward_eligibility_diagnostics(db_path=db_path)
+    except Exception:  # noqa: BLE001 - never crash the route
+        return base
+
+    # ``*_after`` reflects the production-persisted forward-eligible snapshots
+    # (comparable to the probe baseline).  The scored-universe diagnostic supplies
+    # the per-reason after-counts and the top-missing lists (its rate is a
+    # *coverage* metric over scored candidates, surfaced separately and labelled).
+    forward = _count_forward_eligibility(db_path)
+    eligible_after = int(forward.get("n_forward_outcome_eligible", 0))
+    ineligible_after = int(forward.get("n_forward_ineligible", 0))
+    snap_total = eligible_after + ineligible_after
+    reasons_after = dict(forward.get("forward_unavailable_reasons", {}))
+    base.update({
+        "forward_eligible_after": eligible_after,
+        "eligibility_rate_after": round(eligible_after / max(1, snap_total), 6),
+        "missing_ticker_after": int(reasons_after.get("MISSING_TICKER", 0)),
+        "missing_entry_price_after": int(reasons_after.get("MISSING_ENTRY_PRICE", 0)),
+        "missing_probability_after": int(reasons_after.get("MISSING_PROBABILITY", 0)),
+        "top_missing_entry_price_tickers": diag.get("top_missing_entry_price_tickers", []),
+        "top_missing_ticker_sources": diag.get("top_missing_ticker_sources", []),
+        # Coverage over the scored decision-candidate universe (eligible / scored).
+        "scored_candidate_coverage": float(diag.get("eligibility_rate", 0.0)),
+        "scored_candidates_total": int(diag.get("total_decisions", 0)),
+        "scored_candidates_eligible": int(diag.get("forward_eligible", 0)),
+    })
+
+    artifact = _load_json(_release_dir() / "forward_throughput_baseline.json")
+    if isinstance(artifact, dict):
+        for k in (
+            "forward_eligible_before", "eligibility_rate_before",
+            "missing_ticker_before", "missing_entry_price_before",
+            "missing_probability_before",
+        ):
+            if k in artifact:
+                base[k] = artifact[k]
+    return base
+
+
 def build_outcomes_payload(*, db_path: Any = None) -> dict[str, Any]:
     """Honest forward-outcome corpus status (read-only).
 
@@ -473,6 +543,11 @@ def build_outcomes_payload(*, db_path: Any = None) -> dict[str, Any]:
         "edge_claimed": False,
         "real_money_ready": False,
     }
+    # Forward-eligible throughput visibility (this sprint).
+    try:
+        payload["forward_throughput"] = build_forward_throughput(target)
+    except Exception:  # noqa: BLE001 - never crash the route
+        payload["forward_throughput"] = {}
     payload.update(safety)
     return _strip_secrets(payload)
 

@@ -125,6 +125,16 @@ export function mapOutcomeLoopProps(
     predictiveClaimAllowed: resp?.predictive_claim_allowed === true,
     neededForGate: resp?.needed_for_gate ?? Math.max(0, nGate - nReal),
     nGate,
+    forwardEligibleBefore: resp?.forward_throughput?.forward_eligible_before ?? null,
+    forwardEligibleAfter: resp?.forward_throughput?.forward_eligible_after ?? null,
+    eligibilityRateAfter: resp?.forward_throughput?.eligibility_rate_after ?? null,
+    missingTickerBefore: resp?.forward_throughput?.missing_ticker_before ?? null,
+    missingTickerAfter: resp?.forward_throughput?.missing_ticker_after ?? null,
+    missingEntryPriceBefore: resp?.forward_throughput?.missing_entry_price_before ?? null,
+    missingEntryPriceAfter: resp?.forward_throughput?.missing_entry_price_after ?? null,
+    missingProbabilityBefore: resp?.forward_throughput?.missing_probability_before ?? null,
+    missingProbabilityAfter: resp?.forward_throughput?.missing_probability_after ?? null,
+    topMissingEntryPriceTickers: resp?.forward_throughput?.top_missing_entry_price_tickers ?? [],
     mode,
   };
 }

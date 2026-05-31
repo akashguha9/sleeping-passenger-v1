@@ -3,8 +3,8 @@
 > **ADVISORY ONLY. NOT real-money ready. No trading edge is claimed.**
 > This system places no orders and calls no broker API (`execution_gate = LOCKED`, `broker_api_called = false`).
 
-- Generated (UTC): `2026-05-31T12:35:57Z`
-- Repo commit: `45044b68ece74d03f2b8bbcdfdfccdeb7ccdd5dd`
+- Generated (UTC): `2026-05-31T16:16:20Z`
+- Repo commit: `6c2254d1b7a01f3b3e273dd11a84d11658637e90`
 - Predictive claim allowed: **False**
 - Real-money ready: **False**
 
@@ -14,22 +14,37 @@
 - C_global: 0.0
 
 ## Real-row scoring
-- Real canonical rows scored: **49** / 10000 (scoring_coverage 0.0049)
-- Complete six-axis vectors: 49 (score_quality_coverage 0.0049)
+- Real canonical rows scored: **49** / 10041 (scoring_coverage 0.00488)
+- Complete six-axis vectors: 49 (score_quality_coverage 0.00488)
 - Sources scored: ['market_data', 'sec_edgar', 'yfinance']
-- Decision-time valid probabilities (n_valid_p): **85**
+- Decision-time valid probabilities (n_valid_p): **141**
 - Score vector / model version: `real-row-score-v1` / `advisory-logistic-v1`
 - Real rows are now scored AND consumed into decision snapshots; the probabilities are advisory-only and **uncalibrated**.
 - Calibration status: **INSUFFICIENT_EVIDENCE** (N_real_forward < 200 ⇒ predictive claim LOCKED).
 - Signal edge is **NOT proven**. Real-money readiness is **NO**.
 
 ## Decision snapshots & outcomes (the forward loop)
-- Decision snapshots: 260 (valid p: 85)
+- Decision snapshots: 480 (valid p: 141)
 - Real-forward (p, y) pairs: **0**
 - Historical-proxy pairs (research only): 0
 - Excluded: 0 {}
 - Outcome coverage: 0.0 (needed to reach 200: 200)
 - A real-forward pair is created ONLY when a decision's horizon has elapsed in real calendar time AND a real entry/exit price exists; historical proxy / open / unresolved decisions never count.
+
+## Forward snapshot contract (outcome-eligibility)
+- Forward-outcome-eligible snapshots: **56** / 141 valid-p (coverage 0.397163)
+- Pending horizon: 56  Due forward: 0  Entry-price present: 56
+- Forward-ineligible: 424 {'UNSPECIFIED': 260, 'MISSING_TICKER': 161, 'MISSING_PROBABILITY': 3}
+- Target: `forward_return_ge_threshold` (threshold 0.0, horizon 5d, source `DEFAULT_FORWARD_SNAPSHOT_CONTRACT_V1`)
+- Eligibility is **structural only** — a snapshot becoming eligible means a binary outcome can be measured after its horizon closes; it is NOT a predictive claim and NOT an edge claim.
+
+## Forward-eligible throughput (Increase Forward-Eligible Throughput Sprint)
+- Forward-eligible: **4 → 56** (gain 52)
+- Throughput improvement score (reported, NOT a gate): 1.0
+- Sprint-start reason baseline: {'MISSING_TICKER': 119, 'MISSING_ENTRY_PRICE': 25, 'MISSING_PROBABILITY': 2}
+- Top missing-OHLCV scored tickers (now): []
+- Pending horizon: 56  Real-forward pairs: 0  Needed to 200: 200
+- Throughput improvement raises *eligibility*, never calibration. It does NOT unlock a predictive claim, an edge claim, or real-money readiness.
 
 ## Calibration
 
@@ -45,9 +60,9 @@ CalibrationAllowed = I(N>=200) · I(Brier<=0.25) · I(ECE<=0.10)
 - Predictive claim allowed: **False**
 
 ## Evidence score (documentation metric, NOT a trading claim)
-- S_evidence = **0.085735**
-- Components: {'source_truth_score': 0.0, 'scoring_coverage': 0.0049, 'snapshot_coverage': 0.425, 'outcome_coverage': 0.0, 'calibration_gate_score': 0.0, 'reproducibility_score': 0.0}
-- Weights: {'source': 0.15, 'scoring': 0.15, 'snapshot': 0.2, 'outcome': 0.25, 'calibration': 0.15, 'reproducibility': 0.1}
+- S_evidence = **0.185915**
+- Components: {'source_truth_score': 0.0, 'scoring_coverage': 0.00488, 'snapshot_coverage': 0.705, 'forward_eligibility_coverage': 0.397163, 'outcome_coverage': 0.0, 'calibration_gate_score': 0.0, 'reproducibility_score': 0.0}
+- Weights: {'source': 0.15, 'scoring': 0.15, 'snapshot': 0.15, 'forward_eligibility': 0.2, 'outcome': 0.2, 'calibration': 0.1, 'reproducibility': 0.05}
 
 ## Reproducibility
 

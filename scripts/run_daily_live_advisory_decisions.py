@@ -92,6 +92,11 @@ except ModuleNotFoundError:  # pragma: no cover - flat-layout fallback
         resolve_entry_price,
     )
 
+try:  # package layout
+    from scripts.ticker_resolution import resolve_ticker as _resolve_ticker_contract
+except ModuleNotFoundError:  # pragma: no cover - flat-layout fallback
+    from ticker_resolution import resolve_ticker as _resolve_ticker_contract  # type: ignore[no-redef]
+
 NO_FRESH_ROWS = "NO_FRESH_CANONICAL_ROWS"
 
 # Honest reasons for a NULL model_probability at decision time.
@@ -215,33 +220,18 @@ def resolve_ticker(
 ) -> str | None:
     """Recover a normalized ticker for one decision, honestly.
 
-    Tries, in order: the event row's own column, common payload keys
-    (``ticker`` / ``symbol`` / ``asset_symbol`` / ``ticker_symbol``), then the
-    persisted ``signal_event_score_vectors.ticker``.  Returns the contract-
-    normalized ticker, or ``None`` when no usable ticker exists (the snapshot is
-    then recorded but stays forward-ineligible with ``MISSING_TICKER``).
+    Delegates to the deterministic :func:`scripts.ticker_resolution.resolve_ticker`
+    (Phase 2): direct symbol fields → score-vector symbol/company-name → SEC CIK
+    map → exact company-name map → title.  Every accepted ticker carries a method
+    and confidence (>= 0.90); a company name like ``"Tesla, Inc."`` resolves to
+    ``"TSLA"`` so the price layer can match real OHLCV.  Returns ``None`` when no
+    confident ticker exists (the snapshot stays forward-ineligible with
+    ``MISSING_TICKER``).
     """
-    candidates: list[Any] = []
-    if isinstance(event_row, Mapping):
-        for key in ("ticker", "asset_symbol", "symbol", "ticker_symbol"):
-            candidates.append(event_row.get(key))
-    pl = payload
-    if isinstance(pl, str):
-        try:
-            pl = json.loads(pl)
-        except (json.JSONDecodeError, TypeError):
-            pl = None
-    if isinstance(pl, Mapping):
-        for key in ("ticker", "symbol", "asset_symbol", "ticker_symbol"):
-            candidates.append(pl.get(key))
-    if side_row is not None:
-        candidates.append(side_row.get("ticker"))
-
-    for raw in candidates:
-        norm = normalize_ticker(raw)
-        if norm is not None:
-            return norm
-    return None
+    resolution = _resolve_ticker_contract(
+        event_row=event_row, payload=payload, score_vector=side_row
+    )
+    return resolution.get("ticker")
 
 
 def _classify_blocks(decision: Mapping[str, Any]) -> dict[str, bool]:
@@ -264,6 +254,53 @@ def _classify_blocks(decision: Mapping[str, Any]) -> dict[str, bool]:
     }
 
 
+def _scored_event_rows(db_path: Any, *, limit: int) -> list[dict[str, Any]]:
+    """Return signal_events rows that carry a SCORED side-table vector.
+
+    These are the only rows that can produce a valid ``model_probability`` (and
+    therefore the only rows that can ever be forward-outcome-eligible).  Read
+    -only; resolves each scored ``event_id`` back to its full signal_events row
+    (with payload) so the decision path runs normally.  Newest-scored first.
+    """
+    import sqlite3
+
+    try:
+        from scripts.score_real_signal_events import SCORE_VECTOR_TABLE
+        from scripts.real_signal_score_vector import SCORED
+    except ModuleNotFoundError:  # pragma: no cover - flat-layout fallback
+        from score_real_signal_events import SCORE_VECTOR_TABLE  # type: ignore[no-redef]
+        from real_signal_score_vector import SCORED  # type: ignore[no-redef]
+
+    conn = sqlite3.connect(str(db_path))
+    try:
+        conn.row_factory = sqlite3.Row
+        try:
+            scored = conn.execute(
+                f"SELECT DISTINCT event_id FROM {SCORE_VECTOR_TABLE}"
+                " WHERE score_status=? ORDER BY scored_at_utc DESC LIMIT ?",
+                (SCORED, int(max(1, limit))),
+            ).fetchall()
+        except sqlite3.Error:
+            return []
+        out: list[dict[str, Any]] = []
+        for s in scored:
+            eid = s["event_id"]
+            row = conn.execute(
+                "SELECT * FROM signal_events WHERE event_id=? LIMIT 1", (eid,)
+            ).fetchone()
+            if row is None:
+                continue
+            d = dict(row)
+            try:
+                d["raw_payload"] = json.loads(d["raw_payload"])
+            except (json.JSONDecodeError, TypeError):
+                pass
+            out.append(d)
+        return out
+    finally:
+        conn.close()
+
+
 def run_daily_decision_batch(
     *,
     db_path: Any = None,
@@ -273,12 +310,21 @@ def run_daily_decision_batch(
     max_decisions: int = 50,
     now_iso: str | None = None,
     write: bool = True,
+    prioritize_scored: bool = False,
 ) -> dict[str, Any]:
-    """Run the advisory decision path over fresh canonical signal events.
+    """Run the advisory decision path over canonical signal events.
 
     ``events`` (when provided) bypass the DB read for deterministic offline
     tests.  ``write=False`` (or ``db_path=None``) makes every decision
     side-effect free (snapshots are built but never persisted).
+
+    ``prioritize_scored=True`` selects decision candidates from the events that
+    carry a SCORED side-table score vector (the only rows that can produce a
+    valid ``model_probability`` — and therefore the only rows that can ever be
+    forward-outcome-eligible), filling any remaining capacity with the usual
+    fresh canonical rows.  This is the honest throughput lever: it processes the
+    rows that *can* carry a forward outcome instead of arbitrary recent noise.
+    It never relaxes any eligibility factor and never fabricates a field.
     """
     stamps = advisory_safety_stamps()
     target = db_path if db_path is not None else persistence.DB_PATH
@@ -286,12 +332,19 @@ def run_daily_decision_batch(
 
     n_valid_p_before = count_valid_p(target) if write else 0
 
-    # ----- resolve the fresh canonical rows ------------------------------- #
+    # ----- resolve the canonical rows ------------------------------------- #
     if events is None:
+        scored_rows: list[dict[str, Any]] = []
+        seen_ids: set[str] = set()
+        if prioritize_scored:
+            scored_rows = _scored_event_rows(target, limit=max_decisions)
+            seen_ids = {str(r.get("event_id")) for r in scored_rows}
         rows = persistence.get_signal_events(limit=max(1, max_decisions), db_path=target)
         # Keep only rows fresh within the TTL window.
         fresh: list[dict[str, Any]] = []
         for r in rows:
+            if str(r.get("event_id")) in seen_ids:
+                continue
             ev_source = r.get("source_name")
             stats = persistence.count_fresh_signal_events_by_source(
                 ev_source or "", ttl_hours=ttl_hours, now_iso=now_iso, db_path=target
@@ -299,7 +352,8 @@ def run_daily_decision_batch(
             age = stats.get("latest_age_hours")
             if age is not None and age <= ttl_hours:
                 fresh.append(r)
-        event_rows = fresh[:max_decisions]
+        # Scored candidates lead; fresh rows backfill remaining capacity.
+        event_rows = (scored_rows + fresh)[:max_decisions]
     else:
         event_rows = [dict(e) for e in events][:max_decisions]
 
@@ -561,6 +615,8 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     p.add_argument("--max-decisions", type=int, default=50)
     p.add_argument("--ttl-hours", type=float, default=24.0)
     p.add_argument("--write", action="store_true", help="persist decision snapshots")
+    p.add_argument("--prioritize-scored", action="store_true",
+                   help="lead with events that carry a SCORED score vector (forward-eligible candidates)")
     return p.parse_args(argv)
 
 
@@ -571,6 +627,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         max_decisions=args.max_decisions,
         ttl_hours=args.ttl_hours,
         write=bool(args.write),
+        prioritize_scored=bool(args.prioritize_scored),
     )
     print(json.dumps(summary, indent=2))
     return 0

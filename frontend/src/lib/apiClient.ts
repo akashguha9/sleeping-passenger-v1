@@ -900,6 +900,26 @@ export interface EvidenceOutcomesResponse {
   generated_at_utc?: string | null;
   edge_claimed?: boolean | null;
   real_money_ready?: boolean | null;
+  // Forward-eligible throughput visibility (Increase Forward-Eligible Throughput Sprint).
+  forward_throughput?: ForwardThroughput | null;
+}
+
+export interface ForwardThroughput {
+  forward_eligible_before?: number | null;
+  forward_eligible_after?: number | null;
+  eligibility_rate_before?: number | null;
+  eligibility_rate_after?: number | null;
+  missing_ticker_before?: number | null;
+  missing_ticker_after?: number | null;
+  missing_entry_price_before?: number | null;
+  missing_entry_price_after?: number | null;
+  missing_probability_before?: number | null;
+  missing_probability_after?: number | null;
+  top_missing_entry_price_tickers?: Array<{ key: string; count: number }> | null;
+  top_missing_ticker_sources?: Array<{ key: string; count: number }> | null;
+  scored_candidate_coverage?: number | null;
+  predictive_claim_allowed?: boolean | null;
+  calibration_status?: string | null;
 }
 
 export interface EvidenceBundleResponse {

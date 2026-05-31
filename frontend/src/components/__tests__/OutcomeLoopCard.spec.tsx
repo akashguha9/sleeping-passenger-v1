@@ -128,6 +128,70 @@ describe('OutcomeLoopCard', () => {
     expect(props.neededForGate).toBe(200);
   });
 
+  // --- forward-eligible throughput visibility (this sprint) --------------
+  it('test_frontend_renders_forward_eligibility_rate', () => {
+    render(
+      <OutcomeLoopCard
+        forwardEligibleBefore={4}
+        forwardEligibleAfter={49}
+        eligibilityRateAfter={0.29}
+      />,
+    );
+    expect(screen.getByTestId('outcome-forward-eligible-growth').textContent).toBe('4 → 49');
+    expect(screen.getByTestId('outcome-forward-eligibility-rate').textContent).toBe('0.29');
+  });
+
+  it('test_frontend_renders_reason_reductions', () => {
+    render(
+      <OutcomeLoopCard
+        forwardEligibleBefore={4}
+        forwardEligibleAfter={49}
+        missingTickerBefore={119}
+        missingTickerAfter={119}
+        missingEntryPriceBefore={25}
+        missingEntryPriceAfter={0}
+        missingProbabilityBefore={2}
+        missingProbabilityAfter={2}
+        topMissingEntryPriceTickers={[{ key: 'NVDA', count: 6 }]}
+      />,
+    );
+    expect(screen.getByTestId('outcome-missing-entry-price-reduction').textContent).toContain('25 → 0');
+    expect(screen.getByTestId('outcome-missing-ticker-reduction').textContent).toContain('119 → 119');
+    expect(screen.getByTestId('outcome-top-missing-ohlcv-tickers').textContent).toContain('NVDA:6');
+  });
+
+  it('test_frontend_keeps_calibration_locked_with_throughput', () => {
+    render(
+      <OutcomeLoopCard
+        forwardEligibleBefore={4}
+        forwardEligibleAfter={49}
+        predictiveClaimAllowed={false}
+      />,
+    );
+    expect(screen.getByTestId('outcome-calibration-locked')).toBeTruthy();
+    expect(screen.queryByTestId('outcome-predictive-allowed')).toBeNull();
+  });
+
+  it('maps forward-throughput fields from the backend payload', () => {
+    const props = mapOutcomeLoopProps({
+      status: 'OK',
+      n_forward_outcome_eligible: 49,
+      predictive_claim_allowed: false,
+      forward_throughput: {
+        forward_eligible_before: 4,
+        forward_eligible_after: 49,
+        eligibility_rate_after: 0.29,
+        missing_entry_price_before: 25,
+        missing_entry_price_after: 0,
+        top_missing_entry_price_tickers: [{ key: 'NVDA', count: 6 }],
+      },
+    });
+    expect(props.forwardEligibleBefore).toBe(4);
+    expect(props.forwardEligibleAfter).toBe(49);
+    expect(props.missingEntryPriceAfter).toBe(0);
+    expect(props.topMissingEntryPriceTickers).toEqual([{ key: 'NVDA', count: 6 }]);
+  });
+
   it('maps a backend payload and never optimistically unlocks', () => {
     const props = mapOutcomeLoopProps({
       status: 'OK',

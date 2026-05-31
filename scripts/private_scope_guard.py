@@ -381,6 +381,22 @@ EXPLICIT_IN_SCOPE: frozenset[str] = frozenset({
     # never unlocks a predictive claim.  Sibling to decision_probability_snapshot
     # / run_daily_live_advisory_decisions / attach_due_outcomes.
     "forward_snapshot_contract.py",
+    # Increase Forward-Eligible Throughput sprint — advisory-only siblings of
+    # the forward-snapshot contract that raise forward *eligibility* (never
+    # calibration).  All read-only or additive; no broker/order/execution; none
+    # can unlock a predictive claim:
+    #   * ticker_resolution.py — deterministic, conservative ticker resolver
+    #     (direct symbol → score-vector → SEC CIK map → exact company-name map →
+    #     title); confidence-gated, never fuzzy-guesses, never fabricates.
+    #   * ensure_ohlcv_for_scored_tickers.py — read-only OHLCV ingest (injectable
+    #     loader; default yfinance, no key/broker) for scored tickers missing a
+    #     usable entry price; idempotent market_data rows, never fabricates a bar.
+    #   * missing_probability_resolution.py — audits that complete score vectors
+    #     always yield a probability and incomplete/missing ones stay null with an
+    #     honest reason; never invents a probability.
+    "ticker_resolution.py",
+    "ensure_ohlcv_for_scored_tickers.py",
+    "missing_probability_resolution.py",
 })
 
 # Modules deliberately marked OUT_OF_SCOPE inside ``scripts/``.  This

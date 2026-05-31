@@ -412,6 +412,17 @@ export interface OutcomeLoopCardProps {
   predictiveClaimAllowed?: boolean | null;
   neededForGate?: number | null;
   nGate?: number;
+  // Forward-eligible throughput visibility (Increase Forward-Eligible Throughput Sprint).
+  forwardEligibleBefore?: number | null;
+  forwardEligibleAfter?: number | null;
+  eligibilityRateAfter?: number | null;
+  missingTickerBefore?: number | null;
+  missingTickerAfter?: number | null;
+  missingEntryPriceBefore?: number | null;
+  missingEntryPriceAfter?: number | null;
+  missingProbabilityBefore?: number | null;
+  missingProbabilityAfter?: number | null;
+  topMissingEntryPriceTickers?: Array<{ key: string; count: number }> | null;
   mode?: DataMode;
 }
 
@@ -430,6 +441,16 @@ export function OutcomeLoopCard({
   predictiveClaimAllowed = false,
   neededForGate = 200,
   nGate = 200,
+  forwardEligibleBefore = null,
+  forwardEligibleAfter = null,
+  eligibilityRateAfter = null,
+  missingTickerBefore = null,
+  missingTickerAfter = null,
+  missingEntryPriceBefore = null,
+  missingEntryPriceAfter = null,
+  missingProbabilityBefore = null,
+  missingProbabilityAfter = null,
+  topMissingEntryPriceTickers = [],
   mode = 'LIVE',
 }: OutcomeLoopCardProps) {
   const allowed = predictiveClaimAllowed === true;
@@ -448,9 +469,62 @@ export function OutcomeLoopCard({
           .map(([k, v]) => `${k}:${v}`)
           .join(', ')
       : '—';
+  const reduction = (before: number | null, after: number | null): string => {
+    if (before == null || after == null) return '—';
+    return `${fmt(before)} → ${fmt(after)} (Δ${fmt(before - after)})`;
+  };
+  const eligGrowth =
+    forwardEligibleBefore != null && forwardEligibleAfter != null
+      ? `${fmt(forwardEligibleBefore)} → ${fmt(forwardEligibleAfter)}`
+      : '—';
+  const topMissing = topMissingEntryPriceTickers ?? [];
+  const topMissingText =
+    topMissing.length > 0
+      ? topMissing.map((t) => `${t.key}:${t.count}`).join(', ')
+      : 'none';
+  const showThroughput = forwardEligibleBefore != null || forwardEligibleAfter != null;
   return (
     <Shell testid="outcome-loop-card" title="Forward Outcome Loop" mode={mode}>
       <Row label="FORWARD_ELIGIBLE" value={fmt(nForwardEligible)} testid="outcome-forward-eligible" />
+      {showThroughput && (
+        <>
+          <Row
+            label="FORWARD_ELIGIBLE (before → after)"
+            value={eligGrowth}
+            testid="outcome-forward-eligible-growth"
+            valueClass="font-mono text-emerald-400"
+          />
+          <Row
+            label="FORWARD_ELIGIBILITY_RATE"
+            value={fmt(eligibilityRateAfter)}
+            testid="outcome-forward-eligibility-rate"
+          />
+          <Row
+            label="MISSING_TICKER (reduction)"
+            value={reduction(missingTickerBefore, missingTickerAfter)}
+            testid="outcome-missing-ticker-reduction"
+            valueClass="font-mono text-[11px]"
+          />
+          <Row
+            label="MISSING_ENTRY_PRICE (reduction)"
+            value={reduction(missingEntryPriceBefore, missingEntryPriceAfter)}
+            testid="outcome-missing-entry-price-reduction"
+            valueClass="font-mono text-[11px]"
+          />
+          <Row
+            label="MISSING_PROBABILITY (reduction)"
+            value={reduction(missingProbabilityBefore, missingProbabilityAfter)}
+            testid="outcome-missing-probability-reduction"
+            valueClass="font-mono text-[11px]"
+          />
+          <Row
+            label="TOP_MISSING_OHLCV_TICKERS"
+            value={topMissingText}
+            testid="outcome-top-missing-ohlcv-tickers"
+            valueClass="font-mono text-[11px]"
+          />
+        </>
+      )}
       <Row label="DUE_FORWARD" value={fmt(nDueForward)} testid="outcome-due-forward" />
       <Row label="N_REAL_FORWARD" value={fmt(nRealForwardPairs)} testid="outcome-n-real-forward" />
       <Row label="PENDING_HORIZON" value={fmt(nPendingHorizon)} testid="outcome-pending-horizon" />
