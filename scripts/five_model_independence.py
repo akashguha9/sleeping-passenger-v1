@@ -45,6 +45,11 @@ EXPECTED_MODELS: tuple[str, ...] = (
     "grok", "claude", "codex", "gemini", "mistral",
 )
 
+# Minimum number of independent model inputs required for a five-model
+# synthesis to claim quorum. Below this, missing evidence MUST downgrade the
+# synthesis classification (never silently proceed as if all five spoke).
+MODEL_QUORUM_MIN = 3
+
 _DDL = """
 CREATE TABLE IF NOT EXISTS model_runs (
     model_run_id TEXT PRIMARY KEY,
@@ -216,6 +221,15 @@ def independence_score(runs: Iterable[ModelRun]) -> dict[str, Any]:
         + 0.10 * (0.0 if missing_output else 1.0)
     )
 
+    # --- Quorum: enough INDEPENDENT model inputs actually present -----------
+    models_present = sorted(seen_models)
+    quorum_satisfied = (
+        len(independent) >= MODEL_QUORUM_MIN and not synthesis_before_freeze
+    )
+    # Missing/contaminated evidence below quorum MUST downgrade the synthesis
+    # classification — it can never be presented as a full five-model verdict.
+    classification_downgraded_for_missing_models = not quorum_satisfied
+
     return {
         "expected_model_count": expected,
         "seen_model_count": len(seen_models),
@@ -238,7 +252,50 @@ def independence_score(runs: Iterable[ModelRun]) -> dict[str, Any]:
         "five_model_independence_score": round(10.0 * five_model_independence_seg, 4),
         "all_expected_models_seen": all_expected_accounted_for,
         "missing_models": silently_missing,
+        "models_present": models_present,
+        "models_missing": silently_missing,
+        "quorum_min": MODEL_QUORUM_MIN,
+        "quorum_satisfied": quorum_satisfied,
+        "classification_downgraded_for_missing_models": classification_downgraded_for_missing_models,
     }
+
+
+def render_model_quorum_markdown(summary: dict[str, Any]) -> str:
+    """Render the five-model presence / missing / quorum report for synthesis.
+
+    Makes explicit, in the context the synthesis reasons over: which model
+    inputs are present, which are missing, whether quorum is satisfied, and
+    whether missing evidence downgrades the classification. Advisory only.
+    """
+    present = summary.get("models_present") or sorted(
+        {m.lower() for m in EXPECTED_MODELS}
+        - set(summary.get("models_missing") or summary.get("missing_models") or [])
+    )
+    missing = summary.get("models_missing") or summary.get("missing_models") or []
+    quorum_min = summary.get("quorum_min", MODEL_QUORUM_MIN)
+    quorum_ok = bool(summary.get("quorum_satisfied"))
+    downgraded = bool(
+        summary.get("classification_downgraded_for_missing_models", not quorum_ok)
+    )
+    lines: list[str] = []
+    lines.append("## Five-Model Input Quorum (ADVISORY)")
+    lines.append("expected_models: %s" % ", ".join(EXPECTED_MODELS))
+    lines.append("models_present: %s" % (", ".join(present) if present else "NONE"))
+    lines.append("models_missing: %s" % (", ".join(missing) if missing else "NONE"))
+    lines.append(
+        "independent_model_count: %s / quorum_min: %s"
+        % (summary.get("independent_model_count", "?"), quorum_min)
+    )
+    lines.append("quorum_satisfied: %s" % quorum_ok)
+    if downgraded:
+        lines.append(
+            "classification_downgraded: True — missing/insufficient independent "
+            "model evidence MUST downgrade the synthesis; do NOT present this as "
+            "a full five-model verdict."
+        )
+    else:
+        lines.append("classification_downgraded: False — quorum of independent models met.")
+    return "\n".join(lines)
 
 
 def _fixture_runs() -> list[ModelRun]:
@@ -328,8 +385,9 @@ def main(argv: list[str] | None = None) -> int:
 
 
 __all__ = [
-    "DEFAULT_SUMMARY_PATH", "EXPECTED_MODELS",
+    "DEFAULT_SUMMARY_PATH", "EXPECTED_MODELS", "MODEL_QUORUM_MIN",
     "ModelRun", "open_db", "record_model_run", "independence_score",
+    "render_model_quorum_markdown",
     "build_summary", "write_summary", "read_summary",
 ]
 
