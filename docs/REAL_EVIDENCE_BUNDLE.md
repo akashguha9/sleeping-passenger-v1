@@ -3,15 +3,15 @@
 > **ADVISORY ONLY. NOT real-money ready. No trading edge is claimed.**
 > This system places no orders and calls no broker API (`execution_gate = LOCKED`, `broker_api_called = false`).
 
-- Generated (UTC): `2026-05-31T05:47:30Z`
-- Repo commit: `702da7cae24876f1197301c4efd8916b06ff798c`
+- Generated (UTC): `2026-05-31T09:33:34Z`
+- Repo commit: `7e8d5c30950a15392d98731d26f4c0ca2c73cc64`
 - Predictive claim allowed: **False**
 - Real-money ready: **False**
 
 ## Source activation
-- Real canary activation: **0** []
+- Real canary activation: **3** ['yfinance', 'polymarket', 'sec_edgar']
 - Fixture-backed activation: **0** []
-- C_global: 0.0
+- C_global: 0.75
 
 ## Decision snapshots & outcomes
 - Decision snapshots: 0 (valid p: 0)
@@ -33,8 +33,8 @@ CalibrationAllowed = I(N>=200) · I(Brier<=0.25) · I(ECE<=0.10)
 - Predictive claim allowed: **False**
 
 ## Evidence score (documentation metric, NOT a trading claim)
-- S_evidence = **0.1**
-- Components: {'source_truth_score': 0.0, 'snapshot_coverage': 0.0, 'outcome_coverage': 0.0, 'calibration_gate_score': 0.0, 'reproducibility_score': 1.0}
+- S_evidence = **0.35**
+- Components: {'source_truth_score': 1.0, 'snapshot_coverage': 0.0, 'outcome_coverage': 0.0, 'calibration_gate_score': 0.0, 'reproducibility_score': 1.0}
 - Weights: {'source': 0.25, 'snapshot': 0.2, 'outcome': 0.25, 'calibration': 0.2, 'reproducibility': 0.1}
 
 ## Reproducibility

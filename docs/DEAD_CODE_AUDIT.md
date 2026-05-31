@@ -199,3 +199,29 @@ Not imported by any other script or test (excludes CLI entry points). Review bef
 2. Move — do not delete — to `scripts/_quarantine/` in a dedicated PR.
 3. Run the full test suite; if green, keep quarantined one release.
 4. Delete only after a release with no regression and explicit sign-off.
+
+## First Real Rows + Kanté Score Push sprint update (2026-05-31)
+
+Inventory snapshot (`scripts/dead_code_inventory.py`, READ-ONLY — never deletes):
+
+- `n_scripts = 409`
+- `unreferenced_candidates = 89` (entry points excluded; candidates for review only)
+- `modules_without_tests = 164`
+- `metaphor_labeled_modules = 34`
+- `legacy_quarantine_files = 3`
+- `deletes_files = False`
+
+**Core live path is now documented** in
+[`CORE_LIVE_PATH_MANIFEST.md`](CORE_LIVE_PATH_MANIFEST.md) — 18 spine files, each
+test-anchored. New advisory-only evidence modules added this sprint and
+registered in `private_scope_guard.EXPLICIT_IN_SCOPE`:
+
+- `scripts/run_daily_live_advisory_decisions.py`
+- `scripts/attach_due_outcomes.py`
+- `scripts/refresh_real_evidence.py`
+- `scripts/api/routers/evidence_router.py` (router package; not a top-level scripts stem)
+
+**Files deleted this sprint:** none. No candidate cleared the
+`DeleteAllowed_f = 1` gate (not imported × not tested × marked legacy/quarantine
+× no runtime reference × full suite green after delete), so nothing was removed —
+the 89 unreferenced candidates remain *deferred* for a dedicated quarantine PR.

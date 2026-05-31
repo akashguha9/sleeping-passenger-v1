@@ -809,6 +809,125 @@ export async function getExternalEvidenceReliability(): Promise<ExternalEvidence
   }
 }
 
+// --------------------------------------------------------------------------- //
+// First Real Rows + Kanté Score Push sprint — read-only /evidence/* surface.
+// Each call returns ``null`` on any failure so the cockpit can render an honest
+// DEGRADED card instead of pretending the data is live.  None of these calls
+// can authorise a trade — the backend routes are strictly read-only.
+// --------------------------------------------------------------------------- //
+export interface EvidenceSourceTruthRow {
+  source_name?: string | null;
+  api_health_status?: string | null;
+  canonical_signal_status?: string | null;
+  rows_added?: number | null;
+  latest_canonical_signal_timestamp?: string | null;
+  canonical_age_hours?: number | null;
+  is_live_canonical?: boolean | null;
+  mock_flag?: boolean | null;
+  backfill_flag?: boolean | null;
+  canary_real?: boolean | null;
+  source_truth_score?: number | null;
+}
+
+export interface EvidenceSourceTruthResponse {
+  status?: string | null;
+  advisory_only?: boolean | null;
+  execution_gate?: string | null;
+  real_source_activation_count?: number | null;
+  fixture_source_activation_count?: number | null;
+  live_canonical_count?: number | null;
+  C_global?: number | null;
+  artifact_present?: boolean | null;
+  sources?: EvidenceSourceTruthRow[] | null;
+}
+
+export interface EvidenceCalibrationResponse {
+  status?: string | null;
+  n_valid_p?: number | null;
+  n_real_forward?: number | null;
+  n_historical_proxy?: number | null;
+  brier_real_forward?: number | null;
+  ece_real_forward?: number | null;
+  logloss_real_forward?: number | null;
+  calibration_status?: string | null;
+  predictive_claim_allowed?: boolean | null;
+  predictive_claim_label?: string | null;
+}
+
+export interface EvidenceBundleResponse {
+  status?: string | null;
+  artifact_present?: boolean | null;
+  generated_at_utc?: string | null;
+  repo_commit?: string | null;
+  evidence_score?: number | null;
+  real_money_ready?: boolean | null;
+  edge_claimed?: boolean | null;
+  predictive_claim_allowed?: boolean | null;
+  bundle_json_path?: string | null;
+  bundle_markdown_path?: string | null;
+}
+
+export interface EvidenceLiveDecisionResponse {
+  status?: string | null;
+  last_decision_id?: string | null;
+  final_advisory_class?: string | null;
+  p_base?: number | null;
+  p_after_moltbook?: number | null;
+  model_probability?: number | null;
+  source_truth_status?: string | null;
+  advisory_only?: boolean | null;
+  execution_gate?: string | null;
+}
+
+export interface EvidenceCapacityRiskResponse {
+  status?: string | null;
+  capacity_ok?: boolean | null;
+  capacity_status?: string | null;
+  correlation_status?: string | null;
+  max_pairwise_correlation?: number | null;
+  block_reason?: string | null;
+}
+
+export async function getEvidenceSourceTruth(): Promise<EvidenceSourceTruthResponse | null> {
+  try {
+    return await apiFetch<EvidenceSourceTruthResponse>('/evidence/source-truth');
+  } catch {
+    return null;
+  }
+}
+
+export async function getEvidenceCalibration(): Promise<EvidenceCalibrationResponse | null> {
+  try {
+    return await apiFetch<EvidenceCalibrationResponse>('/evidence/calibration');
+  } catch {
+    return null;
+  }
+}
+
+export async function getEvidenceBundle(): Promise<EvidenceBundleResponse | null> {
+  try {
+    return await apiFetch<EvidenceBundleResponse>('/evidence/bundle');
+  } catch {
+    return null;
+  }
+}
+
+export async function getEvidenceLiveDecisionPath(): Promise<EvidenceLiveDecisionResponse | null> {
+  try {
+    return await apiFetch<EvidenceLiveDecisionResponse>('/evidence/live-decision-path');
+  } catch {
+    return null;
+  }
+}
+
+export async function getEvidenceCapacityRisk(): Promise<EvidenceCapacityRiskResponse | null> {
+  try {
+    return await apiFetch<EvidenceCapacityRiskResponse>('/evidence/capacity-risk');
+  } catch {
+    return null;
+  }
+}
+
 export function getCsvExportUrl(
   type:
     | 'signal-inbox'

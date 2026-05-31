@@ -1392,6 +1392,30 @@ except ModuleNotFoundError:  # pragma: no cover
 
 
 # ---------------------------------------------------------------------------
+# scripts.api.routers.evidence_router (First Real Rows + Kanté sprint, Phase 2).
+# Read-only cockpit evidence surface; feeds RealEvidenceCards real backend
+# evidence instead of a permanent DEGRADED fallback.  Pure builders are
+# re-exported so tests can patch them:
+#   GET /evidence/source-truth, /evidence/calibration, /evidence/bundle,
+#   GET /evidence/live-decision-path, /evidence/capacity-risk, /evidence/summary
+# ---------------------------------------------------------------------------
+try:
+    from scripts.api.routers.evidence_router import (  # noqa: E402
+        build_router as _build_evidence_router,
+        build_source_truth_payload as _build_evidence_source_truth_payload,  # noqa: F401
+        build_calibration_payload as _build_evidence_calibration_payload,  # noqa: F401
+        build_bundle_payload as _build_evidence_bundle_payload,  # noqa: F401
+        build_live_decision_path_payload as _build_evidence_live_decision_path_payload,  # noqa: F401,E501
+        build_capacity_risk_payload as _build_evidence_capacity_risk_payload,  # noqa: F401
+        build_summary_payload as _build_evidence_summary_payload,  # noqa: F401
+    )
+    if _FASTAPI_AVAILABLE:
+        app.include_router(_build_evidence_router())
+except ModuleNotFoundError:  # pragma: no cover
+    pass
+
+
+# ---------------------------------------------------------------------------
 # Live-sources / live-signals routes — extracted into
 # scripts.api.routers.live_sources_router and
 # scripts.api.routers.live_signals_router (Phase 3).  Helpers

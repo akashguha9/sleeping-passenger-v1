@@ -105,10 +105,12 @@ def _real_loader_records(source_name: str, max_rows: int) -> tuple[list[dict[str
             from scripts.ingestion.polymarket_loader import PolymarketLoader
             from scripts.ingestion.gdelt_loader import GDELTLoader
             from scripts.ingestion.market_data_loader import MarketDataLoader
+            from scripts.ingestion.sec_edgar_loader import SECEdgarLoader
         except ModuleNotFoundError:  # pragma: no cover - flat layout
             from ingestion.polymarket_loader import PolymarketLoader  # type: ignore
             from ingestion.gdelt_loader import GDELTLoader  # type: ignore
             from ingestion.market_data_loader import MarketDataLoader  # type: ignore
+            from ingestion.sec_edgar_loader import SECEdgarLoader  # type: ignore
     except Exception as exc:  # pragma: no cover - defensive
         return [], "DEGRADED", f"loader_import_failed: {type(exc).__name__}"
 
@@ -119,6 +121,11 @@ def _real_loader_records(source_name: str, max_rows: int) -> tuple[list[dict[str
         loader = GDELTLoader(max_records=max_rows)
     elif key == "polymarket":
         loader = PolymarketLoader(limit=max_rows)
+    elif key in ("sec_edgar", "sec", "edgar"):
+        # Read-only public SEC EDGAR over the default watchlist.  Honours the
+        # SEC fair-access policy via the SEC_USER_AGENT env var; skips cleanly
+        # (DEGRADED) when that env var is unset.  No key *value* is ever echoed.
+        loader = SECEdgarLoader(use_default_watchlist=True, max_filings=max_rows)
     else:
         return [], "DEGRADED", f"unknown_source:{source_name}"
 
