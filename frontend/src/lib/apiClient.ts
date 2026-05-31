@@ -874,6 +874,27 @@ export interface EvidenceScoringResponse {
   real_money_ready?: boolean | null;
 }
 
+export interface EvidenceOutcomesResponse {
+  status?: string | null;
+  n_valid_p?: number | null;
+  n_real_forward_pairs?: number | null;
+  n_historical_proxy_pairs?: number | null;
+  n_pending_horizon?: number | null;
+  n_excluded?: number | null;
+  exclusion_reasons?: Record<string, number> | null;
+  brier_real_forward?: number | null;
+  ece_real_forward?: number | null;
+  logloss_real_forward?: number | null;
+  calibration_status?: string | null;
+  predictive_claim_allowed?: boolean | null;
+  predictive_claim_label?: string | null;
+  needed_for_gate?: number | null;
+  n_outcome_gate?: number | null;
+  generated_at_utc?: string | null;
+  edge_claimed?: boolean | null;
+  real_money_ready?: boolean | null;
+}
+
 export interface EvidenceBundleResponse {
   status?: string | null;
   artifact_present?: boolean | null;
@@ -927,6 +948,14 @@ export async function getEvidenceCalibration(): Promise<EvidenceCalibrationRespo
 export async function getEvidenceScoring(): Promise<EvidenceScoringResponse | null> {
   try {
     return await apiFetch<EvidenceScoringResponse>('/evidence/scoring');
+  } catch {
+    return null;
+  }
+}
+
+export async function getEvidenceOutcomes(): Promise<EvidenceOutcomesResponse | null> {
+  try {
+    return await apiFetch<EvidenceOutcomesResponse>('/evidence/outcomes');
   } catch {
     return null;
   }

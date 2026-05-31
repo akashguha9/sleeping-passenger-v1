@@ -62,12 +62,15 @@ _MD_PATH = REPO_ROOT / "docs" / "REAL_EVIDENCE_BUNDLE.md"
 N_SNAPSHOT_TARGET = 200
 N_OUTCOME_TARGET = 200
 
-# S_evidence weights (now include a scoring-coverage axis).
-W_SOURCE = 0.20
-W_SCORING = 0.20
+# S_evidence weights.  The Close-the-Outcome-Loop sprint re-weights the bundle
+# so the forward-outcome corpus (the actual loop closure) and the calibration
+# gate carry the most weight — coverage of *sources* matters less than evidence
+# that horizons closed on real outcomes.  Weights sum to 1.0.
+W_SOURCE = 0.15
+W_SCORING = 0.15
 W_SNAPSHOT = 0.20
-W_OUTCOME = 0.20
-W_CALIBRATION = 0.10
+W_OUTCOME = 0.25
+W_CALIBRATION = 0.15
 W_REPRODUCIBILITY = 0.10
 
 REPRO_COMMAND = (
@@ -215,6 +218,8 @@ def build_evidence_bundle(
             "n_historical_proxy_pairs": calibration["n_historical_proxy"],
             "n_excluded": outcomes["n_excluded"],
             "exclusion_reasons": outcomes["exclusion_reasons"],
+            "outcome_coverage": outcome_coverage,
+            "needed_to_reach_200": max(0, N_OUTCOME_TARGET - int(calibration["n_real_forward"])),
         },
         "calibration": {
             "status": calibration["calibration_status"],
@@ -305,7 +310,7 @@ def render_markdown(bundle: Mapping[str, Any]) -> str:
         f"(N_real_forward < 200 ⇒ predictive claim LOCKED).",
         "- Signal edge is **NOT proven**. Real-money readiness is **NO**.",
         "",
-        "## Decision snapshots & outcomes",
+        "## Decision snapshots & outcomes (the forward loop)",
         f"- Decision snapshots: {bundle['decision_snapshots']['n_snapshots']} "
         f"(valid p: {bundle['decision_snapshots']['n_valid_p']})",
         f"- Real-forward (p, y) pairs: **{bundle['outcomes']['n_real_forward_pairs']}**",
@@ -313,6 +318,12 @@ def render_markdown(bundle: Mapping[str, Any]) -> str:
         f"{bundle['outcomes']['n_historical_proxy_pairs']}",
         f"- Excluded: {bundle['outcomes']['n_excluded']} "
         f"{bundle['outcomes']['exclusion_reasons']}",
+        f"- Outcome coverage: {bundle['outcomes'].get('outcome_coverage', 0.0)} "
+        f"(needed to reach 200: "
+        f"{bundle['outcomes'].get('needed_to_reach_200', N_OUTCOME_TARGET)})",
+        "- A real-forward pair is created ONLY when a decision's horizon has "
+        "elapsed in real calendar time AND a real entry/exit price exists; "
+        "historical proxy / open / unresolved decisions never count.",
         "",
         "## Calibration",
         "",

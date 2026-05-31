@@ -69,6 +69,7 @@ def refresh_real_evidence(
     real_canary: bool = False,
     write: bool = False,
     evidence_by_id: Mapping[str, Mapping[str, Any]] | None = None,
+    use_real_price_evidence: bool = True,
     now_iso: str | None = None,
     canary_json_path: Any = None,
     calibration_json_path: Any = None,
@@ -119,8 +120,15 @@ def refresh_real_evidence(
     steps_run.append(STEPS[2])
 
     # ----- 4. attach due outcomes --------------------------------------- #
+    # Default: attach outcomes from REAL ingested OHLCV bars (market_data) when
+    # no explicit evidence map is supplied.  A test that provides an evidence
+    # map (or disables the real-price path) keeps full control.
     outcomes = attach_due_outcomes(
-        db_path=target, evidence_by_id=evidence_by_id, now_utc=now_iso, write=write
+        db_path=target,
+        evidence_by_id=evidence_by_id,
+        use_real_price_evidence=bool(use_real_price_evidence and evidence_by_id is None),
+        now_utc=now_iso,
+        write=write,
     )
     steps_run.append(STEPS[3])
 
@@ -161,6 +169,9 @@ def refresh_real_evidence(
         # decisions / calibration
         "n_valid_p": calibration["corpus"]["n_valid_p"],
         "n_real_forward": calibration["n_real_forward"],
+        "n_pending_horizon": outcomes.get("pending_horizon", 0),
+        "outcomes_attached_this_run": outcomes.get("outcomes_attached", 0),
+        "needed_to_reach_200": max(0, 200 - int(calibration["n_real_forward"])),
         "delta_n_valid_p": decisions["delta_n_valid_p"],
         "delta_n_real_forward": outcomes["delta_n_real_forward"],
         "brier_real_forward": calibration["brier_real_forward"],

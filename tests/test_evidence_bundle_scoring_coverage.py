@@ -115,9 +115,10 @@ def test_evidence_score_uses_scoring_coverage(scored_db):
     comps = b["s_evidence"]["components"]
     assert "scoring_coverage" in comps
     assert comps["scoring_coverage"] == pytest.approx(2 / 3, abs=1e-6)
-    assert b["s_evidence"]["weights"]["scoring"] == 0.20
+    # Close-the-Outcome-Loop re-weighting: scoring carries 0.15.
+    assert b["s_evidence"]["weights"]["scoring"] == 0.15
     # The scoring component must actually move the total (weight * value > 0).
-    assert b["s_evidence"]["score"] >= 0.20 * comps["scoring_coverage"]
+    assert b["s_evidence"]["score"] >= 0.15 * comps["scoring_coverage"]
 
 
 # --- 5. S_evidence uses snapshot coverage --------------------------------- #

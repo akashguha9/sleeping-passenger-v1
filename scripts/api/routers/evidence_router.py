@@ -277,6 +277,129 @@ def build_calibration_payload(*, db_path: Any = None) -> dict[str, Any]:
 
 
 # --------------------------------------------------------------------------- #
+# GET /evidence/outcomes
+# --------------------------------------------------------------------------- #
+N_OUTCOME_GATE = 200
+
+
+def _count_pending_horizon(db_path: Any) -> int:
+    """Snapshots without an outcome whose prediction horizon has NOT elapsed."""
+    import sqlite3
+    from datetime import datetime, timezone
+
+    try:
+        from scripts.decision_probability_snapshot import TABLE, ensure_schema
+        from scripts.attach_due_outcomes import horizon_elapsed
+    except ModuleNotFoundError:  # pragma: no cover - script-style env
+        from decision_probability_snapshot import TABLE, ensure_schema  # type: ignore
+        from attach_due_outcomes import horizon_elapsed  # type: ignore
+
+    now = datetime.now(timezone.utc)
+    conn = sqlite3.connect(str(db_path))
+    try:
+        conn.row_factory = sqlite3.Row
+        ensure_schema(conn)
+        rows = conn.execute(
+            f"SELECT timestamp_utc, prediction_horizon_days, outcome_label FROM {TABLE}"
+        ).fetchall()
+    except Exception:  # noqa: BLE001
+        return 0
+    finally:
+        conn.close()
+
+    pending = 0
+    for r in rows:
+        if r["outcome_label"] is not None:
+            continue
+        if not horizon_elapsed(
+            decision_ts=r["timestamp_utc"],
+            horizon_days=r["prediction_horizon_days"],
+            now_utc=now,
+        ):
+            pending += 1
+    return pending
+
+
+def build_outcomes_payload(*, db_path: Any = None) -> dict[str, Any]:
+    """Honest forward-outcome corpus status (read-only).
+
+    Surfaces the real-forward (p, y) corpus that closes the calibration loop:
+    how many pairs exist, how many are still pending their horizon, how many were
+    excluded (and why), the Brier/ECE/LogLoss on the real-forward corpus, and how
+    many more pairs are needed to reach the N=200 gate.  ``predictive_claim_allowed``
+    is surfaced verbatim and stays ``False`` until N>=200 with Brier<=0.25,
+    ECE<=0.10.
+    """
+    safety = _safety_stamps()
+    target = db_path if db_path is not None else _db_path()
+    try:
+        try:
+            from scripts.real_calibration_evidence import build_calibration_evidence
+            from scripts.outcome_labeling_flow import build_outcome_corpus_summary
+            from scripts.decision_probability_snapshot import count_valid_p
+        except ModuleNotFoundError:  # pragma: no cover - script-style env
+            from real_calibration_evidence import build_calibration_evidence  # type: ignore
+            from outcome_labeling_flow import build_outcome_corpus_summary  # type: ignore
+            from decision_probability_snapshot import count_valid_p  # type: ignore
+
+        ev = build_calibration_evidence(target)
+        summary = build_outcome_corpus_summary(target)
+        n_valid_p = int(count_valid_p(target))
+        n_pending = _count_pending_horizon(target)
+    except Exception as exc:  # noqa: BLE001 - never crash the route
+        payload = {
+            "status": STATUS_DEGRADED,
+            "reason": f"{type(exc).__name__}",
+            "n_valid_p": 0,
+            "n_real_forward_pairs": 0,
+            "n_pending_horizon": 0,
+            "n_excluded": 0,
+            "exclusion_reasons": {},
+            "brier_real_forward": None,
+            "ece_real_forward": None,
+            "logloss_real_forward": None,
+            "calibration_status": INSUFFICIENT_EVIDENCE,
+            "predictive_claim_allowed": False,
+            "predictive_claim_label": PREDICTIVE_CLAIM_LOCKED,
+            "needed_for_gate": N_OUTCOME_GATE,
+            "n_outcome_gate": N_OUTCOME_GATE,
+            "generated_at_utc": None,
+        }
+        payload.update(safety)
+        return payload
+
+    n_real_forward = int(ev.get("n_real_forward", 0))
+    predictive = bool(ev.get("predictive_claim_allowed"))
+    payload = {
+        "status": STATUS_OK,
+        "n_valid_p": n_valid_p,
+        "n_real_forward_pairs": n_real_forward,
+        "n_historical_proxy_pairs": int(ev.get("n_historical_proxy", 0)),
+        "n_pending_horizon": int(n_pending),
+        "n_excluded": int(summary.get("n_excluded", 0)),
+        "exclusion_reasons": dict(summary.get("exclusion_reasons") or {}),
+        "brier_real_forward": ev.get("brier_real_forward"),
+        "ece_real_forward": ev.get("ece_real_forward"),
+        "logloss_real_forward": ev.get("logloss_real_forward"),
+        "n_min": ev.get("n_min", N_OUTCOME_GATE),
+        "brier_threshold": ev.get("brier_threshold"),
+        "ece_threshold": ev.get("ece_threshold"),
+        "calibration_status": ev.get("calibration_status", INSUFFICIENT_EVIDENCE),
+        "predictive_claim_allowed": predictive,
+        "predictive_claim_label": (
+            STATUS_OK if predictive else PREDICTIVE_CLAIM_LOCKED
+        ),
+        "needed_for_gate": max(0, N_OUTCOME_GATE - n_real_forward),
+        "n_outcome_gate": N_OUTCOME_GATE,
+        "generated_at_utc": ev.get("generated_at_utc"),
+        "edge_claimed": False,
+        "real_money_ready": False,
+    }
+    payload.update(safety)
+    return _strip_secrets(payload)
+
+
+# --------------------------------------------------------------------------- #
 # GET /evidence/scoring
 # --------------------------------------------------------------------------- #
 def build_scoring_payload(*, db_path: Any = None) -> dict[str, Any]:
@@ -543,6 +666,7 @@ def build_summary_payload(*, db_path: Any = None) -> dict[str, Any]:
     source_truth = build_source_truth_payload(db_path=db_path)
     calibration = build_calibration_payload(db_path=db_path)
     scoring = build_scoring_payload(db_path=db_path)
+    outcomes = build_outcomes_payload(db_path=db_path)
     bundle = build_bundle_payload()
     decision = build_live_decision_path_payload(db_path=db_path)
 
@@ -556,6 +680,10 @@ def build_summary_payload(*, db_path: Any = None) -> dict[str, Any]:
         "scoring_coverage": scoring.get("scoring_coverage", 0.0),
         "n_valid_p": calibration.get("n_valid_p", 0),
         "n_real_forward": calibration.get("n_real_forward", 0),
+        "n_real_forward_pairs": outcomes.get("n_real_forward_pairs", 0),
+        "n_pending_horizon": outcomes.get("n_pending_horizon", 0),
+        "n_excluded_outcomes": outcomes.get("n_excluded", 0),
+        "needed_for_gate": outcomes.get("needed_for_gate", N_OUTCOME_GATE),
         "calibration_status": calibration.get("calibration_status", INSUFFICIENT_EVIDENCE),
         "predictive_claim_allowed": bool(calibration.get("predictive_claim_allowed", False)),
         "evidence_score": bundle.get("evidence_score"),
@@ -590,6 +718,10 @@ def get_evidence_scoring() -> dict[str, Any]:
     return _resolve("_build_evidence_scoring_payload", build_scoring_payload)()
 
 
+def get_evidence_outcomes() -> dict[str, Any]:
+    return _resolve("_build_evidence_outcomes_payload", build_outcomes_payload)()
+
+
 def get_evidence_bundle() -> dict[str, Any]:
     return _resolve("_build_evidence_bundle_payload", build_bundle_payload)()
 
@@ -613,6 +745,7 @@ def build_router():
     router.get("/evidence/source-truth")(get_evidence_source_truth)
     router.get("/evidence/calibration")(get_evidence_calibration)
     router.get("/evidence/scoring")(get_evidence_scoring)
+    router.get("/evidence/outcomes")(get_evidence_outcomes)
     router.get("/evidence/bundle")(get_evidence_bundle)
     router.get("/evidence/live-decision-path")(get_evidence_live_decision_path)
     router.get("/evidence/capacity-risk")(get_evidence_capacity_risk)
@@ -629,6 +762,7 @@ __all__ = [
     "build_source_truth_payload",
     "build_calibration_payload",
     "build_scoring_payload",
+    "build_outcomes_payload",
     "build_bundle_payload",
     "build_live_decision_path_payload",
     "build_capacity_risk_payload",

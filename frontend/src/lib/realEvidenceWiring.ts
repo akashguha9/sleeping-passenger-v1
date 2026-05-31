@@ -17,6 +17,7 @@
 import type {
   EvidenceSourceTruthResponse,
   EvidenceCalibrationResponse,
+  EvidenceOutcomesResponse,
   EvidenceBundleResponse,
   EvidenceLiveDecisionResponse,
   EvidenceCapacityRiskResponse,
@@ -26,6 +27,7 @@ import type {
   DataMode,
   SourceTruthCardProps,
   CalibrationEvidenceCardProps,
+  OutcomeLoopCardProps,
   EvidenceBundleCardProps,
   LiveDecisionPathCardProps,
   CapacityCorrelationCardProps,
@@ -89,6 +91,37 @@ export function mapCalibrationProps(
     calibrationStatus: resp?.calibration_status ?? 'INSUFFICIENT_EVIDENCE',
     // Never optimistic: only an explicit `true` unlocks the claim.
     predictiveClaimAllowed: resp?.predictive_claim_allowed === true,
+    mode,
+  };
+}
+
+/**
+ * Map the /evidence/outcomes payload into the forward-outcome-loop card props.
+ *
+ * Honesty rules:
+ *   - DEGRADED whenever the endpoint is null or self-reports DEGRADED.
+ *   - The predictive claim is only ever unlocked by an explicit `true`.
+ *   - NEEDED_FOR_GATE falls back to (200 − N) when the backend omits it, so the
+ *     gap is never silently shown as zero.
+ */
+export function mapOutcomeLoopProps(
+  resp: EvidenceOutcomesResponse | null,
+): OutcomeLoopCardProps {
+  const mode: DataMode = !resp || !isHealthy(resp.status) ? 'DEGRADED' : 'LIVE';
+  const nGate = resp?.n_outcome_gate ?? 200;
+  const nReal = resp?.n_real_forward_pairs ?? 0;
+  return {
+    nRealForwardPairs: nReal,
+    nPendingHorizon: resp?.n_pending_horizon ?? 0,
+    nExcluded: resp?.n_excluded ?? 0,
+    exclusionReasons: resp?.exclusion_reasons ?? {},
+    brier: resp?.brier_real_forward ?? null,
+    ece: resp?.ece_real_forward ?? null,
+    logloss: resp?.logloss_real_forward ?? null,
+    calibrationStatus: resp?.calibration_status ?? 'INSUFFICIENT_EVIDENCE',
+    predictiveClaimAllowed: resp?.predictive_claim_allowed === true,
+    neededForGate: resp?.needed_for_gate ?? Math.max(0, nGate - nReal),
+    nGate,
     mode,
   };
 }

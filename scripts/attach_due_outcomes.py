@@ -64,9 +64,19 @@ except ModuleNotFoundError:  # pragma: no cover - flat-layout fallback
 REASON_NO_PRICE_EVIDENCE = "NO_PRICE_EVIDENCE"
 REASON_AMBIGUOUS_OUTCOME = "AMBIGUOUS_OUTCOME_NOT_RESOLVED"
 REASON_OPEN_TRADE = "OPEN_TRADE_NOT_RESOLVED"
+REASON_MISSING_TARGET_DEFINITION = "MISSING_TARGET_EVENT_DEFINITION"
+REASON_MISSING_PROBABILITY = "MISSING_PROBABILITY"
 
 # An evidence provider maps a decision_id -> realized-evidence mapping, or None.
 EvidenceProvider = Callable[[str], Mapping[str, Any] | None]
+
+
+def _valid_probability(p: Any) -> bool:
+    try:
+        pf = float(p)
+    except (TypeError, ValueError):
+        return False
+    return 0.0 <= pf <= 1.0
 
 
 def _parse_iso(ts: str | None) -> datetime | None:
@@ -162,7 +172,7 @@ def _due_snapshots(db_path: Any, now_utc: datetime) -> list[dict[str, Any]]:
         ensure_schema(conn)
         rows = conn.execute(
             f"SELECT snapshot_id, timestamp_utc, prediction_horizon_days,"
-            f" model_probability, outcome_label FROM {TABLE}"
+            f" model_probability, target_event_definition, outcome_label FROM {TABLE}"
         ).fetchall()
     finally:
         conn.close()
@@ -173,6 +183,12 @@ def _n_real_forward(db_path: Any) -> int:
     return len(extract_datasets(db_path)["real_forward"])
 
 
+def _is_blank_target(target_event_definition: Any) -> bool:
+    """A decision with no usable target-event definition cannot be labelled."""
+    text = str(target_event_definition or "").strip()
+    return text == ""
+
+
 def attach_due_outcomes(
     *,
     db_path: Any = None,
@@ -181,14 +197,22 @@ def attach_due_outcomes(
     now_utc: str | None = None,
     target_return_threshold: float = 0.0,
     alpha_threshold: float = 0.0,
+    use_real_price_evidence: bool = False,
+    benchmark_symbol: str | None = None,
     write: bool = True,
 ) -> dict[str, Any]:
     """Attach realized outcomes to decisions whose horizon has elapsed.
 
     ``evidence_provider`` (or ``evidence_by_id``) supplies realized-price
-    evidence per decision_id.  A decision with no evidence stays *pending*; one
-    with ambiguous/missing price data is recorded as *excluded* with a reason.
-    Nothing is ever fabricated.
+    evidence per decision_id.  When ``use_real_price_evidence`` is set and no
+    explicit provider/map is given, a real-OHLCV provider is built from the
+    ingested ``market_data`` bars (see ``real_price_outcome_evidence``).
+
+    A decision with no evidence stays *excluded* (``NO_PRICE_EVIDENCE``); an open
+    trade stays *pending*; a snapshot with no target-event definition is
+    *excluded* (``MISSING_TARGET_EVENT_DEFINITION``); one carrying no usable
+    probability is recorded but never counts toward the gate.  Nothing is ever
+    fabricated.
     """
     stamps = advisory_safety_stamps()
     target = db_path if db_path is not None else persistence.DB_PATH
@@ -198,13 +222,36 @@ def attach_due_outcomes(
         def evidence_provider(did: str):  # type: ignore[misc]
             return evidence_by_id.get(did)
 
+    # Default real-price provider: read real OHLCV entry/exit bars.  Opt-in so
+    # the deterministic offline tests keep supplying their own evidence map.
+    if evidence_provider is None and use_real_price_evidence:
+        try:  # local import to avoid a hard dependency cycle
+            try:
+                from scripts.real_price_outcome_evidence import (
+                    make_real_price_evidence_provider,
+                )
+            except ModuleNotFoundError:  # pragma: no cover - flat-layout fallback
+                from real_price_outcome_evidence import (  # type: ignore[no-redef]
+                    make_real_price_evidence_provider,
+                )
+            evidence_provider = make_real_price_evidence_provider(
+                target, now_utc=now_utc, benchmark_symbol=benchmark_symbol,
+            )
+        except Exception:  # pragma: no cover - never crash the loop
+            evidence_provider = None
+
     n_before = _n_real_forward(target)
 
     snapshots = _due_snapshots(target, now_dt)
+    snapshots_seen = len(snapshots)
     due_decisions = 0
     outcomes_attached = 0
     pending = 0
+    pending_horizon = 0
     excluded = 0
+    excluded_missing_price = 0
+    excluded_missing_target_definition = 0
+    excluded_missing_probability = 0
     details: list[dict[str, Any]] = []
 
     for snap in snapshots:
@@ -219,14 +266,25 @@ def attach_due_outcomes(
         )
         if not elapsed:
             pending += 1
+            pending_horizon += 1
             continue
 
         due_decisions += 1
+
+        # A due decision with no target-event definition cannot be labelled.
+        if _is_blank_target(snap.get("target_event_definition")):
+            excluded += 1
+            excluded_missing_target_definition += 1
+            details.append({"decision_id": did, "status": "EXCLUDED",
+                            "reason": REASON_MISSING_TARGET_DEFINITION})
+            continue
+
         evidence = evidence_provider(did) if evidence_provider else None
         if not evidence:
             # Horizon elapsed but no realized-price evidence -> excluded with a
             # reason (it cannot be labelled), never silently pending-forever.
             excluded += 1
+            excluded_missing_price += 1
             details.append({"decision_id": did, "status": "EXCLUDED",
                             "reason": REASON_NO_PRICE_EVIDENCE})
             continue
@@ -238,6 +296,11 @@ def attach_due_outcomes(
                             "reason": REASON_OPEN_TRADE})
             continue
 
+        # No usable probability at decision time -> recorded honestly but it can
+        # never count toward the real-forward gate.
+        if not _valid_probability(snap.get("model_probability")):
+            excluded_missing_probability += 1
+
         y, reason = compute_outcome_label(
             evidence,
             target_return_threshold=target_return_threshold,
@@ -245,6 +308,7 @@ def attach_due_outcomes(
         )
         if y is None:
             excluded += 1
+            excluded_missing_price += 1
             details.append({"decision_id": did, "status": "EXCLUDED",
                             "reason": reason or REASON_NO_PRICE_EVIDENCE})
             continue
@@ -272,15 +336,21 @@ def attach_due_outcomes(
                             "calibration_eligible": res.get("calibration_eligible")})
         else:
             excluded += 1
+            excluded_missing_price += 1
             details.append({"decision_id": did, "status": "EXCLUDED",
                             "reason": res.get("reason")})
 
     n_after = _n_real_forward(target) if write else n_before
     out = {
+        "snapshots_seen": snapshots_seen,
         "due_decisions": due_decisions,
         "outcomes_attached": outcomes_attached,
         "pending": pending,
+        "pending_horizon": pending_horizon,
         "excluded": excluded,
+        "excluded_missing_price": excluded_missing_price,
+        "excluded_missing_target_definition": excluded_missing_target_definition,
+        "excluded_missing_probability": excluded_missing_probability,
         "n_real_forward_before": n_before,
         "n_real_forward_after": n_after,
         "delta_n_real_forward": n_after - n_before,
@@ -307,6 +377,13 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         default=None,
         help="optional path to a JSON map of decision_id -> realized evidence",
     )
+    p.add_argument(
+        "--real-price-evidence",
+        action="store_true",
+        help="attach outcomes from real ingested OHLCV bars (market_data) when "
+        "no explicit evidence map is supplied",
+    )
+    p.add_argument("--benchmark-symbol", default=None)
     p.add_argument("--write", action="store_true")
     return p.parse_args(argv)
 
@@ -328,6 +405,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         evidence_by_id=evidence_by_id,
         target_return_threshold=args.target_return_threshold,
         alpha_threshold=args.alpha_threshold,
+        use_real_price_evidence=bool(args.real_price_evidence),
+        benchmark_symbol=args.benchmark_symbol,
         write=bool(args.write),
     )
     # Print without the per-decision details (which could be large).
@@ -344,6 +423,8 @@ __all__ = [
     "REASON_NO_PRICE_EVIDENCE",
     "REASON_AMBIGUOUS_OUTCOME",
     "REASON_OPEN_TRADE",
+    "REASON_MISSING_TARGET_DEFINITION",
+    "REASON_MISSING_PROBABILITY",
     "horizon_elapsed",
     "compute_outcome_label",
     "attach_due_outcomes",

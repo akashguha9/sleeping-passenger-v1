@@ -395,6 +395,81 @@ export function CalibrationEvidenceCard({
 }
 
 // --------------------------------------------------------------------------- //
+// 5b. Outcome Loop Card — real-forward (p, y) corpus + gate gap
+// --------------------------------------------------------------------------- //
+export interface OutcomeLoopCardProps {
+  nRealForwardPairs?: number | null;
+  nPendingHorizon?: number | null;
+  nExcluded?: number | null;
+  exclusionReasons?: Record<string, number> | null;
+  brier?: number | null;
+  ece?: number | null;
+  logloss?: number | null;
+  calibrationStatus?: string | null;
+  predictiveClaimAllowed?: boolean | null;
+  neededForGate?: number | null;
+  nGate?: number;
+  mode?: DataMode;
+}
+
+export function OutcomeLoopCard({
+  nRealForwardPairs = 0,
+  nPendingHorizon = 0,
+  nExcluded = 0,
+  exclusionReasons = {},
+  brier = null,
+  ece = null,
+  logloss = null,
+  calibrationStatus = 'INSUFFICIENT_EVIDENCE',
+  predictiveClaimAllowed = false,
+  neededForGate = 200,
+  nGate = 200,
+  mode = 'LIVE',
+}: OutcomeLoopCardProps) {
+  const allowed = predictiveClaimAllowed === true;
+  const status = (calibrationStatus ?? 'INSUFFICIENT_EVIDENCE').toUpperCase();
+  const reasons = exclusionReasons ?? {};
+  const reasonText =
+    Object.keys(reasons).length > 0
+      ? Object.entries(reasons)
+          .map(([k, v]) => `${k}:${v}`)
+          .join(', ')
+      : '—';
+  return (
+    <Shell testid="outcome-loop-card" title="Forward Outcome Loop" mode={mode}>
+      <Row label="N_REAL_FORWARD" value={fmt(nRealForwardPairs)} testid="outcome-n-real-forward" />
+      <Row label="PENDING_HORIZON" value={fmt(nPendingHorizon)} testid="outcome-pending-horizon" />
+      <Row label="EXCLUDED_OUTCOMES" value={fmt(nExcluded)} testid="outcome-excluded" />
+      <Row label="exclusion_reasons" value={reasonText} valueClass="font-mono text-[11px]" />
+      <Row label="BRIER" value={fmt(brier)} testid="outcome-brier" />
+      <Row label="ECE" value={fmt(ece)} testid="outcome-ece" />
+      <Row label="LOGLOSS" value={fmt(logloss)} testid="outcome-logloss" />
+      <Row
+        label="NEEDED_FOR_GATE (200 − N)"
+        value={fmt(neededForGate)}
+        testid="outcome-needed-for-gate"
+        valueClass="font-mono text-amber-400"
+      />
+      <Row label="calibration_status" value={status} valueClass="font-mono text-amber-400" />
+      {allowed ? (
+        <Row
+          label="predictive_claim_allowed"
+          value="true"
+          testid="outcome-predictive-allowed"
+          valueClass="font-mono text-emerald-400"
+        />
+      ) : (
+        <p data-testid="outcome-calibration-locked" className="text-xs text-amber-400 mt-1">
+          CALIBRATION_LOCKED — {fmt(neededForGate)} more real-forward outcomes
+          needed before any predictive claim. Scores are advisory-only and
+          uncalibrated.
+        </p>
+      )}
+    </Shell>
+  );
+}
+
+// --------------------------------------------------------------------------- //
 // 6. Evidence Bundle Card
 // --------------------------------------------------------------------------- //
 export interface EvidenceBundleCardProps {

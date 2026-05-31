@@ -1405,6 +1405,7 @@ try:
         build_source_truth_payload as _build_evidence_source_truth_payload,  # noqa: F401
         build_calibration_payload as _build_evidence_calibration_payload,  # noqa: F401
         build_scoring_payload as _build_evidence_scoring_payload,  # noqa: F401
+        build_outcomes_payload as _build_evidence_outcomes_payload,  # noqa: F401
         build_bundle_payload as _build_evidence_bundle_payload,  # noqa: F401
         build_live_decision_path_payload as _build_evidence_live_decision_path_payload,  # noqa: F401,E501
         build_capacity_risk_payload as _build_evidence_capacity_risk_payload,  # noqa: F401
