@@ -340,6 +340,16 @@ EXPLICIT_IN_SCOPE: frozenset[str] = frozenset({
     # no AI trade execution.  Core MVP "score them, capture the decision"
     # surface, so explicitly in scope.
     "live_decision_path.py",
+    # Real Evidence Sprint — advisory-only, read-only evidence layer.  All
+    # modules are pure compute / read-only SQLite + JSON; no broker execution,
+    # no order placement, no API trading writes.  Names lack an approved-domain
+    # substring (real_calibration_evidence.py already matches "calibration")
+    # but they are core MVP evidence/risk surface, so explicitly in scope.
+    "real_evidence_canary.py",        # read-only >=3-source canary; mock/backfill never canonical
+    "outcome_labeling_flow.py",       # attaches real (p,y) outcomes; rejects open/unresolved/fake
+    "real_evidence_bundle.py",        # composes the honest, reproducible evidence bundle
+    "portfolio_correlation_guard.py", # cross-position correlation/exposure guard; missing data => UNKNOWN => block
+    "dead_code_inventory.py",         # read-only dead-code/maintainability map; never deletes
 })
 
 # Modules deliberately marked OUT_OF_SCOPE inside ``scripts/``.  This

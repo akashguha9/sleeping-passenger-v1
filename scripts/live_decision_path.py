@@ -46,6 +46,9 @@ try:  # pragma: no cover - exercised both ways across the suite
         apply_moltbook_adjustment, signature_from_dict,
     )
     from scripts.capital_rotation_guard import evaluate_capacity
+    from scripts.portfolio_correlation_guard import (
+        STATUS_NOT_EVALUATED, evaluate_correlation_guard,
+    )
     from scripts.admission_gates import ADVISORY_CANDIDATE, WATCHLIST, evaluate_admission_gates
     from scripts.decision_probability_snapshot import build_decision_snapshot, record_decision_probability
 except ModuleNotFoundError:  # pragma: no cover - flat-layout fallback
@@ -57,6 +60,9 @@ except ModuleNotFoundError:  # pragma: no cover - flat-layout fallback
         apply_moltbook_adjustment, signature_from_dict,
     )
     from capital_rotation_guard import evaluate_capacity  # type: ignore[no-redef]
+    from portfolio_correlation_guard import (  # type: ignore[no-redef]
+        STATUS_NOT_EVALUATED, evaluate_correlation_guard,
+    )
     from admission_gates import ADVISORY_CANDIDATE, WATCHLIST, evaluate_admission_gates  # type: ignore[no-redef]
     from decision_probability_snapshot import build_decision_snapshot, record_decision_probability  # type: ignore[no-redef]
 
@@ -108,6 +114,13 @@ def run_live_decision_path(
     side: str = "BUY",
     regime_ok: bool = True,
     existing_country_exposure: float = 0.0,
+    # ----- Phase 5: portfolio correlation guard (opt-in) -----------------
+    candidate_weight: float | None = None,
+    portfolio_positions: Iterable[Mapping[str, Any]] | None = None,
+    returns_by_ticker: Mapping[str, Any] | None = None,
+    correlation_matrix: Mapping[Any, float] | None = None,
+    covariance_matrix: Mapping[Any, float] | None = None,
+    portfolio_sigma2_max: float | None = None,
     db_path: Any = None,
 ) -> dict[str, Any]:
     """Run one candidate through the full advisory decision path.
@@ -193,6 +206,38 @@ def run_live_decision_path(
         capacity_ok = bool(capacity.get("portfolio_capacity_ok"))
     # Advisory-language alias — never frame size as an order quantity.
     capacity["suggested_paper_notional"] = capacity.get("position_notional")
+
+    # ----- 4b. Portfolio correlation guard (opt-in, conservative) --------
+    # Only evaluated when a portfolio context is supplied; otherwise inert so
+    # the per-position path is unchanged.  Missing covariance => UNKNOWN =>
+    # blocks capacity (never promotes).  It can NEVER unlock execution.
+    if candidate_weight is not None:
+        correlation_guard = evaluate_correlation_guard(
+            candidate={
+                "ticker": ticker or signal_id,
+                "weight": candidate_weight,
+                "sector": sector,
+                "country": country,
+            },
+            existing_positions=list(portfolio_positions or []),
+            returns_by_ticker=returns_by_ticker,
+            correlation_matrix=correlation_matrix,
+            covariance_matrix=covariance_matrix,
+            sigma2_max=portfolio_sigma2_max,
+        )
+        capacity["correlation_guard"] = correlation_guard
+        if not correlation_guard["correlation_guard_ok"]:
+            # Correlation/exposure risk (or missing data) downgrades capacity.
+            capacity_ok = False
+            capacity["capacity_status"] = "CAPACITY_BLOCKED"
+            reason = correlation_guard.get("correlation_block_reason") or "correlation_guard_blocked"
+            capacity.setdefault("blocking_reasons", []).append(reason)
+    else:
+        capacity["correlation_guard"] = {
+            "correlation_status": STATUS_NOT_EVALUATED,
+            "correlation_guard_ok": True,
+            "correlation_block_reason": "no portfolio context supplied",
+        }
 
     # ----- 5. Admission gates --------------------------------------------
     gate_candidate = {

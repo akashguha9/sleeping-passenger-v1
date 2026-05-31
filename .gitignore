@@ -89,6 +89,8 @@ data/paper_trades/*
 !data/logs/
 data/logs/*
 !data/logs/.gitkeep
+# Transient daily-payload backups (timestamped runtime junk; see docs/DEAD_CODE_AUDIT.md)
+data/daily_payload_backup_*/
 *.csv
 *.tsv
 *.parquet

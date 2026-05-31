@@ -4,6 +4,13 @@ import { useState, useEffect } from 'react';
 import { getDiagnosticsCockpit, type CockpitResponse } from '@/lib/apiClient';
 import { AdvisoryOnlyBadge } from '@/components/AdvisoryOnlyBadge';
 import { CalibrationUncertaintyCard } from '@/components/CalibrationUncertaintyCard';
+import {
+  SourceTruthCard,
+  GateVectorCard,
+  CapacityCorrelationCard,
+  CalibrationEvidenceCard,
+  EvidenceBundleCard,
+} from '@/components/RealEvidenceCards';
 
 function Stat({ label, value }: { label: string; value: string | number }) {
   return (
@@ -187,6 +194,28 @@ export default function CockpitPage() {
           />
         );
       })()}
+
+      {/* Real Evidence proof — ALWAYS visible. No dedicated live endpoint is
+          wired yet, so these render in a DEGRADED fallback labelled DEGRADED
+          (never faked LIVE) until the canary / calibration_evidence / bundle
+          endpoints exist. The honest current state is the safe default. */}
+      <section data-testid="real-evidence-section" className="space-y-3">
+        <h2 className="text-sm font-semibold text-slate-300">
+          Real Evidence (live-path proof)
+        </h2>
+        <p className="text-[11px] text-slate-500">
+          No live evidence endpoint is wired yet — cards show the truthful
+          current state in a DEGRADED fallback. They are never shown as LIVE
+          when unproven.
+        </p>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          <SourceTruthCard mode="DEGRADED" />
+          <GateVectorCard mode="DEGRADED" gatePassed={false} blockedBy={['no live evidence endpoint wired']} />
+          <CapacityCorrelationCard mode="DEGRADED" />
+          <CalibrationEvidenceCard mode="DEGRADED" />
+          <EvidenceBundleCard mode="DEGRADED" />
+        </div>
+      </section>
 
       {loading ? (
         <div className="text-center py-16 text-slate-500 text-sm">Loading cockpit…</div>
