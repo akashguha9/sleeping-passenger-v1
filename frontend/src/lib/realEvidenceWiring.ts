@@ -125,6 +125,9 @@ export function mapOutcomeLoopProps(
     predictiveClaimAllowed: resp?.predictive_claim_allowed === true,
     neededForGate: resp?.needed_for_gate ?? Math.max(0, nGate - nReal),
     nGate,
+    // Real-forward maturation visibility (Real-Forward Outcome Maturation Sprint).
+    nextDueInHours: resp?.next_due_in_hours ?? resp?.maturation?.next_due_in_hours ?? null,
+    deltaRealForwardLastRun: resp?.maturation?.delta_n_real_forward_last_run ?? null,
     forwardEligibleBefore: resp?.forward_throughput?.forward_eligible_before ?? null,
     forwardEligibleAfter: resp?.forward_throughput?.forward_eligible_after ?? null,
     eligibilityRateAfter: resp?.forward_throughput?.eligibility_rate_after ?? null,

@@ -412,6 +412,9 @@ export interface OutcomeLoopCardProps {
   predictiveClaimAllowed?: boolean | null;
   neededForGate?: number | null;
   nGate?: number;
+  // Real-forward maturation visibility (Real-Forward Outcome Maturation Sprint).
+  nextDueInHours?: number | null;
+  deltaRealForwardLastRun?: number | null;
   // Forward-eligible throughput visibility (Increase Forward-Eligible Throughput Sprint).
   forwardEligibleBefore?: number | null;
   forwardEligibleAfter?: number | null;
@@ -441,6 +444,8 @@ export function OutcomeLoopCard({
   predictiveClaimAllowed = false,
   neededForGate = 200,
   nGate = 200,
+  nextDueInHours = null,
+  deltaRealForwardLastRun = null,
   forwardEligibleBefore = null,
   forwardEligibleAfter = null,
   eligibilityRateAfter = null,
@@ -526,8 +531,30 @@ export function OutcomeLoopCard({
         </>
       )}
       <Row label="DUE_FORWARD" value={fmt(nDueForward)} testid="outcome-due-forward" />
-      <Row label="N_REAL_FORWARD" value={fmt(nRealForwardPairs)} testid="outcome-n-real-forward" />
+      <Row
+        label="NEXT_DUE_IN_HOURS"
+        value={fmt(nextDueInHours)}
+        testid="outcome-next-due-in-hours"
+        valueClass="font-mono text-sky-300"
+      />
+      <Row
+        label="REAL_FORWARD_PAIRS"
+        value={fmt(nRealForwardPairs)}
+        testid="outcome-n-real-forward"
+      />
+      <Row
+        label="DELTA_REAL_FORWARD_LAST_RUN"
+        value={fmt(deltaRealForwardLastRun)}
+        testid="outcome-delta-real-forward"
+        valueClass="font-mono"
+      />
       <Row label="PENDING_HORIZON" value={fmt(nPendingHorizon)} testid="outcome-pending-horizon" />
+      {(nRealForwardPairs ?? 0) > 0 && (nRealForwardPairs ?? 0) < nGate ? (
+        <p data-testid="outcome-first-pairs" className="text-xs text-sky-300 mt-1">
+          FIRST_PAIRS_ATTACHED — {fmt(nRealForwardPairs)} real-forward outcome(s)
+          attached, still below the N={nGate} gate. No predictive claim is made.
+        </p>
+      ) : null}
       <Row
         label="forward_unavailable_reasons"
         value={fwdReasonText}

@@ -453,6 +453,74 @@ def build_forward_throughput(db_path: Any) -> dict[str, Any]:
     return base
 
 
+def build_maturation_payload(db_path: Any) -> dict[str, Any]:
+    """Real-forward maturation visibility block (read-only, advisory-only).
+
+    Surfaces — from the read-only maturity scanner — how many snapshots are
+    forward-eligible, pending their horizon, due now, and already attached, plus
+    when the next horizon becomes due and the live Brier/ECE on the real-forward
+    corpus.  ``predictive_claim_allowed`` is always surfaced verbatim and stays
+    ``False`` until N>=200 clears Brier<=0.25 / ECE<=0.10.  ``status_detail`` is
+    ``FIRST_REAL_FORWARD_PAIRS_ATTACHED_BUT_BELOW_GATE`` once the first pairs
+    attach (still locked).
+    """
+    base = {
+        "n_forward_eligible": 0,
+        "n_pending_horizon": 0,
+        "n_due_forward": 0,
+        "n_real_forward_pairs": 0,
+        "delta_n_real_forward_last_run": None,
+        "next_due_in_hours": None,
+        "earliest_horizon_close_utc": None,
+        "brier_real_forward": None,
+        "ece_real_forward": None,
+        "logloss_real_forward": None,
+        "n_needed_to_200": N_OUTCOME_GATE,
+        "calibration_status": INSUFFICIENT_EVIDENCE,
+        "status_detail": "NO_REAL_FORWARD_PAIRS",
+        "predictive_claim_allowed": False,
+    }
+    try:
+        try:
+            from scripts.forward_outcome_maturity_scanner import scan_forward_outcome_maturity
+            from scripts.real_calibration_evidence import build_calibration_evidence
+        except ModuleNotFoundError:  # pragma: no cover - script-style env
+            from forward_outcome_maturity_scanner import scan_forward_outcome_maturity  # type: ignore
+            from real_calibration_evidence import build_calibration_evidence  # type: ignore
+        scan = scan_forward_outcome_maturity(db_path=db_path)
+        cal = build_calibration_evidence(db_path)
+    except Exception:  # noqa: BLE001 - never crash the route
+        return base
+
+    n_real = int(cal.get("n_real_forward", 0))
+    # The last-run attach delta is read from the optional persisted daily report
+    # artifact when present; otherwise it is reported as null (never invented).
+    delta = None
+    artifact = _load_json(_release_dir() / "daily_maturation_report.json")
+    if isinstance(artifact, dict) and "delta_n_real_forward" in artifact:
+        try:
+            delta = int(artifact["delta_n_real_forward"])
+        except (TypeError, ValueError):
+            delta = None
+    base.update({
+        "n_forward_eligible": int(scan["n_forward_eligible"]),
+        "n_pending_horizon": int(scan["n_pending_horizon"]),
+        "n_due_forward": int(scan["n_due_forward"]),
+        "n_real_forward_pairs": n_real,
+        "delta_n_real_forward_last_run": delta,
+        "next_due_in_hours": scan["next_due_in_hours"],
+        "earliest_horizon_close_utc": scan["earliest_horizon_close_utc"],
+        "brier_real_forward": cal.get("brier_real_forward"),
+        "ece_real_forward": cal.get("ece_real_forward"),
+        "logloss_real_forward": cal.get("logloss_real_forward"),
+        "n_needed_to_200": max(0, N_OUTCOME_GATE - n_real),
+        "calibration_status": cal.get("calibration_status", INSUFFICIENT_EVIDENCE),
+        "status_detail": cal.get("status_detail", "NO_REAL_FORWARD_PAIRS"),
+        "predictive_claim_allowed": bool(cal.get("predictive_claim_allowed")),
+    })
+    return base
+
+
 def build_outcomes_payload(*, db_path: Any = None) -> dict[str, Any]:
     """Honest forward-outcome corpus status (read-only).
 
@@ -543,11 +611,21 @@ def build_outcomes_payload(*, db_path: Any = None) -> dict[str, Any]:
         "edge_claimed": False,
         "real_money_ready": False,
     }
-    # Forward-eligible throughput visibility (this sprint).
+    # Forward-eligible throughput visibility (Increase Forward-Eligible Throughput Sprint).
     try:
         payload["forward_throughput"] = build_forward_throughput(target)
     except Exception:  # noqa: BLE001 - never crash the route
         payload["forward_throughput"] = {}
+    # Real-forward maturation visibility (Real-Forward Outcome Maturation Sprint).
+    try:
+        maturation = build_maturation_payload(target)
+    except Exception:  # noqa: BLE001 - never crash the route
+        maturation = {}
+    payload["maturation"] = maturation
+    # Promote next-due timing to the top level so the operator sees it without
+    # digging into the maturation sub-object.
+    payload["next_due_in_hours"] = maturation.get("next_due_in_hours")
+    payload["earliest_horizon_close_utc"] = maturation.get("earliest_horizon_close_utc")
     payload.update(safety)
     return _strip_secrets(payload)
 
@@ -835,6 +913,8 @@ def build_summary_payload(*, db_path: Any = None) -> dict[str, Any]:
         "n_real_forward": calibration.get("n_real_forward", 0),
         "n_real_forward_pairs": outcomes.get("n_real_forward_pairs", 0),
         "n_pending_horizon": outcomes.get("n_pending_horizon", 0),
+        "n_due_forward": outcomes.get("n_due_forward", 0),
+        "next_due_in_hours": outcomes.get("next_due_in_hours"),
         "n_excluded_outcomes": outcomes.get("n_excluded", 0),
         "needed_for_gate": outcomes.get("needed_for_gate", N_OUTCOME_GATE),
         "calibration_status": calibration.get("calibration_status", INSUFFICIENT_EVIDENCE),

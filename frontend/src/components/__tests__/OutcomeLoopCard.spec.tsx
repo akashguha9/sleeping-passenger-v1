@@ -192,6 +192,66 @@ describe('OutcomeLoopCard', () => {
     expect(props.topMissingEntryPriceTickers).toEqual([{ key: 'NVDA', count: 6 }]);
   });
 
+  // --- Real-Forward Outcome Maturation Sprint --------------------------
+  it('test_card_renders_next_due_in_hours', () => {
+    render(<OutcomeLoopCard nextDueInHours={118.97} />);
+    expect(screen.getByTestId('outcome-next-due-in-hours').textContent).toBe('118.97');
+  });
+
+  it('test_card_renders_real_forward_pairs', () => {
+    render(<OutcomeLoopCard nRealForwardPairs={3} deltaRealForwardLastRun={2} />);
+    expect(screen.getByTestId('outcome-n-real-forward').textContent).toBe('3');
+    expect(screen.getByTestId('outcome-delta-real-forward').textContent).toBe('2');
+  });
+
+  it('test_card_renders_needed_to_200', () => {
+    render(<OutcomeLoopCard nRealForwardPairs={3} neededForGate={197} />);
+    expect(screen.getByTestId('outcome-needed-for-gate').textContent).toBe('197');
+  });
+
+  it('test_card_renders_first_pairs_below_gate', () => {
+    render(<OutcomeLoopCard nRealForwardPairs={3} nGate={200} predictiveClaimAllowed={false} />);
+    expect(screen.getByTestId('outcome-first-pairs')).toBeTruthy();
+    // Still locked.
+    expect(screen.getByTestId('outcome-calibration-locked')).toBeTruthy();
+  });
+
+  it('test_card_keeps_calibration_locked', () => {
+    render(<OutcomeLoopCard nRealForwardPairs={3} nextDueInHours={0} predictiveClaimAllowed={false} />);
+    expect(screen.getByTestId('outcome-calibration-locked')).toBeTruthy();
+    expect(screen.queryByTestId('outcome-predictive-allowed')).toBeNull();
+  });
+
+  it('test_card_has_no_execution_language_maturation', () => {
+    const { container } = render(
+      <OutcomeLoopCard nRealForwardPairs={3} nextDueInHours={48} deltaRealForwardLastRun={1} />,
+    );
+    const text = (container.textContent ?? '').toLowerCase();
+    for (const rx of FORBIDDEN) {
+      expect(rx.test(text)).toBe(false);
+    }
+  });
+
+  it('no first-pairs banner when zero pairs', () => {
+    render(<OutcomeLoopCard nRealForwardPairs={0} />);
+    expect(screen.queryByTestId('outcome-first-pairs')).toBeNull();
+  });
+
+  it('maps maturation fields from the backend payload', () => {
+    const props = mapOutcomeLoopProps({
+      status: 'OK',
+      n_real_forward_pairs: 0,
+      next_due_in_hours: 118.97,
+      maturation: {
+        next_due_in_hours: 118.97,
+        delta_n_real_forward_last_run: 0,
+      },
+      predictive_claim_allowed: false,
+    });
+    expect(props.nextDueInHours).toBe(118.97);
+    expect(props.deltaRealForwardLastRun).toBe(0);
+  });
+
   it('maps a backend payload and never optimistically unlocks', () => {
     const props = mapOutcomeLoopProps({
       status: 'OK',

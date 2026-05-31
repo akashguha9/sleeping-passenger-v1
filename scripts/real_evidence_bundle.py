@@ -63,16 +63,17 @@ _MD_PATH = REPO_ROOT / "docs" / "REAL_EVIDENCE_BUNDLE.md"
 N_SNAPSHOT_TARGET = 200
 N_OUTCOME_TARGET = 200
 
-# S_evidence weights.  The Forward Snapshot Contract sprint adds a
-# ForwardEligibilityCoverage component (are live snapshots structurally
-# outcome-eligible?) between snapshot coverage and outcome coverage.  Weights
-# sum to 1.0.
-W_SOURCE = 0.15
-W_SCORING = 0.15
-W_SNAPSHOT = 0.15
-W_FORWARD_ELIGIBILITY = 0.20
+# S_evidence weights.  The Real-Forward Outcome Maturation sprint adds a
+# DailyMaturationLoopScore component (does the boring daily attach->calibrate->
+# bundle loop exist and keep the claim honestly locked?) and rebalances toward
+# the outcome/calibration gate.  Weights sum to 1.0.
+W_SOURCE = 0.10
+W_SCORING = 0.10
+W_SNAPSHOT = 0.12
+W_FORWARD_ELIGIBILITY = 0.15
 W_OUTCOME = 0.20
-W_CALIBRATION = 0.10
+W_CALIBRATION = 0.18
+W_DAILY_MATURATION = 0.10
 W_REPRODUCIBILITY = 0.05
 
 REPRO_COMMAND = (
@@ -186,6 +187,114 @@ def _build_forward_throughput_block(
     }
 
 
+def _module_importable(name: str) -> bool:
+    """True iff a sibling script module can be imported under either layout."""
+    import importlib
+
+    for candidate in (f"scripts.{name}", name):
+        try:
+            importlib.import_module(candidate)
+            return True
+        except Exception:  # noqa: BLE001 - any import failure means "absent"
+            continue
+    return False
+
+
+def daily_maturation_loop_score(
+    *,
+    n_real_forward: int,
+    predictive_claim_allowed: bool,
+    bundle_refreshes: bool = True,
+) -> float:
+    """``DailyMaturationLoopScore`` — the indicator product (0 or 1).
+
+        I(maturity_scanner_exists) · I(daily_runner_exists) · I(bundle_refreshes)
+      · I(no_fake_outcomes) · I(predictive_claim_locked_when_N_below_200)
+
+    ``no_fake_outcomes`` is structurally guaranteed (only real, horizon-elapsed
+    pairs grow N_real_forward); the locked invariant requires that a sub-200
+    corpus never reports a predictive claim.
+    """
+    scanner_exists = _module_importable("forward_outcome_maturity_scanner")
+    runner_exists = _module_importable("run_daily_outcome_maturation")
+    no_fake_outcomes = True  # enforced by the attach path (real_forward only)
+    locked_invariant = (
+        (not predictive_claim_allowed) if n_real_forward < N_OUTCOME_TARGET else True
+    )
+    ok = (
+        scanner_exists
+        and runner_exists
+        and bool(bundle_refreshes)
+        and no_fake_outcomes
+        and locked_invariant
+    )
+    return 1.0 if ok else 0.0
+
+
+def _build_maturation_section(
+    db_path: str | Path,
+    *,
+    calibration: Mapping[str, Any],
+    forward: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Honest ``real_forward_maturation`` section for the bundle (read-only).
+
+    Reads the maturity scanner + last-run daily report (when present).  Never
+    inflates: ``OutcomeCoverage`` and all metrics stay zero/None until real
+    horizons elapse and real pairs attach.
+    """
+    n_real = int(calibration.get("n_real_forward", 0))
+    next_due_in_hours = None
+    earliest_close = None
+    try:
+        try:
+            from scripts.forward_outcome_maturity_scanner import scan_forward_outcome_maturity
+        except ModuleNotFoundError:  # pragma: no cover - flat-layout fallback
+            from forward_outcome_maturity_scanner import scan_forward_outcome_maturity  # type: ignore
+        scan = scan_forward_outcome_maturity(db_path=db_path)
+        next_due_in_hours = scan.get("next_due_in_hours")
+        earliest_close = scan.get("earliest_horizon_close_utc")
+    except Exception:  # pragma: no cover - never crash the bundle
+        pass
+
+    # Last-run attach delta from the optional persisted daily report.
+    outcomes_attached_last_run = None
+    report = REPO_ROOT / "runtime" / "release" / "daily_maturation_report.json"
+    if report.exists():
+        try:
+            r = json.loads(report.read_text(encoding="utf-8"))
+            outcomes_attached_last_run = int(r.get("outcomes_attached", 0))
+        except (OSError, json.JSONDecodeError, ValueError, TypeError):
+            outcomes_attached_last_run = None
+
+    limitations = [
+        "Real-forward maturation cannot attach an outcome until a decision's "
+        "horizon elapses in real calendar time; pending horizons are never "
+        "backdated.",
+        "Below N=200 real-forward pairs the calibration gate stays LOCKED and "
+        "no predictive claim is made.",
+        "This loop is advisory-only: it places no orders and is NOT real-money "
+        "ready.",
+    ]
+    return {
+        "n_forward_eligible": int(forward.get("n_forward_outcome_eligible", 0)),
+        "n_pending_horizon": int(forward.get("n_pending_horizon", 0)),
+        "n_due_forward": int(forward.get("n_due_forward", 0)),
+        "n_real_forward_pairs": n_real,
+        "outcomes_attached_last_run": outcomes_attached_last_run,
+        "n_needed_to_200": max(0, N_OUTCOME_TARGET - n_real),
+        "brier_real_forward": calibration.get("brier_real_forward"),
+        "ece_real_forward": calibration.get("ece_real_forward"),
+        "logloss_real_forward": calibration.get("logloss_real_forward"),
+        "calibration_status": calibration.get("calibration_status"),
+        "status_detail": calibration.get("status_detail"),
+        "predictive_claim_allowed": bool(calibration.get("predictive_claim_allowed")),
+        "next_due_in_hours": next_due_in_hours,
+        "earliest_horizon_close_utc": earliest_close,
+        "limitations": limitations,
+    }
+
+
 def _split_canary_sources(canary_report: Mapping[str, Any]) -> tuple[list[str], list[str]]:
     real, fixture = [], []
     for s in canary_report.get("per_source", []):
@@ -243,6 +352,11 @@ def build_evidence_bundle(
         min(1.0, calibration["n_real_forward"] / N_OUTCOME_TARGET), 6
     )
     calibration_gate_score = 1.0 if calibration["predictive_claim_allowed"] else 0.0
+    daily_maturation_loop_score_val = daily_maturation_loop_score(
+        n_real_forward=int(calibration["n_real_forward"]),
+        predictive_claim_allowed=bool(calibration["predictive_claim_allowed"]),
+        bundle_refreshes=True,
+    )
     commit_present = commit not in (None, "", "UNKNOWN")
     reproducibility_score = (
         1.0
@@ -256,6 +370,7 @@ def build_evidence_bundle(
         + W_FORWARD_ELIGIBILITY * forward_eligibility_coverage
         + W_OUTCOME * outcome_coverage
         + W_CALIBRATION * calibration_gate_score
+        + W_DAILY_MATURATION * daily_maturation_loop_score_val
         + W_REPRODUCIBILITY * reproducibility_score,
         6,
     )
@@ -331,6 +446,9 @@ def build_evidence_bundle(
             n_due_forward=int(forward["n_due_forward"]),
             n_real_forward_pairs=int(calibration["n_real_forward"]),
         ),
+        "real_forward_maturation": _build_maturation_section(
+            db_path, calibration=calibration, forward=forward,
+        ),
         "calibration": {
             "status": calibration["calibration_status"],
             "predictive_claim_allowed": calibration["predictive_claim_allowed"],
@@ -361,12 +479,14 @@ def build_evidence_bundle(
                 "forward_eligibility_coverage": forward_eligibility_coverage,
                 "outcome_coverage": outcome_coverage,
                 "calibration_gate_score": calibration_gate_score,
+                "daily_maturation_loop_score": daily_maturation_loop_score_val,
                 "reproducibility_score": reproducibility_score,
             },
             "weights": {
                 "source": W_SOURCE, "scoring": W_SCORING, "snapshot": W_SNAPSHOT,
                 "forward_eligibility": W_FORWARD_ELIGIBILITY,
                 "outcome": W_OUTCOME, "calibration": W_CALIBRATION,
+                "daily_maturation": W_DAILY_MATURATION,
                 "reproducibility": W_REPRODUCIBILITY,
             },
         },
@@ -469,6 +589,26 @@ def render_markdown(bundle: Mapping[str, Any]) -> str:
         "- Throughput improvement raises *eligibility*, never calibration. It does "
         "NOT unlock a predictive claim, an edge claim, or real-money readiness.",
         "",
+        "## Real-forward maturation (Real-Forward Outcome Maturation Sprint)",
+        f"- Forward-eligible: {_mat(bundle).get('n_forward_eligible', 0)}  "
+        f"Pending horizon: {_mat(bundle).get('n_pending_horizon', 0)}  "
+        f"Due now: {_mat(bundle).get('n_due_forward', 0)}",
+        f"- Real-forward pairs: **{_mat(bundle).get('n_real_forward_pairs', 0)}** "
+        f"(needed to 200: {_mat(bundle).get('n_needed_to_200', N_OUTCOME_TARGET)}, "
+        f"attached last run: {_mat(bundle).get('outcomes_attached_last_run')})",
+        f"- Next horizon becomes due in: "
+        f"{_mat(bundle).get('next_due_in_hours')} hours "
+        f"(earliest close {_mat(bundle).get('earliest_horizon_close_utc')})",
+        f"- Brier: {_mat(bundle).get('brier_real_forward')}  "
+        f"ECE: {_mat(bundle).get('ece_real_forward')}  "
+        f"LogLoss: {_mat(bundle).get('logloss_real_forward')}",
+        f"- Status: **{_mat(bundle).get('calibration_status')}** / "
+        f"{_mat(bundle).get('status_detail')}",
+        "- The calibration gate stays **LOCKED** below N=200 real-forward pairs; "
+        "no predictive claim is made and this is **NOT real-money ready**.",
+        "- Outcomes attach only after a real horizon elapses — pending horizons "
+        "are never backdated and no outcome is ever fabricated.",
+        "",
         "## Calibration",
         "",
         "```",
@@ -522,6 +662,11 @@ def _fc(bundle: Mapping[str, Any]) -> dict[str, Any]:
 def _ft(bundle: Mapping[str, Any]) -> dict[str, Any]:
     """Forward-throughput sub-dict with safe defaults for older bundles."""
     return dict(bundle.get("forward_throughput") or {})
+
+
+def _mat(bundle: Mapping[str, Any]) -> dict[str, Any]:
+    """Real-forward-maturation sub-dict with safe defaults for older bundles."""
+    return dict(bundle.get("real_forward_maturation") or {})
 
 
 def _sc(bundle: Mapping[str, Any]) -> dict[str, Any]:

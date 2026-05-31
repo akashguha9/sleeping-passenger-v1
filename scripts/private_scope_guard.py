@@ -397,6 +397,15 @@ EXPLICIT_IN_SCOPE: frozenset[str] = frozenset({
     "ticker_resolution.py",
     "ensure_ohlcv_for_scored_tickers.py",
     "missing_probability_resolution.py",
+    # Real-Forward Outcome Maturation sprint — advisory-only, read-only maturity
+    # scanner that classifies forward-eligible decision snapshots
+    # (ATTACHED/DUE_FORWARD/PENDING_HORIZON/INELIGIBLE) and reports when the next
+    # horizon becomes due.  No DB writes, no network, no broker/order/execution;
+    # it never attaches an outcome, never backdates, and never unlocks a
+    # predictive claim.  Sibling to attach_due_outcomes.py /
+    # real_price_outcome_evidence.py.  (run_daily_outcome_maturation.py is already
+    # in scope via the "daily" approved domain.)
+    "forward_outcome_maturity_scanner.py",
 })
 
 # Modules deliberately marked OUT_OF_SCOPE inside ``scripts/``.  This

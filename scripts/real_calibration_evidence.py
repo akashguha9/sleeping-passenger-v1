@@ -155,6 +155,19 @@ def build_calibration_evidence(
     predictive_claim_allowed = bool(rf["predictive_claim_allowed"])
     calibration_status = rf["calibration_status"]
 
+    # Honest sub-status that distinguishes "no real-forward pairs yet" from
+    # "the first real-forward pairs have attached but we are still below the
+    # N>=200 gate".  Neither ever unlocks a predictive claim.
+    n_rf = int(rf["n"])
+    if predictive_claim_allowed:
+        status_detail = "GATE_PASSED"
+    elif n_rf <= 0:
+        status_detail = "NO_REAL_FORWARD_PAIRS"
+    elif n_rf < N_MIN:
+        status_detail = "FIRST_REAL_FORWARD_PAIRS_ATTACHED_BUT_BELOW_GATE"
+    else:  # N>=200 but Brier/ECE not met
+        status_detail = "GATE_THRESHOLDS_NOT_MET"
+
     return {
         "generated_at_utc": now_utc or _utc_now_iso(),
         "model_version": MODEL_VERSION,
@@ -183,6 +196,7 @@ def build_calibration_evidence(
         },
         # Honest gate.
         "calibration_status": calibration_status,
+        "status_detail": status_detail,
         "predictive_claim_allowed": predictive_claim_allowed,
         "exclusion_reasons": summary["exclusion_reasons"],
         "corpus": {

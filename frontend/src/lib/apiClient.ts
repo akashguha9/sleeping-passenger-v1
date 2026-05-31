@@ -902,6 +902,27 @@ export interface EvidenceOutcomesResponse {
   real_money_ready?: boolean | null;
   // Forward-eligible throughput visibility (Increase Forward-Eligible Throughput Sprint).
   forward_throughput?: ForwardThroughput | null;
+  // Real-forward maturation visibility (Real-Forward Outcome Maturation Sprint).
+  next_due_in_hours?: number | null;
+  earliest_horizon_close_utc?: string | null;
+  maturation?: OutcomeMaturation | null;
+}
+
+export interface OutcomeMaturation {
+  n_forward_eligible?: number | null;
+  n_pending_horizon?: number | null;
+  n_due_forward?: number | null;
+  n_real_forward_pairs?: number | null;
+  delta_n_real_forward_last_run?: number | null;
+  next_due_in_hours?: number | null;
+  earliest_horizon_close_utc?: string | null;
+  brier_real_forward?: number | null;
+  ece_real_forward?: number | null;
+  logloss_real_forward?: number | null;
+  n_needed_to_200?: number | null;
+  calibration_status?: string | null;
+  status_detail?: string | null;
+  predictive_claim_allowed?: boolean | null;
 }
 
 export interface ForwardThroughput {
