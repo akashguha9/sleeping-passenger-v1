@@ -320,6 +320,69 @@ def _count_pending_horizon(db_path: Any) -> int:
     return pending
 
 
+def _count_forward_eligibility(db_path: Any) -> dict[str, Any]:
+    """Tally forward-outcome eligibility across snapshots (read-only).
+
+    Returns ``n_forward_outcome_eligible`` / ``n_forward_ineligible`` /
+    ``forward_unavailable_reasons`` / ``n_due_forward`` (eligible AND horizon
+    elapsed AND not yet labelled).  Tolerates a pre-migration DB by treating a
+    missing ``forward_outcome_eligible`` column as zero eligible.
+    """
+    import sqlite3
+    from datetime import datetime, timezone
+
+    try:
+        from scripts.decision_probability_snapshot import TABLE, ensure_schema
+        from scripts.attach_due_outcomes import horizon_elapsed
+    except ModuleNotFoundError:  # pragma: no cover - script-style env
+        from decision_probability_snapshot import TABLE, ensure_schema  # type: ignore
+        from attach_due_outcomes import horizon_elapsed  # type: ignore
+
+    out = {
+        "n_forward_outcome_eligible": 0,
+        "n_forward_ineligible": 0,
+        "forward_unavailable_reasons": {},
+        "n_due_forward": 0,
+        "entry_price_present_count": 0,
+    }
+    now = datetime.now(timezone.utc)
+    conn = sqlite3.connect(str(db_path))
+    try:
+        conn.row_factory = sqlite3.Row
+        ensure_schema(conn)
+        cols = {r[1] for r in conn.execute(f"PRAGMA table_info({TABLE})")}
+        if "forward_outcome_eligible" not in cols:
+            return out
+        rows = conn.execute(
+            f"SELECT forward_outcome_eligible, forward_outcome_unavailable_reason,"
+            f" entry_price, timestamp_utc, prediction_horizon_days, outcome_label"
+            f" FROM {TABLE}"
+        ).fetchall()
+    except Exception:  # noqa: BLE001 - never crash the route
+        return out
+    finally:
+        conn.close()
+
+    reasons: dict[str, int] = {}
+    for r in rows:
+        if r["entry_price"] is not None:
+            out["entry_price_present_count"] += 1
+        if int(r["forward_outcome_eligible"] or 0) == 1:
+            out["n_forward_outcome_eligible"] += 1
+            if r["outcome_label"] is None and horizon_elapsed(
+                decision_ts=r["timestamp_utc"],
+                horizon_days=r["prediction_horizon_days"],
+                now_utc=now,
+            ):
+                out["n_due_forward"] += 1
+        else:
+            out["n_forward_ineligible"] += 1
+            key = r["forward_outcome_unavailable_reason"] or "UNSPECIFIED"
+            reasons[key] = reasons.get(key, 0) + 1
+    out["forward_unavailable_reasons"] = reasons
+    return out
+
+
 def build_outcomes_payload(*, db_path: Any = None) -> dict[str, Any]:
     """Honest forward-outcome corpus status (read-only).
 
@@ -346,12 +409,17 @@ def build_outcomes_payload(*, db_path: Any = None) -> dict[str, Any]:
         summary = build_outcome_corpus_summary(target)
         n_valid_p = int(count_valid_p(target))
         n_pending = _count_pending_horizon(target)
+        forward = _count_forward_eligibility(target)
     except Exception as exc:  # noqa: BLE001 - never crash the route
         payload = {
             "status": STATUS_DEGRADED,
             "reason": f"{type(exc).__name__}",
             "n_valid_p": 0,
             "n_real_forward_pairs": 0,
+            "n_forward_outcome_eligible": 0,
+            "n_forward_ineligible": 0,
+            "forward_unavailable_reasons": {},
+            "n_due_forward": 0,
             "n_pending_horizon": 0,
             "n_excluded": 0,
             "exclusion_reasons": {},
@@ -362,6 +430,7 @@ def build_outcomes_payload(*, db_path: Any = None) -> dict[str, Any]:
             "predictive_claim_allowed": False,
             "predictive_claim_label": PREDICTIVE_CLAIM_LOCKED,
             "needed_for_gate": N_OUTCOME_GATE,
+            "n_needed_to_200": N_OUTCOME_GATE,
             "n_outcome_gate": N_OUTCOME_GATE,
             "generated_at_utc": None,
         }
@@ -375,6 +444,14 @@ def build_outcomes_payload(*, db_path: Any = None) -> dict[str, Any]:
         "n_valid_p": n_valid_p,
         "n_real_forward_pairs": n_real_forward,
         "n_historical_proxy_pairs": int(ev.get("n_historical_proxy", 0)),
+        # Forward-snapshot-contract surface (this sprint): how many live
+        # snapshots are structurally outcome-eligible, how many are due, and why
+        # the rest are ineligible.
+        "n_forward_outcome_eligible": int(forward["n_forward_outcome_eligible"]),
+        "n_forward_ineligible": int(forward["n_forward_ineligible"]),
+        "forward_unavailable_reasons": dict(forward["forward_unavailable_reasons"]),
+        "n_due_forward": int(forward["n_due_forward"]),
+        "entry_price_present_count": int(forward["entry_price_present_count"]),
         "n_pending_horizon": int(n_pending),
         "n_excluded": int(summary.get("n_excluded", 0)),
         "exclusion_reasons": dict(summary.get("exclusion_reasons") or {}),
@@ -390,6 +467,7 @@ def build_outcomes_payload(*, db_path: Any = None) -> dict[str, Any]:
             STATUS_OK if predictive else PREDICTIVE_CLAIM_LOCKED
         ),
         "needed_for_gate": max(0, N_OUTCOME_GATE - n_real_forward),
+        "n_needed_to_200": max(0, N_OUTCOME_GATE - n_real_forward),
         "n_outcome_gate": N_OUTCOME_GATE,
         "generated_at_utc": ev.get("generated_at_utc"),
         "edge_claimed": False,

@@ -112,6 +112,9 @@ export function mapOutcomeLoopProps(
   const nReal = resp?.n_real_forward_pairs ?? 0;
   return {
     nRealForwardPairs: nReal,
+    nForwardEligible: resp?.n_forward_outcome_eligible ?? 0,
+    nDueForward: resp?.n_due_forward ?? 0,
+    forwardUnavailableReasons: resp?.forward_unavailable_reasons ?? {},
     nPendingHorizon: resp?.n_pending_horizon ?? 0,
     nExcluded: resp?.n_excluded ?? 0,
     exclusionReasons: resp?.exclusion_reasons ?? {},

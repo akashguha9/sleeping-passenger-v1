@@ -399,6 +399,9 @@ export function CalibrationEvidenceCard({
 // --------------------------------------------------------------------------- //
 export interface OutcomeLoopCardProps {
   nRealForwardPairs?: number | null;
+  nForwardEligible?: number | null;
+  nDueForward?: number | null;
+  forwardUnavailableReasons?: Record<string, number> | null;
   nPendingHorizon?: number | null;
   nExcluded?: number | null;
   exclusionReasons?: Record<string, number> | null;
@@ -414,6 +417,9 @@ export interface OutcomeLoopCardProps {
 
 export function OutcomeLoopCard({
   nRealForwardPairs = 0,
+  nForwardEligible = 0,
+  nDueForward = 0,
+  forwardUnavailableReasons = {},
   nPendingHorizon = 0,
   nExcluded = 0,
   exclusionReasons = {},
@@ -435,10 +441,25 @@ export function OutcomeLoopCard({
           .map(([k, v]) => `${k}:${v}`)
           .join(', ')
       : '—';
+  const fwdReasons = forwardUnavailableReasons ?? {};
+  const fwdReasonText =
+    Object.keys(fwdReasons).length > 0
+      ? Object.entries(fwdReasons)
+          .map(([k, v]) => `${k}:${v}`)
+          .join(', ')
+      : '—';
   return (
     <Shell testid="outcome-loop-card" title="Forward Outcome Loop" mode={mode}>
+      <Row label="FORWARD_ELIGIBLE" value={fmt(nForwardEligible)} testid="outcome-forward-eligible" />
+      <Row label="DUE_FORWARD" value={fmt(nDueForward)} testid="outcome-due-forward" />
       <Row label="N_REAL_FORWARD" value={fmt(nRealForwardPairs)} testid="outcome-n-real-forward" />
       <Row label="PENDING_HORIZON" value={fmt(nPendingHorizon)} testid="outcome-pending-horizon" />
+      <Row
+        label="forward_unavailable_reasons"
+        value={fwdReasonText}
+        testid="outcome-forward-unavailable-reasons"
+        valueClass="font-mono text-[11px]"
+      />
       <Row label="EXCLUDED_OUTCOMES" value={fmt(nExcluded)} testid="outcome-excluded" />
       <Row label="exclusion_reasons" value={reasonText} valueClass="font-mono text-[11px]" />
       <Row label="BRIER" value={fmt(brier)} testid="outcome-brier" />

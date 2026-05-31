@@ -84,8 +84,36 @@ CREATE TABLE IF NOT EXISTS {TABLE} (
 """
 
 
+# Additive forward-snapshot-contract columns (Phase 5).  All nullable so old
+# snapshots stay readable and simply remain forward-ineligible.
+_FORWARD_COLUMNS: dict[str, str] = {
+    "target_return_threshold": "REAL",
+    "target_source": "TEXT",
+    "entry_price": "REAL",
+    "entry_price_timestamp_utc": "TEXT",
+    "entry_price_source": "TEXT",
+    "horizon_close_utc": "TEXT",
+    "forward_outcome_eligible": "INTEGER",
+    "forward_outcome_unavailable_reason": "TEXT",
+}
+
+
 def ensure_schema(conn: sqlite3.Connection) -> None:
     conn.execute(_CREATE_SQL)
+    conn.commit()
+
+
+def ensure_forward_columns(conn: sqlite3.Connection) -> None:
+    """Add the nullable forward-snapshot-contract columns if absent.
+
+    Safe runtime migration (``ALTER TABLE ... ADD COLUMN`` only) — never drops or
+    rewrites a column, so existing snapshots remain fully readable.
+    """
+    ensure_schema(conn)
+    existing = {row[1] for row in conn.execute(f"PRAGMA table_info({TABLE})")}
+    for col, decl in _FORWARD_COLUMNS.items():
+        if col not in existing:
+            conn.execute(f"ALTER TABLE {TABLE} ADD COLUMN {col} {decl}")
     conn.commit()
 
 
@@ -215,6 +243,192 @@ def record_decision_probability(
     return snap
 
 
+def stamp_forward_contract(
+    db_path: str | Path,
+    snapshot_id: str,
+    *,
+    entry_price: float | None = None,
+    entry_price_timestamp_utc: str | None = None,
+    entry_price_source: str | None = None,
+    target_return_threshold: float | None = None,
+    target_source: str | None = None,
+    prediction_horizon_days: float | None = None,
+    target_event_definition: str | None = None,
+    ticker: str | None = None,
+) -> dict[str, Any]:
+    """Stamp forward-contract fields onto an existing snapshot and recompute
+    its ``forward_outcome_eligible`` flag + unavailable reason.
+
+    Reads the snapshot's persisted ticker / probability / horizon / target /
+    decision-timestamp, combines them with the (optional) entry-price evidence,
+    and evaluates :func:`forward_snapshot_contract.forward_outcome_eligible`.  It
+    NEVER fabricates a price — a missing entry price simply yields
+    ``forward_outcome_eligible = 0`` with reason ``MISSING_ENTRY_PRICE``.  The
+    advisory-only stamps on the row are left untouched.
+    """
+    try:
+        from scripts.forward_snapshot_contract import (
+            DEFAULT_TARGET_RETURN_THRESHOLD,
+            TARGET_SOURCE,
+            forward_outcome_eligible,
+            horizon_close_utc,
+        )
+    except ModuleNotFoundError:  # pragma: no cover - flat-layout fallback
+        from forward_snapshot_contract import (  # type: ignore[no-redef]
+            DEFAULT_TARGET_RETURN_THRESHOLD,
+            TARGET_SOURCE,
+            forward_outcome_eligible,
+            horizon_close_utc,
+        )
+
+    conn = sqlite3.connect(str(db_path))
+    try:
+        conn.row_factory = sqlite3.Row
+        ensure_forward_columns(conn)
+        row = conn.execute(
+            f"SELECT ticker, timestamp_utc, model_probability,"
+            f" prediction_horizon_days, target_event_definition FROM {TABLE}"
+            " WHERE snapshot_id = ?",
+            (snapshot_id,),
+        ).fetchone()
+        if row is None:
+            return {"stamped": False, "reason": "SNAPSHOT_NOT_FOUND"}
+
+        eff_ticker = ticker if ticker is not None else row["ticker"]
+        eff_horizon = (
+            prediction_horizon_days
+            if prediction_horizon_days is not None
+            else row["prediction_horizon_days"]
+        )
+        eff_target = (
+            target_event_definition
+            if target_event_definition is not None
+            else row["target_event_definition"]
+        )
+        threshold = (
+            float(target_return_threshold)
+            if target_return_threshold is not None
+            else DEFAULT_TARGET_RETURN_THRESHOLD
+        )
+        source = target_source if target_source is not None else TARGET_SOURCE
+        close_utc = horizon_close_utc(row["timestamp_utc"], eff_horizon)
+
+        eligible, reason = forward_outcome_eligible(
+            ticker=eff_ticker,
+            model_probability=row["model_probability"],
+            prediction_horizon_days=eff_horizon,
+            target_event_definition=eff_target,
+            entry_price=entry_price,
+            entry_price_timestamp_utc=entry_price_timestamp_utc,
+            decision_timestamp_utc=row["timestamp_utc"],
+            is_real_forward=True,
+            advisory_status="ADVISORY_ONLY",
+            execution_gate="LOCKED",
+        )
+
+        conn.execute(
+            f"UPDATE {TABLE} SET"
+            "  entry_price = ?,"
+            "  entry_price_timestamp_utc = ?,"
+            "  entry_price_source = ?,"
+            "  target_return_threshold = ?,"
+            "  target_source = ?,"
+            "  horizon_close_utc = ?,"
+            "  forward_outcome_eligible = ?,"
+            "  forward_outcome_unavailable_reason = ?"
+            " WHERE snapshot_id = ?",
+            (
+                float(entry_price) if entry_price is not None else None,
+                entry_price_timestamp_utc,
+                entry_price_source,
+                threshold,
+                source,
+                close_utc,
+                1 if eligible else 0,
+                None if eligible else reason,
+                snapshot_id,
+            ),
+        )
+        conn.commit()
+        return {
+            "stamped": True,
+            "snapshot_id": snapshot_id,
+            "forward_outcome_eligible": bool(eligible),
+            "forward_outcome_unavailable_reason": None if eligible else reason,
+            "entry_price": float(entry_price) if entry_price is not None else None,
+            "horizon_close_utc": close_utc,
+        }
+    finally:
+        conn.close()
+
+
+def forward_outcome_counts(db_path: str | Path, *, now_utc: str | None = None) -> dict[str, Any]:
+    """Honest tally of forward-eligible / ineligible / due / pending snapshots.
+
+    ``n_due_forward``  = eligible AND horizon elapsed AND not yet labelled.
+    ``n_pending_horizon`` = eligible AND horizon NOT elapsed AND not yet labelled.
+    """
+    from datetime import datetime, timezone
+
+    try:
+        from scripts.attach_due_outcomes import horizon_elapsed
+    except ModuleNotFoundError:  # pragma: no cover - flat-layout fallback
+        from attach_due_outcomes import horizon_elapsed  # type: ignore[no-redef]
+
+    now_dt = datetime.now(timezone.utc)
+    if now_utc:
+        try:
+            parsed = datetime.fromisoformat(str(now_utc).replace("Z", "+00:00"))
+            now_dt = parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+        except ValueError:
+            pass
+
+    conn = sqlite3.connect(str(db_path))
+    try:
+        conn.row_factory = sqlite3.Row
+        ensure_forward_columns(conn)
+        rows = conn.execute(
+            f"SELECT forward_outcome_eligible, forward_outcome_unavailable_reason,"
+            f" entry_price, timestamp_utc, prediction_horizon_days, outcome_label"
+            f" FROM {TABLE}"
+        ).fetchall()
+    finally:
+        conn.close()
+
+    eligible = 0
+    ineligible = 0
+    entry_price_present = 0
+    due_forward = 0
+    pending_horizon = 0
+    reasons: dict[str, int] = {}
+    for r in rows:
+        if int(r["forward_outcome_eligible"] or 0) == 1:
+            eligible += 1
+            if r["outcome_label"] is None:
+                if horizon_elapsed(
+                    decision_ts=r["timestamp_utc"],
+                    horizon_days=r["prediction_horizon_days"],
+                    now_utc=now_dt,
+                ):
+                    due_forward += 1
+                else:
+                    pending_horizon += 1
+        else:
+            ineligible += 1
+            key = r["forward_outcome_unavailable_reason"] or "UNSPECIFIED"
+            reasons[key] = reasons.get(key, 0) + 1
+        if r["entry_price"] is not None:
+            entry_price_present += 1
+    return {
+        "n_forward_outcome_eligible": eligible,
+        "n_forward_outcome_ineligible": ineligible,
+        "n_due_forward": due_forward,
+        "n_pending_horizon": pending_horizon,
+        "entry_price_present_count": entry_price_present,
+        "forward_outcome_unavailable_reasons": reasons,
+    }
+
+
 def count_valid_p(db_path: str | Path) -> int:
     """Number of decision snapshots carrying a usable model_probability."""
     conn = sqlite3.connect(str(db_path))
@@ -266,6 +480,9 @@ __all__ = [
     "SCORING_VERSION",
     "DEFAULT_TARGET_EVENT",
     "ensure_schema",
+    "ensure_forward_columns",
+    "stamp_forward_contract",
+    "forward_outcome_counts",
     "build_decision_snapshot",
     "persist_decision_snapshot",
     "record_decision_probability",

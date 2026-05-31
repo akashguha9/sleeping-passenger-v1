@@ -880,6 +880,13 @@ export interface EvidenceOutcomesResponse {
   n_real_forward_pairs?: number | null;
   n_historical_proxy_pairs?: number | null;
   n_pending_horizon?: number | null;
+  // Forward-snapshot-contract surface (Forward Snapshot Contract Sprint).
+  n_forward_outcome_eligible?: number | null;
+  n_forward_ineligible?: number | null;
+  forward_unavailable_reasons?: Record<string, number> | null;
+  n_due_forward?: number | null;
+  entry_price_present_count?: number | null;
+  n_needed_to_200?: number | null;
   n_excluded?: number | null;
   exclusion_reasons?: Record<string, number> | null;
   brier_real_forward?: number | null;

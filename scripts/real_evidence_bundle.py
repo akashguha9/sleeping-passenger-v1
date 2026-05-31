@@ -62,16 +62,17 @@ _MD_PATH = REPO_ROOT / "docs" / "REAL_EVIDENCE_BUNDLE.md"
 N_SNAPSHOT_TARGET = 200
 N_OUTCOME_TARGET = 200
 
-# S_evidence weights.  The Close-the-Outcome-Loop sprint re-weights the bundle
-# so the forward-outcome corpus (the actual loop closure) and the calibration
-# gate carry the most weight — coverage of *sources* matters less than evidence
-# that horizons closed on real outcomes.  Weights sum to 1.0.
+# S_evidence weights.  The Forward Snapshot Contract sprint adds a
+# ForwardEligibilityCoverage component (are live snapshots structurally
+# outcome-eligible?) between snapshot coverage and outcome coverage.  Weights
+# sum to 1.0.
 W_SOURCE = 0.15
 W_SCORING = 0.15
-W_SNAPSHOT = 0.20
-W_OUTCOME = 0.25
-W_CALIBRATION = 0.15
-W_REPRODUCIBILITY = 0.10
+W_SNAPSHOT = 0.15
+W_FORWARD_ELIGIBILITY = 0.20
+W_OUTCOME = 0.20
+W_CALIBRATION = 0.10
+W_REPRODUCIBILITY = 0.05
 
 REPRO_COMMAND = (
     "python scripts/real_evidence_canary.py --sources yfinance,gdelt,polymarket --write && "
@@ -148,6 +149,12 @@ def build_evidence_bundle(
     n_valid_p = count_valid_p(db_path)
     scoring = scoring_coverage_summary(db_path)
 
+    try:  # forward-snapshot-contract counts (this sprint)
+        from scripts.decision_probability_snapshot import forward_outcome_counts
+    except ModuleNotFoundError:  # pragma: no cover - flat-layout fallback
+        from decision_probability_snapshot import forward_outcome_counts  # type: ignore
+    forward = forward_outcome_counts(db_path)
+
     # ----- S_evidence components ---------------------------------------- #
     source_truth_score = round(min(1.0, len(real_sources) / 3.0), 6)
     scoring_coverage = round(
@@ -158,6 +165,10 @@ def build_evidence_bundle(
         6,
     )
     snapshot_coverage = round(min(1.0, n_valid_p / max(1, n_snapshot_target)), 6)
+    # ForwardEligibilityCoverage = min(1, n_forward_outcome_eligible / max(1, n_valid_p))
+    forward_eligibility_coverage = round(
+        min(1.0, forward["n_forward_outcome_eligible"] / max(1, n_valid_p)), 6
+    )
     outcome_coverage = round(
         min(1.0, calibration["n_real_forward"] / N_OUTCOME_TARGET), 6
     )
@@ -172,6 +183,7 @@ def build_evidence_bundle(
         W_SOURCE * source_truth_score
         + W_SCORING * scoring_coverage
         + W_SNAPSHOT * snapshot_coverage
+        + W_FORWARD_ELIGIBILITY * forward_eligibility_coverage
         + W_OUTCOME * outcome_coverage
         + W_CALIBRATION * calibration_gate_score
         + W_REPRODUCIBILITY * reproducibility_score,
@@ -221,6 +233,27 @@ def build_evidence_bundle(
             "outcome_coverage": outcome_coverage,
             "needed_to_reach_200": max(0, N_OUTCOME_TARGET - int(calibration["n_real_forward"])),
         },
+        "forward_snapshot_contract": {
+            "n_valid_p": n_valid_p,
+            "n_forward_outcome_eligible": int(forward["n_forward_outcome_eligible"]),
+            "n_forward_ineligible": int(forward["n_forward_outcome_ineligible"]),
+            "n_pending_horizon": int(forward["n_pending_horizon"]),
+            "n_due_forward": int(forward["n_due_forward"]),
+            "n_real_forward_pairs": int(calibration["n_real_forward"]),
+            "entry_price_present_count": int(forward["entry_price_present_count"]),
+            "forward_unavailable_reasons": dict(
+                forward["forward_outcome_unavailable_reasons"]
+            ),
+            "forward_eligibility_coverage": forward_eligibility_coverage,
+            "target_event_definition": "forward_return_ge_threshold",
+            "default_prediction_horizon_days": 5,
+            "target_return_threshold": 0.0,
+            "target_source": "DEFAULT_FORWARD_SNAPSHOT_CONTRACT_V1",
+            "n_needed_to_200": max(0, N_OUTCOME_TARGET - int(calibration["n_real_forward"])),
+            # Eligibility is structural only — it never unlocks a predictive claim.
+            "predictive_claim_allowed": False,
+            "edge_claimed": False,
+        },
         "calibration": {
             "status": calibration["calibration_status"],
             "predictive_claim_allowed": calibration["predictive_claim_allowed"],
@@ -248,12 +281,14 @@ def build_evidence_bundle(
                 "source_truth_score": source_truth_score,
                 "scoring_coverage": scoring_coverage,
                 "snapshot_coverage": snapshot_coverage,
+                "forward_eligibility_coverage": forward_eligibility_coverage,
                 "outcome_coverage": outcome_coverage,
                 "calibration_gate_score": calibration_gate_score,
                 "reproducibility_score": reproducibility_score,
             },
             "weights": {
                 "source": W_SOURCE, "scoring": W_SCORING, "snapshot": W_SNAPSHOT,
+                "forward_eligibility": W_FORWARD_ELIGIBILITY,
                 "outcome": W_OUTCOME, "calibration": W_CALIBRATION,
                 "reproducibility": W_REPRODUCIBILITY,
             },
@@ -325,6 +360,23 @@ def render_markdown(bundle: Mapping[str, Any]) -> str:
         "elapsed in real calendar time AND a real entry/exit price exists; "
         "historical proxy / open / unresolved decisions never count.",
         "",
+        "## Forward snapshot contract (outcome-eligibility)",
+        f"- Forward-outcome-eligible snapshots: **{_fc(bundle)['n_forward_outcome_eligible']}** "
+        f"/ {_fc(bundle)['n_valid_p']} valid-p "
+        f"(coverage {_fc(bundle)['forward_eligibility_coverage']})",
+        f"- Pending horizon: {_fc(bundle)['n_pending_horizon']}  "
+        f"Due forward: {_fc(bundle)['n_due_forward']}  "
+        f"Entry-price present: {_fc(bundle)['entry_price_present_count']}",
+        f"- Forward-ineligible: {_fc(bundle)['n_forward_ineligible']} "
+        f"{_fc(bundle)['forward_unavailable_reasons']}",
+        f"- Target: `{_fc(bundle)['target_event_definition']}` "
+        f"(threshold {_fc(bundle)['target_return_threshold']}, "
+        f"horizon {_fc(bundle)['default_prediction_horizon_days']}d, "
+        f"source `{_fc(bundle)['target_source']}`)",
+        "- Eligibility is **structural only** — a snapshot becoming eligible means "
+        "a binary outcome can be measured after its horizon closes; it is NOT a "
+        "predictive claim and NOT an edge claim.",
+        "",
         "## Calibration",
         "",
         "```",
@@ -361,6 +413,18 @@ def render_markdown(bundle: Mapping[str, Any]) -> str:
 
 def cal_n(bundle: Mapping[str, Any]) -> int:
     return int(bundle["outcomes"]["n_real_forward_pairs"])
+
+
+def _fc(bundle: Mapping[str, Any]) -> dict[str, Any]:
+    """Forward-snapshot-contract sub-dict with safe defaults for older bundles."""
+    return dict(bundle.get("forward_snapshot_contract") or {
+        "n_valid_p": 0, "n_forward_outcome_eligible": 0, "n_forward_ineligible": 0,
+        "n_pending_horizon": 0, "n_due_forward": 0, "entry_price_present_count": 0,
+        "forward_unavailable_reasons": {}, "forward_eligibility_coverage": 0.0,
+        "target_event_definition": "forward_return_ge_threshold",
+        "default_prediction_horizon_days": 5, "target_return_threshold": 0.0,
+        "target_source": "DEFAULT_FORWARD_SNAPSHOT_CONTRACT_V1", "n_needed_to_200": 200,
+    })
 
 
 def _sc(bundle: Mapping[str, Any]) -> dict[str, Any]:

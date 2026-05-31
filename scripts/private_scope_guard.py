@@ -374,6 +374,13 @@ EXPLICIT_IN_SCOPE: frozenset[str] = frozenset({
     # fabricates).  No broker execution, no order placement, no API trading
     # writes.  Sibling to attach_due_outcomes.py / outcome_labeling_flow.py.
     "real_price_outcome_evidence.py",
+    # Forward Snapshot Contract sprint — pure, advisory-only contract module
+    # defining what makes a live decision snapshot outcome-eligible (ticker +
+    # positive horizon + price-based target + real entry price).  No DB writes,
+    # no network, no broker/order/execution; eligibility is structural only and
+    # never unlocks a predictive claim.  Sibling to decision_probability_snapshot
+    # / run_daily_live_advisory_decisions / attach_due_outcomes.
+    "forward_snapshot_contract.py",
 })
 
 # Modules deliberately marked OUT_OF_SCOPE inside ``scripts/``.  This

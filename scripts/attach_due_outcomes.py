@@ -62,6 +62,8 @@ except ModuleNotFoundError:  # pragma: no cover - flat-layout fallback
 
 # Reasons a due decision could not be labelled.
 REASON_NO_PRICE_EVIDENCE = "NO_PRICE_EVIDENCE"
+REASON_MISSING_EXIT_PRICE = "MISSING_EXIT_PRICE"
+REASON_MISSING_ENTRY_PRICE = "MISSING_ENTRY_PRICE"
 REASON_AMBIGUOUS_OUTCOME = "AMBIGUOUS_OUTCOME_NOT_RESOLVED"
 REASON_OPEN_TRADE = "OPEN_TRADE_NOT_RESOLVED"
 REASON_MISSING_TARGET_DEFINITION = "MISSING_TARGET_EVENT_DEFINITION"
@@ -138,6 +140,13 @@ def compute_outcome_label(
 
     entry = evidence.get("entry_price")
     exit_ = evidence.get("exit_price")
+    # Distinguish the honest reason: a present entry with a missing exit means the
+    # horizon-close price could not be found (MISSING_EXIT_PRICE); a missing entry
+    # means no reference price (MISSING_ENTRY_PRICE).
+    if entry is not None and exit_ is None:
+        return None, REASON_MISSING_EXIT_PRICE
+    if entry is None and exit_ is not None:
+        return None, REASON_MISSING_ENTRY_PRICE
     if entry is None or exit_ is None:
         return None, REASON_AMBIGUOUS_OUTCOME
 
@@ -170,9 +179,14 @@ def _due_snapshots(db_path: Any, now_utc: datetime) -> list[dict[str, Any]]:
     try:
         conn.row_factory = sqlite3.Row
         ensure_schema(conn)
+        # ``target_return_threshold`` is a forward-contract column (added by the
+        # additive migration); tolerate its absence on legacy DBs.
+        cols = {r[1] for r in conn.execute(f"PRAGMA table_info({TABLE})")}
+        thr_col = "target_return_threshold" if "target_return_threshold" in cols else "NULL AS target_return_threshold"
         rows = conn.execute(
             f"SELECT snapshot_id, timestamp_utc, prediction_horizon_days,"
-            f" model_probability, target_event_definition, outcome_label FROM {TABLE}"
+            f" model_probability, target_event_definition, outcome_label,"
+            f" {thr_col} FROM {TABLE}"
         ).fetchall()
     finally:
         conn.close()
@@ -250,6 +264,7 @@ def attach_due_outcomes(
     pending_horizon = 0
     excluded = 0
     excluded_missing_price = 0
+    excluded_missing_exit_price = 0
     excluded_missing_target_definition = 0
     excluded_missing_probability = 0
     details: list[dict[str, Any]] = []
@@ -301,14 +316,23 @@ def attach_due_outcomes(
         if not _valid_probability(snap.get("model_probability")):
             excluded_missing_probability += 1
 
+        # Prefer the per-snapshot persisted target_return_threshold (the forward
+        # contract default is 0.0) over the batch-wide default.
+        snap_threshold = snap.get("target_return_threshold")
+        eff_threshold = (
+            float(snap_threshold) if snap_threshold is not None else target_return_threshold
+        )
         y, reason = compute_outcome_label(
             evidence,
-            target_return_threshold=target_return_threshold,
+            target_return_threshold=eff_threshold,
             alpha_threshold=alpha_threshold,
         )
         if y is None:
             excluded += 1
-            excluded_missing_price += 1
+            if reason == REASON_MISSING_EXIT_PRICE:
+                excluded_missing_exit_price += 1
+            else:
+                excluded_missing_price += 1
             details.append({"decision_id": did, "status": "EXCLUDED",
                             "reason": reason or REASON_NO_PRICE_EVIDENCE})
             continue
@@ -349,6 +373,7 @@ def attach_due_outcomes(
         "pending_horizon": pending_horizon,
         "excluded": excluded,
         "excluded_missing_price": excluded_missing_price,
+        "excluded_missing_exit_price": excluded_missing_exit_price,
         "excluded_missing_target_definition": excluded_missing_target_definition,
         "excluded_missing_probability": excluded_missing_probability,
         "n_real_forward_before": n_before,
@@ -421,6 +446,8 @@ if __name__ == "__main__":  # pragma: no cover
 
 __all__ = [
     "REASON_NO_PRICE_EVIDENCE",
+    "REASON_MISSING_EXIT_PRICE",
+    "REASON_MISSING_ENTRY_PRICE",
     "REASON_AMBIGUOUS_OUTCOME",
     "REASON_OPEN_TRADE",
     "REASON_MISSING_TARGET_DEFINITION",

@@ -79,6 +79,47 @@ describe('OutcomeLoopCard', () => {
     expect(root.getAttribute('data-execution-permission')).toBe('false');
   });
 
+  // --- 7. renders forward-eligible and due-forward -----------------------
+  it('test_frontend_renders_forward_eligible_and_pending', () => {
+    render(
+      <OutcomeLoopCard nForwardEligible={12} nDueForward={3} nPendingHorizon={9} />,
+    );
+    expect(screen.getByTestId('outcome-forward-eligible').textContent).toBe('12');
+    expect(screen.getByTestId('outcome-due-forward').textContent).toBe('3');
+    expect(screen.getByTestId('outcome-pending-horizon').textContent).toBe('9');
+  });
+
+  // --- 8. renders needed-to-200 ------------------------------------------
+  it('test_frontend_renders_needed_to_200', () => {
+    render(<OutcomeLoopCard nRealForwardPairs={1} neededForGate={199} />);
+    expect(screen.getByTestId('outcome-needed-for-gate').textContent).toBe('199');
+  });
+
+  // --- 9. no green calibration below 200 ---------------------------------
+  it('test_no_green_calibration_below_200', () => {
+    render(<OutcomeLoopCard nForwardEligible={10} nRealForwardPairs={4} predictiveClaimAllowed={false} />);
+    expect(screen.getByTestId('outcome-calibration-locked')).toBeTruthy();
+    expect(screen.queryByTestId('outcome-predictive-allowed')).toBeNull();
+  });
+
+  // --- wiring: forward-eligibility fields mapped -------------------------
+  it('maps forward-eligibility fields from the backend payload', () => {
+    const props = mapOutcomeLoopProps({
+      status: 'OK',
+      n_real_forward_pairs: 0,
+      n_forward_outcome_eligible: 12,
+      n_due_forward: 0,
+      forward_unavailable_reasons: { MISSING_ENTRY_PRICE: 5 },
+      n_pending_horizon: 12,
+      predictive_claim_allowed: false,
+      n_needed_to_200: 200,
+    });
+    expect(props.nForwardEligible).toBe(12);
+    expect(props.nDueForward).toBe(0);
+    expect(props.forwardUnavailableReasons).toEqual({ MISSING_ENTRY_PRICE: 5 });
+    expect(props.predictiveClaimAllowed).toBe(false);
+  });
+
   // --- wiring: locked when backend omits the gate gap --------------------
   it('maps null payload to a degraded, locked card', () => {
     const props = mapOutcomeLoopProps(null);

@@ -151,13 +151,13 @@ def load_price_series(
     return series
 
 
-def price_on_or_before(
+def price_point_on_or_before(
     bars: list[tuple[datetime, float]],
     target: datetime,
     *,
     max_gap_days: float = DEFAULT_MAX_GAP_DAYS,
-) -> float | None:
-    """Last real close at/before ``target`` within ``max_gap_days``, else None."""
+) -> tuple[datetime, float] | None:
+    """Last real ``(timestamp, close)`` at/before ``target`` within tolerance."""
     best: tuple[datetime, float] | None = None
     for dt, close in bars:  # bars are sorted ascending
         if dt <= target:
@@ -168,7 +168,64 @@ def price_on_or_before(
         return None
     if (target - best[0]) > timedelta(days=max_gap_days):
         return None
-    return best[1]
+    return best
+
+
+def price_on_or_before(
+    bars: list[tuple[datetime, float]],
+    target: datetime,
+    *,
+    max_gap_days: float = DEFAULT_MAX_GAP_DAYS,
+) -> float | None:
+    """Last real close at/before ``target`` within ``max_gap_days``, else None."""
+    point = price_point_on_or_before(bars, target, max_gap_days=max_gap_days)
+    return point[1] if point is not None else None
+
+
+def resolve_entry_price(
+    db_path: Any,
+    *,
+    ticker: Any,
+    decision_timestamp_utc: Any,
+    max_lookback_days: float = DEFAULT_MAX_GAP_DAYS,
+    series_by_symbol: Mapping[str, list[tuple[datetime, float]]] | None = None,
+) -> dict[str, Any] | None:
+    """Resolve a real entry/reference price for a decision, or ``None``.
+
+    The entry price is the last real OHLCV close at/before the decision timestamp
+    whose bar sits within ``max_lookback_days``.  It is NEVER taken from a bar
+    after the decision timestamp (no look-ahead), and is never fabricated — a
+    missing/stale series yields ``None`` so the caller records
+    ``MISSING_ENTRY_PRICE``.
+
+    Returns ``{entry_price, entry_price_timestamp_utc, entry_price_source,
+    symbol}``.
+    """
+    sym = normalize_symbol(ticker)
+    if sym is None:
+        return None
+    decision_dt = _parse_iso(decision_timestamp_utc)
+    if decision_dt is None:
+        return None
+
+    if series_by_symbol is None:
+        series_by_symbol = load_price_series(db_path, symbols={sym})
+    bars = series_by_symbol.get(sym)
+    if not bars:
+        return None
+
+    point = price_point_on_or_before(bars, decision_dt, max_gap_days=max_lookback_days)
+    if point is None:
+        return None
+    entry_dt, entry_close = point
+    if entry_close is None or entry_close <= 0:
+        return None
+    return {
+        "entry_price": float(entry_close),
+        "entry_price_timestamp_utc": entry_dt.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "entry_price_source": "real_ohlcv_signal_events",
+        "symbol": sym,
+    }
 
 
 def build_real_price_evidence(
@@ -347,6 +404,8 @@ __all__ = [
     "normalize_symbol",
     "load_price_series",
     "price_on_or_before",
+    "price_point_on_or_before",
+    "resolve_entry_price",
     "build_real_price_evidence",
     "make_real_price_evidence_provider",
     "price_coverage_summary",

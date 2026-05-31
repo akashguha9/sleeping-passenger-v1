@@ -172,6 +172,17 @@ def refresh_real_evidence(
         "n_pending_horizon": outcomes.get("pending_horizon", 0),
         "outcomes_attached_this_run": outcomes.get("outcomes_attached", 0),
         "needed_to_reach_200": max(0, 200 - int(calibration["n_real_forward"])),
+        # forward-snapshot-contract surface (this sprint)
+        "ticker_present_count": decisions.get("ticker_present_count", 0),
+        "entry_price_present_count": decisions.get("entry_price_present_count", 0),
+        "forward_outcome_eligible_count": decisions.get("forward_outcome_eligible_count", 0),
+        "forward_outcome_unavailable_reasons": decisions.get(
+            "forward_outcome_unavailable_reasons", {}
+        ),
+        "n_forward_outcome_eligible": bundle["forward_snapshot_contract"][
+            "n_forward_outcome_eligible"
+        ],
+        "n_due_forward": bundle["forward_snapshot_contract"]["n_due_forward"],
         "delta_n_valid_p": decisions["delta_n_valid_p"],
         "delta_n_real_forward": outcomes["delta_n_real_forward"],
         "brier_real_forward": calibration["brier_real_forward"],

@@ -93,6 +93,7 @@ def run_live_decision_path(
     trade_id: str | None = None,
     prediction_horizon_days: float | None = None,
     target_event_definition: str | None = None,
+    decision_timestamp_utc: str | None = None,
     api_health_status: str = "OK",
     rows_added: int = 0,
     canonical_age_hours: float | None = None,
@@ -275,6 +276,10 @@ def run_live_decision_path(
     )
     if target_event_definition is not None:
         snapshot_kwargs["target_event_definition"] = target_event_definition
+    # A live decision timestamp may be supplied for deterministic batches/tests;
+    # it is NEVER moved backward by the caller (the batch passes "now").
+    if decision_timestamp_utc is not None:
+        snapshot_kwargs["timestamp_utc"] = decision_timestamp_utc
     if db_path is not None:
         snapshot = record_decision_probability(db_path=db_path, **snapshot_kwargs)
         snapshot_persisted = True
@@ -300,6 +305,7 @@ def run_live_decision_path(
         "p_after_moltbook": p_after_moltbook,
         "model_probability": snapshot.get("model_probability"),
         "model_probability_reason": snapshot.get("model_probability_reason"),
+        "timestamp_utc": snapshot.get("timestamp_utc"),
         "model_version": snapshot.get("model_version"),
         "scoring_version": snapshot.get("scoring_version"),
         "prediction_horizon_days": snapshot.get("prediction_horizon_days"),

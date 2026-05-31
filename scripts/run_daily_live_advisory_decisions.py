@@ -42,27 +42,54 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from datetime import datetime, timedelta, timezone
 from typing import Any, Iterable, Mapping, Sequence
 
 try:  # package layout
     from scripts import persistence
     from scripts.live_decision_path import run_live_decision_path
-    from scripts.decision_probability_snapshot import count_valid_p
+    from scripts.decision_probability_snapshot import count_valid_p, stamp_forward_contract
     from scripts.advisory_contract import advisory_safety_stamps
     from scripts.score_real_signal_events import (
         complete_axes_from_row,
         count_score_vectors,
         lookup_score_vector,
     )
+    from scripts.forward_snapshot_contract import (
+        DEFAULT_FORWARD_HORIZON_DAYS,
+        DEFAULT_TARGET_EVENT_DEFINITION,
+        DEFAULT_TARGET_RETURN_THRESHOLD,
+        TARGET_SOURCE,
+        forward_outcome_eligible,
+        normalize_ticker,
+    )
+    from scripts.real_price_outcome_evidence import (
+        load_price_series,
+        normalize_symbol,
+        resolve_entry_price,
+    )
 except ModuleNotFoundError:  # pragma: no cover - flat-layout fallback
     import persistence  # type: ignore[no-redef]
     from live_decision_path import run_live_decision_path  # type: ignore[no-redef]
-    from decision_probability_snapshot import count_valid_p  # type: ignore[no-redef]
+    from decision_probability_snapshot import count_valid_p, stamp_forward_contract  # type: ignore[no-redef]
     from advisory_contract import advisory_safety_stamps  # type: ignore[no-redef]
     from score_real_signal_events import (  # type: ignore[no-redef]
         complete_axes_from_row,
         count_score_vectors,
         lookup_score_vector,
+    )
+    from forward_snapshot_contract import (  # type: ignore[no-redef]
+        DEFAULT_FORWARD_HORIZON_DAYS,
+        DEFAULT_TARGET_EVENT_DEFINITION,
+        DEFAULT_TARGET_RETURN_THRESHOLD,
+        TARGET_SOURCE,
+        forward_outcome_eligible,
+        normalize_ticker,
+    )
+    from real_price_outcome_evidence import (  # type: ignore[no-redef]
+        load_price_series,
+        normalize_symbol,
+        resolve_entry_price,
     )
 
 NO_FRESH_ROWS = "NO_FRESH_CANONICAL_ROWS"
@@ -73,6 +100,38 @@ SCORE_VECTOR_INCOMPLETE = "SCORE_VECTOR_INCOMPLETE"
 
 # The six advisory score axes the probability snapshot consumes.
 _AXES_KEYS = ("EMS", "EQS", "DS", "LS", "EFS", "APS")
+
+
+def _parse_now(now_iso: str | None) -> datetime:
+    """Parse a now timestamp (ISO) to aware UTC, or current UTC."""
+    if now_iso:
+        text = str(now_iso).strip().replace("Z", "+00:00")
+        try:
+            dt = datetime.fromisoformat(text)
+            return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+        except ValueError:
+            pass
+    return datetime.now(timezone.utc)
+
+
+def _horizon_elapsed(decision_ts: str | None, horizon_days: float, now_dt: datetime) -> bool:
+    """True when ``decision_ts + horizon_days`` is at/behind ``now_dt``."""
+    if not decision_ts:
+        return False
+    text = str(decision_ts).strip().replace("Z", "+00:00")
+    try:
+        start = datetime.fromisoformat(text)
+    except ValueError:
+        return False
+    if start.tzinfo is None:
+        start = start.replace(tzinfo=timezone.utc)
+    try:
+        days = float(horizon_days)
+    except (TypeError, ValueError):
+        return False
+    if days <= 0:
+        return False
+    return now_dt >= (start + timedelta(days=days))
 
 
 def _coerce_axes(blob: Mapping[str, Any]) -> dict[str, float] | None:
@@ -116,14 +175,16 @@ def resolve_decision_axes(
     event_id: str,
     payload: Any,
     lookup_db: Any,
-) -> tuple[dict[str, float] | None, str, str]:
+) -> tuple[dict[str, float] | None, str, str, dict[str, Any] | None]:
     """Resolve the score vector for one event, honestly.
 
-    Returns ``(axes_or_none, score_vector_source, reason)`` where
+    Returns ``(axes_or_none, score_vector_source, reason, side_row)`` where
     ``score_vector_source`` is one of ``"SCORE_VECTOR"`` (complete side-table
     vector), ``"PAYLOAD_AXES"`` (legacy / fixture), ``"INCOMPLETE"`` or
     ``"MISSING"``.  Side-table truth wins; an incomplete side-table vector is
     NEVER overridden by payload axes — it stays NULL with an explicit reason.
+    ``side_row`` is the raw side-table row (or ``None``) so the caller can also
+    recover the persisted ticker from it.
     """
     side_row = None
     if event_id and lookup_db is not None:
@@ -135,15 +196,52 @@ def resolve_decision_axes(
     if side_row is not None:
         axes = complete_axes_from_row(side_row)
         if axes is not None:
-            return axes, "SCORE_VECTOR", "OK"
+            return axes, "SCORE_VECTOR", "OK", side_row
         # A persisted-but-incomplete vector is honestly NULL, no fallback.
-        return None, "INCOMPLETE", SCORE_VECTOR_INCOMPLETE
+        return None, "INCOMPLETE", SCORE_VECTOR_INCOMPLETE, side_row
 
     # No side-table vector — fall back to payload-embedded axes (legacy path).
     payload_axes = extract_axes(payload)
     if payload_axes is not None:
-        return payload_axes, "PAYLOAD_AXES", "OK"
-    return None, "MISSING", SCORE_VECTOR_MISSING
+        return payload_axes, "PAYLOAD_AXES", "OK", None
+    return None, "MISSING", SCORE_VECTOR_MISSING, None
+
+
+def resolve_ticker(
+    *,
+    event_row: Mapping[str, Any],
+    payload: Any,
+    side_row: Mapping[str, Any] | None,
+) -> str | None:
+    """Recover a normalized ticker for one decision, honestly.
+
+    Tries, in order: the event row's own column, common payload keys
+    (``ticker`` / ``symbol`` / ``asset_symbol`` / ``ticker_symbol``), then the
+    persisted ``signal_event_score_vectors.ticker``.  Returns the contract-
+    normalized ticker, or ``None`` when no usable ticker exists (the snapshot is
+    then recorded but stays forward-ineligible with ``MISSING_TICKER``).
+    """
+    candidates: list[Any] = []
+    if isinstance(event_row, Mapping):
+        for key in ("ticker", "asset_symbol", "symbol", "ticker_symbol"):
+            candidates.append(event_row.get(key))
+    pl = payload
+    if isinstance(pl, str):
+        try:
+            pl = json.loads(pl)
+        except (json.JSONDecodeError, TypeError):
+            pl = None
+    if isinstance(pl, Mapping):
+        for key in ("ticker", "symbol", "asset_symbol", "ticker_symbol"):
+            candidates.append(pl.get(key))
+    if side_row is not None:
+        candidates.append(side_row.get("ticker"))
+
+    for raw in candidates:
+        norm = normalize_ticker(raw)
+        if norm is not None:
+            return norm
+    return None
 
 
 def _classify_blocks(decision: Mapping[str, Any]) -> dict[str, bool]:
@@ -221,6 +319,15 @@ def run_daily_decision_batch(
     decisions_missing_score_vector = 0
     decisions_incomplete_score_vector = 0
     probability_unavailable_reasons: dict[str, int] = {}
+    # ----- forward-snapshot-contract accounting (this sprint) ------------- #
+    ticker_present_count = 0
+    horizon_present_count = 0
+    price_target_present_count = 0
+    entry_price_present_count = 0
+    forward_outcome_eligible_count = 0
+    forward_outcome_ineligible_count = 0
+    forward_outcome_unavailable_reasons: dict[str, int] = {}
+    pending_horizon = 0
 
     if decisions_attempted == 0:
         out = {
@@ -237,6 +344,18 @@ def run_daily_decision_batch(
             "blocked_by_freshness": 0,
             "blocked_by_capacity": 0,
             "blocked_by_moltbook": 0,
+            "ticker_present_count": 0,
+            "horizon_present_count": 0,
+            "price_target_present_count": 0,
+            "entry_price_present_count": 0,
+            "forward_outcome_eligible_count": 0,
+            "forward_outcome_ineligible_count": 0,
+            "forward_outcome_unavailable_reasons": {},
+            "n_pending_horizon": 0,
+            "default_prediction_horizon_days": DEFAULT_FORWARD_HORIZON_DAYS,
+            "target_event_definition": DEFAULT_TARGET_EVENT_DEFINITION,
+            "target_return_threshold": DEFAULT_TARGET_RETURN_THRESHOLD,
+            "target_source": TARGET_SOURCE,
             "reason": NO_FRESH_ROWS,
             "calibration_status": "INSUFFICIENT_EVIDENCE",
             "predictive_claim_allowed": False,
@@ -246,24 +365,56 @@ def run_daily_decision_batch(
         out["human_execution_required"] = True
         return out
 
+    # ----- pre-pass: resolve axes + ticker, gather price symbols ---------- #
+    prepared: list[dict[str, Any]] = []
+    wanted_symbols: set[str] = set()
     for i, row in enumerate(event_rows):
         payload = row.get("raw_payload", row)
         signal_id = str(row.get("event_id") or row.get("signal_id") or f"DAILY_{i}")
-        ticker = row.get("ticker") if isinstance(row, Mapping) else None
         country = row.get("country") if isinstance(row, Mapping) else None
 
-        # Primary: persisted side-table score vector; fallback: payload axes.
-        axes, vector_source, axes_reason = resolve_decision_axes(
+        axes, vector_source, axes_reason, side_row = resolve_decision_axes(
             event_id=signal_id, payload=payload, lookup_db=target,
         )
+        ticker = resolve_ticker(event_row=row, payload=payload, side_row=side_row)
+        if ticker is not None:
+            sym = normalize_symbol(ticker)
+            if sym:
+                wanted_symbols.add(sym)
+        prepared.append({
+            "signal_id": signal_id, "payload": payload, "country": country,
+            "axes": axes, "vector_source": vector_source, "axes_reason": axes_reason,
+            "ticker": ticker,
+        })
+
+    # Load the real OHLCV series once for every symbol we may price (efficient).
+    # ``series_loaded`` lets us pass the (possibly empty) preloaded dict to the
+    # resolver so it never re-scans market_data per row.
+    series_loaded = bool(wanted_symbols)
+    try:
+        series_by_symbol = load_price_series(
+            target, symbols=wanted_symbols or None
+        ) if wanted_symbols else {}
+    except Exception:  # pragma: no cover - defensive; never crash the batch
+        series_by_symbol = {}
+
+    now_dt = _parse_now(now_iso)
+
+    for item in prepared:
+        signal_id = item["signal_id"]
+        payload = item["payload"]
+        country = item["country"]
+        axes = item["axes"]
+        vector_source = item["vector_source"]
+        axes_reason = item["axes_reason"]
+        ticker = item["ticker"]
+
         if vector_source == "SCORE_VECTOR":
             decisions_with_score_vector += 1
         elif vector_source == "INCOMPLETE":
             decisions_incomplete_score_vector += 1
         elif vector_source == "MISSING":
             decisions_missing_score_vector += 1
-        # PAYLOAD_AXES rows have no side-table vector but still carry axes; they
-        # are counted as "missing side-table vector" for honest accounting.
         if vector_source == "PAYLOAD_AXES":
             decisions_missing_score_vector += 1
 
@@ -272,11 +423,16 @@ def run_daily_decision_batch(
                 probability_unavailable_reasons.get(axes_reason, 0) + 1
             )
 
+        # Every scored real decision gets the explicit forward contract: a
+        # positive horizon and a price-based target (never a manual one).
         decision = run_live_decision_path(
             signal_id=signal_id,
             axes=axes,
             ticker=ticker,
             country=country,
+            prediction_horizon_days=DEFAULT_FORWARD_HORIZON_DAYS,
+            target_event_definition=DEFAULT_TARGET_EVENT_DEFINITION,
+            decision_timestamp_utc=now_iso,
             api_health_status="OK",
             rows_added=1,
             canonical_age_hours=0.0,
@@ -291,6 +447,68 @@ def run_daily_decision_batch(
         blocked_by_freshness += int(blocks["freshness"])
         blocked_by_capacity += int(blocks["capacity"])
         blocked_by_moltbook += int(blocks["moltbook"])
+
+        decision_ts = decision.get("timestamp_utc") or now_iso
+        # Resolve a real entry/reference price at/before the decision timestamp.
+        entry_evidence = None
+        if ticker is not None:
+            try:
+                entry_evidence = resolve_entry_price(
+                    target,
+                    ticker=ticker,
+                    decision_timestamp_utc=decision_ts,
+                    series_by_symbol=series_by_symbol if series_loaded else None,
+                )
+            except Exception:  # pragma: no cover - never crash the batch
+                entry_evidence = None
+
+        # Honest in-memory contract accounting (computed whether or not we write).
+        if ticker is not None:
+            ticker_present_count += 1
+        horizon_present_count += 1
+        price_target_present_count += 1
+        entry_price = entry_evidence["entry_price"] if entry_evidence else None
+        entry_ts = entry_evidence["entry_price_timestamp_utc"] if entry_evidence else None
+        if entry_price is not None:
+            entry_price_present_count += 1
+
+        eligible, reason = forward_outcome_eligible(
+            ticker=ticker,
+            model_probability=mp,
+            prediction_horizon_days=DEFAULT_FORWARD_HORIZON_DAYS,
+            target_event_definition=DEFAULT_TARGET_EVENT_DEFINITION,
+            entry_price=entry_price,
+            entry_price_timestamp_utc=entry_ts,
+            decision_timestamp_utc=decision_ts,
+            is_real_forward=True,
+        )
+        if eligible:
+            forward_outcome_eligible_count += 1
+            # A freshly-created live decision's horizon has not elapsed yet.
+            if not _horizon_elapsed(decision_ts, DEFAULT_FORWARD_HORIZON_DAYS, now_dt):
+                pending_horizon += 1
+        else:
+            forward_outcome_ineligible_count += 1
+            forward_outcome_unavailable_reasons[reason] = (
+                forward_outcome_unavailable_reasons.get(reason, 0) + 1
+            )
+
+        # Persist the forward fields onto the snapshot (only when writing).
+        if persist_db is not None and decision.get("snapshot_id"):
+            try:
+                stamp_forward_contract(
+                    persist_db,
+                    decision["snapshot_id"],
+                    entry_price=entry_price,
+                    entry_price_timestamp_utc=entry_ts,
+                    entry_price_source=(
+                        entry_evidence["entry_price_source"] if entry_evidence else None
+                    ),
+                    target_return_threshold=DEFAULT_TARGET_RETURN_THRESHOLD,
+                    target_source=TARGET_SOURCE,
+                )
+            except Exception:  # pragma: no cover - never crash the batch
+                pass
 
     n_valid_p_after = count_valid_p(target) if write else n_valid_p_before + valid_p_added
     out = {
@@ -308,6 +526,19 @@ def run_daily_decision_batch(
         "blocked_by_freshness": blocked_by_freshness,
         "blocked_by_capacity": blocked_by_capacity,
         "blocked_by_moltbook": blocked_by_moltbook,
+        # ----- forward-snapshot-contract summary -------------------------- #
+        "ticker_present_count": ticker_present_count,
+        "horizon_present_count": horizon_present_count,
+        "price_target_present_count": price_target_present_count,
+        "entry_price_present_count": entry_price_present_count,
+        "forward_outcome_eligible_count": forward_outcome_eligible_count,
+        "forward_outcome_ineligible_count": forward_outcome_ineligible_count,
+        "forward_outcome_unavailable_reasons": forward_outcome_unavailable_reasons,
+        "n_pending_horizon": pending_horizon,
+        "default_prediction_horizon_days": DEFAULT_FORWARD_HORIZON_DAYS,
+        "target_event_definition": DEFAULT_TARGET_EVENT_DEFINITION,
+        "target_return_threshold": DEFAULT_TARGET_RETURN_THRESHOLD,
+        "target_source": TARGET_SOURCE,
         "reason": "OK",
         # This batch persists decision-time probabilities only; it never claims
         # calibration.  The gate stays locked until N>=200 with Brier/ECE pass.
@@ -355,6 +586,7 @@ __all__ = [
     "SCORE_VECTOR_INCOMPLETE",
     "extract_axes",
     "resolve_decision_axes",
+    "resolve_ticker",
     "run_daily_decision_batch",
     "main",
 ]
