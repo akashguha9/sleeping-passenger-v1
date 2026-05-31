@@ -316,6 +316,16 @@ APPROVED_DOMAINS: tuple[str, ...] = (
     # operator_readiness_checklist by "operator"; runtime_artifact_hygiene by
     # "hygiene"; only the LIVE_VERIFIED proof pack needs a new narrow domain.)
     "live_verified",     # live_verified_proof_pack.py — LIVE_VERIFIED proof packaging (data-quality verdict only, never execution readiness)
+    # Kanté Five-Model Frontier Resolver sprint — advisory-only, config-driven
+    # registry + resolver that selects the highest AVAILABLE model per provider
+    # (OpenAI/Anthropic/xAI/Gemini/Mistral), falls back HONESTLY (never
+    # silently), honours per-provider overrides, and computes a model-quality
+    # -weighted quorum injected into synthesis evidence.  Offline by default;
+    # LIVE_PROBE is opt-in and only ever touches a model metadata/list or a
+    # tiny harmless text probe.  No broker execution, no order placement, no
+    # API trading writes; key values are never logged (only *_present booleans);
+    # model output authority is ADVISORY_ONLY.
+    "frontier_model",    # frontier_model_registry.py / frontier_model_resolver.py — highest-available-model selector + weighted quorum
 )
 
 # Explicit allowlist for individual files / directories whose name does

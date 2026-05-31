@@ -241,9 +241,33 @@ def run_daily_synthesis(
             "proof_status": "CALIBRATION_CORPUS_QUALITY_FAILED_SAFE",
         }
 
+    # Frontier model resolver — select the highest AVAILABLE model per provider
+    # (OpenAI/Anthropic/xAI/Gemini/Mistral) and compute the model-quality
+    # -weighted quorum injected into synthesis evidence.  Offline registry by
+    # default (no network); honest degrade if anything fails.  Advisory-only:
+    # model outputs are evidence, never execution authority.
+    try:
+        from scripts.frontier_model_resolver import build_model_selection_evidence
+        frontier_models = build_model_selection_evidence(
+            mode="OFFLINE_REGISTRY"
+        )
+    except Exception:  # noqa: BLE001 - resolver never breaks the synthesis run
+        frontier_models = {
+            "resolution": {"model_resolver_mode": "OFFLINE_REGISTRY", "providers": {}},
+            "quorum": {
+                "quorum_satisfied": False,
+                "valid_provider_count": 0,
+                "classification_downgraded_for_quorum": True,
+            },
+            "markdown": "# Model Selection / Frontier Resolver (ADVISORY)\n"
+            "frontier_model_resolver_unavailable: synthesis proceeds without "
+            "model-selection evidence; treat model quorum as DEGRADED.",
+        }
+
     return {
         "run_date": payload["verified_holdings"].get("run_date"),
         "payload": payload,
+        "frontier_models": frontier_models,
         "portfolio_truth_gate": truth_gate,
         "fresh_market_discovery": discovery,
         "candidate_executable_split": split,
@@ -460,6 +484,13 @@ def render_portfolio_truth_context(result: dict[str, Any]) -> str:
         lines.append(render_external_evidence_markdown(external_evidence))
         lines.append("")
 
+    # --- Frontier model selection / resolver evidence (Section 7) ---
+    frontier = result.get("frontier_models")
+    if frontier and frontier.get("markdown"):
+        lines.append("------------------------------------------------------------")
+        lines.append(frontier["markdown"])
+        lines.append("")
+
     # --- Synthesis evidence readiness + classification invariants (P3) ---
     lines.append("------------------------------------------------------------")
     lines.append(render_evidence_readiness_block(result))
@@ -674,6 +705,41 @@ def _paper_outcome_readiness_summary(readiness: dict[str, Any]) -> dict[str, Any
     }
 
 
+def _frontier_models_summary(frontier: dict[str, Any]) -> dict[str, Any]:
+    """Frontend-safe frontier-model resolution summary (no secrets, no blobs)."""
+    resolution = frontier.get("resolution", {}) or {}
+    quorum = frontier.get("quorum", {}) or {}
+    providers = resolution.get("providers", {}) or {}
+    selected = {
+        provider: {
+            "selected_model": r.get("selected_model"),
+            "selected_model_score": r.get("selected_model_score"),
+            "capability_tier": r.get("capability_tier"),
+            "provider_key_present": r.get("provider_key_present", False),
+            "availability_status": r.get("availability_status"),
+            "fallback_used": r.get("fallback_used", False),
+            "fallback_reason": r.get("fallback_reason"),
+            "override_used": r.get("override_used", False),
+            "participates_in_quorum": r.get("participates_in_quorum", False),
+        }
+        for provider, r in providers.items()
+    }
+    return {
+        "model_resolver_mode": resolution.get("model_resolver_mode"),
+        "model_availability_live_probed": resolution.get(
+            "model_availability_live_probed", False
+        ),
+        "providers": selected,
+        "valid_provider_count": quorum.get("valid_provider_count", 0),
+        "quorum_required_count": quorum.get("quorum_required_count", 3),
+        "weighted_quorum_score": quorum.get("weighted_quorum_score", 0.0),
+        "normalized_quorum": quorum.get("normalized_quorum", 0.0),
+        "quorum_satisfied": quorum.get("quorum_satisfied", False),
+        "model_output_authority": "ADVISORY_ONLY",
+        "real_money_sizing_impact": "PROHIBITED",
+    }
+
+
 def _corpus_quality_summary(corpus: dict[str, Any]) -> dict[str, Any]:
     """Frontend-safe calibration corpus quality summary."""
     return {
@@ -749,6 +815,7 @@ def _write_artifacts(result: dict[str, Any], context_md: str) -> None:
         "calibration_corpus_quality": _corpus_quality_summary(
             result.get("calibration_corpus_quality") or {}
         ),
+        "frontier_models": _frontier_models_summary(result.get("frontier_models") or {}),
         "safety": result["safety"],
     }
     CONTEXT_JSON_PATH.write_text(json.dumps(summary, indent=2), encoding="utf-8")

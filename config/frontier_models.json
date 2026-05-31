@@ -1,0 +1,64 @@
+{
+  "version": 1,
+  "doc": "Frontier model registry seeds for the five-model synthesis resolver. These are SEED PREFERENCES ONLY — they are not claimed to remain the highest-capability models forever. The resolver selects the highest-scoring AVAILABLE model per provider from these candidates and can be overridden per provider via *_MODEL_OVERRIDE env vars or by editing this file. No code rewrite is required to update a model id. Advisory-only: model outputs are evidence, never execution authority.",
+  "advisory_only": true,
+  "model_output_authority": "ADVISORY_ONLY",
+  "allow_model_override": true,
+  "silent_model_fallback_allowed": false,
+  "providers": {
+    "OPENAI": {
+      "ledger_model_name": "codex",
+      "key_env": ["OPENAI_API_KEY"],
+      "override_env": "OPENAI_MODEL_OVERRIDE",
+      "candidates": [
+        {"model_id": "gpt-5.5", "display_name": "GPT-5.5", "capability_tier": "FRONTIER_MAX", "release_rank": 1.0, "reasoning_strength": 0.98, "coding_strength": 0.96, "financial_analysis_strength": 0.95, "context_score": 0.95, "tool_support_score": 0.97, "structured_output_score": 0.96, "latency_penalty": 0.15, "cost_penalty": 0.35, "deprecation_penalty": 0.0, "availability_status": "AVAILABLE", "notes": "seed primary analyst+synthesis model", "source_kind": "seed"},
+        {"model_id": "gpt-5.5-pro", "display_name": "GPT-5.5 Pro", "capability_tier": "FRONTIER_MAX", "release_rank": 0.97, "reasoning_strength": 0.99, "coding_strength": 0.97, "financial_analysis_strength": 0.96, "context_score": 0.96, "tool_support_score": 0.97, "structured_output_score": 0.97, "latency_penalty": 0.35, "cost_penalty": 0.60, "deprecation_penalty": 0.0, "availability_status": "UNKNOWN", "notes": "may require pro account tier; offline cannot confirm entitlement", "source_kind": "seed"},
+        {"model_id": "gpt-5.4-pro", "display_name": "GPT-5.4 Pro", "capability_tier": "FRONTIER", "release_rank": 0.90, "reasoning_strength": 0.96, "coding_strength": 0.94, "financial_analysis_strength": 0.93, "context_score": 0.93, "tool_support_score": 0.95, "structured_output_score": 0.95, "latency_penalty": 0.30, "cost_penalty": 0.55, "deprecation_penalty": 0.0, "availability_status": "AVAILABLE", "notes": "frontier fallback", "source_kind": "seed"},
+        {"model_id": "gpt-5.4", "display_name": "GPT-5.4", "capability_tier": "FRONTIER", "release_rank": 0.85, "reasoning_strength": 0.95, "coding_strength": 0.93, "financial_analysis_strength": 0.92, "context_score": 0.92, "tool_support_score": 0.94, "structured_output_score": 0.94, "latency_penalty": 0.15, "cost_penalty": 0.30, "deprecation_penalty": 0.0, "availability_status": "AVAILABLE", "notes": "balanced fallback", "source_kind": "seed"},
+        {"model_id": "gpt-5", "display_name": "GPT-5", "capability_tier": "BALANCED", "release_rank": 0.70, "reasoning_strength": 0.90, "coding_strength": 0.88, "financial_analysis_strength": 0.87, "context_score": 0.90, "tool_support_score": 0.90, "structured_output_score": 0.90, "latency_penalty": 0.12, "cost_penalty": 0.25, "deprecation_penalty": 0.0, "availability_status": "AVAILABLE", "notes": "last-resort frontier-line fallback", "source_kind": "seed"},
+        {"model_id": "gpt-4o", "display_name": "GPT-4o (legacy)", "capability_tier": "DEPRECATED", "release_rank": 0.20, "reasoning_strength": 0.78, "coding_strength": 0.76, "financial_analysis_strength": 0.72, "context_score": 0.75, "tool_support_score": 0.80, "structured_output_score": 0.80, "latency_penalty": 0.10, "cost_penalty": 0.20, "deprecation_penalty": 1.0, "availability_status": "DEPRECATED", "notes": "legacy, superseded; blocked from selection", "source_kind": "seed"}
+      ]
+    },
+    "ANTHROPIC": {
+      "ledger_model_name": "claude",
+      "key_env": ["ANTHROPIC_API_KEY"],
+      "override_env": "ANTHROPIC_MODEL_OVERRIDE",
+      "candidates": [
+        {"model_id": "claude-opus-4-8", "display_name": "Claude Opus 4.8", "capability_tier": "FRONTIER_MAX", "release_rank": 1.0, "reasoning_strength": 0.98, "coding_strength": 0.97, "financial_analysis_strength": 0.96, "context_score": 0.95, "tool_support_score": 0.96, "structured_output_score": 0.96, "latency_penalty": 0.20, "cost_penalty": 0.40, "deprecation_penalty": 0.0, "availability_status": "AVAILABLE", "notes": "seed primary", "source_kind": "seed"},
+        {"model_id": "claude-sonnet-4-6", "display_name": "Claude Sonnet 4.6", "capability_tier": "FRONTIER", "release_rank": 0.85, "reasoning_strength": 0.94, "coding_strength": 0.93, "financial_analysis_strength": 0.90, "context_score": 0.93, "tool_support_score": 0.94, "structured_output_score": 0.94, "latency_penalty": 0.10, "cost_penalty": 0.25, "deprecation_penalty": 0.0, "availability_status": "AVAILABLE", "notes": "balanced fallback; prior pipeline default", "source_kind": "seed"},
+        {"model_id": "claude-haiku-4-5", "display_name": "Claude Haiku 4.5", "capability_tier": "FAST", "release_rank": 0.60, "reasoning_strength": 0.85, "coding_strength": 0.84, "financial_analysis_strength": 0.80, "context_score": 0.88, "tool_support_score": 0.90, "structured_output_score": 0.90, "latency_penalty": 0.05, "cost_penalty": 0.12, "deprecation_penalty": 0.0, "availability_status": "AVAILABLE", "notes": "fast fallback", "source_kind": "seed"},
+        {"model_id": "claude-3-5-sonnet", "display_name": "Claude 3.5 Sonnet (legacy)", "capability_tier": "DEPRECATED", "release_rank": 0.20, "reasoning_strength": 0.80, "coding_strength": 0.80, "financial_analysis_strength": 0.74, "context_score": 0.78, "tool_support_score": 0.82, "structured_output_score": 0.82, "latency_penalty": 0.10, "cost_penalty": 0.18, "deprecation_penalty": 1.0, "availability_status": "DEPRECATED", "notes": "legacy; blocked from selection", "source_kind": "seed"}
+      ]
+    },
+    "XAI": {
+      "ledger_model_name": "grok",
+      "key_env": ["XAI_API_KEY"],
+      "override_env": "XAI_MODEL_OVERRIDE",
+      "candidates": [
+        {"model_id": "grok-4.3", "display_name": "Grok 4.3", "capability_tier": "FRONTIER_MAX", "release_rank": 1.0, "reasoning_strength": 0.95, "coding_strength": 0.90, "financial_analysis_strength": 0.90, "context_score": 0.90, "tool_support_score": 0.90, "structured_output_score": 0.88, "latency_penalty": 0.15, "cost_penalty": 0.30, "deprecation_penalty": 0.0, "availability_status": "AVAILABLE", "notes": "seed primary narrative/crowd-pressure lens", "source_kind": "seed"},
+        {"model_id": "grok-build-0.1", "display_name": "Grok Build 0.1 (coding route)", "capability_tier": "BALANCED", "release_rank": 0.70, "reasoning_strength": 0.85, "coding_strength": 0.95, "financial_analysis_strength": 0.80, "context_score": 0.85, "tool_support_score": 0.88, "structured_output_score": 0.85, "latency_penalty": 0.15, "cost_penalty": 0.25, "deprecation_penalty": 0.0, "availability_status": "AVAILABLE", "notes": "coding-specialized route only; not the default analyst", "source_kind": "seed"}
+      ]
+    },
+    "GOOGLE_GEMINI": {
+      "ledger_model_name": "gemini",
+      "key_env": ["GEMINI_API_KEY", "GOOGLE_API_KEY"],
+      "override_env": "GEMINI_MODEL_OVERRIDE",
+      "candidates": [
+        {"model_id": "gemini-3.1-pro", "display_name": "Gemini 3.1 Pro", "capability_tier": "FRONTIER_MAX", "release_rank": 1.0, "reasoning_strength": 0.96, "coding_strength": 0.93, "financial_analysis_strength": 0.92, "context_score": 0.98, "tool_support_score": 0.93, "structured_output_score": 0.92, "latency_penalty": 0.15, "cost_penalty": 0.30, "deprecation_penalty": 0.0, "availability_status": "UNKNOWN", "notes": "configurable latest; preview ids rotate — override via GEMINI_MODEL_OVERRIDE if name changes", "source_kind": "seed"},
+        {"model_id": "gemini-3.1-pro-preview", "display_name": "Gemini 3.1 Pro (preview)", "capability_tier": "FRONTIER", "release_rank": 0.90, "reasoning_strength": 0.95, "coding_strength": 0.92, "financial_analysis_strength": 0.91, "context_score": 0.97, "tool_support_score": 0.92, "structured_output_score": 0.91, "latency_penalty": 0.15, "cost_penalty": 0.28, "deprecation_penalty": 0.0, "availability_status": "AVAILABLE", "notes": "preserved existing configured pipeline model as fallback", "source_kind": "seed"},
+        {"model_id": "gemini-2.5-pro", "display_name": "Gemini 2.5 Pro", "capability_tier": "BALANCED", "release_rank": 0.60, "reasoning_strength": 0.90, "coding_strength": 0.88, "financial_analysis_strength": 0.86, "context_score": 0.95, "tool_support_score": 0.90, "structured_output_score": 0.90, "latency_penalty": 0.10, "cost_penalty": 0.22, "deprecation_penalty": 0.0, "availability_status": "AVAILABLE", "notes": "stable long-context fallback", "source_kind": "seed"}
+      ]
+    },
+    "MISTRAL": {
+      "ledger_model_name": "mistral",
+      "key_env": ["MISTRAL_API_KEY"],
+      "override_env": "MISTRAL_MODEL_OVERRIDE",
+      "candidates": [
+        {"model_id": "mistral-medium-3.5", "display_name": "Mistral Medium 3.5", "capability_tier": "FRONTIER", "release_rank": 1.0, "reasoning_strength": 0.90, "coding_strength": 0.90, "financial_analysis_strength": 0.88, "context_score": 0.88, "tool_support_score": 0.88, "structured_output_score": 0.90, "latency_penalty": 0.10, "cost_penalty": 0.20, "deprecation_penalty": 0.0, "availability_status": "AVAILABLE", "notes": "seed primary European/international lens", "source_kind": "seed"},
+        {"model_id": "mistral-large-3", "display_name": "Mistral Large 3", "capability_tier": "FRONTIER", "release_rank": 0.95, "reasoning_strength": 0.92, "coding_strength": 0.90, "financial_analysis_strength": 0.89, "context_score": 0.90, "tool_support_score": 0.90, "structured_output_score": 0.90, "latency_penalty": 0.18, "cost_penalty": 0.35, "deprecation_penalty": 0.0, "availability_status": "UNKNOWN", "notes": "if available/configured", "source_kind": "seed"},
+        {"model_id": "mistral-small-4", "display_name": "Mistral Small 4", "capability_tier": "FAST", "release_rank": 0.60, "reasoning_strength": 0.82, "coding_strength": 0.83, "financial_analysis_strength": 0.78, "context_score": 0.82, "tool_support_score": 0.85, "structured_output_score": 0.86, "latency_penalty": 0.05, "cost_penalty": 0.10, "deprecation_penalty": 0.0, "availability_status": "AVAILABLE", "notes": "fast fallback", "source_kind": "seed"},
+        {"model_id": "devstral", "display_name": "Devstral (coding route)", "capability_tier": "BALANCED", "release_rank": 0.50, "reasoning_strength": 0.80, "coding_strength": 0.92, "financial_analysis_strength": 0.72, "context_score": 0.82, "tool_support_score": 0.85, "structured_output_score": 0.84, "latency_penalty": 0.08, "cost_penalty": 0.12, "deprecation_penalty": 0.0, "availability_status": "AVAILABLE", "notes": "coding-specific route only", "source_kind": "seed"}
+      ]
+    }
+  }
+}

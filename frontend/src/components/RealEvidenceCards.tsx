@@ -452,4 +452,127 @@ export function EvidenceBundleCard({
   );
 }
 
+// --------------------------------------------------------------------------- //
+// 7. Scoring Coverage Card
+// --------------------------------------------------------------------------- //
+export interface ScoringCoverageCardProps {
+  nRealCanonicalRows?: number | null;
+  nScoredRealRows?: number | null;
+  scoringCoverage?: number | null;
+  nCompleteScoreVectors?: number | null;
+  scoreQualityCoverage?: number | null;
+  nValidP?: number | null;
+  sourcesScored?: string[] | null;
+  scoreUnavailableReasons?: Record<string, number> | null;
+  calibrationStatus?: string | null;
+  predictiveClaimAllowed?: boolean | null;
+  edgeClaimed?: boolean | null;
+  realMoneyReady?: boolean | null;
+  mode?: DataMode;
+}
+
+function pct(value: number | null | undefined): string {
+  if (value === null || value === undefined || Number.isNaN(value)) return '—';
+  return `${(value * 100).toFixed(2)}%`;
+}
+
+export function ScoringCoverageCard({
+  nRealCanonicalRows = 0,
+  nScoredRealRows = 0,
+  scoringCoverage = 0,
+  nCompleteScoreVectors = 0,
+  scoreQualityCoverage = 0,
+  nValidP = 0,
+  sourcesScored = [],
+  scoreUnavailableReasons = {},
+  calibrationStatus = 'INSUFFICIENT_EVIDENCE',
+  predictiveClaimAllowed = false,
+  edgeClaimed = false,
+  realMoneyReady = false,
+  mode = 'LIVE',
+}: ScoringCoverageCardProps) {
+  const allowed = predictiveClaimAllowed === true;
+  const reasons = scoreUnavailableReasons ?? {};
+  const missing = reasons['SCORE_VECTOR_MISSING'] ?? 0;
+  const incomplete = reasons['SCORE_VECTOR_INCOMPLETE'] ?? 0;
+  const status = (calibrationStatus ?? 'INSUFFICIENT_EVIDENCE').toUpperCase();
+  return (
+    <Shell testid="scoring-coverage-card" title="Real-Row Scoring Coverage" mode={mode}>
+      <Row
+        label="SCORED_REAL_ROWS"
+        value={`${fmt(nScoredRealRows)} / ${fmt(nRealCanonicalRows)}`}
+        testid="scoring-scored-real-rows"
+        valueClass={(nScoredRealRows ?? 0) > 0 ? 'text-emerald-300 font-mono' : 'text-slate-300'}
+      />
+      <Row
+        label="scoring_coverage"
+        value={pct(scoringCoverage)}
+        testid="scoring-coverage"
+      />
+      <Row
+        label="complete vectors"
+        value={fmt(nCompleteScoreVectors)}
+        testid="scoring-complete-vectors"
+      />
+      <Row
+        label="score_quality_coverage"
+        value={pct(scoreQualityCoverage)}
+        testid="scoring-quality-coverage"
+      />
+      <Row
+        label="N_VALID_P"
+        value={fmt(nValidP)}
+        testid="scoring-n-valid-p"
+        valueClass={(nValidP ?? 0) > 0 ? 'text-emerald-300 font-mono' : 'text-slate-300'}
+      />
+      <Row
+        label="sources scored"
+        value={(sourcesScored ?? []).length ? (sourcesScored ?? []).join(', ') : '—'}
+        valueClass="font-mono text-[11px]"
+      />
+      <Row
+        label="calibration_status"
+        value={status}
+        testid="scoring-calibration-status"
+        valueClass="font-mono text-amber-400"
+      />
+      {incomplete > 0 ? (
+        <p data-testid="scoring-vector-incomplete" className="text-xs text-amber-400 mt-1">
+          SCORE_VECTOR_INCOMPLETE — {fmt(incomplete)} real rows lack a complete
+          six-axis vector and record no probability.
+        </p>
+      ) : null}
+      {missing > 0 ? (
+        <p data-testid="scoring-vector-missing" className="text-xs text-amber-400 mt-1">
+          SCORE_VECTOR_MISSING — {fmt(missing)} rows have no score vector yet.
+        </p>
+      ) : null}
+      {allowed ? (
+        <Row
+          label="predictive_claim_allowed"
+          value="true"
+          valueClass="font-mono text-emerald-400"
+        />
+      ) : (
+        <p data-testid="scoring-predictive-locked" className="text-xs text-amber-400 mt-1">
+          PREDICTIVE_CLAIM_LOCKED · INSUFFICIENT_EVIDENCE — real rows are scored
+          but the probabilities are advisory-only and uncalibrated.
+        </p>
+      )}
+      <Row
+        label="edge claimed"
+        value={edgeClaimed ? 'true' : 'false'}
+        testid="scoring-edge-claimed"
+        valueClass={`font-mono ${edgeClaimed ? 'text-red-400' : 'text-emerald-400'}`}
+      />
+      <Row
+        label="real-money ready"
+        value={realMoneyReady ? 'true' : 'false'}
+        testid="scoring-real-money"
+        valueClass={`font-mono ${realMoneyReady ? 'text-red-400' : 'text-emerald-400'}`}
+      />
+    </Shell>
+  );
+}
+
 export default SourceTruthCard;

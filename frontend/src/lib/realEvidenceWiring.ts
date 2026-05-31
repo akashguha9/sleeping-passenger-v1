@@ -20,6 +20,7 @@ import type {
   EvidenceBundleResponse,
   EvidenceLiveDecisionResponse,
   EvidenceCapacityRiskResponse,
+  EvidenceScoringResponse,
 } from './apiClient';
 import type {
   DataMode,
@@ -28,6 +29,7 @@ import type {
   EvidenceBundleCardProps,
   LiveDecisionPathCardProps,
   CapacityCorrelationCardProps,
+  ScoringCoverageCardProps,
 } from '@/components/RealEvidenceCards';
 
 /** True only when the backend explicitly reports a non-degraded status. */
@@ -88,6 +90,44 @@ export function mapCalibrationProps(
     // Never optimistic: only an explicit `true` unlocks the claim.
     predictiveClaimAllowed: resp?.predictive_claim_allowed === true,
     mode,
+  };
+}
+
+/**
+ * Map the /evidence/scoring payload into the scoring-coverage card props.
+ *
+ * Honesty rules:
+ *   - DEGRADED whenever the endpoint is null or self-reports DEGRADED.
+ *   - LIVE only when the backend reports real scored rows (mode === 'LIVE').
+ *   - EMPTY (no scored rows yet) renders as DEGRADED — never a green/LIVE chip.
+ *   - predictive / edge / real-money are never asserted true by the frontend.
+ */
+export function scoringMode(resp: EvidenceScoringResponse | null): DataMode {
+  if (!resp || !isHealthy(resp.status)) return 'DEGRADED';
+  if (String(resp.mode ?? '').toUpperCase() === 'LIVE') return 'LIVE';
+  // Healthy but EMPTY (no scored rows) is not "live".
+  return 'DEGRADED';
+}
+
+export function mapScoringProps(
+  resp: EvidenceScoringResponse | null,
+): ScoringCoverageCardProps {
+  return {
+    nRealCanonicalRows: resp?.n_real_canonical_rows ?? 0,
+    nScoredRealRows: resp?.n_scored_real_rows ?? 0,
+    scoringCoverage: resp?.scoring_coverage ?? 0,
+    nCompleteScoreVectors: resp?.n_complete_score_vectors ?? 0,
+    scoreQualityCoverage: resp?.score_quality_coverage ?? 0,
+    nValidP: resp?.n_valid_p ?? 0,
+    sourcesScored: resp?.sources_scored ?? [],
+    scoreUnavailableReasons: resp?.score_unavailable_reasons ?? {},
+    calibrationStatus: resp?.calibration_status ?? 'INSUFFICIENT_EVIDENCE',
+    // Never optimistic: only an explicit `true` unlocks the claim.
+    predictiveClaimAllowed: resp?.predictive_claim_allowed === true,
+    edgeClaimed: resp?.edge_claimed === true,
+    // The frontend never asserts real-money readiness as true.
+    realMoneyReady: resp?.real_money_ready === true,
+    mode: scoringMode(resp),
   };
 }
 

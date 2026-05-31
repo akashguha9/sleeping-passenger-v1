@@ -19,11 +19,20 @@ was actually produced at decision time:
 
     ValidP_d = I(model_probability_d is not NULL) · I(0 <= model_probability_d <= 1)
 
-A signal event carries a usable score vector only when its raw_payload exposes
-the six advisory axes (EMS/EQS/DS/LS/EFS/APS), either nested under ``axes`` /
-``score_vector`` or as top-level keys.  Events without a score vector are still
-*recorded* (honest audit), but model_probability is NULL and they never count
-toward ``n_valid_p`` — we never fabricate a probability.
+A signal event carries a usable score vector from one of two honest sources, in
+priority order:
+
+  1. the persisted ``signal_event_score_vectors`` side table (Phase 4) — the
+     real-row scorer wrote a CompleteScore vector keyed by ``event_id``; OR
+  2. the event's own ``raw_payload`` exposing the six axes (legacy / fixture
+     path) under ``axes`` / ``score_vector`` or as top-level keys.
+
+A side-table vector that exists but is *incomplete* (status != SCORED or an axis
+out of range) yields ``model_probability = NULL`` with reason
+``SCORE_VECTOR_INCOMPLETE`` — it is never overridden by a fabricated value.  An
+event with neither a side-table vector nor payload axes yields NULL with reason
+``SCORE_VECTOR_MISSING``.  Events with a NULL probability are still *recorded*
+(honest audit) but never count toward ``n_valid_p``.
 
 When there are no fresh canonical rows, ``decisions_recorded`` is 0 and the
 summary reports ``reason = "NO_FRESH_CANONICAL_ROWS"`` rather than pretending.
@@ -40,13 +49,27 @@ try:  # package layout
     from scripts.live_decision_path import run_live_decision_path
     from scripts.decision_probability_snapshot import count_valid_p
     from scripts.advisory_contract import advisory_safety_stamps
+    from scripts.score_real_signal_events import (
+        complete_axes_from_row,
+        count_score_vectors,
+        lookup_score_vector,
+    )
 except ModuleNotFoundError:  # pragma: no cover - flat-layout fallback
     import persistence  # type: ignore[no-redef]
     from live_decision_path import run_live_decision_path  # type: ignore[no-redef]
     from decision_probability_snapshot import count_valid_p  # type: ignore[no-redef]
     from advisory_contract import advisory_safety_stamps  # type: ignore[no-redef]
+    from score_real_signal_events import (  # type: ignore[no-redef]
+        complete_axes_from_row,
+        count_score_vectors,
+        lookup_score_vector,
+    )
 
 NO_FRESH_ROWS = "NO_FRESH_CANONICAL_ROWS"
+
+# Honest reasons for a NULL model_probability at decision time.
+SCORE_VECTOR_MISSING = "SCORE_VECTOR_MISSING"
+SCORE_VECTOR_INCOMPLETE = "SCORE_VECTOR_INCOMPLETE"
 
 # The six advisory score axes the probability snapshot consumes.
 _AXES_KEYS = ("EMS", "EQS", "DS", "LS", "EFS", "APS")
@@ -86,6 +109,41 @@ def extract_axes(payload: Any) -> dict[str, float] | None:
             if axes is not None:
                 return axes
     return _coerce_axes(payload)
+
+
+def resolve_decision_axes(
+    *,
+    event_id: str,
+    payload: Any,
+    lookup_db: Any,
+) -> tuple[dict[str, float] | None, str, str]:
+    """Resolve the score vector for one event, honestly.
+
+    Returns ``(axes_or_none, score_vector_source, reason)`` where
+    ``score_vector_source`` is one of ``"SCORE_VECTOR"`` (complete side-table
+    vector), ``"PAYLOAD_AXES"`` (legacy / fixture), ``"INCOMPLETE"`` or
+    ``"MISSING"``.  Side-table truth wins; an incomplete side-table vector is
+    NEVER overridden by payload axes — it stays NULL with an explicit reason.
+    """
+    side_row = None
+    if event_id and lookup_db is not None:
+        try:
+            side_row = lookup_score_vector(lookup_db, event_id)
+        except Exception:  # pragma: no cover - defensive; never crash the batch
+            side_row = None
+
+    if side_row is not None:
+        axes = complete_axes_from_row(side_row)
+        if axes is not None:
+            return axes, "SCORE_VECTOR", "OK"
+        # A persisted-but-incomplete vector is honestly NULL, no fallback.
+        return None, "INCOMPLETE", SCORE_VECTOR_INCOMPLETE
+
+    # No side-table vector — fall back to payload-embedded axes (legacy path).
+    payload_axes = extract_axes(payload)
+    if payload_axes is not None:
+        return payload_axes, "PAYLOAD_AXES", "OK"
+    return None, "MISSING", SCORE_VECTOR_MISSING
 
 
 def _classify_blocks(decision: Mapping[str, Any]) -> dict[str, bool]:
@@ -147,12 +205,22 @@ def run_daily_decision_batch(
     else:
         event_rows = [dict(e) for e in events][:max_decisions]
 
+    # Total CompleteScore vectors available in the side table (honest context).
+    try:
+        scored_rows_available = count_score_vectors(target, complete_only=True)
+    except Exception:  # pragma: no cover - defensive
+        scored_rows_available = 0
+
     decisions_attempted = len(event_rows)
     decisions_recorded = 0
     valid_p_added = 0
     blocked_by_freshness = 0
     blocked_by_capacity = 0
     blocked_by_moltbook = 0
+    decisions_with_score_vector = 0
+    decisions_missing_score_vector = 0
+    decisions_incomplete_score_vector = 0
+    probability_unavailable_reasons: dict[str, int] = {}
 
     if decisions_attempted == 0:
         out = {
@@ -161,10 +229,16 @@ def run_daily_decision_batch(
             "n_valid_p_before": n_valid_p_before,
             "n_valid_p_after": n_valid_p_before,
             "delta_n_valid_p": 0,
+            "scored_rows_available": scored_rows_available,
+            "decisions_with_score_vector": 0,
+            "decisions_missing_score_vector": 0,
+            "decisions_incomplete_score_vector": 0,
+            "probability_unavailable_reasons": {},
             "blocked_by_freshness": 0,
             "blocked_by_capacity": 0,
             "blocked_by_moltbook": 0,
             "reason": NO_FRESH_ROWS,
+            "calibration_status": "INSUFFICIENT_EVIDENCE",
             "predictive_claim_allowed": False,
         }
         out.update(stamps)
@@ -174,10 +248,29 @@ def run_daily_decision_batch(
 
     for i, row in enumerate(event_rows):
         payload = row.get("raw_payload", row)
-        axes = extract_axes(payload)
         signal_id = str(row.get("event_id") or row.get("signal_id") or f"DAILY_{i}")
         ticker = row.get("ticker") if isinstance(row, Mapping) else None
         country = row.get("country") if isinstance(row, Mapping) else None
+
+        # Primary: persisted side-table score vector; fallback: payload axes.
+        axes, vector_source, axes_reason = resolve_decision_axes(
+            event_id=signal_id, payload=payload, lookup_db=target,
+        )
+        if vector_source == "SCORE_VECTOR":
+            decisions_with_score_vector += 1
+        elif vector_source == "INCOMPLETE":
+            decisions_incomplete_score_vector += 1
+        elif vector_source == "MISSING":
+            decisions_missing_score_vector += 1
+        # PAYLOAD_AXES rows have no side-table vector but still carry axes; they
+        # are counted as "missing side-table vector" for honest accounting.
+        if vector_source == "PAYLOAD_AXES":
+            decisions_missing_score_vector += 1
+
+        if axes is None and axes_reason in (SCORE_VECTOR_MISSING, SCORE_VECTOR_INCOMPLETE):
+            probability_unavailable_reasons[axes_reason] = (
+                probability_unavailable_reasons.get(axes_reason, 0) + 1
+            )
 
         decision = run_live_decision_path(
             signal_id=signal_id,
@@ -207,10 +300,18 @@ def run_daily_decision_batch(
         "n_valid_p_after": n_valid_p_after,
         "delta_n_valid_p": n_valid_p_after - n_valid_p_before,
         "valid_p_added_this_batch": valid_p_added,
+        "scored_rows_available": scored_rows_available,
+        "decisions_with_score_vector": decisions_with_score_vector,
+        "decisions_missing_score_vector": decisions_missing_score_vector,
+        "decisions_incomplete_score_vector": decisions_incomplete_score_vector,
+        "probability_unavailable_reasons": probability_unavailable_reasons,
         "blocked_by_freshness": blocked_by_freshness,
         "blocked_by_capacity": blocked_by_capacity,
         "blocked_by_moltbook": blocked_by_moltbook,
         "reason": "OK",
+        # This batch persists decision-time probabilities only; it never claims
+        # calibration.  The gate stays locked until N>=200 with Brier/ECE pass.
+        "calibration_status": "INSUFFICIENT_EVIDENCE",
         "predictive_claim_allowed": False,
     }
     out.update(stamps)
@@ -250,7 +351,10 @@ if __name__ == "__main__":  # pragma: no cover
 
 __all__ = [
     "NO_FRESH_ROWS",
+    "SCORE_VECTOR_MISSING",
+    "SCORE_VECTOR_INCOMPLETE",
     "extract_axes",
+    "resolve_decision_axes",
     "run_daily_decision_batch",
     "main",
 ]

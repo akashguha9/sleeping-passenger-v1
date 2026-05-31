@@ -277,6 +277,107 @@ def build_calibration_payload(*, db_path: Any = None) -> dict[str, Any]:
 
 
 # --------------------------------------------------------------------------- #
+# GET /evidence/scoring
+# --------------------------------------------------------------------------- #
+def build_scoring_payload(*, db_path: Any = None) -> dict[str, Any]:
+    """Real-row scoring coverage + valid-probability count (read-only).
+
+    Reuses the Phase 4 read-only aggregator
+    (``scoring_coverage_summary``) and the decision-snapshot
+    ``count_valid_p`` — no scoring math is duplicated here and nothing is
+    mutated.  ``predictive_claim_allowed`` is surfaced verbatim from the
+    real-forward calibration gate and stays ``False`` until N>=200 with
+    Brier<=0.25 and ECE<=0.10.
+
+    ``mode`` is:
+      * ``EMPTY``    — no real canonical rows have been scored yet;
+      * ``DEGRADED`` — the scoring side table / snapshot store is unreadable;
+      * ``LIVE``     — real scored rows exist.
+    """
+    safety = _safety_stamps()
+    target = db_path if db_path is not None else _db_path()
+    try:
+        try:
+            from scripts.score_real_signal_events import scoring_coverage_summary
+            from scripts.decision_probability_snapshot import count_valid_p
+            from scripts.real_signal_score_vector import MODEL_VERSION
+            from scripts.real_calibration_evidence import build_calibration_evidence
+        except ModuleNotFoundError:  # pragma: no cover - script-style env
+            from score_real_signal_events import scoring_coverage_summary  # type: ignore
+            from decision_probability_snapshot import count_valid_p  # type: ignore
+            from real_signal_score_vector import MODEL_VERSION  # type: ignore
+            from real_calibration_evidence import build_calibration_evidence  # type: ignore
+
+        coverage = scoring_coverage_summary(target)
+        n_valid_p = int(count_valid_p(target))
+        try:
+            cal = build_calibration_evidence(target)
+            calibration_status = cal.get("calibration_status", INSUFFICIENT_EVIDENCE)
+            predictive = bool(cal.get("predictive_claim_allowed"))
+        except Exception:  # noqa: BLE001 - calibration is best-effort here
+            calibration_status = INSUFFICIENT_EVIDENCE
+            predictive = False
+    except Exception as exc:  # noqa: BLE001 - never crash the route
+        payload = {
+            "status": STATUS_DEGRADED,
+            "mode": "DEGRADED",
+            "reason": f"{type(exc).__name__}",
+            "n_real_canonical_rows": 0,
+            "n_scored_real_rows": 0,
+            "scoring_coverage": 0.0,
+            "n_complete_score_vectors": 0,
+            "score_quality_coverage": 0.0,
+            "sources_scored": [],
+            "score_unavailable_reasons": {},
+            "scoring_version": "real-row-score-v1",
+            "model_version": "advisory-logistic-v1",
+            "n_valid_p": 0,
+            "calibration_status": INSUFFICIENT_EVIDENCE,
+            "predictive_claim_allowed": False,
+            "predictive_claim_label": PREDICTIVE_CLAIM_LOCKED,
+            "edge_claimed": False,
+            "real_money_ready": False,
+        }
+        payload.update(safety)
+        return payload
+
+    n_real = int(coverage["n_real_canonical_rows"])
+    n_complete = int(coverage["n_complete_score_vectors"])
+
+    # Roll-up decision-time label so the cockpit can warn on incomplete vectors:
+    # real canonical rows that exist but are NOT a CompleteScore vector.
+    reasons = dict(coverage.get("score_unavailable_reasons") or {})
+    n_incomplete = max(0, n_real - n_complete)
+    if n_incomplete > 0:
+        reasons.setdefault("SCORE_VECTOR_INCOMPLETE", n_incomplete)
+
+    mode = "LIVE" if (n_real > 0 or n_valid_p > 0) else "EMPTY"
+    payload = {
+        "status": STATUS_OK,
+        "mode": mode,
+        "n_real_canonical_rows": n_real,
+        "n_scored_real_rows": int(coverage["n_scored_real_rows"]),
+        "scoring_coverage": float(coverage["scoring_coverage"]),
+        "n_complete_score_vectors": n_complete,
+        "score_quality_coverage": float(coverage["score_quality_coverage"]),
+        "sources_scored": list(coverage.get("sources_scored") or []),
+        "score_unavailable_reasons": reasons,
+        "scoring_version": coverage.get("scoring_version", "real-row-score-v1"),
+        "model_version": MODEL_VERSION,
+        "n_valid_p": n_valid_p,
+        "calibration_status": calibration_status,
+        "predictive_claim_allowed": predictive,
+        "predictive_claim_label": (
+            STATUS_OK if predictive else PREDICTIVE_CLAIM_LOCKED
+        ),
+        "edge_claimed": False,
+        "real_money_ready": False,
+    }
+    payload.update(safety)
+    return _strip_secrets(payload)
+
+
+# --------------------------------------------------------------------------- #
 # GET /evidence/bundle
 # --------------------------------------------------------------------------- #
 def build_bundle_payload(*, bundle_path: Path | None = None) -> dict[str, Any]:
@@ -441,6 +542,7 @@ def build_summary_payload(*, db_path: Any = None) -> dict[str, Any]:
     safety = _safety_stamps()
     source_truth = build_source_truth_payload(db_path=db_path)
     calibration = build_calibration_payload(db_path=db_path)
+    scoring = build_scoring_payload(db_path=db_path)
     bundle = build_bundle_payload()
     decision = build_live_decision_path_payload(db_path=db_path)
 
@@ -450,6 +552,8 @@ def build_summary_payload(*, db_path: Any = None) -> dict[str, Any]:
         "fixture_source_activation_count": source_truth.get(
             "fixture_source_activation_count", 0
         ),
+        "n_scored_real_rows": scoring.get("n_scored_real_rows", 0),
+        "scoring_coverage": scoring.get("scoring_coverage", 0.0),
         "n_valid_p": calibration.get("n_valid_p", 0),
         "n_real_forward": calibration.get("n_real_forward", 0),
         "calibration_status": calibration.get("calibration_status", INSUFFICIENT_EVIDENCE),
@@ -482,6 +586,10 @@ def get_evidence_calibration() -> dict[str, Any]:
     return _resolve("_build_evidence_calibration_payload", build_calibration_payload)()
 
 
+def get_evidence_scoring() -> dict[str, Any]:
+    return _resolve("_build_evidence_scoring_payload", build_scoring_payload)()
+
+
 def get_evidence_bundle() -> dict[str, Any]:
     return _resolve("_build_evidence_bundle_payload", build_bundle_payload)()
 
@@ -504,6 +612,7 @@ def build_router():
     router = APIRouter()
     router.get("/evidence/source-truth")(get_evidence_source_truth)
     router.get("/evidence/calibration")(get_evidence_calibration)
+    router.get("/evidence/scoring")(get_evidence_scoring)
     router.get("/evidence/bundle")(get_evidence_bundle)
     router.get("/evidence/live-decision-path")(get_evidence_live_decision_path)
     router.get("/evidence/capacity-risk")(get_evidence_capacity_risk)
@@ -519,6 +628,7 @@ __all__ = [
     "INSUFFICIENT_EVIDENCE",
     "build_source_truth_payload",
     "build_calibration_payload",
+    "build_scoring_payload",
     "build_bundle_payload",
     "build_live_decision_path_payload",
     "build_capacity_risk_payload",

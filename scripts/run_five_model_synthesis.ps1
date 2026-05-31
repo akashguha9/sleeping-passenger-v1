@@ -16,6 +16,12 @@ $runDate = Get-Date -Format "yyyy-MM-dd"
 # ============================================================
 # MODEL IDS
 # ============================================================
+#
+# Hardcoded seed defaults (used only if the frontier resolver is unavailable).
+# These are NOT the source of truth — the resolver below selects the highest
+# AVAILABLE model per provider from config/frontier_models.json, falls back
+# honestly (never silently), and honours *_MODEL_OVERRIDE env vars. No code
+# rewrite is needed to bump a model id; edit the registry config instead.
 
 $OPENAI_ANALYST_MODEL  = "gpt-5.5"
 $OPENAI_SYNTH_MODEL    = "gpt-5.5"
@@ -23,6 +29,41 @@ $CLAUDE_MODEL          = "claude-sonnet-4-6"
 $GROK_MODEL            = "grok-4.3"
 $GEMINI_MODEL          = "gemini-3.1-pro-preview"
 $MISTRAL_MODEL         = "mistral-large-latest"
+
+# ------------------------------------------------------------
+# FRONTIER MODEL RESOLVER — highest-available-model-per-provider.
+# Advisory/read-only: offline registry, no network, no broker, no secrets.
+# Overrides the hardcoded defaults above ONLY when the resolver returns a
+# non-empty model id; otherwise the hardcoded default is preserved (honest
+# degrade). Fallback reasons are surfaced so a silent downgrade is impossible.
+# ------------------------------------------------------------
+try {
+  $resolvedRaw = & python ".\scripts\frontier_model_resolver.py" --emit-shell-env 2>$null
+  if ($resolvedRaw) {
+    $resolved = @{}
+    foreach ($line in $resolvedRaw) {
+      if ($line -match "^([A-Z_]+)=(.*)$") { $resolved[$matches[1]] = $matches[2] }
+    }
+    if ($resolved["OPENAI_RESOLVED_MODEL"]) {
+      $OPENAI_ANALYST_MODEL = $resolved["OPENAI_RESOLVED_MODEL"]
+      $OPENAI_SYNTH_MODEL   = $resolved["OPENAI_RESOLVED_MODEL"]
+    }
+    if ($resolved["ANTHROPIC_RESOLVED_MODEL"]) { $CLAUDE_MODEL  = $resolved["ANTHROPIC_RESOLVED_MODEL"] }
+    if ($resolved["XAI_RESOLVED_MODEL"])       { $GROK_MODEL    = $resolved["XAI_RESOLVED_MODEL"] }
+    if ($resolved["GOOGLE_GEMINI_RESOLVED_MODEL"]) { $GEMINI_MODEL = $resolved["GOOGLE_GEMINI_RESOLVED_MODEL"] }
+    if ($resolved["MISTRAL_RESOLVED_MODEL"])   { $MISTRAL_MODEL = $resolved["MISTRAL_RESOLVED_MODEL"] }
+    Write-Host "Frontier resolver selected: OpenAI=$OPENAI_ANALYST_MODEL Claude=$CLAUDE_MODEL Grok=$GROK_MODEL Gemini=$GEMINI_MODEL Mistral=$MISTRAL_MODEL"
+    foreach ($p in @("OPENAI","ANTHROPIC","XAI","GOOGLE_GEMINI","MISTRAL")) {
+      if ($resolved["${p}_FALLBACK_USED"] -eq "true") {
+        Write-Host "  ! $p fallback in effect — reason: $($resolved["${p}_FALLBACK_REASON"]) (not a silent downgrade)"
+      }
+    }
+  } else {
+    Write-Host "Frontier resolver returned nothing; using hardcoded seed model ids."
+  }
+} catch {
+  Write-Host "Frontier resolver unavailable; using hardcoded seed model ids."
+}
 
 # ============================================================
 # KEY VALIDATION

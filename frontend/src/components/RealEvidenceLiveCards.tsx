@@ -14,11 +14,13 @@ import { useEffect, useState } from 'react';
 import {
   getEvidenceSourceTruth,
   getEvidenceCalibration,
+  getEvidenceScoring,
   getEvidenceBundle,
   getEvidenceLiveDecisionPath,
   getEvidenceCapacityRisk,
   type EvidenceSourceTruthResponse,
   type EvidenceCalibrationResponse,
+  type EvidenceScoringResponse,
   type EvidenceBundleResponse,
   type EvidenceLiveDecisionResponse,
   type EvidenceCapacityRiskResponse,
@@ -26,6 +28,7 @@ import {
 import {
   mapSourceTruthProps,
   mapCalibrationProps,
+  mapScoringProps,
   mapBundleProps,
   mapLiveDecisionProps,
   mapCapacityRiskProps,
@@ -35,12 +38,14 @@ import {
   LiveDecisionPathCard,
   CapacityCorrelationCard,
   CalibrationEvidenceCard,
+  ScoringCoverageCard,
   EvidenceBundleCard,
 } from '@/components/RealEvidenceCards';
 
 interface EvidenceState {
   sourceTruth: EvidenceSourceTruthResponse | null;
   calibration: EvidenceCalibrationResponse | null;
+  scoring: EvidenceScoringResponse | null;
   bundle: EvidenceBundleResponse | null;
   decision: EvidenceLiveDecisionResponse | null;
   capacity: EvidenceCapacityRiskResponse | null;
@@ -49,6 +54,7 @@ interface EvidenceState {
 const EMPTY: EvidenceState = {
   sourceTruth: null,
   calibration: null,
+  scoring: null,
   bundle: null,
   decision: null,
   capacity: null,
@@ -62,15 +68,17 @@ export function RealEvidenceLiveCards() {
   useEffect(() => {
     let cancelled = false;
     async function load() {
-      const [sourceTruth, calibration, bundle, decision, capacity] = await Promise.all([
-        getEvidenceSourceTruth(),
-        getEvidenceCalibration(),
-        getEvidenceBundle(),
-        getEvidenceLiveDecisionPath(),
-        getEvidenceCapacityRisk(),
-      ]);
+      const [sourceTruth, calibration, scoring, bundle, decision, capacity] =
+        await Promise.all([
+          getEvidenceSourceTruth(),
+          getEvidenceCalibration(),
+          getEvidenceScoring(),
+          getEvidenceBundle(),
+          getEvidenceLiveDecisionPath(),
+          getEvidenceCapacityRisk(),
+        ]);
       if (!cancelled) {
-        setState({ sourceTruth, calibration, bundle, decision, capacity });
+        setState({ sourceTruth, calibration, scoring, bundle, decision, capacity });
       }
     }
     void load();
@@ -85,6 +93,7 @@ export function RealEvidenceLiveCards() {
       <LiveDecisionPathCard {...mapLiveDecisionProps(state.decision)} />
       <CapacityCorrelationCard {...mapCapacityRiskProps(state.capacity)} />
       <CalibrationEvidenceCard {...mapCalibrationProps(state.calibration)} />
+      <ScoringCoverageCard {...mapScoringProps(state.scoring)} />
       <EvidenceBundleCard {...mapBundleProps(state.bundle)} />
     </div>
   );

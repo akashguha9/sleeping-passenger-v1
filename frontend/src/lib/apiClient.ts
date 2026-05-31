@@ -854,6 +854,26 @@ export interface EvidenceCalibrationResponse {
   predictive_claim_label?: string | null;
 }
 
+export interface EvidenceScoringResponse {
+  status?: string | null;
+  mode?: string | null;
+  n_real_canonical_rows?: number | null;
+  n_scored_real_rows?: number | null;
+  scoring_coverage?: number | null;
+  n_complete_score_vectors?: number | null;
+  score_quality_coverage?: number | null;
+  sources_scored?: string[] | null;
+  score_unavailable_reasons?: Record<string, number> | null;
+  scoring_version?: string | null;
+  model_version?: string | null;
+  n_valid_p?: number | null;
+  calibration_status?: string | null;
+  predictive_claim_allowed?: boolean | null;
+  predictive_claim_label?: string | null;
+  edge_claimed?: boolean | null;
+  real_money_ready?: boolean | null;
+}
+
 export interface EvidenceBundleResponse {
   status?: string | null;
   artifact_present?: boolean | null;
@@ -899,6 +919,14 @@ export async function getEvidenceSourceTruth(): Promise<EvidenceSourceTruthRespo
 export async function getEvidenceCalibration(): Promise<EvidenceCalibrationResponse | null> {
   try {
     return await apiFetch<EvidenceCalibrationResponse>('/evidence/calibration');
+  } catch {
+    return null;
+  }
+}
+
+export async function getEvidenceScoring(): Promise<EvidenceScoringResponse | null> {
+  try {
+    return await apiFetch<EvidenceScoringResponse>('/evidence/scoring');
   } catch {
     return null;
   }

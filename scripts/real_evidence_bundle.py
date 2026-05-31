@@ -14,17 +14,23 @@ The bundle is deliberately conservative:
 
 Evidence score (documented, not a trading claim)::
 
-    S_evidence = w_source·SourceTruthScore + w_snapshot·SnapshotCoverage
-               + w_outcome·OutcomeCoverage + w_calibration·CalibrationGateScore
+    S_evidence = w_source·SourceTruthScore + w_scoring·ScoringCoverage
+               + w_snapshot·SnapshotCoverage + w_outcome·OutcomeCoverage
+               + w_calibration·CalibrationGateScore
                + w_reproducibility·ReproducibilityScore
 
-    SourceTruthScore     = real_live_sources / 3
-    SnapshotCoverage     = min(1, n_valid_p / n_snapshot_target)
+    SourceTruthScore     = min(1, real_live_sources / 3)
+    ScoringCoverage      = min(1, n_scored_real_rows / max(1, n_real_canonical_rows))
+    SnapshotCoverage     = min(1, n_valid_p / 200)
     OutcomeCoverage      = min(1, n_real_forward_pairs / 200)
     CalibrationGateScore = I(N>=200)·I(Brier<=0.25)·I(ECE<=0.10)
     ReproducibilityScore = I(bundle_json) · I(commands_logged)
                          · I(commit_hash) · I(tests_green)
-    weights: source 0.25, snapshot 0.20, outcome 0.25, calibration 0.20, repro 0.10
+    weights: source 0.20, scoring 0.20, snapshot 0.20, outcome 0.20,
+             calibration 0.10, repro 0.10
+
+Adding the scoring axis NEVER unlocks a predictive claim — that gate is owned
+solely by the real-forward calibration corpus (N>=200, Brier<=0.25, ECE<=0.10).
 """
 from __future__ import annotations
 
@@ -39,12 +45,16 @@ try:  # package layout
     from scripts.outcome_labeling_flow import build_outcome_corpus_summary
     from scripts.real_evidence_canary import run_canary
     from scripts.decision_probability_snapshot import count_valid_p
+    from scripts.score_real_signal_events import scoring_coverage_summary
+    from scripts.real_signal_score_vector import MODEL_VERSION, SCORING_VERSION
 except ModuleNotFoundError:  # pragma: no cover - flat-layout fallback
     from runtime_common import RUNTIME_DIR, REPO_ROOT, write_json_atomic  # type: ignore[no-redef]
     from real_calibration_evidence import build_calibration_evidence  # type: ignore[no-redef]
     from outcome_labeling_flow import build_outcome_corpus_summary  # type: ignore[no-redef]
     from real_evidence_canary import run_canary  # type: ignore[no-redef]
     from decision_probability_snapshot import count_valid_p  # type: ignore[no-redef]
+    from score_real_signal_events import scoring_coverage_summary  # type: ignore[no-redef]
+    from real_signal_score_vector import MODEL_VERSION, SCORING_VERSION  # type: ignore[no-redef]
 
 _JSON_NAME = "real_evidence_bundle.json"
 _MD_PATH = REPO_ROOT / "docs" / "REAL_EVIDENCE_BUNDLE.md"
@@ -52,11 +62,12 @@ _MD_PATH = REPO_ROOT / "docs" / "REAL_EVIDENCE_BUNDLE.md"
 N_SNAPSHOT_TARGET = 200
 N_OUTCOME_TARGET = 200
 
-# S_evidence weights.
-W_SOURCE = 0.25
+# S_evidence weights (now include a scoring-coverage axis).
+W_SOURCE = 0.20
+W_SCORING = 0.20
 W_SNAPSHOT = 0.20
-W_OUTCOME = 0.25
-W_CALIBRATION = 0.20
+W_OUTCOME = 0.20
+W_CALIBRATION = 0.10
 W_REPRODUCIBILITY = 0.10
 
 REPRO_COMMAND = (
@@ -132,9 +143,17 @@ def build_evidence_bundle(
     calibration = build_calibration_evidence(db_path)
     outcomes = build_outcome_corpus_summary(db_path)
     n_valid_p = count_valid_p(db_path)
+    scoring = scoring_coverage_summary(db_path)
 
     # ----- S_evidence components ---------------------------------------- #
-    source_truth_score = round(len(real_sources) / 3.0, 6)
+    source_truth_score = round(min(1.0, len(real_sources) / 3.0), 6)
+    scoring_coverage = round(
+        min(
+            1.0,
+            scoring["n_scored_real_rows"] / max(1, scoring["n_real_canonical_rows"]),
+        ),
+        6,
+    )
     snapshot_coverage = round(min(1.0, n_valid_p / max(1, n_snapshot_target)), 6)
     outcome_coverage = round(
         min(1.0, calibration["n_real_forward"] / N_OUTCOME_TARGET), 6
@@ -148,6 +167,7 @@ def build_evidence_bundle(
     )
     s_evidence = round(
         W_SOURCE * source_truth_score
+        + W_SCORING * scoring_coverage
         + W_SNAPSHOT * snapshot_coverage
         + W_OUTCOME * outcome_coverage
         + W_CALIBRATION * calibration_gate_score
@@ -170,6 +190,25 @@ def build_evidence_bundle(
         "decision_snapshots": {
             "n_snapshots": outcomes["n_snapshots"],
             "n_valid_p": n_valid_p,
+        },
+        "scoring": {
+            "n_real_canonical_rows": int(scoring["n_real_canonical_rows"]),
+            "n_scored_real_rows": int(scoring["n_scored_real_rows"]),
+            "scoring_coverage": scoring_coverage,
+            "n_complete_score_vectors": int(scoring["n_complete_score_vectors"]),
+            "score_quality_coverage": float(scoring["score_quality_coverage"]),
+            "sources_scored": list(scoring.get("sources_scored") or []),
+            "score_unavailable_reasons": dict(
+                scoring.get("score_unavailable_reasons") or {}
+            ),
+            "n_valid_p": n_valid_p,
+            "scoring_version": SCORING_VERSION,
+            "model_version": MODEL_VERSION,
+            "calibration_status": calibration["calibration_status"],
+            # The scoring axis is advisory-only; it can NEVER unlock the gate.
+            "predictive_claim_allowed": bool(calibration["predictive_claim_allowed"]),
+            "edge_claimed": False,
+            "real_money_ready": False,
         },
         "outcomes": {
             "n_real_forward_pairs": calibration["n_real_forward"],
@@ -202,14 +241,16 @@ def build_evidence_bundle(
             "score": s_evidence,
             "components": {
                 "source_truth_score": source_truth_score,
+                "scoring_coverage": scoring_coverage,
                 "snapshot_coverage": snapshot_coverage,
                 "outcome_coverage": outcome_coverage,
                 "calibration_gate_score": calibration_gate_score,
                 "reproducibility_score": reproducibility_score,
             },
             "weights": {
-                "source": W_SOURCE, "snapshot": W_SNAPSHOT, "outcome": W_OUTCOME,
-                "calibration": W_CALIBRATION, "reproducibility": W_REPRODUCIBILITY,
+                "source": W_SOURCE, "scoring": W_SCORING, "snapshot": W_SNAPSHOT,
+                "outcome": W_OUTCOME, "calibration": W_CALIBRATION,
+                "reproducibility": W_REPRODUCIBILITY,
             },
         },
         "reproducibility": {
@@ -246,6 +287,23 @@ def render_markdown(bundle: Mapping[str, Any]) -> str:
         f"- Fixture-backed activation: **{bundle['fixture_source_activation']['source_count']}** "
         f"{bundle['fixture_source_activation']['sources']}",
         f"- C_global: {bundle['source_truth']['C_global']}",
+        "",
+        "## Real-row scoring",
+        f"- Real canonical rows scored: **{_sc(bundle)['n_scored_real_rows']}** / "
+        f"{_sc(bundle)['n_real_canonical_rows']} "
+        f"(scoring_coverage {_sc(bundle)['scoring_coverage']})",
+        f"- Complete six-axis vectors: {_sc(bundle)['n_complete_score_vectors']} "
+        f"(score_quality_coverage {_sc(bundle)['score_quality_coverage']})",
+        f"- Sources scored: {_sc(bundle)['sources_scored']}",
+        f"- Decision-time valid probabilities (n_valid_p): "
+        f"**{_sc(bundle)['n_valid_p']}**",
+        f"- Score vector / model version: `{_sc(bundle)['scoring_version']}` / "
+        f"`{_sc(bundle)['model_version']}`",
+        "- Real rows are now scored AND consumed into decision snapshots; "
+        "the probabilities are advisory-only and **uncalibrated**.",
+        f"- Calibration status: **{_sc(bundle)['calibration_status']}** "
+        f"(N_real_forward < 200 ⇒ predictive claim LOCKED).",
+        "- Signal edge is **NOT proven**. Real-money readiness is **NO**.",
         "",
         "## Decision snapshots & outcomes",
         f"- Decision snapshots: {bundle['decision_snapshots']['n_snapshots']} "
@@ -294,6 +352,17 @@ def cal_n(bundle: Mapping[str, Any]) -> int:
     return int(bundle["outcomes"]["n_real_forward_pairs"])
 
 
+def _sc(bundle: Mapping[str, Any]) -> dict[str, Any]:
+    """Scoring sub-dict with safe defaults for older bundles."""
+    return dict(bundle.get("scoring") or {
+        "n_real_canonical_rows": 0, "n_scored_real_rows": 0, "scoring_coverage": 0.0,
+        "n_complete_score_vectors": 0, "score_quality_coverage": 0.0,
+        "sources_scored": [], "n_valid_p": 0,
+        "scoring_version": "real-row-score-v1", "model_version": "advisory-logistic-v1",
+        "calibration_status": "INSUFFICIENT_EVIDENCE",
+    })
+
+
 def write_bundle(
     bundle: Mapping[str, Any],
     *,
@@ -332,6 +401,10 @@ def main(argv: list[str] | None = None) -> int:  # pragma: no cover - thin CLI
         "repo_commit": bundle["repo_commit"],
         "real_source_activation": bundle["real_source_activation"]["source_count"],
         "fixture_source_activation": bundle["fixture_source_activation"]["source_count"],
+        "n_real_canonical_rows": bundle["scoring"]["n_real_canonical_rows"],
+        "n_scored_real_rows": bundle["scoring"]["n_scored_real_rows"],
+        "scoring_coverage": bundle["scoring"]["scoring_coverage"],
+        "n_valid_p": bundle["scoring"]["n_valid_p"],
         "n_real_forward_pairs": bundle["outcomes"]["n_real_forward_pairs"],
         "calibration_status": bundle["calibration"]["status"],
         "predictive_claim_allowed": bundle["predictive_claim_allowed"],

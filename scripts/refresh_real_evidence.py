@@ -34,6 +34,7 @@ from typing import Any, Mapping, Sequence
 try:  # package layout
     from scripts import persistence
     from scripts.real_evidence_canary import CANARY_ENV_FLAG, run_canary, write_report
+    from scripts.score_real_signal_events import score_real_signal_events
     from scripts.run_daily_live_advisory_decisions import run_daily_decision_batch
     from scripts.attach_due_outcomes import attach_due_outcomes
     from scripts.real_calibration_evidence import build_calibration_evidence, write_evidence
@@ -42,6 +43,7 @@ try:  # package layout
 except ModuleNotFoundError:  # pragma: no cover - flat-layout fallback
     import persistence  # type: ignore[no-redef]
     from real_evidence_canary import CANARY_ENV_FLAG, run_canary, write_report  # type: ignore
+    from score_real_signal_events import score_real_signal_events  # type: ignore
     from run_daily_live_advisory_decisions import run_daily_decision_batch  # type: ignore
     from attach_due_outcomes import attach_due_outcomes  # type: ignore
     from real_calibration_evidence import build_calibration_evidence, write_evidence  # type: ignore
@@ -51,6 +53,7 @@ except ModuleNotFoundError:  # pragma: no cover - flat-layout fallback
 # Step labels — surfaced in order so callers (and tests) can assert sequencing.
 STEPS = (
     "real_evidence_canary",
+    "score_real_signal_events",
     "run_daily_live_advisory_decisions",
     "attach_due_outcomes",
     "real_calibration_evidence",
@@ -101,26 +104,34 @@ def refresh_real_evidence(
         canary["report_path"] = write_report(canary, path=canary_json_path)
     steps_run.append(STEPS[0])
 
-    # ----- 2. daily decisions ------------------------------------------- #
-    decisions = run_daily_decision_batch(
-        db_path=target, max_decisions=max_decisions, now_iso=now_iso, write=write
+    # ----- 2. score real signal events ---------------------------------- #
+    # Reads canonical signal_events, persists six-axis score vectors into the
+    # additive side table.  Read-only over canonical rows; never executes.
+    scoring = score_real_signal_events(
+        db_path=target, now_iso=now_iso, write=write
     )
     steps_run.append(STEPS[1])
 
-    # ----- 3. attach due outcomes --------------------------------------- #
-    outcomes = attach_due_outcomes(
-        db_path=target, evidence_by_id=evidence_by_id, now_utc=now_iso, write=write
+    # ----- 3. daily decisions ------------------------------------------- #
+    decisions = run_daily_decision_batch(
+        db_path=target, max_decisions=max_decisions, now_iso=now_iso, write=write
     )
     steps_run.append(STEPS[2])
 
-    # ----- 4. calibration evidence -------------------------------------- #
+    # ----- 4. attach due outcomes --------------------------------------- #
+    outcomes = attach_due_outcomes(
+        db_path=target, evidence_by_id=evidence_by_id, now_utc=now_iso, write=write
+    )
+    steps_run.append(STEPS[3])
+
+    # ----- 5. calibration evidence -------------------------------------- #
     calibration = build_calibration_evidence(target, now_utc=now_iso)
     calibration_path = None
     if write:
         calibration_path = write_evidence(calibration, path=calibration_json_path)
-    steps_run.append(STEPS[3])
+    steps_run.append(STEPS[4])
 
-    # ----- 5. evidence bundle ------------------------------------------- #
+    # ----- 6. evidence bundle ------------------------------------------- #
     bundle = build_evidence_bundle(
         target, canary_report=canary, tests_green=tests_green, now_utc=now_iso
     )
@@ -129,7 +140,7 @@ def refresh_real_evidence(
         bundle_paths = write_bundle(
             bundle, json_path=bundle_json_path, md_path=bundle_md_path
         )
-    steps_run.append(STEPS[4])
+    steps_run.append(STEPS[5])
 
     out = {
         "steps_run": steps_run,
@@ -141,6 +152,12 @@ def refresh_real_evidence(
         "real_source_activation_count": canary.get("real_source_activation_count", 0),
         "fixture_source_activation_count": canary.get("fixture_source_activation_count", 0),
         "C_global": canary.get("C_global", 0.0),
+        # scoring coverage (Phase 7)
+        "n_real_canonical_rows": scoring.get("n_real_canonical_rows", 0),
+        "n_scored_real_rows": scoring.get("n_scored_real_rows", 0),
+        "scoring_coverage": scoring.get("scoring_coverage", 0.0),
+        "n_complete_score_vectors": scoring.get("n_complete_score_vectors", 0),
+        "score_quality_coverage": scoring.get("score_quality_coverage", 0.0),
         # decisions / calibration
         "n_valid_p": calibration["corpus"]["n_valid_p"],
         "n_real_forward": calibration["n_real_forward"],
