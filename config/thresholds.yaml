@@ -57,3 +57,76 @@ daily_discovery:
     STALE_24H: 0.20
     STALE_48H: 0.35
     HISTORICAL_ONLY: 0.50
+
+# Discovery / Execution / Survival three-lane mode model.
+# Single source of truth for the mode_state gates, why-today tiers, BUY_SCORE
+# composition, phantom set, and exit-debt config. These are ADVISORY thresholds
+# only — they gate discovery-surface labelling and execution PERMISSION, they
+# NEVER authorize execution. BUY / PROBE_BUY remain advisory paper-signal
+# classifications; human execution is always required and the execution gate
+# stays LOCKED.
+discovery_execution:
+  # Execution-permission gates (block BUY, never block discovery).
+  min_holdings_price_coverage_for_execution: 0.80
+  min_candidate_price_coverage_for_execution: 0.80
+  # Price validity: sources that can never count as a valid/live price.
+  non_executable_price_sources:
+    - STATIC_FALLBACK
+    - STATIC_UNIVERSE_FALLBACK
+    - UNVERIFIED
+    - MOCK_ONLY
+    - UNKNOWN
+  # WHY_TODAY tier boundaries (tiered classification, not a single hard floor).
+  why_today_noise_max: 0.40       # < this => NOISE_OR_STALE
+  why_today_discovery_min: 0.55   # >= this => VALID_DISCOVERY
+  why_today_watchlist_min: 0.65   # >= this => STRONG_WATCHLIST
+  why_today_probe_min: 0.73       # >= this => PROBE_CANDIDATE (if exec gates pass)
+  why_today_buy_min: 0.80         # >= this => HIGH_CONVICTION (if exec gates pass)
+  # BUY_SCORE classification thresholds.
+  buy_score_discovery_min: 0.55
+  buy_score_watchlist_min: 0.65
+  buy_score_probe_min: 0.73
+  buy_score_buy_min: 0.80
+  # BUY_SCORE weights (must sum to 1.0). Each component clamped to [0,1].
+  buy_score_weights:
+    why_today_score: 0.30
+    price_confirmation: 0.25
+    source_quality: 0.20
+    cross_model_agreement: 0.15
+    portfolio_fit: 0.10
+  # Per-candidate proof floors required for PROBE_BUY / BUY (in addition to
+  # execution_allowed=true and BUY_SCORE thresholds).
+  probe_price_confirmation_min: 0.60
+  probe_volume_confirmation_min: 0.50
+  probe_source_quality_min: 0.60
+  buy_price_confirmation_min: 0.70
+  buy_volume_confirmation_min: 0.60
+  buy_source_quality_min: 0.70
+  buy_portfolio_fit_min: 0.60
+  # Exit-debt normalization.
+  exit_debt_d_max: 5
+  # Phantom / quarantine baseline. Unioned with the runtime hard-override file
+  # data/daily_payload/do_not_treat_as_open.json (which always wins for OPEN
+  # truth). ZIM is phantom-adjacent by config baseline.
+  default_phantom_tickers:
+    - GLD
+    - UNG
+    - TIP
+    - TLT
+    - FCG
+    - ZIM
+  # Trade-state vocabularies for reconciliation / phantom / exit-debt logic.
+  open_like_states:
+    - OPEN
+    - OPEN_RECONCILED
+    - OPEN_LIKE
+    - EXIT_PENDING
+    - PARTIAL
+    - HOLD
+  closed_states:
+    - CLOSED
+    - STOP_CLOSED
+    - CLOSE_TRADE_SYNCED
+    - CLOSED_RECONCILED
+    - SOLD
+    - EXITED

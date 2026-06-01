@@ -70,7 +70,21 @@ from scripts.calibration_corpus_quality import (
 from scripts.fresh_market_discovery import build_fresh_market_discovery
 from scripts.minimum_daily_universe import minimum_universe_metadata
 from scripts.portfolio_truth_gate import build_portfolio_truth_gate
-from scripts.runtime_common import REPO_ROOT
+from scripts.runtime_common import OPEN_POSITIONS_PATH, REPO_ROOT, load_json_file
+from scripts.discovery_execution_config import load_discovery_execution_config
+from scripts.discovery_execution_mode import (
+    build_discovery_execution_report,
+    classify_candidate,
+    clamp01,
+    compute_buy_score,
+    compute_mode_state,
+    exit_debt,
+    leverage_truth,
+    phantom_open_violations,
+    price_coverage,
+    valid_price_flag,
+    why_today_tier,
+)
 from scripts.top30_country_coverage import (
     build_country_coverage_from_payload,
     country_from_ticker,
@@ -139,6 +153,187 @@ def _compute_why_today_scores(
             4,
         )
     return scores
+
+
+def _price_row_map(payload: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    rows: dict[str, dict[str, Any]] = {}
+    for mover in payload.get("price_movers", {}).get("movers", []) or []:
+        ticker = normalize_ticker(mover.get("ticker") or mover.get("symbol"))
+        if ticker:
+            rows[ticker] = mover
+    return rows
+
+
+def build_mode_state_block(
+    payload: dict[str, Any],
+    truth_gate: dict[str, Any],
+    discovery: dict[str, Any],
+    why_today_scores: dict[str, float],
+    split: dict[str, Any],
+) -> dict[str, Any]:
+    """Compute the three-lane mode_state + boards for the daily synthesis.
+
+    Advisory/visibility-only. Discovery is ALWAYS permitted to surface
+    candidates; the gates below only block EXECUTION permission (advisory paper
+    BUY / PROBE_BUY classification). Bad price coverage, phantom contamination,
+    leverage conflict, or exit debt block execution — never discovery.
+
+    NOTE on inputs:
+      * portfolio_truth_clean is driven by the Portfolio Truth Gate's own
+        contradiction checks (verified_current_holdings is canonical; the stale
+        ledger is intentionally non-canonical and is not diffed as "the sheet").
+      * exit-debt has no closed-rows feed wired into the daily payload yet, so
+        it is computed over an empty set here (honest 0). The exit-debt counter
+        itself is exercised by unit tests.
+    """
+    cfg = load_discovery_execution_config()
+    price_rows = _price_row_map(payload)
+
+    # --- Price coverage: holdings (H) and candidate universe (C) -------------
+    verified = list(truth_gate.get("verified_open_holdings", []))
+    holding_rows = [
+        price_rows.get(t, {"ticker": t, "valid_price": False}) for t in verified
+    ]
+    candidate_tickers = [s["ticker"] for s in discovery.get("scored_candidates", [])]
+    candidate_rows = [
+        price_rows.get(t, {"ticker": t, "valid_price": False}) for t in candidate_tickers
+    ]
+    h_cov = price_coverage(holding_rows, config=cfg)
+    c_cov = price_coverage(candidate_rows, config=cfg)
+
+    # --- Phantom open-like violations from the stale ledger ------------------
+    open_positions = load_json_file(OPEN_POSITIONS_PATH, default=[])
+    open_rows = [r for r in open_positions if isinstance(r, dict)]
+    phantom = phantom_open_violations(open_rows, config=cfg)
+
+    # --- Leverage truth conflict over verified holdings ----------------------
+    holdings_positions = payload.get("verified_holdings", {}).get("positions", []) or []
+    lev = leverage_truth(holdings_positions, config=cfg)
+
+    # --- Exit debt (no closed-rows feed in the daily payload yet) ------------
+    debt = exit_debt([], config=cfg)
+
+    # --- Portfolio truth: clean iff the truth gate found no contradiction ----
+    portfolio_truth_clean = not truth_gate.get("portfolio_truth_errors")
+
+    # --- Source health -------------------------------------------------------
+    movers_meta = payload.get("price_movers", {})
+    source_health_ok = bool(movers_meta.get("is_live")) or str(
+        movers_meta.get("source_health", "")
+    ).upper() == "LIVE_VERIFIED"
+
+    mode_state = compute_mode_state(
+        holdings_price_coverage=h_cov,
+        candidate_price_coverage=c_cov,
+        portfolio_truth_clean=portfolio_truth_clean,
+        phantom_clean=phantom["phantom_clean"],
+        leverage_clean=lev["leverage_clean"],
+        exit_debt_clean=debt["exit_debt_clean"],
+        source_health_ok=source_health_ok,
+        advisory_safety_lock_intact=True,
+        candidate_source_available=bool(discovery.get("scored_candidates")),
+        config=cfg,
+    )
+    execution_allowed = mode_state["execution_allowed"]
+
+    # --- Discovery board: tiered, advisory-only ------------------------------
+    discovery_board: list[dict[str, Any]] = []
+    for score in discovery.get("scored_candidates", []):
+        ticker = score["ticker"]
+        wt = float(why_today_scores.get(ticker, 0.0))
+        prow = price_rows.get(ticker, {})
+        valid = valid_price_flag(prow, config=cfg)
+        volume_conf = 1.0 if (valid and prow.get("valid_mover")) else 0.0
+        components = {
+            "why_today_score": wt,
+            "price_confirmation": 1.0 if valid else 0.0,
+            "source_quality": 0.70 if valid else 0.25,
+            "cross_model_agreement": clamp01(score.get("cross_model_agreement", 0.0)),
+            "portfolio_fit": clamp01(score.get("portfolio_fit", 0.0)),
+        }
+        bscore = compute_buy_score(components, config=cfg)
+        phantom_flag = score.get("source_class") == "PHANTOM"
+        verdict = classify_candidate(
+            bscore,
+            execution_allowed=execution_allowed,
+            proof={
+                "price_confirmation": components["price_confirmation"],
+                "volume_confirmation": volume_conf,
+                "source_quality": components["source_quality"],
+                "portfolio_fit": components["portfolio_fit"],
+            },
+            phantom=phantom_flag,
+            config=cfg,
+        )
+        discovery_board.append(
+            {
+                "ticker": ticker,
+                "why_today_score": round(wt, 4),
+                "why_today_tier": why_today_tier(wt, config=cfg),
+                "buy_score": verdict["buy_score"],
+                "classification": verdict["classification"],
+                "execution_blocked_reason": verdict["execution_blocked_reason"],
+            }
+        )
+
+    # --- Survival board: dirty open-risk surface -----------------------------
+    survival_board: list[dict[str, Any]] = []
+    for t in phantom["phantom_open_violations"]:
+        survival_board.append({"ticker": t, "issue": "PHANTOM_OPEN_VIOLATION"})
+    for conflict in lev["conflicts"]:
+        survival_board.append({"ticker": conflict["ticker"], "issue": "LEVERAGE_TRUTH_CONFLICT", **conflict})
+    for row in debt["exit_debt_rows"]:
+        survival_board.append({"ticker": row["ticker"], "issue": "EXIT_DEBT_UNRESOLVED", **row})
+    missing_price_holdings = [
+        t for t, r in ((t, price_rows.get(t, {})) for t in verified)
+        if not valid_price_flag(r, config=cfg)
+    ]
+    for t in missing_price_holdings:
+        survival_board.append({"ticker": t, "issue": "HOLDING_MISSING_VALID_PRICE"})
+
+    # --- Execution board: only authoritative executable buys, only if allowed.
+    # The mode block never invents buys — it reflects whatever the strict
+    # candidate_executable_split already approved (authoritative path).
+    execution_board = (
+        [
+            {"ticker": r["ticker"], "classification": "EXECUTABLE-PAPER-BUY"}
+            for r in split.get("executable_paper_buys", [])
+        ]
+        if execution_allowed
+        else []
+    )
+
+    # --- Quarantine board: phantom / closed / sold ---------------------------
+    quarantine_board = (
+        [{"ticker": t, "issue": "PHANTOM_QUARANTINE"} for t in truth_gate.get("phantom_position_candidates", [])]
+        + [{"ticker": t, "issue": "CLOSED_OR_SOLD"} for t in truth_gate.get("closed_or_sold", [])]
+        + [{"ticker": t, "issue": "DO_NOT_TREAT_AS_OPEN"} for t in truth_gate.get("do_not_treat_as_open", [])]
+    )
+
+    report = build_discovery_execution_report(
+        mode_state=mode_state,
+        holdings_price_coverage=h_cov,
+        candidate_price_coverage=c_cov,
+        discovery_board=discovery_board,
+        survival_board=survival_board,
+        execution_board=execution_board,
+        quarantine_board=quarantine_board,
+    )
+    return {
+        "mode_state": mode_state,
+        "coverage": report["coverage"],
+        "discovery_board": discovery_board,
+        "survival_board": survival_board,
+        "execution_board": report["execution_board"],
+        "quarantine_board": quarantine_board,
+        "leverage_truth": lev,
+        "phantom_state": phantom,
+        "exit_debt_state": debt,
+        "discovery_execution_report": report,
+        "H_price_coverage": h_cov,
+        "C_price_coverage": c_cov,
+        "new_risk_allowed": mode_state["new_risk_allowed"],
+    }
 
 
 def run_daily_synthesis(
@@ -264,6 +459,12 @@ def run_daily_synthesis(
             "model-selection evidence; treat model quorum as DEGRADED.",
         }
 
+    # --- Three-lane mode_state: SURVIVAL vs DISCOVERY vs EXECUTION ----------
+    # Discovery always runs; the gates below only block EXECUTION permission.
+    mode_block = build_mode_state_block(
+        payload, truth_gate, discovery, why_today_scores, split
+    )
+
     return {
         "run_date": payload["verified_holdings"].get("run_date"),
         "payload": payload,
@@ -273,6 +474,19 @@ def run_daily_synthesis(
         "candidate_executable_split": split,
         "anti_staleness": anti_staleness,
         "why_today_scores": why_today_scores,
+        "mode_state": mode_block["mode_state"],
+        "coverage": mode_block["coverage"],
+        "discovery_board": mode_block["discovery_board"],
+        "survival_board": mode_block["survival_board"],
+        "execution_board": mode_block["execution_board"],
+        "quarantine_board": mode_block["quarantine_board"],
+        "leverage_truth": mode_block["leverage_truth"],
+        "phantom_state": mode_block["phantom_state"],
+        "exit_debt_state": mode_block["exit_debt_state"],
+        "discovery_execution_report": mode_block["discovery_execution_report"],
+        "H_price_coverage": mode_block["H_price_coverage"],
+        "C_price_coverage": mode_block["C_price_coverage"],
+        "new_risk_allowed": mode_block["new_risk_allowed"],
         "country_coverage": discovery_metrics["country_coverage"],
         "usa_bias": discovery_metrics["usa_bias"],
         "contamination": discovery_metrics["contamination"],
@@ -335,6 +549,84 @@ def _build_discovery_metrics(
     }
 
 
+def _render_mode_summary(result: dict[str, Any]) -> str:
+    """Render the three-lane MODE SUMMARY + boards (advisory-only)."""
+    mode = result.get("mode_state") or {}
+    coverage = result.get("coverage") or {}
+    report = result.get("discovery_execution_report") or {}
+    lines: list[str] = []
+    lines.append("------------------------------------------------------------")
+    lines.append("MODE SUMMARY (SURVIVAL vs DISCOVERY vs EXECUTION)")
+    lines.append("------------------------------------------------------------")
+    lines.append(f"discovery_allowed = {mode.get('discovery_allowed')}")
+    lines.append(f"execution_allowed = {mode.get('execution_allowed')}")
+    lines.append(f"new_risk_allowed = {mode.get('new_risk_allowed')}")
+    lines.append(
+        f"survival_attention_required = {mode.get('survival_attention_required')}"
+    )
+    lines.append(f"candidate_board_allowed = {mode.get('candidate_board_allowed')}")
+    lines.append(f"buy_board_allowed = {mode.get('buy_board_allowed')}")
+    lines.append(f"blockers = {mode.get('blockers') or 'NONE'}")
+    lines.append(
+        "  holdings_price_coverage = %s  candidate_price_coverage = %s"
+        % (
+            coverage.get("holdings_price_coverage"),
+            coverage.get("candidate_price_coverage"),
+        )
+    )
+    lines.append(f"  message: {report.get('message')}")
+
+    survival = result.get("survival_board") or []
+    discovery_board = result.get("discovery_board") or []
+    execution_board = result.get("execution_board") or []
+    quarantine = result.get("quarantine_board") or []
+
+    lines.append("")
+    lines.append("SURVIVAL BOARD (open-risk hygiene — manage before new risk):")
+    if survival:
+        for row in survival:
+            lines.append(f"  - {row.get('ticker')}: {row.get('issue')}")
+    else:
+        lines.append("  NONE")
+
+    lines.append("")
+    lines.append("DISCOVERY BOARD (research candidates — surfaced even when execution blocked):")
+    if discovery_board:
+        for row in discovery_board:
+            blocked = row.get("execution_blocked_reason")
+            suffix = f"  [{blocked}]" if blocked else ""
+            lines.append(
+                "  - %s: why_today=%s tier=%s buy_score=%s -> %s%s"
+                % (
+                    row.get("ticker"),
+                    row.get("why_today_score"),
+                    row.get("why_today_tier"),
+                    row.get("buy_score"),
+                    row.get("classification"),
+                    suffix,
+                )
+            )
+    else:
+        lines.append("  NONE")
+
+    lines.append("")
+    lines.append("EXECUTION BOARD (advisory paper buys — only if execution_allowed):")
+    if execution_board:
+        for row in execution_board:
+            lines.append(f"  - {row.get('ticker')}: {row.get('classification')}")
+    else:
+        lines.append("  No executable buys. Discovery candidates exist." )
+
+    lines.append("")
+    lines.append("QUARANTINE BOARD (phantom / closed / sold — never managed as open):")
+    if quarantine:
+        for row in quarantine:
+            lines.append(f"  - {row.get('ticker')}: {row.get('issue')}")
+    else:
+        lines.append("  NONE")
+    return "\n".join(lines)
+
+
 def render_portfolio_truth_context(result: dict[str, Any]) -> str:
     """Render the Portfolio Truth context block injected into the five prompts.
 
@@ -375,6 +667,8 @@ def render_portfolio_truth_context(result: dict[str, Any]) -> str:
         for err in gate["portfolio_truth_errors"]:
             lines.append(f"  ! {err}")
     lines.append("")
+    lines.append(_render_mode_summary(result))
+    lines.append("")
     lines.append("------------------------------------------------------------")
     lines.append("FRESH MARKET DISCOVERY (must run even if execution blocked)")
     lines.append("------------------------------------------------------------")
@@ -399,15 +693,25 @@ def render_portfolio_truth_context(result: dict[str, Any]) -> str:
     for warning in stale.get("warnings", []):
         lines.append(f"  * {warning}")
     lines.append("")
-    lines.append("WHY-TODAY GATE (executable requires why_today_score >= 0.70):")
+    lines.append("WHY-TODAY TIERS (tiered, not a single hard 0.70 filter):")
     why_scores = result.get("why_today_scores", {})
-    weak = sorted(t for t, s in why_scores.items() if s < 0.70)
-    strong = sorted(t for t, s in why_scores.items() if s >= 0.70)
-    lines.append(f"  strong_why_today (>=0.70): {strong or 'NONE'}")
-    lines.append(f"  weak_why_today (<0.70, not executable): {weak or 'NONE'}")
+    _de_cfg = load_discovery_execution_config()
+    tiers: dict[str, list[str]] = {}
+    for ticker, sc in why_scores.items():
+        tiers.setdefault(why_today_tier(sc, config=_de_cfg), []).append(ticker)
+    for tier in (
+        "HIGH_CONVICTION",
+        "PROBE_CANDIDATE",
+        "STRONG_WATCHLIST",
+        "VALID_DISCOVERY",
+        "WEAK_DISCOVERY",
+        "NOISE_OR_STALE",
+    ):
+        lines.append(f"  {tier}: {sorted(tiers.get(tier, [])) or 'NONE'}")
     lines.append(
-        "  Note: a weak why-today blocks EXECUTABLE but NOT discovery — such names "
-        "stay BUY-CANDIDATE / NOT-EXECUTABLE."
+        "  Note: why-today is tiered. A weak/strong-watchlist tier may still be a "
+        "discovery candidate; only the strict executable split + execution gates "
+        "approve an advisory paper BUY. Discovery is never suppressed by tier."
     )
     lines.append("")
 
@@ -763,6 +1067,15 @@ def _write_artifacts(result: dict[str, Any], context_md: str) -> None:
     summary = {
         "run_date": result["run_date"],
         "portfolio_truth_gate": result["portfolio_truth_gate"],
+        # Three-lane mode model (advisory-only; for a future frontend sprint).
+        "mode_state": result.get("mode_state", {}),
+        "coverage": result.get("coverage", {}),
+        "survival_board": result.get("survival_board", []),
+        "discovery_board": result.get("discovery_board", []),
+        "execution_board": result.get("execution_board", []),
+        "quarantine_board": result.get("quarantine_board", []),
+        "leverage_truth": result.get("leverage_truth", {}),
+        "exit_debt_state": result.get("exit_debt_state", {}),
         "discovery_universe": result["fresh_market_discovery"]["discovery_universe"],
         "l_today": result.get("l_today", []),
         "executable_paper_buys": [r["ticker"] for r in result["candidate_executable_split"]["executable_paper_buys"]],
