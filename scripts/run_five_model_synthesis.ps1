@@ -1,4 +1,26 @@
-cd "C:\Users\akash\sleeping-passenger-v1"
+﻿# ============================================================
+# REPO-ROOT GUARD (advisory-only; no execution surface)
+# ============================================================
+# Auto-locate the repo root from this script's own path so the workflow runs
+# correctly regardless of the caller's working directory.
+$RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
+Set-Location $RepoRoot
+
+# Verify we are actually at the repo root before doing anything else.
+$repoMarkers = @(
+  (Join-Path $RepoRoot "scripts\run_five_model_synthesis.ps1"),
+  (Join-Path $RepoRoot "scripts\frontier_model_resolver.py"),
+  (Join-Path $RepoRoot "data")
+)
+foreach ($marker in $repoMarkers) {
+  if (-not (Test-Path $marker)) {
+    throw "Run from $RepoRoot or launch using the full script path. Missing repo marker: $marker"
+  }
+}
+
+# Shared, secret-safe API-key leak detection helpers (Find-SecretMatchLines /
+# Assert-NoSecretText / Get-SecretRedactionRegex). Never prints secret values.
+. (Join-Path $PSScriptRoot "secret_scan_lib.ps1")
 
 $ErrorActionPreference = "Stop"
 
@@ -18,7 +40,7 @@ $runDate = Get-Date -Format "yyyy-MM-dd"
 # ============================================================
 #
 # Hardcoded seed defaults (used only if the frontier resolver is unavailable).
-# These are NOT the source of truth — the resolver below selects the highest
+# These are NOT the source of truth â€” the resolver below selects the highest
 # AVAILABLE model per provider from config/frontier_models.json, falls back
 # honestly (never silently), and honours *_MODEL_OVERRIDE env vars. No code
 # rewrite is needed to bump a model id; edit the registry config instead.
@@ -31,7 +53,7 @@ $GEMINI_MODEL          = "gemini-3.1-pro-preview"
 $MISTRAL_MODEL         = "mistral-large-latest"
 
 # ------------------------------------------------------------
-# FRONTIER MODEL RESOLVER — highest-available-model-per-provider.
+# FRONTIER MODEL RESOLVER â€” highest-available-model-per-provider.
 # Advisory/read-only: offline registry, no network, no broker, no secrets.
 # Overrides the hardcoded defaults above ONLY when the resolver returns a
 # non-empty model id; otherwise the hardcoded default is preserved (honest
@@ -54,8 +76,11 @@ try {
     if ($resolved["MISTRAL_RESOLVED_MODEL"])   { $MISTRAL_MODEL = $resolved["MISTRAL_RESOLVED_MODEL"] }
     Write-Host "Frontier resolver selected: OpenAI=$OPENAI_ANALYST_MODEL Claude=$CLAUDE_MODEL Grok=$GROK_MODEL Gemini=$GEMINI_MODEL Mistral=$MISTRAL_MODEL"
     foreach ($p in @("OPENAI","ANTHROPIC","XAI","GOOGLE_GEMINI","MISTRAL")) {
-      if ($resolved["${p}_FALLBACK_USED"] -eq "true") {
-        Write-Host "  ! $p fallback in effect — reason: $($resolved["${p}_FALLBACK_REASON"]) (not a silent downgrade)"
+      $fallbackKey = "${p}_FALLBACK_USED"
+      $reasonKey = "${p}_FALLBACK_REASON"
+      if ($resolved[$fallbackKey] -eq "true") {
+        $reason = $resolved[$reasonKey]
+        Write-Host "  ! $p fallback in effect - reason: $reason (not a silent downgrade)"
       }
     }
   } else {
@@ -140,7 +165,7 @@ if (Test-Path ".\config\thresholds.yaml") {
 }
 
 # ------------------------------------------------------------
-# DAILY PAYLOAD (v2) — verified truth + fresh discovery seeds
+# DAILY PAYLOAD (v2) â€” verified truth + fresh discovery seeds
 # ------------------------------------------------------------
 # These nine files are the authoritative current-holdings/discovery inputs.
 # moltbook/open_positions.json and signal_ledger.json are now demoted to
@@ -161,11 +186,53 @@ function Read-PayloadFile {
 # never calls a broker, never executes, and degrades honestly to the static
 # fallback when no fresh live data exists.
 # ------------------------------------------------------------
+$payloadDir = Join-Path $RepoRoot "data\daily_payload"
+$bridgeScript = Join-Path $RepoRoot "scripts\build_daily_payloads.py"
 Write-Host "Rebuilding daily payloads via signal_events + price bridges (honest fallback if no live data)..."
-try {
-  & python ".\scripts\build_daily_payloads.py" 2>$null | Out-Null
-} catch {
-  Write-Host "build_daily_payloads bridge unavailable; using existing payload files."
+if (Test-Path $bridgeScript) {
+  # Run with ErrorActionPreference relaxed: a native command writing to stderr
+  # must NOT be turned into a terminating error (the old "2>$null" under
+  # ErrorActionPreference=Stop is exactly what produced the spurious
+  # "bridge unavailable" message even on success). Success is judged by the
+  # process exit code, not by stderr output.
+  $prevEAP = $ErrorActionPreference
+  $ErrorActionPreference = "Continue"
+  try {
+    $null = & python $bridgeScript 2>&1
+    if ($LASTEXITCODE -eq 0) {
+      Write-Host "Daily payloads rebuilt from live bridges (or honest static fallback)."
+    } else {
+      Write-Host "build_daily_payloads exited with code $LASTEXITCODE; reusing existing payload files from $payloadDir."
+    }
+  } catch {
+    Write-Host "build_daily_payloads bridge unavailable; reusing existing payload files from $payloadDir."
+  } finally {
+    $ErrorActionPreference = $prevEAP
+  }
+} else {
+  Write-Host "build_daily_payloads bridge unavailable; reusing existing payload files from $payloadDir."
+}
+
+# Stale-input warning: flag regenerable payload files older than 24h so the
+# operator knows discovery may be running on stale inputs.
+$staleThreshold = (Get-Date).AddHours(-24)
+$regenerablePayloads = @(
+  "today_market_snapshot.json",
+  "today_price_movers.json",
+  "today_news_events.json",
+  "today_filings_events.json",
+  "yesterday_final_candidates.json"
+)
+foreach ($pf in $regenerablePayloads) {
+  $pfFull = Join-Path $payloadDir $pf
+  if (Test-Path $pfFull) {
+    $lastWrite = (Get-Item $pfFull).LastWriteTime
+    if ($lastWrite -lt $staleThreshold) {
+      Write-Host ("  ! STALE: {0} last updated {1:yyyy-MM-dd HH:mm} (>24h old) - discovery may be using stale inputs." -f $pf, $lastWrite)
+    }
+  } else {
+    Write-Host ("  ! MISSING: {0} not found in {1}." -f $pf, $payloadDir)
+  }
 }
 
 $verifiedHoldings   = Read-PayloadFile ".\data\daily_payload\verified_current_holdings.json"
@@ -195,7 +262,7 @@ $sharedContext = @"
 $portfolioTruthContext
 
 ============================================================
-DAILY PAYLOAD (v2) — VERIFIED TRUTH IS AUTHORITATIVE
+DAILY PAYLOAD (v2) â€” VERIFIED TRUTH IS AUTHORITATIVE
 ============================================================
 
 data/daily_payload/verified_current_holdings.json:
@@ -226,10 +293,10 @@ data/daily_payload/yesterday_final_candidates.json:
 $yesterdayCandidates
 
 ============================================================
-HISTORICAL CONTEXT ONLY (NOT portfolio truth — never manage from these)
+HISTORICAL CONTEXT ONLY (NOT portfolio truth â€” never manage from these)
 ============================================================
 
-moltbook/open_positions.json (STALE — historical/contaminated; do NOT treat as open):
+moltbook/open_positions.json (STALE â€” historical/contaminated; do NOT treat as open):
 $openPositions
 
 ============================================================
@@ -245,24 +312,131 @@ $thresholds
 
 $sharedContext = [regex]::Replace($sharedContext, '[\uD800-\uDFFF]', '')
 
-# ============================================================
-# SAFETY SCAN
-# ============================================================
-
-$keyPattern = "sk-[A-Za-z0-9_\-]{20,}|sk-ant-[A-Za-z0-9_\-]{20,}|xai-[A-Za-z0-9_\-]{20,}|AIza[A-Za-z0-9_\-]{20,}|Bearer\s+[A-Za-z0-9_\-]{20,}"
-
-$allPromptsAndContext = @"
-$gptPrompt
-$claudePrompt
-$geminiPrompt
-$grokPrompt
-$mistralPrompt
-$sharedContext
-"@
-
-if ($allPromptsAndContext -match $keyPattern) {
-  throw "ABORTED: prompt/context contains API-key-like text. Clean prompt/context before sending."
+# ------------------------------------------------------------
+# Secret-scan helpers (defined here so they are guaranteed present and correct
+# at scan time, independent of any external helper file). Re-defining is safe in
+# PowerShell. STRICT patterns + negative lookbehind + same-line Bearer; matching
+# via the explicit case-sensitive [regex]::IsMatch; single-object/$null return.
+# Matched secret VALUES are never printed or returned.
+# ------------------------------------------------------------
+function Get-SecretClassPatterns {
+  return [ordered]@{
+    'ANTHROPIC_STYLE_KEY' = '(?<![A-Za-z0-9/_.\-])sk-ant-[A-Za-z0-9_\-]{20,}'
+    'OPENAI_PROJECT_KEY'  = '(?<![A-Za-z0-9/_.\-])sk-(?:proj|svcacct|admin)-[A-Za-z0-9_\-]{20,}'
+    'OPENAI_STYLE_KEY'    = '(?<![A-Za-z0-9/_.\-])sk-[A-Za-z0-9]{20,}'
+    'XAI_STYLE_KEY'       = '(?<![A-Za-z0-9/_.\-])xai-[A-Za-z0-9]{20,}'
+    'GOOGLE_STYLE_KEY'    = '(?<![A-Za-z0-9/_.\-])AIza[A-Za-z0-9_\-]{30,}'
+    'BEARER_TOKEN'        = 'Bearer[ \t]+[A-Za-z0-9_\-]{20,}'
+  }
 }
+function Get-FirstSecretMatch {
+  param(
+    [Parameter(Mandatory = $true)][AllowEmptyString()][string]$Text,
+    [string]$Source = '<text>'
+  )
+  if ([string]::IsNullOrEmpty($Text)) { return $null }
+  $patterns = Get-SecretClassPatterns
+  $lineNo = 0
+  foreach ($line in ($Text -split "`n")) {
+    $lineNo++
+    foreach ($cls in $patterns.Keys) {
+      if ([regex]::IsMatch($line, $patterns[$cls])) {
+        return [pscustomobject]@{ Source = $Source; Line = $lineNo; Class = $cls }
+      }
+    }
+  }
+  return $null
+}
+function Assert-NoSecretText {
+  param(
+    [Parameter(Mandatory = $true)][AllowEmptyString()][string]$Text,
+    [Parameter(Mandatory = $true)][string]$Source
+  )
+  $hit = Get-FirstSecretMatch -Text $Text -Source $Source
+  if ($null -ne $hit) {
+    throw @"
+ABORTED: prompt/context contains API-key-like text.
+Matched source: $($hit.Source) (line $($hit.Line))
+Pattern class: $($hit.Class)
+Secret value was not printed.
+Fix: run scripts/sanitize_generated_context.ps1 or delete stale generated payloads and rerun.
+"@
+  }
+}
+
+# ============================================================
+# SAFETY SCAN (secret-safe, line-by-line, named sources)
+# ============================================================
+# Scan ONLY the actual prompt/context strings that are about to be sent, plus
+# the generated payload/context files they are built from. We never scan the
+# whole repo, never .env, and never environment-variable dumps. Each source is
+# scanned line-by-line so a match can never span two unrelated lines, and on a
+# hit we name the exact file/line/pattern-class WITHOUT printing the secret.
+$contextSources = [ordered]@{
+  "prompts/gpt_daily_prompt.txt"                              = $gptPrompt
+  "prompts/claude_daily_prompt.txt"                           = $claudePrompt
+  "prompts/gemini_daily_prompt.txt"                           = $geminiPrompt
+  "prompts/grok_daily_prompt.txt"                             = $grokPrompt
+  "prompts/mistral_daily_prompt.txt"                          = $mistralPrompt
+  "generated: daily_synthesis_pipeline.py (portfolio truth)"  = $portfolioTruthContext
+  "data/daily_payload/verified_current_holdings.json"         = $verifiedHoldings
+  "data/daily_payload/closed_positions.json"                  = $closedPositions
+  "data/daily_payload/sold_positions.json"                    = $soldPositions
+  "data/daily_payload/do_not_treat_as_open.json"              = $doNotTreatAsOpen
+  "data/daily_payload/today_market_snapshot.json"             = $marketSnapshot
+  "data/daily_payload/today_price_movers.json"                = $priceMovers
+  "data/daily_payload/today_news_events.json"                 = $newsEvents
+  "data/daily_payload/today_filings_events.json"              = $filingsEvents
+  "data/daily_payload/yesterday_final_candidates.json"        = $yesterdayCandidates
+  "moltbook/open_positions.json"                              = $openPositions
+  "moltbook/signal_ledger.json"                               = $signalLedger
+  "config/thresholds.yaml"                                    = $thresholds
+}
+
+$secretScanPassed = $true
+foreach ($srcName in $contextSources.Keys) {
+  $hit = Get-FirstSecretMatch -Text ([string]$contextSources[$srcName]) -Source $srcName
+  if ($null -ne $hit) {
+    $secretScanPassed = $false
+    throw @"
+ABORTED: prompt/context contains API-key-like text.
+Matched source: $($hit.Source) (line $($hit.Line))
+Pattern class: $($hit.Class)
+Secret value was not printed.
+Fix: run scripts/sanitize_generated_context.ps1 or delete stale generated payloads and rerun.
+"@
+  }
+}
+
+# ============================================================
+# PREFLIGHT (no prompt contents, no secrets)
+# ============================================================
+$promptFilesToSend = @(
+  "prompts/gpt_daily_prompt.txt",
+  "prompts/claude_daily_prompt.txt",
+  "prompts/gemini_daily_prompt.txt",
+  "prompts/grok_daily_prompt.txt",
+  "prompts/mistral_daily_prompt.txt"
+)
+Write-Host ""
+Write-Host "============================================================"
+Write-Host "PREFLIGHT"
+Write-Host "============================================================"
+Write-Host ("  Working directory : {0}" -f (Get-Location).Path)
+Write-Host ("  Repo root         : {0}" -f $RepoRoot)
+Write-Host "  Generated folders :"
+foreach ($d in @("data", "data\daily_payload", "moltbook", "reports", "outputs", "tmp", "runtime")) {
+  $exists = Test-Path (Join-Path $RepoRoot $d)
+  Write-Host ("      {0,-22} {1}" -f $d, $(if ($exists) { "present" } else { "absent" }))
+}
+Write-Host "  Prompt/context files to be sent:"
+foreach ($pf in $promptFilesToSend) { Write-Host ("      {0}" -f $pf) }
+Write-Host ("      (+ assembled daily-payload context: {0} generated JSON inputs)" -f $regenerablePayloads.Count)
+Write-Host ("  Secret scan       : {0}" -f $(if ($secretScanPassed) { "PASSED (no API-key-like text in prompt/context)" } else { "FAILED" }))
+Write-Host ("  Models selected   : OpenAI={0} Claude={1} Grok={2} Gemini={3} Mistral={4}" -f $OPENAI_ANALYST_MODEL, $CLAUDE_MODEL, $GROK_MODEL, $GEMINI_MODEL, $MISTRAL_MODEL)
+Write-Host "  NOTE: prompt contents are NOT printed (may contain advisory context); API keys are never printed."
+Write-Host "============================================================"
+Write-Host ""
 
 # ============================================================
 # HELPER FUNCTIONS
@@ -567,9 +741,7 @@ if ([string]::IsNullOrWhiteSpace($gptResult)) {
   throw "GPT analyst output was empty."
 }
 
-if ($gptResult -match $keyPattern) {
-  throw "ABORTED: GPT analyst output contains API-key-like text."
-}
+Assert-NoSecretText -Text $gptResult -Source "GPT analyst output"
 
 Write-Host "Running Claude analyst..."
 $claudeResult = Get-ClaudeResponseText `
@@ -580,9 +752,7 @@ if ([string]::IsNullOrWhiteSpace($claudeResult)) {
   throw "Claude analyst output was empty."
 }
 
-if ($claudeResult -match $keyPattern) {
-  throw "ABORTED: Claude analyst output contains API-key-like text."
-}
+Assert-NoSecretText -Text $claudeResult -Source "Claude analyst output"
 
 Write-Host "Running Gemini analyst..."
 $geminiResult = Get-GeminiResponseText `
@@ -593,9 +763,7 @@ if ([string]::IsNullOrWhiteSpace($geminiResult)) {
   throw "Gemini analyst output was empty."
 }
 
-if ($geminiResult -match $keyPattern) {
-  throw "ABORTED: Gemini analyst output contains API-key-like text."
-}
+Assert-NoSecretText -Text $geminiResult -Source "Gemini analyst output"
 
 Write-Host "Running Grok analyst..."
 $grokResult = Get-GrokResponseText `
@@ -606,9 +774,7 @@ if ([string]::IsNullOrWhiteSpace($grokResult)) {
   throw "Grok analyst output was empty."
 }
 
-if ($grokResult -match $keyPattern) {
-  throw "ABORTED: Grok analyst output contains API-key-like text."
-}
+Assert-NoSecretText -Text $grokResult -Source "Grok analyst output"
 
 Write-Host "Running Mistral analyst..."
 $mistralResult = Get-MistralResponseText `
@@ -619,9 +785,7 @@ if ([string]::IsNullOrWhiteSpace($mistralResult)) {
   throw "Mistral analyst output was empty."
 }
 
-if ($mistralResult -match $keyPattern) {
-  throw "ABORTED: Mistral analyst output contains API-key-like text."
-}
+Assert-NoSecretText -Text $mistralResult -Source "Mistral analyst output"
 
 # ============================================================
 # FINAL FIVE-MODEL SYNTHESIS PROMPT
@@ -663,7 +827,7 @@ CORE OBJECTIVE
 
 Read all five AI responses below and answer:
 
-“Given the combined evidence from ChatGPT, Claude, Gemini, Grok, and Mistral, what stocks, if any, should be considered for paper-trade human review today?”
+â€œGiven the combined evidence from ChatGPT, Claude, Gemini, Grok, and Mistral, what stocks, if any, should be considered for paper-trade human review today?â€
 
 You must also answer:
 
@@ -735,7 +899,7 @@ If Gemini or Mistral identify macro uncertainty, downgrade aggression.
 If GPT identifies fake confidence or missing data, downgrade.
 
 ============================================================
-PORTFOLIO TRUTH AUDIT — MANDATORY FIRST STEP (before reading consensus)
+PORTFOLIO TRUTH AUDIT â€” MANDATORY FIRST STEP (before reading consensus)
 ============================================================
 
 Before you read any model's consensus, establish portfolio truth using the
@@ -757,13 +921,13 @@ Rules that override everything below:
   allowed; "no candidates" is NOT allowed unless discovery truly failed and you
   log the failure explicitly.
 
-Model Contamination Audit — for each model compute:
+Model Contamination Audit â€” for each model compute:
   contamination_score(model) = phantom_management_mentions / max(1, total_position_management_mentions)
 If contamination_score > 0, mark that model's portfolio-management section as
 contaminated, but do NOT discard its fresh-discovery section unless that section
 also relies on false holdings.
 
-L_TODAY INVARIANT (HARD — applies to every candidate any model names):
+L_TODAY INVARIANT (HARD â€” applies to every candidate any model names):
 The PORTFOLIO TRUTH GATE context block above contains an L_TODAY INVARIANT
 section with: L_today (live-discovered set), static_universe, memory_only_stale,
 phantom/closed/sold, verified holdings H, the TOP-30 COUNTRY COVERAGE PROOF, and
@@ -780,7 +944,7 @@ USA BIAS + FALLBACK CONTAMINATION metrics. Enforce:
     blocked for being US, but a high R_static / zero R_live means the board is
     research-grade, not live global discovery.
 
-Fresh Cross-Model Candidate Board — rank by:
+Fresh Cross-Model Candidate Board â€” rank by:
   ACQS(t) = CQS(t) * exp(-0.25 * days_without_fresh_signal)   (memory decay)
   FCS(t) = 0.25*ACQS + 0.20*mean_model_score + 0.15*cross_model_agreement
            + 0.15*why_today_score + 0.10*data_quality + 0.10*freshness
@@ -792,7 +956,7 @@ Execution Readiness:
   ERS(t) = 0.25*data_quality + 0.20*source_health + 0.15*invalidation_defined
            + 0.15*sizing_defined + 0.10*portfolio_truth_clean + 0.10*why_today_score
            + 0.05*human_review_ready
-Classification (EXECUTABLE is the strictest tier — all must hold):
+Classification (EXECUTABLE is the strictest tier â€” all must hold):
   EXECUTABLE-PAPER-BUY iff FCS>=0.70 AND ERS>=0.75 AND why_today_score>=0.70
     AND source_health>=0.70 AND invalidation_defined AND position_sizing_defined
     AND normalized_disagreement<0.35 AND t NOT in (closed/sold/do_not_treat_as_open)
@@ -819,22 +983,22 @@ sections were contaminated by phantom management. Then continue.
 Before the candidate board, run these five audits using the daily payload and
 the five model reports:
 
-1. Fresh Payload Health Audit — for each of today_market_snapshot, today_price_movers,
+1. Fresh Payload Health Audit â€” for each of today_market_snapshot, today_price_movers,
    today_news_events, today_filings_events: report source_health, provider, is_live,
    record count. If is_live=false / source_health=UNVERIFIED, say discovery is
    UNDERPOWERED and candidates are research-grade. Never claim live data on a fallback.
-2. Minimum Daily Universe Coverage Audit — confirm the minimum viable universe
+2. Minimum Daily Universe Coverage Audit â€” confirm the minimum viable universe
    (US mega-cap, defense, energy, semis, India large-cap, Europe large-cap, macro
-   ETFs, high-beta watch) was scanned. U_today = U_static ∪ U_price ∪ U_news ∪
-   U_filings ∪ U_yesterday ∪ U_old ∪ U_model. Membership does NOT imply ownership.
-3. Why-Today Audit — every candidate must answer "Why today, not yesterday?".
+   ETFs, high-beta watch) was scanned. U_today = U_static âˆª U_price âˆª U_news âˆª
+   U_filings âˆª U_yesterday âˆª U_old âˆª U_model. Membership does NOT imply ownership.
+3. Why-Today Audit â€” every candidate must answer "Why today, not yesterday?".
    why_today_score < 0.70 => cannot be EXECUTABLE (still may be BUY-CANDIDATE /
    NOT-EXECUTABLE). Flag names whose why-today is static-fallback (0.25) or stale
    repeat (0.10).
-4. Memory Decay Audit — repeated yesterday names with no fresh evidence decay by
+4. Memory Decay Audit â€” repeated yesterday names with no fresh evidence decay by
    score_today = score_yesterday * exp(-0.25 * days_without_fresh_signal)
    (d=3 -> 0.472). A fresh signal today resets d=0.
-5. Model Disagreement Audit — DisagreementScore(t) = variance(model_scores[t]);
+5. Model Disagreement Audit â€” DisagreementScore(t) = variance(model_scores[t]);
    NormalizedDisagreement = min(1, std/0.50). High score + low disagreement =
    CLEAN_CONSENSUS; high score + high disagreement = RESEARCH_CANDIDATE; low score
    + high disagreement = uncertainty/avoid.
@@ -946,8 +1110,8 @@ Rules:
 - If TP hit, classify PARTIAL-TAKE-PROFIT-CANDIDATE.
 - If no current price, classify DATA-INSUFFICIENT.
 - If duplicate, classify DUPLICATE / CANCEL-LOCAL-LOG.
-- Do not say “sell now.”
-- Say “manual exit review candidate” or “manual partial TP review candidate.”
+- Do not say â€œsell now.â€
+- Say â€œmanual exit review candidateâ€ or â€œmanual partial TP review candidate.â€
 
 ---
 
@@ -982,9 +1146,9 @@ Rules:
 | EXISTING-POSITION MANAGEMENT ONLY | | |
 
 Rules:
-- It is valid for BUY-CANDIDATE to be “None.”
+- It is valid for BUY-CANDIDATE to be â€œNone.â€
 - Do not force a buy.
-- If the five-model synthesis says “no clean buys,” say so.
+- If the five-model synthesis says â€œno clean buys,â€ say so.
 - Paper trade still counts as real-risk discipline.
 - If existing trades are unresolved, prioritize management over new names.
 
@@ -1020,7 +1184,7 @@ Rules:
 
 Answer directly:
 
-“Now I’m running paper trades. Tell me which stocks to buy with ticker. Treat paper trade as real money trade.”
+â€œNow Iâ€™m running paper trades. Tell me which stocks to buy with ticker. Treat paper trade as real money trade.â€
 
 Use this exact table:
 
@@ -1040,11 +1204,11 @@ Use this exact table:
 | Cash / patience verdict | |
 
 Important:
-If the answer is “no new trades,” do NOT still sneak in buy recommendations.
+If the answer is â€œno new trades,â€ do NOT still sneak in buy recommendations.
 Instead give:
-- “No new paper buys today”
-- “Existing-position management only”
-- “Top watchlist names once gate clears”
+- â€œNo new paper buys todayâ€
+- â€œExisting-position management onlyâ€
+- â€œTop watchlist names once gate clearsâ€
 
 ---
 
@@ -1130,7 +1294,7 @@ $mistralResult
 FINAL USER QUESTION
 ============================================================
 
-Now I’m running paper trades. Tell me which stocks to buy with ticker.
+Now Iâ€™m running paper trades. Tell me which stocks to buy with ticker.
 Treat paper trade as real money trade.
 Use the combined five-model synthesis above.
 Do not force buys if the correct answer is no new risk.
@@ -1138,9 +1302,7 @@ Do not force buys if the correct answer is no new risk.
 
 $synthesisPrompt = [regex]::Replace($synthesisPrompt, '[\uD800-\uDFFF]', '')
 
-if ($synthesisPrompt -match $keyPattern) {
-  throw "ABORTED: synthesis prompt contains API-key-like text."
-}
+Assert-NoSecretText -Text $synthesisPrompt -Source "final synthesis prompt"
 
 # ============================================================
 # RUN FINAL SYNTHESIS
@@ -1162,9 +1324,8 @@ if ([string]::IsNullOrWhiteSpace($synthesisResult)) {
   throw "Final synthesis output was empty. Report was NOT written. Check raw JSON for status, output, content, text, refusal, or max_output_tokens exhaustion."
 }
 
-if ($synthesisResult -match $keyPattern) {
-  throw "ABORTED: final synthesis output contains API-key-like text. Report was NOT written."
-}
+# Secret-safe check BEFORE writing the report to disk (report is not written on abort).
+Assert-NoSecretText -Text $synthesisResult -Source "final synthesis output (report NOT written on abort)"
 
 $outFile = ".\moltbook\five_model_synthesis_report_$runDate.txt"
 
