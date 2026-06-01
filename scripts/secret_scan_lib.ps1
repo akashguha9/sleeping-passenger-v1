@@ -27,13 +27,19 @@
 function Get-SecretClassPatterns {
   # ONE source of truth. Returned fresh each call (no module-scope state to
   # drift). Ordered so structured/longer prefixes are reported before classic.
+  # Each class is anchored by a negative lookBEHIND (prefix cannot be embedded in
+  # a longer word/URL/path, e.g. ".../mu[sk-]is-going...") and a negative
+  # lookAHEAD (the body cannot bleed into an adjacent word/hyphen), so the match
+  # is a standalone token, never a prose substring.
   return [ordered]@{
-    'ANTHROPIC_STYLE_KEY' = '(?<![A-Za-z0-9/_.\-])sk-ant-[A-Za-z0-9_\-]{20,}'
-    'OPENAI_PROJECT_KEY'  = '(?<![A-Za-z0-9/_.\-])sk-(?:proj|svcacct|admin)-[A-Za-z0-9_\-]{20,}'
-    'OPENAI_STYLE_KEY'    = '(?<![A-Za-z0-9/_.\-])sk-[A-Za-z0-9]{20,}'
-    'XAI_STYLE_KEY'       = '(?<![A-Za-z0-9/_.\-])xai-[A-Za-z0-9]{20,}'
-    'GOOGLE_STYLE_KEY'    = '(?<![A-Za-z0-9/_.\-])AIza[A-Za-z0-9_\-]{30,}'
-    'BEARER_TOKEN'        = 'Bearer[ \t]+[A-Za-z0-9_\-]{20,}'
+    'ANTHROPIC_STYLE_KEY' = '(?<![A-Za-z0-9/_.\-])sk-ant-[A-Za-z0-9_\-]{20,}(?![A-Za-z0-9_\-])'
+    'OPENAI_PROJECT_KEY'  = '(?<![A-Za-z0-9/_.\-])sk-(?:proj|svcacct|admin)-[A-Za-z0-9_\-]{20,}(?![A-Za-z0-9_\-])'
+    # Legacy OpenAI keys are high-entropy base62 with NO hyphens; require 32+ so a
+    # short hyphen-broken slug fragment ("sk-is-going-...") can never match.
+    'OPENAI_STYLE_KEY'    = '(?<![A-Za-z0-9/_.\-])sk-[A-Za-z0-9]{32,}(?![A-Za-z0-9_\-])'
+    'XAI_STYLE_KEY'       = '(?<![A-Za-z0-9/_.\-])xai-[A-Za-z0-9]{20,}(?![A-Za-z0-9_\-])'
+    'GOOGLE_STYLE_KEY'    = '(?<![A-Za-z0-9/_.\-])AIza[A-Za-z0-9_\-]{20,}(?![A-Za-z0-9_\-])'
+    'BEARER_TOKEN'        = 'Bearer[ \t]+[A-Za-z0-9_\-]{20,}(?![A-Za-z0-9_\-])'
   }
 }
 
@@ -56,10 +62,13 @@ function Find-SecretMatchLines {
   )
   $patterns = Get-SecretClassPatterns
   $findings = New-Object System.Collections.Generic.List[object]
-  # Return with a unary comma so PowerShell does NOT enumerate the list on the
-  # way out: a single finding must stay a 1-element collection (otherwise
-  # $result.Count is $null and a lone leaked key would slip past the guard).
-  if ([string]::IsNullOrEmpty($Text)) { return ,$findings }
+  # An EMPTY result MUST enumerate to ZERO items at the call site. The previous
+  # `return ,$findings` wrapped the empty list as a single element, so
+  # @(Find-SecretMatchLines ...) reported Count=1 and FALSE-POSITIVED on clean
+  # text (e.g. a news URL slug). When there are no hits we therefore emit
+  # nothing; when there are hits we return the array wrapped with a unary comma
+  # so a lone finding still keeps its .Count for bare-assignment callers.
+  if ([string]::IsNullOrEmpty($Text)) { return }
   $lineNo = 0
   foreach ($line in ($Text -split "`n")) {
     $lineNo++
@@ -70,7 +79,35 @@ function Find-SecretMatchLines {
       }
     }
   }
-  return ,$findings
+  if ($findings.Count -eq 0) { return }
+  return ,$findings.ToArray()
+}
+
+function Get-FirstSecretMatch {
+  <#
+    Return the FIRST API-key-like finding in $Text as
+      [pscustomobject]@{ Source; Line; Class }
+    or $null when the text is clean. Single source of truth shared with
+    run_five_model_synthesis.ps1 (which dot-sources this library) so the main
+    script and this library can never drift apart. The matched secret VALUE is
+    never captured, returned, or printed.
+  #>
+  param(
+    [Parameter(Mandatory = $true)][AllowEmptyString()][string]$Text,
+    [string]$Source = '<text>'
+  )
+  if ([string]::IsNullOrEmpty($Text)) { return $null }
+  $patterns = Get-SecretClassPatterns
+  $lineNo = 0
+  foreach ($line in ($Text -split "`n")) {
+    $lineNo++
+    foreach ($cls in $patterns.Keys) {
+      if ([regex]::IsMatch($line, $patterns[$cls])) {
+        return [pscustomobject]@{ Source = $Source; Line = $lineNo; Class = $cls }
+      }
+    }
+  }
+  return $null
 }
 
 function Assert-NoSecretText {

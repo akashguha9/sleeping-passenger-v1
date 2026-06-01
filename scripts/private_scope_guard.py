@@ -326,6 +326,16 @@ APPROVED_DOMAINS: tuple[str, ...] = (
     # API trading writes; key values are never logged (only *_present booleans);
     # model output authority is ADVISORY_ONLY.
     "frontier_model",    # frontier_model_registry.py / frontier_model_resolver.py — highest-available-model selector + weighted quorum
+    # Five-model synthesis secret-hygiene sprint — advisory-only, secret-safe
+    # tooling that detects/redacts API-key-like text in the generated synthesis
+    # context BEFORE it is sent to any model. Read-only detection + generated-
+    # folder-only redaction; never touches source/.env, never prints matched
+    # secret values, no broker execution, no order placement, no API trading
+    # writes. These two narrow domains cover the helper scripts dot-sourced by
+    # run_five_model_synthesis.ps1 (intentionally specific, NOT a blanket
+    # approval of all "secret"/"sanitize"/".ps1" names).
+    "secret_scan",        # secret_scan_lib.ps1 — shared API-key leak detector
+    "sanitize_generated", # sanitize_generated_context.ps1 — generated-folder redactor
 )
 
 # Explicit allowlist for individual files / directories whose name does

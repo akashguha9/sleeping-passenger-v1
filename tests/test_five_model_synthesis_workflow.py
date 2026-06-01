@@ -116,6 +116,48 @@ def test_detector_single_lone_key_is_counted() -> None:
 
 
 @needs_powershell
+def test_detector_flags_fake_openai_project_key_without_leaking() -> None:
+    fake_secret = "sk-proj-ABCDEFGHIJKLMNOPQRSTUVWXYZ012345"
+    body = (
+        ". .\\scripts\\secret_scan_lib.ps1; "
+        f"$t = 'OPENAI_PROJECT={fake_secret}'; "
+        "$h = @(Find-SecretMatchLines -Text $t -Source 'proj.txt'); "
+        "foreach ($x in $h) { Write-Output (\"HIT \" + $x.Source + ':' + $x.Line + ' ' + $x.Class) }"
+    )
+    res = _run_ps(body)
+    assert "HIT proj.txt:1 OPENAI_PROJECT_KEY" in res.stdout, res.stdout
+    assert fake_secret not in res.stdout
+
+
+@needs_powershell
+def test_detector_flags_fake_anthropic_key_without_leaking() -> None:
+    fake_secret = "sk-ant-api03-ABCDEFGHIJKLMNOPQRSTUVWXYZ012345"
+    body = (
+        ". .\\scripts\\secret_scan_lib.ps1; "
+        f"$t = 'ANTHROPIC_API_KEY={fake_secret}'; "
+        "$h = @(Find-SecretMatchLines -Text $t -Source 'ant.txt'); "
+        "foreach ($x in $h) { Write-Output (\"HIT \" + $x.Source + ':' + $x.Line + ' ' + $x.Class) }"
+    )
+    res = _run_ps(body)
+    assert "HIT ant.txt:1 ANTHROPIC_STYLE_KEY" in res.stdout, res.stdout
+    assert fake_secret not in res.stdout
+
+
+@needs_powershell
+def test_detector_flags_fake_xai_key_without_leaking() -> None:
+    fake_secret = "xai-ABCDEFGHIJKLMNOPQRSTUVWXYZ012345"
+    body = (
+        ". .\\scripts\\secret_scan_lib.ps1; "
+        f"$t = 'XAI_API_KEY={fake_secret}'; "
+        "$h = @(Find-SecretMatchLines -Text $t -Source 'xai.txt'); "
+        "foreach ($x in $h) { Write-Output (\"HIT \" + $x.Source + ':' + $x.Line + ' ' + $x.Class) }"
+    )
+    res = _run_ps(body)
+    assert "HIT xai.txt:1 XAI_STYLE_KEY" in res.stdout, res.stdout
+    assert fake_secret not in res.stdout
+
+
+@needs_powershell
 def test_detector_does_not_false_positive_on_news_slug() -> None:
     slug_line = '{"url": "https://example.com/biggest-ipo-elon-musk-is-going-to-get-even-bigger/"}'
     body = (
@@ -188,6 +230,33 @@ def test_sanitizer_redacts_generated_skips_env_and_source() -> None:
         assert fake in py_file.read_text(encoding="utf-8")
         assert not py_file.with_name(py_file.name + ".bak").exists()
 
+        assert fake not in res.stdout
+    finally:
+        shutil.rmtree(sandbox, ignore_errors=True)
+
+
+@needs_powershell
+def test_sanitizer_dryrun_reports_but_does_not_modify() -> None:
+    """Dry-run must flag the leak (and exit 0) but leave the file untouched and
+    create no .bak — never printing the matched secret value."""
+    sandbox = REPO_ROOT / "data" / "_sanitizer_dryrun_selftest_tmp"
+    if sandbox.exists():
+        shutil.rmtree(sandbox)
+    sandbox.mkdir(parents=True)
+    fake = "sk-ABCDEFGHIJKLMNOPQRSTUVWX1234567890abcd"
+    json_file = sandbox / "generated_payload.json"
+    original = '{"leak": "' + fake + '"}\n'
+    json_file.write_text(original, encoding="utf-8")
+    try:
+        res = _run_ps(".\\scripts\\sanitize_generated_context.ps1 -DryRun")
+        assert res.returncode == 0, res.stdout + res.stderr
+        assert "DRY-RUN" in res.stdout
+        assert "WOULD REDACT" in res.stdout
+        # File is unchanged and no backup was written.
+        assert json_file.read_text(encoding="utf-8") == original
+        assert fake in json_file.read_text(encoding="utf-8")
+        assert not json_file.with_name(json_file.name + ".bak").exists()
+        # The matched secret value is never printed.
         assert fake not in res.stdout
     finally:
         shutil.rmtree(sandbox, ignore_errors=True)

@@ -18,9 +18,16 @@ foreach ($marker in $repoMarkers) {
   }
 }
 
-# Shared, secret-safe API-key leak detection helpers (Find-SecretMatchLines /
-# Assert-NoSecretText / Get-SecretRedactionRegex). Never prints secret values.
-. (Join-Path $PSScriptRoot "secret_scan_lib.ps1")
+# Shared, secret-safe API-key leak detection helpers (Get-FirstSecretMatch /
+# Find-SecretMatchLines / Assert-NoSecretText / Get-SecretRedactionRegex).
+# Dot-source the library so it is the SINGLE source of truth; an inline fallback
+# (below) is defined only if the library is unavailable. Never prints secrets.
+$secretScanLib = Join-Path $PSScriptRoot "secret_scan_lib.ps1"
+if (Test-Path $secretScanLib) {
+  . $secretScanLib
+} else {
+  Write-Host "secret_scan_lib.ps1 not found; using inline fallback secret detector."
+}
 
 $ErrorActionPreference = "Stop"
 
@@ -313,54 +320,59 @@ $thresholds
 $sharedContext = [regex]::Replace($sharedContext, '[\uD800-\uDFFF]', '')
 
 # ------------------------------------------------------------
-# Secret-scan helpers (defined here so they are guaranteed present and correct
-# at scan time, independent of any external helper file). Re-defining is safe in
-# PowerShell. STRICT patterns + negative lookbehind + same-line Bearer; matching
-# via the explicit case-sensitive [regex]::IsMatch; single-object/$null return.
+# Secret-scan helpers. The dot-sourced scripts/secret_scan_lib.ps1 is the SINGLE
+# source of truth (Get-FirstSecretMatch / Get-SecretClassPatterns /
+# Assert-NoSecretText). These INLINE definitions are a fallback that is ONLY
+# installed when the library is unavailable, so the main script and the library
+# can never drift apart. Patterns are kept byte-identical to the library: STRICT
+# base62 bodies + negative lookbehind/lookahead + same-line Bearer; matching via
+# the explicit case-sensitive [regex]::IsMatch; single-object/$null return.
 # Matched secret VALUES are never printed or returned.
 # ------------------------------------------------------------
-function Get-SecretClassPatterns {
-  return [ordered]@{
-    'ANTHROPIC_STYLE_KEY' = '(?<![A-Za-z0-9/_.\-])sk-ant-[A-Za-z0-9_\-]{20,}'
-    'OPENAI_PROJECT_KEY'  = '(?<![A-Za-z0-9/_.\-])sk-(?:proj|svcacct|admin)-[A-Za-z0-9_\-]{20,}'
-    'OPENAI_STYLE_KEY'    = '(?<![A-Za-z0-9/_.\-])sk-[A-Za-z0-9]{20,}'
-    'XAI_STYLE_KEY'       = '(?<![A-Za-z0-9/_.\-])xai-[A-Za-z0-9]{20,}'
-    'GOOGLE_STYLE_KEY'    = '(?<![A-Za-z0-9/_.\-])AIza[A-Za-z0-9_\-]{30,}'
-    'BEARER_TOKEN'        = 'Bearer[ \t]+[A-Za-z0-9_\-]{20,}'
-  }
-}
-function Get-FirstSecretMatch {
-  param(
-    [Parameter(Mandatory = $true)][AllowEmptyString()][string]$Text,
-    [string]$Source = '<text>'
-  )
-  if ([string]::IsNullOrEmpty($Text)) { return $null }
-  $patterns = Get-SecretClassPatterns
-  $lineNo = 0
-  foreach ($line in ($Text -split "`n")) {
-    $lineNo++
-    foreach ($cls in $patterns.Keys) {
-      if ([regex]::IsMatch($line, $patterns[$cls])) {
-        return [pscustomobject]@{ Source = $Source; Line = $lineNo; Class = $cls }
-      }
+if (-not (Get-Command Get-FirstSecretMatch -ErrorAction SilentlyContinue)) {
+  function Get-SecretClassPatterns {
+    return [ordered]@{
+      'ANTHROPIC_STYLE_KEY' = '(?<![A-Za-z0-9/_.\-])sk-ant-[A-Za-z0-9_\-]{20,}(?![A-Za-z0-9_\-])'
+      'OPENAI_PROJECT_KEY'  = '(?<![A-Za-z0-9/_.\-])sk-(?:proj|svcacct|admin)-[A-Za-z0-9_\-]{20,}(?![A-Za-z0-9_\-])'
+      'OPENAI_STYLE_KEY'    = '(?<![A-Za-z0-9/_.\-])sk-[A-Za-z0-9]{32,}(?![A-Za-z0-9_\-])'
+      'XAI_STYLE_KEY'       = '(?<![A-Za-z0-9/_.\-])xai-[A-Za-z0-9]{20,}(?![A-Za-z0-9_\-])'
+      'GOOGLE_STYLE_KEY'    = '(?<![A-Za-z0-9/_.\-])AIza[A-Za-z0-9_\-]{20,}(?![A-Za-z0-9_\-])'
+      'BEARER_TOKEN'        = 'Bearer[ \t]+[A-Za-z0-9_\-]{20,}(?![A-Za-z0-9_\-])'
     }
   }
-  return $null
-}
-function Assert-NoSecretText {
-  param(
-    [Parameter(Mandatory = $true)][AllowEmptyString()][string]$Text,
-    [Parameter(Mandatory = $true)][string]$Source
-  )
-  $hit = Get-FirstSecretMatch -Text $Text -Source $Source
-  if ($null -ne $hit) {
-    throw @"
+  function Get-FirstSecretMatch {
+    param(
+      [Parameter(Mandatory = $true)][AllowEmptyString()][string]$Text,
+      [string]$Source = '<text>'
+    )
+    if ([string]::IsNullOrEmpty($Text)) { return $null }
+    $patterns = Get-SecretClassPatterns
+    $lineNo = 0
+    foreach ($line in ($Text -split "`n")) {
+      $lineNo++
+      foreach ($cls in $patterns.Keys) {
+        if ([regex]::IsMatch($line, $patterns[$cls])) {
+          return [pscustomobject]@{ Source = $Source; Line = $lineNo; Class = $cls }
+        }
+      }
+    }
+    return $null
+  }
+  function Assert-NoSecretText {
+    param(
+      [Parameter(Mandatory = $true)][AllowEmptyString()][string]$Text,
+      [Parameter(Mandatory = $true)][string]$Source
+    )
+    $hit = Get-FirstSecretMatch -Text $Text -Source $Source
+    if ($null -ne $hit) {
+      throw @"
 ABORTED: prompt/context contains API-key-like text.
 Matched source: $($hit.Source) (line $($hit.Line))
 Pattern class: $($hit.Class)
 Secret value was not printed.
 Fix: run scripts/sanitize_generated_context.ps1 or delete stale generated payloads and rerun.
 "@
+    }
   }
 }
 
