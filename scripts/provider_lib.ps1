@@ -220,3 +220,90 @@ function Get-ProviderAvailabilitySection {
   }
   return ($lines -join "`n")
 }
+
+function Format-ProviderReason {
+  <#
+    Build a compact, human-readable, SECRET-SAFE provider-failure reason from a
+    Get-SafeProviderError object: "type / status / code (message)", skipping any
+    field that is empty. The $Safe fields are already redacted by
+    Get-SafeProviderError, so this never embeds an API key. Used so the recorded
+    reason surfaces rate_limited / 429 / 1300 for an exhausted Mistral 429.
+  #>
+  param($Safe)
+  if (-not $Safe) { return "unknown error" }
+  $parts = New-Object System.Collections.Generic.List[string]
+  if (-not [string]::IsNullOrWhiteSpace([string]$Safe.Type))   { $parts.Add([string]$Safe.Type) }
+  if (-not [string]::IsNullOrWhiteSpace([string]$Safe.Status)) { $parts.Add([string]$Safe.Status) }
+  if (-not [string]::IsNullOrWhiteSpace([string]$Safe.Code))   { $parts.Add([string]$Safe.Code) }
+  $head = if ($parts.Count -gt 0) { $parts -join ' / ' } else { '' }
+  $msg  = if (-not [string]::IsNullOrWhiteSpace([string]$Safe.Message)) { [string]$Safe.Message } else { '' }
+  if ($head -and $msg) { return ("{0} ({1})" -f $head, $msg) }
+  if ($head) { return $head }
+  if ($msg)  { return $msg }
+  return "unknown error"
+}
+
+function Get-ConciseProviderReason {
+  <#
+    The short "due ..." descriptor embedded in a provider's UNAVAILABLE
+    placeholder. Prefers the structured failure TYPE (e.g. "rate_limited") so the
+    Mistral placeholder reads "...unavailable due rate_limited...", and falls back
+    to the full reason / a generic phrase. Always secret-safe (the fields it reads
+    come from Get-SafeProviderError redaction).
+  #>
+  param($Result)
+  if ($Result) {
+    if (-not [string]::IsNullOrWhiteSpace([string]$Result.Type))   { return [string]$Result.Type }
+    if (-not [string]::IsNullOrWhiteSpace([string]$Result.Reason)) { return [string]$Result.Reason }
+  }
+  return "unknown reason"
+}
+
+function New-RateLimitedErrorRecord {
+  <#
+    Build a self-describing, SECRET-SAFE ErrorRecord representing rate-limit retry
+    EXHAUSTION, so Invoke-SafeProvider records the provider unavailable with
+    status=429 / type=rate_limited / code=1300 / message="Rate limit exceeded"
+    DETERMINISTICALLY.
+
+    Why this exists: the retry loop must NOT bare re-throw the raw WebException at
+    exhaustion. By that point the retry diagnostics (Get-SafeProviderError) have
+    already consumed that exception's HTTP response stream, so re-reading it inside
+    Invoke-SafeProvider's catch would yield an empty/garbled reason (and, with the
+    stream disposed, risk the error escaping before the provider is marked
+    unavailable). A fresh, fully self-describing ErrorRecord removes that fragility.
+
+    -SafeError (optional) preserves the real status/type/code from the last
+    observed rate-limit error when present; missing fields default to the
+    canonical rate-limit values. The message is always the canonical, secret-safe
+    "Rate limit exceeded" (the $SafeError fields are themselves already redacted,
+    so this never embeds an API key).
+  #>
+  param(
+    $SafeError,
+    [string]$Provider = "Mistral"
+  )
+  $status  = "429"
+  $type    = "rate_limited"
+  $code    = "1300"
+  $message = "Rate limit exceeded"
+  if ($SafeError) {
+    if (-not [string]::IsNullOrWhiteSpace([string]$SafeError.Status)) { $status = [string]$SafeError.Status }
+    if (-not [string]::IsNullOrWhiteSpace([string]$SafeError.Type))   { $type   = [string]$SafeError.Type }
+    if (-not [string]::IsNullOrWhiteSpace([string]$SafeError.Code))   { $code   = [string]$SafeError.Code }
+  }
+  $rawStatus = 429
+  [void][int]::TryParse([string]$status, [ref]$rawStatus)
+  $bodyObj = [ordered]@{
+    message         = $message
+    type            = $type
+    code            = $code
+    raw_status_code = $rawStatus
+  }
+  $json = $bodyObj | ConvertTo-Json -Compress
+  $exc  = New-Object System.Exception (("{0} rate limit exceeded after retries" -f $Provider))
+  $er   = New-Object System.Management.Automation.ErrorRecord(
+    $exc, "ProviderRateLimited", [System.Management.Automation.ErrorCategory]::LimitsExceeded, $null)
+  $er.ErrorDetails = New-Object System.Management.Automation.ErrorDetails($json)
+  return $er
+}

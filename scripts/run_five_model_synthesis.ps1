@@ -752,13 +752,25 @@ function Get-MistralResponseText {
     } catch {
       $safe = Get-SafeProviderError -ErrorRecord $_ -Provider "Mistral" -Model $ModelName
       $isRateLimited = ($safe.Status -eq '429') -or ($safe.Code -eq '1300') -or ($safe.Type -match 'rate')
-      if ($isRateLimited -and $attempt -lt $delays.Count) {
-        $wait = $delays[$attempt]
-        $attempt++
-        Write-Host ("Mistral rate limited; retrying in {0} seconds... (attempt {1}/{2})" -f $wait, $attempt, $delays.Count)
-        Start-Sleep -Seconds $wait
-        continue
+      if ($isRateLimited) {
+        if ($attempt -lt $delays.Count) {
+          $wait = $delays[$attempt]
+          $attempt++
+          Write-Host ("Mistral rate limited; retrying in {0} seconds... (attempt {1}/{2})" -f $wait, $attempt, $delays.Count)
+          Start-Sleep -Seconds $wait
+          continue
+        }
+        # Rate-limit retries EXHAUSTED. Do NOT bare re-throw the raw WebException:
+        # its HTTP response stream was already consumed by Get-SafeProviderError
+        # above, so re-reading it inside Invoke-SafeProvider's catch would yield an
+        # empty/garbled reason (and risk the error escaping before the provider is
+        # marked unavailable). Throw a fresh, self-describing, secret-safe
+        # ErrorRecord so Invoke-SafeProvider records Mistral unavailable with
+        # status=429 / type=rate_limited / code=1300 / message="Rate limit exceeded"
+        # and the run continues when enough providers remain.
+        throw (New-RateLimitedErrorRecord -SafeError $safe -Provider "Mistral")
       }
+      # Non-rate-limit error: re-throw as-is so the safe runner classifies it.
       throw
     }
   }
@@ -806,6 +818,10 @@ function Invoke-SafeProvider {
     Available = $false
     Text      = ""
     Reason    = ""
+    Status    = ""
+    Type      = ""
+    Code      = ""
+    Message   = ""
     CacheFile = $cacheFile
     FromCache = $false
   }
@@ -833,8 +849,21 @@ function Invoke-SafeProvider {
   try {
     $text = & $Call
   } catch {
-    $safe = Get-SafeProviderError -ErrorRecord $_ -Provider $Name -Model $Model
-    $result.Reason = ("status={0} type={1} code={2} message={3}" -f $safe.Status, $safe.Type, $safe.Code, $safe.Message)
+    # Error extraction must NEVER take down the run: any failure here is itself
+    # caught so the provider is still recorded UNAVAILABLE and the script
+    # continues (when SP_ALLOW_PROVIDER_FAILURES=true). Reason/fields are
+    # secret-safe (Get-SafeProviderError redacts API-key-like substrings).
+    $safe = $null
+    try { $safe = Get-SafeProviderError -ErrorRecord $_ -Provider $Name -Model $Model } catch { $safe = $null }
+    if ($safe) {
+      $result.Status  = [string]$safe.Status
+      $result.Type    = [string]$safe.Type
+      $result.Code    = [string]$safe.Code
+      $result.Message = [string]$safe.Message
+      $result.Reason  = Format-ProviderReason -Safe $safe
+    } else {
+      $result.Reason  = "error extraction failed (secret-safe; provider marked unavailable)"
+    }
     Write-Host ("  ! {0} unavailable: {1}" -f $Name, $result.Reason)
     if (-not $AllowFailures) {
       throw ("{0} provider failed and SP_ALLOW_PROVIDER_FAILURES=false: {1}" -f $Name, $result.Reason)
@@ -976,11 +1005,14 @@ if ($availableCount -lt $MinSynthesisProviders) {
 
 # Resolve each provider's text (real output, or a secret-safe placeholder so the
 # synthesizer treats it as missing rather than fabricating that provider's view).
-$gptResult     = if ($gptProvider.Available)     { $gptProvider.Text }     else { Get-ProviderUnavailablePlaceholder -Provider "GPT"     -Reason $gptProvider.Reason }
-$claudeResult  = if ($claudeProvider.Available)  { $claudeProvider.Text }  else { Get-ProviderUnavailablePlaceholder -Provider "Claude"  -Reason $claudeProvider.Reason }
-$geminiResult  = if ($geminiProvider.Available)  { $geminiProvider.Text }  else { Get-ProviderUnavailablePlaceholder -Provider "Gemini"  -Reason $geminiProvider.Reason }
-$grokResult    = if ($grokProvider.Available)    { $grokProvider.Text }    else { Get-ProviderUnavailablePlaceholder -Provider "Grok"    -Reason $grokProvider.Reason }
-$mistralResult = if ($mistralProvider.Available) { $mistralProvider.Text } else { Get-ProviderUnavailablePlaceholder -Provider "Mistral" -Reason $mistralProvider.Reason }
+# The placeholder "due ..." clause uses the concise failure TYPE (e.g.
+# "rate_limited") so an exhausted Mistral 429 reads
+# "PROVIDER_UNAVAILABLE: Mistral unavailable due rate_limited. ...".
+$gptResult     = if ($gptProvider.Available)     { $gptProvider.Text }     else { Get-ProviderUnavailablePlaceholder -Provider "GPT"     -Reason (Get-ConciseProviderReason -Result $gptProvider) }
+$claudeResult  = if ($claudeProvider.Available)  { $claudeProvider.Text }  else { Get-ProviderUnavailablePlaceholder -Provider "Claude"  -Reason (Get-ConciseProviderReason -Result $claudeProvider) }
+$geminiResult  = if ($geminiProvider.Available)  { $geminiProvider.Text }  else { Get-ProviderUnavailablePlaceholder -Provider "Gemini"  -Reason (Get-ConciseProviderReason -Result $geminiProvider) }
+$grokResult    = if ($grokProvider.Available)    { $grokProvider.Text }    else { Get-ProviderUnavailablePlaceholder -Provider "Grok"    -Reason (Get-ConciseProviderReason -Result $grokProvider) }
+$mistralResult = if ($mistralProvider.Available) { $mistralProvider.Text } else { Get-ProviderUnavailablePlaceholder -Provider "Mistral" -Reason (Get-ConciseProviderReason -Result $mistralProvider) }
 
 $providerAvailabilitySection = Get-ProviderAvailabilitySection -Providers $providerResults
 

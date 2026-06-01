@@ -545,3 +545,169 @@ def test_advisory_human_execution_invariants_intact() -> None:
     low = text.lower()
     for forbidden in ("place_order", "submit_order", "broker_execute", "place-order", "execute_trade"):
         assert forbidden not in low
+
+
+# ============================================================
+# Mistral 429 retry-EXHAUSTION fallback (orchestration bug fix)
+# ============================================================
+# Root cause being guarded: the retry loop used to bare re-throw the raw
+# WebException at exhaustion; recording the provider then depended on
+# re-reading that exception's (already-consumed) HTTP response stream inside
+# Invoke-SafeProvider's catch — which could let the error escape before the
+# provider was marked unavailable, silently aborting the whole run. The fix
+# throws a fresh, self-describing, secret-safe ErrorRecord instead.
+
+
+def _invoke_safe_provider_src() -> str:
+    """Extract the live Invoke-SafeProvider function body from the main script."""
+    main_src = MAIN_PS1.read_text(encoding="utf-8", errors="ignore")
+    start = main_src.index("function Invoke-SafeProvider")
+    end = main_src.index(
+        "# ============================================================\n# BUILD FULL PROMPTS",
+        start,
+    )
+    return main_src[start:end]
+
+
+def test_mistral_exhaustion_uses_self_describing_record_not_bare_rethrow() -> None:
+    """TASK 2/3 — the live caller no longer bare re-throws at rate-limit
+    exhaustion; it builds a deterministic, secret-safe ErrorRecord."""
+    text = MAIN_PS1.read_text(encoding="utf-8", errors="ignore")
+    assert 'throw (New-RateLimitedErrorRecord -SafeError $safe -Provider "Mistral")' in text
+    lib = PROVIDER_LIB_PS1.read_text(encoding="utf-8", errors="ignore")
+    assert "function New-RateLimitedErrorRecord" in lib
+    assert "function Format-ProviderReason" in lib
+    assert "function Get-ConciseProviderReason" in lib
+
+
+@needs_powershell
+def test_new_rate_limited_record_yields_429_rate_limited_1300_fields() -> None:
+    """TASK 3 — New-RateLimitedErrorRecord round-trips through Get-SafeProviderError
+    to status=429 / type=rate_limited / code=1300 / message='Rate limit exceeded',
+    and never embeds an API-key-like substring (defaults are key-free)."""
+    body = (
+        ". .\\scripts\\secret_scan_lib.ps1; "
+        ". .\\scripts\\provider_lib.ps1; "
+        "$er = New-RateLimitedErrorRecord -Provider 'Mistral'; "
+        "$s = Get-SafeProviderError -ErrorRecord $er -Provider 'Mistral' -Model 'm'; "
+        "Write-Output ('STATUS::' + $s.Status); "
+        "Write-Output ('TYPE::' + $s.Type); "
+        "Write-Output ('CODE::' + $s.Code); "
+        "Write-Output ('MSG::' + $s.Message)"
+    )
+    res = _run_ps(body)
+    assert "STATUS::429" in res.stdout, res.stdout
+    assert "TYPE::rate_limited" in res.stdout, res.stdout
+    assert "CODE::1300" in res.stdout, res.stdout
+    assert "MSG::Rate limit exceeded" in res.stdout, res.stdout
+
+
+@needs_powershell
+def test_mistral_429_exhaustion_marks_unavailable_and_does_not_exit() -> None:
+    """TASK 3/5 — after ALL retries a simulated Mistral 429 is recorded as a
+    normal provider-unavailable object (status 429 / rate_limited / 1300); the
+    script does NOT exit, and the reason carries no secret."""
+    sandbox = REPO_ROOT / "data" / "_mistral_exhaust_selftest_tmp"
+    if sandbox.exists():
+        shutil.rmtree(sandbox)
+    sandbox.mkdir(parents=True)
+    cache_dir = sandbox / "cache"
+    cache_dir.mkdir()
+    func_file = sandbox / "_runner.ps1"
+    func_file.write_text(_invoke_safe_provider_src(), encoding="utf-8")
+    try:
+        cache_posix = str(cache_dir).replace("\\", "\\\\")
+        runner_posix = str(func_file).replace("\\", "\\\\")
+        # A call that always 429s, exhausts the real retry schedule (no real
+        # sleeps here), then throws the deterministic rate-limit ErrorRecord —
+        # the exact patched exhaustion path.
+        body = (
+            ". .\\scripts\\secret_scan_lib.ps1; "
+            ". .\\scripts\\provider_lib.ps1; "
+            f". '{runner_posix}'; "
+            "function MistralExhaust { "
+            "  $delays = Get-MistralRetryDelaysSeconds; $attempt = 0; "
+            "  while ($true) { try { "
+            "    $p = '{\"message\":\"Rate limit exceeded\",\"type\":\"rate_limited\",\"code\":\"1300\",\"raw_status_code\":429}'; "
+            "    $exc = New-Object System.Exception('boom'); "
+            "    $er = New-Object System.Management.Automation.ErrorRecord("
+            "      $exc,'id',[System.Management.Automation.ErrorCategory]::NotSpecified,$null); "
+            "    $er.ErrorDetails = New-Object System.Management.Automation.ErrorDetails($p); throw $er "
+            "  } catch { "
+            "    $safe = Get-SafeProviderError -ErrorRecord $_ -Provider 'Mistral' -Model 'm'; "
+            "    $rl = ($safe.Status -eq '429') -or ($safe.Code -eq '1300') -or ($safe.Type -match 'rate'); "
+            "    if ($rl) { if ($attempt -lt $delays.Count) { $attempt++; continue } "
+            "               throw (New-RateLimitedErrorRecord -SafeError $safe -Provider 'Mistral') } "
+            "    throw } } }; "
+            f"$r = Invoke-SafeProvider -Name 'Mistral' -Key 'mistral' -Model 'm' -CacheDir '{cache_posix}' "
+            "-AllowFailures $true -ReuseOutputs $false -ForceRerun $false -Call { MistralExhaust }; "
+            "Write-Output ('AVAILABLE::' + $r.Available); "
+            "Write-Output ('STATUS::' + $r.Status); "
+            "Write-Output ('TYPE::' + $r.Type); "
+            "Write-Output ('CODE::' + $r.Code); "
+            "Write-Output ('REASON::' + $r.Reason); "
+            "Write-Output ('PH::' + (Get-ProviderUnavailablePlaceholder -Provider 'Mistral' -Reason (Get-ConciseProviderReason -Result $r))); "
+            "Write-Output 'AFTER_NO_EXIT'"
+        )
+        res = _run_ps(body)
+        assert "AVAILABLE::False" in res.stdout, res.stdout
+        assert "STATUS::429" in res.stdout, res.stdout
+        assert "TYPE::rate_limited" in res.stdout, res.stdout
+        assert "CODE::1300" in res.stdout, res.stdout
+        # exact placeholder the synthesizer sees for an unavailable Mistral
+        assert (
+            "PH::PROVIDER_UNAVAILABLE: Mistral unavailable due rate_limited. "
+            "No advisory generated by this provider." in res.stdout
+        ), res.stdout
+        # the script kept running after the failure (no silent abort)
+        assert "AFTER_NO_EXIT" in res.stdout, res.stdout
+        # no API-key-like text leaked anywhere in the diagnostics
+        assert "sk-" not in res.stdout
+        assert "xai-" not in res.stdout
+    finally:
+        shutil.rmtree(sandbox, ignore_errors=True)
+
+
+@needs_powershell
+def test_synthesis_gate_passes_at_four_available_and_aborts_below() -> None:
+    """TASK 4 — with GPT/Claude/Gemini/Grok available and Mistral unavailable the
+    gate (availableCount >= MinSynthesisProviders=4) PROCEEDS; with only 3 it
+    ABORTS. Uses the same expressions the main script evaluates."""
+    body = (
+        "$mk = { param($n,$a) [pscustomobject]@{Name=$n;Available=$a} }; "
+        "$four = @((& $mk 'GPT' $true),(& $mk 'Claude' $true),(& $mk 'Gemini' $true),"
+        "(& $mk 'Grok' $true),(& $mk 'Mistral' $false)); "
+        "$MinSynthesisProviders = 4; "
+        "$availableCount = @($four | Where-Object { $_.Available }).Count; "
+        "if ($availableCount -lt $MinSynthesisProviders) { Write-Output ('FOUR::ABORT(' + $availableCount + ')') } "
+        "else { Write-Output ('FOUR::PROCEED(' + $availableCount + ')') }; "
+        "$three = @((& $mk 'GPT' $true),(& $mk 'Claude' $true),(& $mk 'Gemini' $true),"
+        "(& $mk 'Grok' $false),(& $mk 'Mistral' $false)); "
+        "$ac2 = @($three | Where-Object { $_.Available }).Count; "
+        "if ($ac2 -lt $MinSynthesisProviders) { Write-Output ('THREE::ABORT(' + $ac2 + ')') } "
+        "else { Write-Output ('THREE::PROCEED(' + $ac2 + ')') }"
+    )
+    res = _run_ps(body)
+    assert "FOUR::PROCEED(4)" in res.stdout, res.stdout
+    assert "THREE::ABORT(3)" in res.stdout, res.stdout
+
+
+@needs_powershell
+def test_format_and_concise_provider_reason_are_secret_safe() -> None:
+    """TASK 6 — Format-ProviderReason renders 'type / status / code (message)' and
+    Get-ConciseProviderReason prefers the structured TYPE; both pass through
+    already-redacted fields without re-introducing secrets."""
+    body = (
+        ". .\\scripts\\provider_lib.ps1; "
+        "$safe = [pscustomobject]@{Type='rate_limited';Status='429';Code='1300';Message='Rate limit exceeded'}; "
+        "Write-Output ('FMT::' + (Format-ProviderReason -Safe $safe)); "
+        "$res = [pscustomobject]@{Type='rate_limited';Reason='rate_limited / 429 / 1300 (Rate limit exceeded)'}; "
+        "Write-Output ('CONCISE::' + (Get-ConciseProviderReason -Result $res)); "
+        # empty-field grace: no leading ' / ' and no trailing '()'
+        "$bare = [pscustomobject]@{Type='';Status='';Code='';Message='boom'}; "
+        "Write-Output ('BARE::' + (Format-ProviderReason -Safe $bare))"
+    )
+    res = _run_ps(body)
+    assert "FMT::rate_limited / 429 / 1300 (Rate limit exceeded)" in res.stdout, res.stdout
+    assert "CONCISE::rate_limited" in res.stdout, res.stdout
+    assert "BARE::boom" in res.stdout, res.stdout
