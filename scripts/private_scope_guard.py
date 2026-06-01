@@ -336,6 +336,16 @@ APPROVED_DOMAINS: tuple[str, ...] = (
     # approval of all "secret"/"sanitize"/".ps1" names).
     "secret_scan",        # secret_scan_lib.ps1 — shared API-key leak detector
     "sanitize_generated", # sanitize_generated_context.ps1 — generated-folder redactor
+    # Provider-safe orchestration sprint — advisory-only, side-effect-free
+    # PowerShell helper library dot-sourced by run_five_model_synthesis.ps1.
+    # Pure functions only (model-aware Claude request body, Gemini model-id
+    # normalization, secret-safe provider-error extraction, Mistral retry
+    # schedule, provider availability/placeholder text). No network, no key
+    # validation, no file writes on load; never prints a matched secret value;
+    # no broker execution, no order placement, no API trading writes. This is a
+    # narrow, specific domain — NOT a blanket approval of all "provider"/".ps1"
+    # names (those are covered individually, e.g. provider_verification).
+    "provider_lib",       # provider_lib.ps1 — pure model-aware provider helpers
 )
 
 # Explicit allowlist for individual files / directories whose name does

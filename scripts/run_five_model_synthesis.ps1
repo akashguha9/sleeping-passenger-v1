@@ -29,6 +29,39 @@ if (Test-Path $secretScanLib) {
   Write-Host "secret_scan_lib.ps1 not found; using inline fallback secret detector."
 }
 
+# Pure, side-effect-free provider helpers (model-aware Claude body, Gemini model
+# normalization, secret-safe error extraction, Mistral retry schedule, provider
+# availability/placeholder text). Dot-sourced as the single source of truth so
+# the orchestration is testable and never relies on a manual one-off edit.
+$providerLib = Join-Path $PSScriptRoot "provider_lib.ps1"
+if (Test-Path $providerLib) {
+  . $providerLib
+} else {
+  throw "provider_lib.ps1 not found next to run_five_model_synthesis.ps1; cannot run provider-safe orchestration."
+}
+
+# ------------------------------------------------------------
+# PROVIDER-SAFE ORCHESTRATION CONTROLS (env-tunable, safe defaults)
+# ------------------------------------------------------------
+# SP_ALLOW_PROVIDER_FAILURES  (default true)  - one provider failing does NOT
+#                                                crash the whole run.
+# SP_MIN_SYNTHESIS_PROVIDERS  (default 4)     - minimum successful providers
+#                                                required before final synthesis.
+# SP_FORCE_PROVIDER_RERUN     (default false) - ignore cached outputs, re-call.
+# SP_REUSE_PROVIDER_OUTPUTS   (default true)  - reuse a cached, secret-clean
+#                                                provider output instead of
+#                                                re-calling that provider.
+$AllowProviderFailures = ($env:SP_ALLOW_PROVIDER_FAILURES -ne 'false')
+$ReuseProviderOutputs  = ($env:SP_REUSE_PROVIDER_OUTPUTS -ne 'false')
+$ForceProviderRerun    = ($env:SP_FORCE_PROVIDER_RERUN -eq 'true')
+$MinSynthesisProviders = 4
+if ($env:SP_MIN_SYNTHESIS_PROVIDERS) {
+  $parsedMin = 0
+  if ([int]::TryParse($env:SP_MIN_SYNTHESIS_PROVIDERS, [ref]$parsedMin) -and $parsedMin -ge 1 -and $parsedMin -le 5) {
+    $MinSynthesisProviders = $parsedMin
+  }
+}
+
 $ErrorActionPreference = "Stop"
 
 Remove-Variable response -ErrorAction SilentlyContinue
@@ -81,7 +114,6 @@ try {
     if ($resolved["XAI_RESOLVED_MODEL"])       { $GROK_MODEL    = $resolved["XAI_RESOLVED_MODEL"] }
     if ($resolved["GOOGLE_GEMINI_RESOLVED_MODEL"]) { $GEMINI_MODEL = $resolved["GOOGLE_GEMINI_RESOLVED_MODEL"] }
     if ($resolved["MISTRAL_RESOLVED_MODEL"])   { $MISTRAL_MODEL = $resolved["MISTRAL_RESOLVED_MODEL"] }
-    Write-Host "Frontier resolver selected: OpenAI=$OPENAI_ANALYST_MODEL Claude=$CLAUDE_MODEL Grok=$GROK_MODEL Gemini=$GEMINI_MODEL Mistral=$MISTRAL_MODEL"
     foreach ($p in @("OPENAI","ANTHROPIC","XAI","GOOGLE_GEMINI","MISTRAL")) {
       $fallbackKey = "${p}_FALLBACK_USED"
       $reasonKey = "${p}_FALLBACK_REASON"
@@ -96,6 +128,22 @@ try {
 } catch {
   Write-Host "Frontier resolver unavailable; using hardcoded seed model ids."
 }
+
+# ------------------------------------------------------------
+# MODEL-ID OVERRIDES + NORMALIZATION (applied regardless of resolver outcome).
+# SP_CLAUDE_MODEL / SP_GEMINI_MODEL override resolver output; Resolve-GeminiModel
+# also fixes the resolver-vs-served "gemini-3.1-pro" -> "gemini-3.1-pro-preview"
+# 404 mismatch. Done in code (not a manual edit) so it is deterministic.
+# ------------------------------------------------------------
+if ($env:SP_CLAUDE_MODEL) {
+  $CLAUDE_MODEL = $env:SP_CLAUDE_MODEL
+  Write-Host "Claude model overridden by SP_CLAUDE_MODEL=$CLAUDE_MODEL"
+}
+$GEMINI_MODEL = Resolve-GeminiModel -ModelName $GEMINI_MODEL
+if ($env:SP_GEMINI_MODEL) {
+  Write-Host "Gemini model overridden by SP_GEMINI_MODEL=$GEMINI_MODEL"
+}
+Write-Host "Models in effect: OpenAI=$OPENAI_ANALYST_MODEL Claude=$CLAUDE_MODEL Grok=$GROK_MODEL Gemini=$GEMINI_MODEL Mistral=$MISTRAL_MODEL"
 
 # ============================================================
 # KEY VALIDATION
@@ -535,18 +583,13 @@ function Get-ClaudeResponseText {
     "Content-Type"      = "application/json; charset=utf-8"
   }
 
-  $bodyObj = @{
-    model = $ModelName
-    max_tokens = 8000
-    temperature = 0.2
-    system = "You are Claude, an independent advisory-only analyst for zzz_passenger's MVP. No execution. No broker action. No repository modification. No database update. Use only pasted context. Never reveal, infer, repeat, transform, summarize, or request API keys, secrets, tokens, Bearer headers, or environment variables."
-    messages = @(
-      @{
-        role = "user"
-        content = $PromptText
-      }
-    )
-  }
+  # Model-aware body (Get-ClaudeRequestBody from provider_lib.ps1): for Opus
+  # 4.7+/4.8-style ids it omits temperature/top_p/top_k and old thinking-budget
+  # shapes (which return 400); older Claude models keep temperature. A 400
+  # model/parameter-compatibility error is caught by the safe provider runner,
+  # which marks Claude unavailable (when SP_ALLOW_PROVIDER_FAILURES=true) instead
+  # of crashing the whole run.
+  $bodyObj = Get-ClaudeRequestBody -PromptText $PromptText -ModelName $ModelName
 
   $body = $bodyObj | ConvertTo-Json -Depth 60 -Compress
 
@@ -689,11 +732,36 @@ function Get-MistralResponseText {
 
   $body = $bodyObj | ConvertTo-Json -Depth 60 -Compress
 
-  $response = Invoke-RestMethod `
-    -Uri "https://api.mistral.ai/v1/chat/completions" `
-    -Method Post `
-    -Headers $headers `
-    -Body ([System.Text.Encoding]::UTF8.GetBytes($body))
+  # Retry on rate limiting (HTTP 429 / type rate_limited / code 1300) with the
+  # backoff schedule from provider_lib (15s, 45s, 90s). Keys/prompts are never
+  # printed: the only diagnostics come from Get-SafeProviderError. After the
+  # retries are exhausted the last error is re-thrown so the safe provider runner
+  # can mark Mistral unavailable and continue if enough providers remain.
+  $mistralUri = "https://api.mistral.ai/v1/chat/completions"
+  $delays = Get-MistralRetryDelaysSeconds
+  $attempt = 0
+  $response = $null
+  while ($true) {
+    try {
+      $response = Invoke-RestMethod `
+        -Uri $mistralUri `
+        -Method Post `
+        -Headers $headers `
+        -Body ([System.Text.Encoding]::UTF8.GetBytes($body))
+      break
+    } catch {
+      $safe = Get-SafeProviderError -ErrorRecord $_ -Provider "Mistral" -Model $ModelName
+      $isRateLimited = ($safe.Status -eq '429') -or ($safe.Code -eq '1300') -or ($safe.Type -match 'rate')
+      if ($isRateLimited -and $attempt -lt $delays.Count) {
+        $wait = $delays[$attempt]
+        $attempt++
+        Write-Host ("Mistral rate limited; retrying in {0} seconds... (attempt {1}/{2})" -f $wait, $attempt, $delays.Count)
+        Start-Sleep -Seconds $wait
+        continue
+      }
+      throw
+    }
+  }
 
   $text = ""
 
@@ -702,6 +770,99 @@ function Get-MistralResponseText {
   }
 
   return $text
+}
+
+# ============================================================
+# SAFE PROVIDER RUNNER (fault-tolerant + resumable + secret-scanned)
+# ============================================================
+# Wraps a single provider call so that:
+#   * a previously-saved, secret-clean output is REUSED (resume) unless
+#     SP_FORCE_PROVIDER_RERUN=true, so a late failure (e.g. a Mistral 429) does
+#     NOT force re-calling GPT/Claude/Gemini/Grok that already succeeded;
+#   * on success the output is secret-scanned and saved to a deterministic
+#     per-run cache file before any downstream use;
+#   * on failure the provider is recorded UNAVAILABLE with a sanitized
+#     status/type/code/message (never the key, never the prompt), and the run
+#     continues when SP_ALLOW_PROVIDER_FAILURES=true.
+# Returns a result object: Name / Key / Model / Available / Text / Reason /
+# CacheFile / FromCache.
+function Invoke-SafeProvider {
+  param(
+    [string]$Name,
+    [string]$Key,
+    [string]$Model,
+    [scriptblock]$Call,
+    [string]$CacheDir,
+    [bool]$AllowFailures,
+    [bool]$ReuseOutputs,
+    [bool]$ForceRerun
+  )
+
+  $cacheFile = Join-Path $CacheDir ("{0}.txt" -f $Key)
+  $result = [pscustomobject]@{
+    Name      = $Name
+    Key       = $Key
+    Model     = $Model
+    Available = $false
+    Text      = ""
+    Reason    = ""
+    CacheFile = $cacheFile
+    FromCache = $false
+  }
+
+  # ---- Resume: reuse a cached, non-empty, secret-clean output ----
+  if ($ReuseOutputs -and (-not $ForceRerun) -and (Test-Path $cacheFile)) {
+    $cached = Get-Content $cacheFile -Raw -Encoding UTF8
+    if (-not [string]::IsNullOrWhiteSpace($cached)) {
+      $hit = Get-FirstSecretMatch -Text $cached -Source ("cached:{0}" -f $Key)
+      if ($null -eq $hit) {
+        Write-Host ("Reusing cached {0} output from {1}" -f $Name, $cacheFile)
+        $result.Available = $true
+        $result.Text      = $cached
+        $result.FromCache = $true
+        return $result
+      } else {
+        Write-Host ("Cached {0} output failed secret scan (class {1}); ignoring cache and re-calling provider." -f $Name, $hit.Class)
+      }
+    }
+  }
+
+  # ---- Live call ----
+  Write-Host ("Running {0} analyst (model={1})..." -f $Name, $Model)
+  $text = $null
+  try {
+    $text = & $Call
+  } catch {
+    $safe = Get-SafeProviderError -ErrorRecord $_ -Provider $Name -Model $Model
+    $result.Reason = ("status={0} type={1} code={2} message={3}" -f $safe.Status, $safe.Type, $safe.Code, $safe.Message)
+    Write-Host ("  ! {0} unavailable: {1}" -f $Name, $result.Reason)
+    if (-not $AllowFailures) {
+      throw ("{0} provider failed and SP_ALLOW_PROVIDER_FAILURES=false: {1}" -f $Name, $result.Reason)
+    }
+    return $result
+  }
+
+  if ([string]::IsNullOrWhiteSpace($text)) {
+    $result.Reason = "empty output"
+    Write-Host ("  ! {0} returned empty output." -f $Name)
+    if (-not $AllowFailures) { throw ("{0} analyst output was empty." -f $Name) }
+    return $result
+  }
+
+  # Secret-scan BEFORE saving or any downstream use; tainted output is dropped.
+  $hit = Get-FirstSecretMatch -Text $text -Source ("{0} analyst output" -f $Name)
+  if ($null -ne $hit) {
+    $result.Reason = ("output failed secret scan (class {0}); not saved" -f $hit.Class)
+    Write-Host ("  ! {0} output flagged by secret scan (class {1}); marking unavailable and NOT saving." -f $Name, $hit.Class)
+    if (-not $AllowFailures) { throw ("ABORTED: {0} output failed secret scan (class {1})." -f $Name, $hit.Class) }
+    return $result
+  }
+
+  $text | Set-Content $cacheFile -Encoding UTF8
+  Write-Host ("  {0} OK; saved to {1}" -f $Name, $cacheFile)
+  $result.Available = $true
+  $result.Text      = $text
+  return $result
 }
 
 # ============================================================
@@ -740,64 +901,88 @@ $grokFullPrompt    = [regex]::Replace($grokFullPrompt, '[\uD800-\uDFFF]', '')
 $mistralFullPrompt = [regex]::Replace($mistralFullPrompt, '[\uD800-\uDFFF]', '')
 
 # ============================================================
-# RUN FIVE INDEPENDENT ANALYST MODELS
+# RUN FIVE INDEPENDENT ANALYST MODELS (provider-safe + resumable)
 # ============================================================
+# Each provider runs through Invoke-SafeProvider: a late failure on one provider
+# never forces re-calling the providers that already succeeded, and each output
+# is secret-scanned + cached before any downstream use.
 
-Write-Host "Running GPT analyst..."
-$gptResult = Get-OpenAIResponseText `
-  -PromptText $gptFullPrompt `
-  -ModelName $OPENAI_ANALYST_MODEL `
-  -SystemText "You are GPT, an independent advisory-only analyst for zzz_passenger's MVP. No execution. No broker action. No repository modification. No database update. Use only pasted context. Never reveal, infer, repeat, transform, summarize, or request API keys, secrets, tokens, Bearer headers, or environment variables."
+$cacheDir = Join-Path $RepoRoot ("runtime\five_model_synthesis\{0}" -f $runDate)
+if (-not (Test-Path $cacheDir)) {
+  New-Item -ItemType Directory -Force -Path $cacheDir | Out-Null
+}
+Write-Host ("Provider output cache dir: {0}" -f $cacheDir)
+Write-Host ("Orchestration: allow_failures={0} reuse_outputs={1} force_rerun={2} min_providers={3}" -f $AllowProviderFailures, $ReuseProviderOutputs, $ForceProviderRerun, $MinSynthesisProviders)
 
-if ([string]::IsNullOrWhiteSpace($gptResult)) {
-  throw "GPT analyst output was empty."
+$gptProvider = Invoke-SafeProvider -Name "GPT" -Key "gpt" -Model $OPENAI_ANALYST_MODEL `
+  -CacheDir $cacheDir -AllowFailures $AllowProviderFailures -ReuseOutputs $ReuseProviderOutputs -ForceRerun $ForceProviderRerun `
+  -Call {
+    Get-OpenAIResponseText `
+      -PromptText $gptFullPrompt `
+      -ModelName $OPENAI_ANALYST_MODEL `
+      -SystemText "You are GPT, an independent advisory-only analyst for zzz_passenger's MVP. No execution. No broker action. No repository modification. No database update. Use only pasted context. Never reveal, infer, repeat, transform, summarize, or request API keys, secrets, tokens, Bearer headers, or environment variables."
+  }
+
+$claudeProvider = Invoke-SafeProvider -Name "Claude" -Key "claude" -Model $CLAUDE_MODEL `
+  -CacheDir $cacheDir -AllowFailures $AllowProviderFailures -ReuseOutputs $ReuseProviderOutputs -ForceRerun $ForceProviderRerun `
+  -Call {
+    Get-ClaudeResponseText -PromptText $claudeFullPrompt -ModelName $CLAUDE_MODEL
+  }
+
+$geminiProvider = Invoke-SafeProvider -Name "Gemini" -Key "gemini" -Model $GEMINI_MODEL `
+  -CacheDir $cacheDir -AllowFailures $AllowProviderFailures -ReuseOutputs $ReuseProviderOutputs -ForceRerun $ForceProviderRerun `
+  -Call {
+    Get-GeminiResponseText -PromptText $geminiFullPrompt -ModelName $GEMINI_MODEL
+  }
+
+$grokProvider = Invoke-SafeProvider -Name "Grok" -Key "grok" -Model $GROK_MODEL `
+  -CacheDir $cacheDir -AllowFailures $AllowProviderFailures -ReuseOutputs $ReuseProviderOutputs -ForceRerun $ForceProviderRerun `
+  -Call {
+    Get-GrokResponseText -PromptText $grokFullPrompt -ModelName $GROK_MODEL
+  }
+
+$mistralProvider = Invoke-SafeProvider -Name "Mistral" -Key "mistral" -Model $MISTRAL_MODEL `
+  -CacheDir $cacheDir -AllowFailures $AllowProviderFailures -ReuseOutputs $ReuseProviderOutputs -ForceRerun $ForceProviderRerun `
+  -Call {
+    Get-MistralResponseText -PromptText $mistralFullPrompt -ModelName $MISTRAL_MODEL
+  }
+
+$providerResults = @($gptProvider, $claudeProvider, $geminiProvider, $grokProvider, $mistralProvider)
+
+# ============================================================
+# PROVIDER AVAILABILITY GATE (partial-availability tolerant)
+# ============================================================
+$availableProviders = @($providerResults | Where-Object { $_.Available })
+$availableCount = $availableProviders.Count
+Write-Host ""
+Write-Host "============================================================"
+Write-Host "PROVIDER AVAILABILITY"
+Write-Host "============================================================"
+foreach ($p in $providerResults) {
+  if ($p.Available) {
+    $tag = if ($p.FromCache) { "available (cached)" } else { "available" }
+    Write-Host ("  {0,-8} {1}" -f $p.Name, $tag)
+  } else {
+    Write-Host ("  {0,-8} unavailable - {1}" -f $p.Name, $p.Reason)
+  }
+}
+Write-Host ("  {0}/5 providers available (minimum required = {1})." -f $availableCount, $MinSynthesisProviders)
+Write-Host "============================================================"
+Write-Host ""
+
+if ($availableCount -lt $MinSynthesisProviders) {
+  throw ("ABORTED: fewer than {0} providers succeeded; no robust synthesis possible. ({1}/5 available)" -f $MinSynthesisProviders, $availableCount)
 }
 
-Assert-NoSecretText -Text $gptResult -Source "GPT analyst output"
+# Resolve each provider's text (real output, or a secret-safe placeholder so the
+# synthesizer treats it as missing rather than fabricating that provider's view).
+$gptResult     = if ($gptProvider.Available)     { $gptProvider.Text }     else { Get-ProviderUnavailablePlaceholder -Provider "GPT"     -Reason $gptProvider.Reason }
+$claudeResult  = if ($claudeProvider.Available)  { $claudeProvider.Text }  else { Get-ProviderUnavailablePlaceholder -Provider "Claude"  -Reason $claudeProvider.Reason }
+$geminiResult  = if ($geminiProvider.Available)  { $geminiProvider.Text }  else { Get-ProviderUnavailablePlaceholder -Provider "Gemini"  -Reason $geminiProvider.Reason }
+$grokResult    = if ($grokProvider.Available)    { $grokProvider.Text }    else { Get-ProviderUnavailablePlaceholder -Provider "Grok"    -Reason $grokProvider.Reason }
+$mistralResult = if ($mistralProvider.Available) { $mistralProvider.Text } else { Get-ProviderUnavailablePlaceholder -Provider "Mistral" -Reason $mistralProvider.Reason }
 
-Write-Host "Running Claude analyst..."
-$claudeResult = Get-ClaudeResponseText `
-  -PromptText $claudeFullPrompt `
-  -ModelName $CLAUDE_MODEL
-
-if ([string]::IsNullOrWhiteSpace($claudeResult)) {
-  throw "Claude analyst output was empty."
-}
-
-Assert-NoSecretText -Text $claudeResult -Source "Claude analyst output"
-
-Write-Host "Running Gemini analyst..."
-$geminiResult = Get-GeminiResponseText `
-  -PromptText $geminiFullPrompt `
-  -ModelName $GEMINI_MODEL
-
-if ([string]::IsNullOrWhiteSpace($geminiResult)) {
-  throw "Gemini analyst output was empty."
-}
-
-Assert-NoSecretText -Text $geminiResult -Source "Gemini analyst output"
-
-Write-Host "Running Grok analyst..."
-$grokResult = Get-GrokResponseText `
-  -PromptText $grokFullPrompt `
-  -ModelName $GROK_MODEL
-
-if ([string]::IsNullOrWhiteSpace($grokResult)) {
-  throw "Grok analyst output was empty."
-}
-
-Assert-NoSecretText -Text $grokResult -Source "Grok analyst output"
-
-Write-Host "Running Mistral analyst..."
-$mistralResult = Get-MistralResponseText `
-  -PromptText $mistralFullPrompt `
-  -ModelName $MISTRAL_MODEL
-
-if ([string]::IsNullOrWhiteSpace($mistralResult)) {
-  throw "Mistral analyst output was empty."
-}
-
-Assert-NoSecretText -Text $mistralResult -Source "Mistral analyst output"
+$providerAvailabilitySection = Get-ProviderAvailabilitySection -Providers $providerResults
 
 # ============================================================
 # FINAL FIVE-MODEL SYNTHESIS PROMPT
@@ -816,6 +1001,16 @@ You are the judge/synthesizer reading five independent AI model reports:
 3. Gemini
 4. Grok
 5. Mistral
+
+============================================================
+PROVIDER AVAILABILITY (read before synthesizing)
+============================================================
+$providerAvailabilitySection
+
+If a provider is listed as unavailable, its response below is a
+PROVIDER_UNAVAILABLE placeholder. Do NOT fabricate that provider's view; treat
+it as missing and synthesize only from the providers that are available. Note in
+the Model-by-Model Summary which providers were unavailable and why.
 
 Your job is to compare, reconcile, challenge, and synthesize all five model outputs into one final paper-trading decision report.
 
@@ -1344,3 +1539,6 @@ $outFile = ".\moltbook\five_model_synthesis_report_$runDate.txt"
 $synthesisResult | Set-Content $outFile -Encoding UTF8
 
 notepad $outFile
+
+
+
