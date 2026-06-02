@@ -1,0 +1,59 @@
+# Daily discovery diversity quotas (advisory-only).
+#
+# These quotas govern DISCOVERY VISIBILITY and the per-country TRADE-CANDIDATE
+# CAP — they NEVER force a trade and NEVER fabricate a ticker.  A country may
+# carry discovery names even if none are promoted; if a country has too few
+# names the gate reports the shortfall as a WARNING (it does not invent names).
+#
+# Operator-editable mirror of the embedded defaults in
+# scripts/country_diversity_gate.py:DEFAULT_QUOTAS.  Missing/invalid file ->
+# embedded defaults are used so discovery is never starved.
+
+daily_discovery_buckets:
+  US:                {min_discovery_names: 5, max_trade_candidates: 2}
+  India:             {min_discovery_names: 5, max_trade_candidates: 2}
+  UK:                {min_discovery_names: 3, max_trade_candidates: 1}
+  Europe:            {min_discovery_names: 5, max_trade_candidates: 2}
+  Japan:             {min_discovery_names: 5, max_trade_candidates: 2}
+  South Korea:       {min_discovery_names: 5, max_trade_candidates: 2}
+  Australia_Canada:  {min_discovery_names: 3, max_trade_candidates: 1}
+  Brazil_LatAm_EM:   {min_discovery_names: 3, max_trade_candidates: 1}
+
+# Country-share / HHI concentration thresholds (computed over the realized
+# discovery output, p_c = n_c / N).
+concentration_thresholds:
+  country_share_warning: 0.40   # any p_c > 0.40  -> COUNTRY_CONCENTRATION_WARNING
+  country_share_block:   0.60   # any p_c > 0.60  -> COUNTRY_OVERCONCENTRATION_BLOCK
+  hhi_warning:           0.35   # HHI > 0.35      -> DISCOVERY_TOO_CONCENTRATED
+
+# Map a candidate's country to its discovery bucket/region.  Unmapped
+# countries fall into "Other" (visible, but outside the quota table).
+region_map:
+  United States: US
+  USA: US
+  US: US
+  India: India
+  United Kingdom: UK
+  UK: UK
+  Germany: Europe
+  France: Europe
+  Netherlands: Europe
+  Spain: Europe
+  Italy: Europe
+  Switzerland: Europe
+  Sweden: Europe
+  Denmark: Europe
+  Norway: Europe
+  Finland: Europe
+  Japan: Japan
+  South Korea: South Korea
+  Korea: South Korea
+  Australia: Australia_Canada
+  Canada: Australia_Canada
+  Brazil: Brazil_LatAm_EM
+  Mexico: Brazil_LatAm_EM
+  Argentina: Brazil_LatAm_EM
+  Chile: Brazil_LatAm_EM
+  Indonesia: Brazil_LatAm_EM
+  South Africa: Brazil_LatAm_EM
+  Taiwan: Brazil_LatAm_EM

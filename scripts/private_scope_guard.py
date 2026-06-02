@@ -177,6 +177,19 @@ APPROVED_DOMAINS: tuple[str, ...] = (
     "compliance_trace",       # live_provider_compliance_trace.py — per-provider audit
     "backend_api_quality",    # backend_api_quality.py — readiness envelope
     "operator_live_provider", # operator_live_provider_refresh.py — explicit refresh
+    # Trade-log & discovery intelligence sprint — advisory-only analytics over
+    # the operator's Google-Sheet trade log + daily five-model discovery board.
+    # Scores/gates only; no broker execution, no order placement, no API trading
+    # writes; every output carries the advisory-only safety stamps.
+    "google_sheet",       # google_sheet_schema.py — typed CSV normalizer
+    "trade_log",          # trade_log_metrics.py — capital/win-rate/expectancy
+    "outcome_maturity",   # outcome_maturity.py — trading-day maturity (no early judging)
+    "model_version",      # model_version_performance.py — per-cohort, no overclaiming
+    "diversity",          # country_diversity_gate.py — quotas/HHI/concentration caps
+    "dashboard_contract", # dashboard_contract.py — stable unified dashboard JSON
+    "rejected_candidate", # rejected_candidate_tracker.py — false-negative learning
+    "mfe_mae",            # mfe_mae.py — MFE/MAE entry-quality diagnosis
+    # discovery_board.py is already covered by the "discovery" domain above.
 )
 
 # Explicit allowlist for individual files / directories whose name does
