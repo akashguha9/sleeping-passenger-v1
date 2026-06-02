@@ -258,30 +258,30 @@ def lpq_uplift_score(evidences: list[ProviderEvidence],
     """Map per-provider LIVE_VERIFIED status to the new LPQ floor.
 
     Per spec:
-      * 3 LIVE_VERIFIED + fresh  -> max(previous, 8.6)
-      * 2 LIVE_VERIFIED          -> max(previous, 8.45)
-      * 1 LIVE_VERIFIED          -> max(previous, 8.35)
-      * 0 LIVE_VERIFIED          -> previous (no inflation)
+      * 3 LIVE_VERIFIED  -> max(previous, 8.6)
+      * 2 LIVE_VERIFIED  -> max(previous, 8.45)
+      * 1 LIVE_VERIFIED  -> max(previous, 8.35)
+      * 0 LIVE_VERIFIED  -> previous (no inflation)
 
-    "Fresh" here means the provider returned a real timestamp inside its
-    *class-appropriate* window (price_mover within ~4 days, accommodating
-    weekend market closure; filings within 60 days; news within 48 hours).
-    Stricter age-decay still lives in the per-provider ``freshness_score``
-    field and feeds downstream LPQ computation; this uplift table counts
-    LIVE_VERIFIED *honesty*, not minute-by-minute freshness.
+    A provider counts toward the uplift exactly when it is ``LIVE_VERIFIED``
+    with a real provider timestamp — i.e. this run reached the provider and
+    received genuine, timestamped data.  This is the SAME definition the
+    orchestrator uses to populate ``providers_live_verified``, so the headline
+    uplift can never contradict the reported live-verified provider set.
+
+    This uplift table counts LIVE_VERIFIED *honesty*, NOT minute-by-minute
+    freshness — as its name implies it is a floor, not a decay curve.  The
+    freshness penalty is preserved where it belongs: in the per-provider
+    ``freshness_score`` (half-life weighted) which feeds ``provider_score``
+    and the downstream LPQ computation.  Folding a second, divergent age
+    window in here previously let a genuinely live-verified provider (e.g.
+    GDELT news a few days old) be silently dropped from the score while still
+    appearing in ``providers_live_verified`` — an internal contradiction.
     """
-    max_age_hours_for_uplift = {
-        "yfinance": 96.0,       # 4 days — Monday after a weekend close is OK
-        "sec_edgar": 60 * 24.0,  # 60 days — filings are infrequent
-        "gdelt": 48.0,           # 2 days
-    }
     live_verified = [
         e for e in evidences
         if e.verification_status == VERIF_LIVE_VERIFIED
         and e.latest_provider_timestamp_utc
-        and e.freshness_age_hours <= max_age_hours_for_uplift.get(
-            e.provider, 96.0,
-        )
     ]
     n = len(live_verified)
     if n >= 3:
