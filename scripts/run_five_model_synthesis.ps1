@@ -90,7 +90,7 @@ $OPENAI_SYNTH_MODEL    = "gpt-5.5"
 $CLAUDE_MODEL          = "claude-sonnet-4-6"
 $GROK_MODEL            = "grok-4.3"
 $GEMINI_MODEL          = "gemini-3.1-pro-preview"
-$MISTRAL_MODEL         = "mistral-large-latest"
+$MISTRAL_MODEL         = "mistral-small-2506"
 
 # ------------------------------------------------------------
 # FRONTIER MODEL RESOLVER â€” highest-available-model-per-provider.
@@ -143,6 +143,25 @@ $GEMINI_MODEL = Resolve-GeminiModel -ModelName $GEMINI_MODEL
 if ($env:SP_GEMINI_MODEL) {
   Write-Host "Gemini model overridden by SP_GEMINI_MODEL=$GEMINI_MODEL"
 }
+
+# ------------------------------------------------------------
+# MISTRAL SYNTHESIS MODEL + MAX-TOKENS (rate-limit-safe, env-tunable).
+# Deliberately pin a rate-limit-safe small model regardless of the resolver's
+# highest-capability pick: the larger Mistral models (e.g. mistral-medium-3.5)
+# have a low ~25k-tokens/min rate limit that 429s on the large synthesis prompt.
+#   MISTRAL_MODEL                 - overrides the model id (default mistral-small-2506)
+#   MISTRAL_SYNTHESIS_MAX_TOKENS  - overrides Mistral's max_tokens (default 1200)
+# Done in code (not a manual edit) so it is deterministic and testable.
+# ------------------------------------------------------------
+$MISTRAL_MODEL = Get-MistralSynthesisModel
+if ($env:MISTRAL_MODEL) {
+  Write-Host "Mistral model overridden by MISTRAL_MODEL=$MISTRAL_MODEL"
+} else {
+  Write-Host "Mistral synthesis model set to rate-limit-safe default: $MISTRAL_MODEL"
+}
+$MistralSynthesisMaxTokens = Get-MistralSynthesisMaxTokens
+Write-Host ("Mistral synthesis max_tokens: {0}{1}" -f $MistralSynthesisMaxTokens, $(if ($env:MISTRAL_SYNTHESIS_MAX_TOKENS) { " (MISTRAL_SYNTHESIS_MAX_TOKENS override)" } else { " (default)" }))
+
 Write-Host "Models in effect: OpenAI=$OPENAI_ANALYST_MODEL Claude=$CLAUDE_MODEL Grok=$GROK_MODEL Gemini=$GEMINI_MODEL Mistral=$MISTRAL_MODEL"
 
 # ============================================================
@@ -706,7 +725,8 @@ $PromptText
 function Get-MistralResponseText {
   param (
     [string]$PromptText,
-    [string]$ModelName
+    [string]$ModelName,
+    [int]$MaxTokens = 1200
   )
 
   $headers = @{
@@ -727,18 +747,23 @@ function Get-MistralResponseText {
       }
     )
     temperature = 0.2
-    max_tokens = 8000
+    max_tokens = $MaxTokens
   }
 
   $body = $bodyObj | ConvertTo-Json -Depth 60 -Compress
 
-  # Retry on rate limiting (HTTP 429 / type rate_limited / code 1300) with the
-  # backoff schedule from provider_lib (15s, 45s, 90s). Keys/prompts are never
-  # printed: the only diagnostics come from Get-SafeProviderError. After the
-  # retries are exhausted the last error is re-thrown so the safe provider runner
-  # can mark Mistral unavailable and continue if enough providers remain.
+  # Secret-safe estimated prompt tokens (~4 chars/token, + small message
+  # framing). Used for diagnostics only; never sent and never a key.
+  $estPromptTokens = [int][math]::Ceiling(($PromptText.Length + 400) / 4.0)
+
+  # Mistral-specific 429 handling: on a 429 wait 20s and retry once; on another
+  # 429 wait 45s and retry once; if it STILL 429s, return a STRUCTURED DEGRADED
+  # RESULT (usable=$false) so Mistral is cleanly excluded from the final vote
+  # instead of crashing the run. Keys and prompt text are NEVER printed: the
+  # diagnostics come only from Get-SafeProviderError (redacted) + estimated token
+  # counts + the Retry-After response header.
   $mistralUri = "https://api.mistral.ai/v1/chat/completions"
-  $delays = Get-MistralRetryDelaysSeconds
+  $delays = Get-MistralRetryDelaysSeconds   # 20s, then 45s
   $attempt = 0
   $response = $null
   while ($true) {
@@ -753,22 +778,25 @@ function Get-MistralResponseText {
       $safe = Get-SafeProviderError -ErrorRecord $_ -Provider "Mistral" -Model $ModelName
       $isRateLimited = ($safe.Status -eq '429') -or ($safe.Code -eq '1300') -or ($safe.Type -match 'rate')
       if ($isRateLimited) {
-        if ($attempt -lt $delays.Count) {
-          $wait = $delays[$attempt]
-          $attempt++
+        $attempt++
+        $retryAfter = Get-RetryAfterSeconds -ErrorRecord $_
+        Write-MistralRateLimitDiagnostics -Model $ModelName -SafeError $safe `
+          -EstimatedPromptTokens $estPromptTokens -MaxTokens $MaxTokens `
+          -RetryAfter $retryAfter -Attempt $attempt
+        if ($attempt -le $delays.Count) {
+          $wait = $delays[$attempt - 1]
           Write-Host ("Mistral rate limited; retrying in {0} seconds... (attempt {1}/{2})" -f $wait, $attempt, $delays.Count)
           Start-Sleep -Seconds $wait
           continue
         }
-        # Rate-limit retries EXHAUSTED. Do NOT bare re-throw the raw WebException:
-        # its HTTP response stream was already consumed by Get-SafeProviderError
-        # above, so re-reading it inside Invoke-SafeProvider's catch would yield an
-        # empty/garbled reason (and risk the error escaping before the provider is
-        # marked unavailable). Throw a fresh, self-describing, secret-safe
-        # ErrorRecord so Invoke-SafeProvider records Mistral unavailable with
-        # status=429 / type=rate_limited / code=1300 / message="Rate limit exceeded"
-        # and the run continues when enough providers remain.
-        throw (New-RateLimitedErrorRecord -SafeError $safe -Provider "Mistral")
+        # Rate-limit retries EXHAUSTED. Return a structured degraded result rather
+        # than throwing: usable=$false signals Invoke-SafeProvider to record
+        # Mistral unavailable (status=RATE_LIMITED) and exclude it from the final
+        # vote, while the run continues when enough providers remain. (We do NOT
+        # bare re-throw the raw WebException, whose HTTP stream was already consumed
+        # by Get-SafeProviderError above.)
+        Write-Host "Mistral rate-limit retries exhausted; returning degraded result (excluded from final vote)."
+        return (New-MistralDegradedResult)
       }
       # Non-rate-limit error: re-throw as-is so the safe runner classifies it.
       throw
@@ -871,6 +899,33 @@ function Invoke-SafeProvider {
     return $result
   }
 
+  # A provider Call may return either plain analyst TEXT or a STRUCTURED DEGRADED
+  # RESULT object (e.g. Mistral after exhausting its 429 retries):
+  #   { provider; status; usable=$false; advisory_text }.
+  # Detect the degraded shape and record the provider UNAVAILABLE using its
+  # status/advisory_text. The advisory_text is NEVER treated as a real analyst
+  # output and is NEVER secret-scanned/cached as text. Run continues when allowed.
+  if ($null -ne $text -and -not ($text -is [string])) {
+    $isUsable = $true
+    try {
+      $usableProp = $text.PSObject.Properties['usable']
+      if ($usableProp) { $isUsable = [bool]$usableProp.Value }
+    } catch {}
+    if (-not $isUsable) {
+      $degradedStatus = ""
+      $degradedText   = ""
+      try { if ($text.PSObject.Properties['status'])        { $degradedStatus = [string]$text.status } } catch {}
+      try { if ($text.PSObject.Properties['advisory_text']) { $degradedText   = [string]$text.advisory_text } } catch {}
+      $result.Status  = $degradedStatus
+      if ($degradedStatus -match 'RATE') { $result.Type = "rate_limited"; $result.Code = "1300" }
+      $result.Reason  = if ($degradedText) { $degradedText } else { "degraded result (usable=false)" }
+      $result.Message = $result.Reason
+      Write-Host ("  ! {0} unavailable (degraded result): {1}" -f $Name, $result.Reason)
+      if (-not $AllowFailures) { throw ("{0} returned a non-usable degraded result: {1}" -f $Name, $result.Reason) }
+      return $result
+    }
+  }
+
   if ([string]::IsNullOrWhiteSpace($text)) {
     $result.Reason = "empty output"
     Write-Host ("  ! {0} returned empty output." -f $Name)
@@ -918,10 +973,11 @@ $grokPrompt
 $sharedContext
 "@
 
-$mistralFullPrompt = @"
-$mistralPrompt
-$sharedContext
-"@
+# Mistral deliberately receives a COMPACT adversarial-review prompt (base lens +
+# condensed portfolio-truth summary), NOT the full raw daily payload. The large
+# payload 429s on Mistral's low rate limit, so we trim it here. Both inputs are
+# already secret-scanned above as separate context sources.
+$mistralFullPrompt = Get-MistralAdversarialPrompt -BasePrompt $mistralPrompt -TruthContext $portfolioTruthContext
 
 $gptFullPrompt     = [regex]::Replace($gptFullPrompt, '[\uD800-\uDFFF]', '')
 $claudeFullPrompt  = [regex]::Replace($claudeFullPrompt, '[\uD800-\uDFFF]', '')
@@ -973,7 +1029,7 @@ $grokProvider = Invoke-SafeProvider -Name "Grok" -Key "grok" -Model $GROK_MODEL 
 $mistralProvider = Invoke-SafeProvider -Name "Mistral" -Key "mistral" -Model $MISTRAL_MODEL `
   -CacheDir $cacheDir -AllowFailures $AllowProviderFailures -ReuseOutputs $ReuseProviderOutputs -ForceRerun $ForceProviderRerun `
   -Call {
-    Get-MistralResponseText -PromptText $mistralFullPrompt -ModelName $MISTRAL_MODEL
+    Get-MistralResponseText -PromptText $mistralFullPrompt -ModelName $MISTRAL_MODEL -MaxTokens $MistralSynthesisMaxTokens
   }
 
 $providerResults = @($gptProvider, $claudeProvider, $geminiProvider, $grokProvider, $mistralProvider)

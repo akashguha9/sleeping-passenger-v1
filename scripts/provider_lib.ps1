@@ -84,9 +84,146 @@ function Resolve-GeminiModel {
 
 function Get-MistralRetryDelaysSeconds {
   # Backoff schedule for Mistral 429 / rate_limited / code 1300 retries.
-  # Three retries: 15s, 45s, 90s. Defined here so it is unit-testable without
+  # Two retries: 20s then 45s. On a 429 we wait 20s and retry once; on another
+  # 429 we wait 45s and retry once; if it still 429s the caller returns a
+  # structured degraded result (see New-MistralDegradedResult) instead of looping
+  # forever or crashing the run. Defined here so it is unit-testable without
   # making a network call or printing secrets.
-  return @(15, 45, 90)
+  return @(20, 45)
+}
+
+function New-MistralDegradedResult {
+  <#
+    Structured DEGRADED result returned by Get-MistralResponseText after the
+    Mistral 429 rate-limit retries (20s, 45s) are exhausted. usable=$false signals
+    the safe provider runner (Invoke-SafeProvider) to record Mistral UNAVAILABLE
+    and exclude it from the final vote WITHOUT crashing the run. Carries no
+    secret and no prompt text.
+  #>
+  return [pscustomobject]@{
+    provider      = "mistral"
+    status        = "RATE_LIMITED"
+    usable        = $false
+    advisory_text = "Mistral unavailable due to rate limit; excluded from final vote."
+  }
+}
+
+function Get-MistralSynthesisModel {
+  <#
+    The Mistral model id used for five-model synthesis. Defaults to a
+    rate-limit-safe small model and is overridden by the MISTRAL_MODEL env var.
+    This is DELIBERATELY not the resolver's highest-capability pick: the larger
+    Mistral models (e.g. mistral-medium-3.5) have a low ~25k-tokens/min rate limit
+    that 429s on the large synthesis prompt, so the synthesis runner pins a
+    smaller, higher-throughput model here.
+  #>
+  param([string]$Default = "mistral-small-2506")
+  if (-not [string]::IsNullOrWhiteSpace($env:MISTRAL_MODEL)) { return $env:MISTRAL_MODEL }
+  return $Default
+}
+
+function Get-MistralSynthesisMaxTokens {
+  <#
+    The max_tokens cap for the Mistral synthesis call. Defaults to 1200 and is
+    overridden by the MISTRAL_SYNTHESIS_MAX_TOKENS env var (must be a positive
+    integer; otherwise the default is used). Keeping Mistral's output small helps
+    stay under its rate limit.
+  #>
+  param([int]$Default = 1200)
+  if (-not [string]::IsNullOrWhiteSpace($env:MISTRAL_SYNTHESIS_MAX_TOKENS)) {
+    $parsed = 0
+    if ([int]::TryParse($env:MISTRAL_SYNTHESIS_MAX_TOKENS, [ref]$parsed) -and $parsed -ge 1) {
+      return $parsed
+    }
+  }
+  return $Default
+}
+
+function Get-MistralAdversarialPrompt {
+  <#
+    Build the COMPACT adversarial-review prompt for Mistral. Mistral deliberately
+    does NOT receive the full raw daily payload (it is large and 429s on a low
+    rate limit). Instead it receives its base lens prompt plus the CONDENSED
+    portfolio-truth summary, framed as an adversarial reviewer that stress-tests
+    today's thesis. Pure/string-only: no network, no secrets.
+  #>
+  param(
+    [string]$BasePrompt,
+    [string]$TruthContext
+  )
+  $truth = if ([string]::IsNullOrWhiteSpace($TruthContext)) { "PORTFOLIO_TRUTH_SUMMARY_UNAVAILABLE" } else { $TruthContext }
+  return @"
+$BasePrompt
+
+============================================================
+COMPACT ADVERSARIAL-REVIEW MODE (rate-limit-safe)
+============================================================
+You are running as a COMPACT ADVERSARIAL REVIEWER, not a full analyst. To stay
+under your provider rate limit you have deliberately been given a CONDENSED
+context (the portfolio-truth summary below) and NOT the full raw daily payload.
+
+Your job: stress-test today's emerging thesis. Be terse and high-signal:
+- Name the strongest reasons today's candidates could be WRONG.
+- Surface the biggest macro / policy / reconciliation / data-quality risks.
+- Flag anything the other models are likely to over-trust.
+Advisory-only. No execution. Do not request the omitted full payload.
+
+============================================================
+CONDENSED CONTEXT (portfolio-truth summary only; full payload intentionally omitted)
+============================================================
+$truth
+"@
+}
+
+function Get-RetryAfterSeconds {
+  <#
+    Extract the Retry-After header value from a caught provider ErrorRecord's HTTP
+    response, if present. Returns "" when absent. Never throws and never reads or
+    prints API keys (it touches only the response headers, not auth headers).
+  #>
+  param($ErrorRecord)
+  $val = ""
+  try {
+    $resp = $null
+    try { $resp = $ErrorRecord.Exception.Response } catch {}
+    if ($resp) {
+      $h = $null
+      try { $h = $resp.Headers["Retry-After"] } catch {}
+      if ([string]::IsNullOrWhiteSpace([string]$h)) {
+        try { $h = ($resp.Headers.GetValues("Retry-After")) -join "," } catch {}
+      }
+      if (-not [string]::IsNullOrWhiteSpace([string]$h)) { $val = [string]$h }
+    }
+  } catch {}
+  return $val
+}
+
+function Write-MistralRateLimitDiagnostics {
+  <#
+    Emit SECRET-SAFE diagnostics for a Mistral 429. Every free-text field comes
+    from Get-SafeProviderError (already API-key-redacted); the API key and the
+    prompt text are NEVER printed. Logs: model, status code, redacted error body,
+    estimated prompt tokens, max tokens, Retry-After header, and attempt count.
+  #>
+  param(
+    [string]$Model,
+    $SafeError,
+    [int]$EstimatedPromptTokens = 0,
+    [int]$MaxTokens = 0,
+    [string]$RetryAfter = "",
+    [int]$Attempt = 0
+  )
+  $status = if ($SafeError) { [string]$SafeError.Status } else { "" }
+  $bodyRedacted = if ($SafeError) { [string]$SafeError.RawBodyRedacted } else { "" }
+  if ($bodyRedacted.Length -gt 300) { $bodyRedacted = $bodyRedacted.Substring(0, 300) + "...(truncated)" }
+  Write-Host "  Mistral 429 diagnostics (secret-safe):"
+  Write-Host ("    model               : {0}" -f $Model)
+  Write-Host ("    status_code         : {0}" -f $(if ($status) { $status } else { "(unknown)" }))
+  Write-Host ("    est_prompt_tokens   : {0}" -f $EstimatedPromptTokens)
+  Write-Host ("    max_tokens          : {0}" -f $MaxTokens)
+  Write-Host ("    retry_after_header  : {0}" -f $(if ($RetryAfter) { $RetryAfter } else { "(none)" }))
+  Write-Host ("    attempt             : {0}" -f $Attempt)
+  Write-Host ("    error_body_redacted : {0}" -f $(if ($bodyRedacted) { $bodyRedacted } else { "(empty)" }))
 }
 
 function Get-SafeProviderError {
