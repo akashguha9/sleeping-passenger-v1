@@ -335,15 +335,16 @@ def test_gemini_resolver_normalizes_pro_to_preview() -> None:
 
 
 @needs_powershell
-def test_mistral_retry_schedule_is_15_45_90() -> None:
-    """TASK 4/7.3 — the 429 retry backoff schedule exists (15s, 45s, 90s)."""
+def test_mistral_retry_schedule_is_20_45() -> None:
+    """TASK 4/7.3 — the 429 retry backoff schedule is 20s then 45s: on a 429 wait
+    20s and retry once; on another 429 wait 45s and retry once."""
     body = (
         ". .\\scripts\\provider_lib.ps1; "
         "Write-Output ('DELAYS::' + ((Get-MistralRetryDelaysSeconds) -join ','))"
     )
     res = _run_ps(body)
-    assert "DELAYS::15,45,90" in res.stdout, res.stdout
-    # and the live caller wires the retry message + re-throw on exhaustion
+    assert "DELAYS::20,45" in res.stdout, res.stdout
+    # and the live caller wires the retry message
     main = MAIN_PS1.read_text(encoding="utf-8", errors="ignore")
     assert "Mistral rate limited; retrying in {0} seconds..." in main
 
@@ -569,15 +570,145 @@ def _invoke_safe_provider_src() -> str:
     return main_src[start:end]
 
 
-def test_mistral_exhaustion_uses_self_describing_record_not_bare_rethrow() -> None:
-    """TASK 2/3 — the live caller no longer bare re-throws at rate-limit
-    exhaustion; it builds a deterministic, secret-safe ErrorRecord."""
+def test_mistral_exhaustion_returns_structured_degraded_result() -> None:
+    """TASK 2/3 — the live caller no longer bare re-throws (nor throws an
+    ErrorRecord) at rate-limit exhaustion; it returns a structured degraded result
+    so Mistral is cleanly excluded from the final vote without crashing the run."""
     text = MAIN_PS1.read_text(encoding="utf-8", errors="ignore")
-    assert 'throw (New-RateLimitedErrorRecord -SafeError $safe -Provider "Mistral")' in text
+    assert "return (New-MistralDegradedResult)" in text
+    # the old bare/ErrorRecord re-throw at exhaustion is gone from the live caller
+    assert 'throw (New-RateLimitedErrorRecord -SafeError $safe -Provider "Mistral")' not in text
     lib = PROVIDER_LIB_PS1.read_text(encoding="utf-8", errors="ignore")
+    assert "function New-MistralDegradedResult" in lib
+    # the supporting helpers remain available
     assert "function New-RateLimitedErrorRecord" in lib
     assert "function Format-ProviderReason" in lib
     assert "function Get-ConciseProviderReason" in lib
+
+
+@needs_powershell
+def test_mistral_degraded_result_has_expected_contract_fields() -> None:
+    """New-MistralDegradedResult returns provider=mistral / status=RATE_LIMITED /
+    usable=$false / the exact advisory_text, and never embeds a secret."""
+    body = (
+        ". .\\scripts\\provider_lib.ps1; "
+        "$d = New-MistralDegradedResult; "
+        "Write-Output ('PROVIDER::' + $d.provider); "
+        "Write-Output ('STATUS::' + $d.status); "
+        "Write-Output ('USABLE::' + $d.usable); "
+        "Write-Output ('ADVISORY::' + $d.advisory_text)"
+    )
+    res = _run_ps(body)
+    assert "PROVIDER::mistral" in res.stdout, res.stdout
+    assert "STATUS::RATE_LIMITED" in res.stdout, res.stdout
+    assert "USABLE::False" in res.stdout, res.stdout
+    assert (
+        "ADVISORY::Mistral unavailable due to rate limit; excluded from final vote."
+        in res.stdout
+    ), res.stdout
+
+
+@needs_powershell
+def test_mistral_synthesis_model_default_and_env_override() -> None:
+    """Get-MistralSynthesisModel defaults to the rate-limit-safe mistral-small-2506
+    and honours the MISTRAL_MODEL env override."""
+    body = (
+        ". .\\scripts\\provider_lib.ps1; "
+        "$env:MISTRAL_MODEL = $null; "
+        "Write-Output ('DEFAULT::' + (Get-MistralSynthesisModel)); "
+        "$env:MISTRAL_MODEL = 'mistral-large-3'; "
+        "Write-Output ('OVERRIDE::' + (Get-MistralSynthesisModel)); "
+        "$env:MISTRAL_MODEL = $null"
+    )
+    res = _run_ps(body)
+    assert "DEFAULT::mistral-small-2506" in res.stdout, res.stdout
+    assert "OVERRIDE::mistral-large-3" in res.stdout, res.stdout
+
+
+@needs_powershell
+def test_mistral_synthesis_max_tokens_default_and_env_override() -> None:
+    """Get-MistralSynthesisMaxTokens defaults to 1200 and honours a valid
+    MISTRAL_SYNTHESIS_MAX_TOKENS override (ignoring garbage)."""
+    body = (
+        ". .\\scripts\\provider_lib.ps1; "
+        "$env:MISTRAL_SYNTHESIS_MAX_TOKENS = $null; "
+        "Write-Output ('DEFAULT::' + (Get-MistralSynthesisMaxTokens)); "
+        "$env:MISTRAL_SYNTHESIS_MAX_TOKENS = '600'; "
+        "Write-Output ('OVERRIDE::' + (Get-MistralSynthesisMaxTokens)); "
+        "$env:MISTRAL_SYNTHESIS_MAX_TOKENS = 'not-a-number'; "
+        "Write-Output ('GARBAGE::' + (Get-MistralSynthesisMaxTokens)); "
+        "$env:MISTRAL_SYNTHESIS_MAX_TOKENS = $null"
+    )
+    res = _run_ps(body)
+    assert "DEFAULT::1200" in res.stdout, res.stdout
+    assert "OVERRIDE::600" in res.stdout, res.stdout
+    assert "GARBAGE::1200" in res.stdout, res.stdout
+
+
+@needs_powershell
+def test_mistral_adversarial_prompt_is_compact_not_full_payload() -> None:
+    """Get-MistralAdversarialPrompt yields the compact adversarial-review prompt
+    (base lens + condensed truth summary), NOT the full raw daily payload."""
+    body = (
+        ". .\\scripts\\provider_lib.ps1; "
+        "$p = Get-MistralAdversarialPrompt -BasePrompt 'BASE_LENS_TEXT' "
+        "-TruthContext 'TRUTH_SUMMARY_TEXT'; "
+        "Write-Output ('LEN::' + $p.Length); "
+        "if ($p -match 'COMPACT ADVERSARIAL-REVIEW MODE') { Write-Output 'HAS_MODE::1' }; "
+        "if ($p -match 'full payload intentionally omitted') { Write-Output 'OMITS::1' }; "
+        "if ($p -match 'BASE_LENS_TEXT') { Write-Output 'HAS_BASE::1' }; "
+        "if ($p -match 'TRUTH_SUMMARY_TEXT') { Write-Output 'HAS_TRUTH::1' }"
+    )
+    res = _run_ps(body)
+    assert "HAS_MODE::1" in res.stdout, res.stdout
+    assert "OMITS::1" in res.stdout, res.stdout
+    assert "HAS_BASE::1" in res.stdout, res.stdout
+    assert "HAS_TRUTH::1" in res.stdout, res.stdout
+    # the runner wires the compact prompt + max-tokens cap for Mistral
+    main = MAIN_PS1.read_text(encoding="utf-8", errors="ignore")
+    assert "Get-MistralAdversarialPrompt -BasePrompt $mistralPrompt" in main
+    assert "-MaxTokens $MistralSynthesisMaxTokens" in main
+
+
+@needs_powershell
+def test_safe_provider_records_degraded_result_unavailable_no_secret() -> None:
+    """Invoke-SafeProvider records a non-usable structured degraded result as
+    UNAVAILABLE (status RATE_LIMITED, rate_limited reason) without crashing and
+    without treating advisory_text as a real analyst output."""
+    sandbox = REPO_ROOT / "data" / "_mistral_degraded_selftest_tmp"
+    if sandbox.exists():
+        shutil.rmtree(sandbox)
+    sandbox.mkdir(parents=True)
+    cache_dir = sandbox / "cache"
+    cache_dir.mkdir()
+    func_file = sandbox / "_runner.ps1"
+    func_file.write_text(_invoke_safe_provider_src(), encoding="utf-8")
+    try:
+        cache_posix = str(cache_dir).replace("\\", "\\\\")
+        runner_posix = str(func_file).replace("\\", "\\\\")
+        body = (
+            ". .\\scripts\\secret_scan_lib.ps1; "
+            ". .\\scripts\\provider_lib.ps1; "
+            f". '{runner_posix}'; "
+            f"$r = Invoke-SafeProvider -Name 'Mistral' -Key 'mistral' -Model 'm' -CacheDir '{cache_posix}' "
+            "-AllowFailures $true -ReuseOutputs $false -ForceRerun $false -Call { New-MistralDegradedResult }; "
+            "Write-Output ('AVAILABLE::' + $r.Available); "
+            "Write-Output ('STATUS::' + $r.Status); "
+            "Write-Output ('TYPE::' + $r.Type); "
+            "Write-Output ('REASON::' + $r.Reason); "
+            "Write-Output 'AFTER_NO_EXIT'"
+        )
+        res = _run_ps(body)
+        assert "AVAILABLE::False" in res.stdout, res.stdout
+        assert "STATUS::RATE_LIMITED" in res.stdout, res.stdout
+        assert "TYPE::rate_limited" in res.stdout, res.stdout
+        assert "excluded from final vote" in res.stdout, res.stdout
+        assert "AFTER_NO_EXIT" in res.stdout, res.stdout
+        # no cache file written for a degraded (non-usable) result
+        assert not (cache_dir / "mistral.txt").exists()
+        assert "sk-" not in res.stdout
+    finally:
+        shutil.rmtree(sandbox, ignore_errors=True)
 
 
 @needs_powershell
