@@ -1,0 +1,60 @@
+name: dep-audit
+
+# S10 fix: dependency vulnerability scanning in CI.  Fails on any
+# High/Critical vulnerability for either the Python or Node surface.
+# Runs on every push, every PR, and weekly to catch newly-disclosed
+# advisories against pinned versions.
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  schedule:
+    - cron: "37 6 * * 1" # Monday 06:37 UTC
+
+permissions:
+  contents: read
+
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install pip-audit
+        run: pip install --no-cache-dir pip-audit
+      - name: Audit production dependencies
+        # --strict fails the run on any vulnerability that has a fix
+        # available.  Vulns with no fix are surfaced but don't break CI.
+        run: pip-audit -r requirements.txt --strict
+
+  node:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci --omit=dev
+      - name: npm audit (production)
+        # --audit-level=high fails on High/Critical only; Moderate is
+        # surfaced in the log without breaking the build.
+        run: npm audit --omit=dev --audit-level=high
+
+  secrets:
+    # D3 fix: scan the repo for committed secrets on every push.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

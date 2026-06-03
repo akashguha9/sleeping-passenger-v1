@@ -594,6 +594,41 @@ def insert_reflection(
         conn.close()
 
 
+def soft_delete_reflection(
+    reflection_id: str, db_path: Path = DB_PATH
+) -> dict[str, Any]:
+    """D1 fix: GDPR-style erasure of a single reflection row.
+
+    Hard-deletes the row.  Reflections are operator-authored PII; the
+    audit explicitly flagged the absence of any deletion endpoint as a
+    privacy gap.  Hard delete (vs. tombstone) matches the operator's
+    intent — they want it GONE.  ai_execution_count never changes;
+    execution_gate is not consulted; this never reaches a broker.
+
+    Returns a small audit record: ``{"deleted": True/False, "reflection_id": ...}``.
+    """
+    conn = _get_conn(db_path)
+    try:
+        before = conn.execute(
+            "SELECT 1 FROM user_reflections WHERE reflection_id=?",
+            (reflection_id,),
+        ).fetchone()
+        if not before:
+            return {
+                "deleted": False,
+                "reflection_id": reflection_id,
+                "reason": "not_found",
+            }
+        conn.execute(
+            "DELETE FROM user_reflections WHERE reflection_id=?",
+            (reflection_id,),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return {"deleted": True, "reflection_id": reflection_id}
+
+
 def get_reflections_for_event(
     event_id: str, db_path: Path = DB_PATH
 ) -> list[dict[str, Any]]:

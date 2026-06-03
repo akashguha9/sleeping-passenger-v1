@@ -45,7 +45,7 @@ try:
     from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response
     from fastapi.middleware.cors import CORSMiddleware
     from fastapi.responses import JSONResponse
-    from pydantic import BaseModel
+    from pydantic import BaseModel, Field
     _FASTAPI_AVAILABLE = True
     _FASTAPI_IMPORT_ERROR: str | None = None
 except ImportError as _exc:  # pragma: no cover — depends on env
@@ -66,6 +66,9 @@ except ImportError as _exc:  # pragma: no cover — depends on env
         def __init__(self, **kwargs: object) -> None:
             for key, value in kwargs.items():
                 setattr(self, key, value)
+
+    def Field(default=None, **_kwargs):  # type: ignore[no-redef]
+        return default
 
 try:
     from scripts.signal_inbox_api import (
@@ -132,14 +135,23 @@ try:
         get_api_host,
         get_api_port,
         get_api_token,
+        bootstrap_symbol_denylist,
+        bootstrap_symbol_quota,
+        clamp_limit,
+        extract_client_ip,
         get_environment_tag,
         get_max_request_bytes,
+        get_trusted_proxies,
+        is_loopback_bind,
+        preflight_auth_or_die,
+        rate_limit_expensive_max_requests,
         rate_limit_enabled,
         rate_limit_max_requests,
         rate_limit_mutation_max_requests,
         rate_limit_window_seconds,
         safe_db_display_path,
         security_headers,
+        unauth_override_active,
     )
 except ModuleNotFoundError:  # pragma: no cover
     from runtime_config import (  # type: ignore[no-redef]
@@ -149,14 +161,23 @@ except ModuleNotFoundError:  # pragma: no cover
         get_api_host,
         get_api_port,
         get_api_token,
+        bootstrap_symbol_denylist,
+        bootstrap_symbol_quota,
+        clamp_limit,
+        extract_client_ip,
         get_environment_tag,
         get_max_request_bytes,
+        get_trusted_proxies,
+        is_loopback_bind,
+        preflight_auth_or_die,
+        rate_limit_expensive_max_requests,
         rate_limit_enabled,
         rate_limit_max_requests,
         rate_limit_mutation_max_requests,
         rate_limit_window_seconds,
         safe_db_display_path,
         security_headers,
+        unauth_override_active,
     )
 
 # Read-only diagnostics service — the single backend source for the cockpit.
@@ -200,7 +221,7 @@ def _get_live_signals(source_name: str | None = None, limit: int = 100) -> dict:
         return {
             "live_signal_events": [],
             "count": 0,
-            "error": str(exc),
+            "error": _safe_exc_summary(exc),
             "advisory_status": _ADVISORY_STATUS,
             "ai_execution_count": _AI_EXECUTION_COUNT,
         }
@@ -270,13 +291,25 @@ def _get_db_status() -> dict:
     except Exception as exc:
         return {
             "db_status": "unavailable",
-            "error": str(exc),
+            "error": _safe_exc_summary(exc),
             "advisory_status": _ADVISORY_STATUS,
             "ai_execution_count": _AI_EXECUTION_COUNT,
         }
 
 
+# R2 fix: count silent write failures so /health/full can flag a
+# degraded server.  Module-global; reset by tests via _reset_health_counters.
+_WRITE_FAILURE_COUNT = 0
+
+
+def _reset_health_counters() -> None:
+    """Test helper: zero out the R2 degraded-state counter."""
+    global _WRITE_FAILURE_COUNT
+    _WRITE_FAILURE_COUNT = 0
+
+
 def _log_source_health(stats: dict, bull_state: str) -> None:
+    global _WRITE_FAILURE_COUNT
     try:
         try:
             from scripts.persistence import insert_source_health
@@ -290,13 +323,31 @@ def _log_source_health(stats: dict, bull_state: str) -> None:
             blocked_count=int(stats.get("blocked_signal_count", 0)),
             fabric_bull_state=str(bull_state),
         )
-    except Exception:
-        pass
+    except Exception as exc:
+        # R2: bump the counter and surface a clear ERROR log so the
+        # operator can spot a degraded write path on /health/full.
+        _WRITE_FAILURE_COUNT += 1
+        _logger.error(
+            "db write failure in _log_source_health: %s (cumulative=%d)",
+            type(exc).__name__,
+            _WRITE_FAILURE_COUNT,
+        )
 
 _CSV_MEDIA_TYPE = "text/csv; charset=utf-8"
 _ADVISORY_STATUS = "ADVISORY_ONLY"
 _EXECUTION_MODE = "HUMAN_ONLY"
 _AI_EXECUTION_COUNT = 0
+
+
+def _safe_exc_summary(exc: BaseException) -> str:
+    """S6 fix: return ``ExceptionType`` only.
+
+    Eliminates leakage of absolute paths, DB filenames, and third-party
+    library internals through per-route ``"error": _safe_exc_summary(exc)`` shortcuts.
+    Full detail is still written to the server log via _logger.exception
+    from the calling site.
+    """
+    return type(exc).__name__
 _VERSION = "1.0.0"
 
 
@@ -358,16 +409,35 @@ if _FASTAPI_AVAILABLE:
 
     _RATE_LIMITERS: dict[str, RateLimiter] = {}
 
+    # I3 fix: which paths are "expensive" and get the stricter bucket.
+    # Match prefixes so any added CSV/diagnostic route inherits the policy.
+    _EXPENSIVE_PREFIXES = (
+        "/exports/",
+        "/diagnostics/",
+        "/learning-completeness",
+        "/self-test/",
+    )
+
+    def _scope_for(path: str, is_mutating: bool) -> str:
+        if is_mutating:
+            return "write"
+        if any(path.startswith(p) for p in _EXPENSIVE_PREFIXES):
+            return "expensive"
+        return "read"
+
     def _get_rate_limiter(scope: str) -> "RateLimiter":
         """Return (and cache) a limiter for the given scope.
 
-        Two scopes are used: ``"read"`` (all routes) and ``"write"``
-        (mutating routes).  Caching matters because the bucket state lives
-        inside the limiter -- we'd reset every counter on every request if
-        we constructed a fresh limiter each call.
+        Three scopes:
+          * ``read`` — standard GET endpoints
+          * ``write`` — mutating POST/PUT/PATCH/DELETE endpoints
+          * ``expensive`` — heavy read endpoints (I3): exports,
+            diagnostics, learning-completeness, self-test
         """
         if scope == "write":
             limit = rate_limit_mutation_max_requests()
+        elif scope == "expensive":
+            limit = rate_limit_expensive_max_requests()
         else:
             limit = rate_limit_max_requests()
         window = rate_limit_window_seconds()
@@ -401,7 +471,12 @@ if _FASTAPI_AVAILABLE:
         """
         method = request.method.upper()
         is_mutating = method in _MUTATING_METHODS
-        client_host = (request.client.host if request.client else "unknown") or "unknown"
+        # S3 fix: resolve real client IP via the trusted-proxy allowlist so
+        # the limiter cannot be bypassed (or starved) by everyone-looks-the-
+        # same when uvicorn sits behind nginx/traefik.
+        direct_host = (request.client.host if request.client else "") or ""
+        forwarded_for = request.headers.get("x-forwarded-for") or ""
+        client_host = extract_client_ip(direct_host, forwarded_for) or "unknown"
 
         # 1. Request size guard.  We only inspect Content-Length here --
         #    streaming bodies without that header are allowed through; the
@@ -443,7 +518,7 @@ if _FASTAPI_AVAILABLE:
         #    the broader read bucket.  Keyed on client_host so a misbehaving
         #    test client can't starve a real user.
         if rate_limit_enabled():
-            scope = "write" if is_mutating else "read"
+            scope = _scope_for(request.url.path, is_mutating)
             limiter = _get_rate_limiter(scope)
             decision = limiter.check(f"{client_host}:{scope}")
             if not decision.allowed:
@@ -477,11 +552,21 @@ if _FASTAPI_AVAILABLE:
 
     @app.on_event("startup")
     def _startup_safety_log() -> None:  # pragma: no cover — side effect only
+        # S1: refuse to start on non-loopback bind without a token unless
+        # MVP_ALLOW_UNAUTH=1 is set explicitly.  Raises StartupSecurityError.
+        preflight_auth_or_die()
         if not api_token_required():
-            _logger.warning(
-                "MVP_API_TOKEN not set; mutating routes are unprotected. "
-                "Local-only use recommended."
-            )
+            if is_loopback_bind():
+                _logger.warning(
+                    "MVP_API_TOKEN not set; mutating routes are unprotected. "
+                    "Loopback bind only (API_HOST=%s).",
+                    get_api_host(),
+                )
+            else:
+                _logger.warning(
+                    "MVP_API_TOKEN not set AND MVP_ALLOW_UNAUTH=1 explicitly "
+                    "overrides S1 preflight. NON-LOOPBACK bind is exposed."
+                )
         else:
             _logger.info("MVP_API_TOKEN set; mutating routes require Bearer auth.")
         _logger.info(
@@ -550,29 +635,73 @@ if _FASTAPI_AVAILABLE:
         return JSONResponse(status_code=500, content=payload)
 
 
-    def require_api_token(authorization: str | None = Header(default=None)) -> None:
-        """FastAPI dependency that enforces a Bearer token when ``MVP_API_TOKEN`` is set.
+    def _check_bearer_token(authorization: str | None) -> None:
+        """Constant-time bearer-token verification.
 
-        Behaviour:
-          * If ``MVP_API_TOKEN`` is unset or empty: no-op (local-dev permissive).
-          * If set: request must include ``Authorization: Bearer <token>`` and
-            the token must match exactly.  Otherwise 401.
-
-        GET routes do not depend on this; only mutating routes do.
+        S2 fix: use ``hmac.compare_digest`` instead of ``!=`` so the
+        comparison does not leak length/equality timing.
         """
+        import hmac
+
         expected = get_api_token()
         if not expected:
             return None
         if not authorization or not authorization.lower().startswith("bearer "):
             raise HTTPException(status_code=401, detail="missing bearer token")
         provided = authorization.split(" ", 1)[1].strip()
-        if provided != expected:
+        if not hmac.compare_digest(provided.encode("utf-8"), expected.encode("utf-8")):
             raise HTTPException(status_code=401, detail="invalid bearer token")
+        return None
+
+    def require_api_token(authorization: str | None = Header(default=None)) -> None:
+        """Enforce Bearer token on mutating routes when ``MVP_API_TOKEN`` is set."""
+        return _check_bearer_token(authorization)
+
+    def require_api_token_for_reads(
+        request: "Request",
+        authorization: str | None = Header(default=None),
+    ) -> None:
+        """S5 fix: gate read endpoints that return operator-authored journal data.
+
+        When ``MVP_API_TOKEN`` is unset and the operator has not explicitly
+        bypassed S1 via ``MVP_ALLOW_UNAUTH=1``, the server refuses to start
+        on a non-loopback bind.  On a loopback bind without a token, reads
+        stay open (preserves single-operator localhost UX).
+
+        When a token IS set, every read endpoint protected by this
+        dependency requires ``Authorization: Bearer <token>``.
+        """
+        expected = get_api_token()
+        if expected:
+            return _check_bearer_token(authorization)
+        # No token configured: only allowed for loopback binds (preflight
+        # already refused non-loopback boot without override).  We still
+        # log to /health that the override is active.
+        if not is_loopback_bind():
+            if not unauth_override_active():
+                # Defense in depth — preflight should have caught this at boot.
+                raise HTTPException(
+                    status_code=503,
+                    detail={
+                        "error": "server_misconfigured",
+                        "reason": "non_loopback_bind_without_token",
+                        "advisory_status": _ADVISORY_STATUS,
+                        "execution_gate": "LOCKED",
+                        "broker_api_called": False,
+                        "ai_execution_count": _AI_EXECUTION_COUNT,
+                    },
+                )
         return None
 else:
     app = _NoopApp()  # type: ignore[assignment]
 
     def require_api_token(authorization: str | None = None) -> None:  # type: ignore[no-redef]
+        """No-op fallback when FastAPI is unavailable (test-only path)."""
+        return None
+
+    def require_api_token_for_reads(  # type: ignore[no-redef]
+        request: object = None, authorization: str | None = None
+    ) -> None:
         """No-op fallback when FastAPI is unavailable (test-only path)."""
         return None
 
@@ -583,9 +712,10 @@ else:
 
 
 class ReflectionBody(BaseModel):
-    reflection_text: str
-    author: str = "human"
-    conviction_level: str = "MODERATE"
+    # L2: bound free-text fields to prevent unbounded growth + CSV bloat.
+    reflection_text: str = Field(..., min_length=1, max_length=4000)
+    author: str = Field("human", max_length=120)
+    conviction_level: str = Field("MODERATE", max_length=40)
 
 
 class AISummaryBody(BaseModel):
@@ -597,16 +727,61 @@ class DecisionBody(BaseModel):
     status: str
 
 
+# L1 fix: money validators wired into the pydantic models below.  Imported
+# lazily because pydantic-v1 fallback in the FastAPI-absent path can't see
+# field_validator.  The validators raise MoneyError → pydantic surfaces it
+# as a 422 with a clean field path.
+from decimal import Decimal as _Decimal  # noqa: E402
+from typing import Any  # noqa: E402
+
+try:
+    from scripts.money import (
+        MoneyError as _MoneyError,
+        parse_money as _parse_money,
+        parse_money_opt as _parse_money_opt,
+        money_to_legacy_float as _money_to_float,
+    )
+except ModuleNotFoundError:  # pragma: no cover
+    from money import (  # type: ignore[no-redef]
+        MoneyError as _MoneyError,
+        parse_money as _parse_money,
+        parse_money_opt as _parse_money_opt,
+        money_to_legacy_float as _money_to_float,
+    )
+
+if _FASTAPI_AVAILABLE:
+    from pydantic import field_validator as _field_validator
+else:  # pragma: no cover
+
+    def _field_validator(*_args, **_kwargs):  # type: ignore[no-redef]
+        def _wrap(fn):
+            return fn
+
+        return _wrap
+
+
 class ManualTradeBody(BaseModel):
+    """L1 fix: money fields accept Decimal | int | float | str on the wire.
+
+    The validator (see ``_money_validator`` below) coerces every incoming
+    money value to a quantised Decimal at the boundary.  Internal callers
+    that still take ``float`` get the value via ``money_to_legacy_float``
+    — every such call is a marked TODO for the schema migration that
+    will swap SQLite ``REAL`` columns for TEXT-stored Decimals.
+    """
     event_id: str
     ticker: str
     side: str
-    quantity: float
-    price: float
-    thesis: str
-    notes: str = ""
-    logged_by: str = "human"
-    leverage: float = 1.0
+    quantity: Any  # validated to Decimal below
+    price: Any  # validated to Decimal below
+    thesis: str = Field(..., min_length=1, max_length=4000)
+    notes: str = Field("", max_length=4000)
+    # S9 fix: ``logged_by`` is now SERVER-STAMPED, not client-controlled.
+    # We accept the field on the wire for backwards compatibility but the
+    # POST handler overwrites it with a stable server-side identity before
+    # persistence.  Forging operator attribution is no longer possible.
+    logged_by: str = Field("human", max_length=120)
+    leverage: Any = 1.0  # validated to Decimal below
     # Operator-discipline / journal-quality fields. All optional; backwards
     # compatible — frontends that omit them keep working.
     invalidation_level: str = ""
@@ -655,12 +830,20 @@ class ManualTradeBody(BaseModel):
     # grants execution permission and never reaches a broker.
     ai_model_used: str = ""
 
+    @_field_validator("quantity", "price", "leverage", mode="before")
+    @classmethod
+    def _coerce_required_money(cls, v: Any) -> _Decimal:
+        try:
+            return _parse_money(v)
+        except _MoneyError as exc:
+            raise ValueError(str(exc)) from exc
+
 
 class ReconcileBody(BaseModel):
-    actual_fill_price: float
-    actual_quantity: float
+    actual_fill_price: Any  # L1: Decimal
+    actual_quantity: Any  # L1: Decimal
     outcome_notes: str = ""
-    pnl_estimate: float = 0.0
+    pnl_estimate: Any = "0"  # L1: Decimal
     outcome_status: str = "UNKNOWN"
     # Skill-vs-luck / skill-vs-process attribution fields. All optional.
     outcome_quality: str = ""
@@ -676,17 +859,48 @@ class ReconcileBody(BaseModel):
     # canonical enum values and the structured-outcome serializer.
     post_trade_outcome: str = ""
     reconciliation_status: str = ""
-    runner_quantity: float | None = None
+    runner_quantity: Any = None  # L1: Decimal
     runner_status: str = ""
-    partial_take_profit_price: float | None = None
-    partial_take_profit_quantity: float | None = None
+    partial_take_profit_price: Any = None  # L1: Decimal
+    partial_take_profit_quantity: Any = None  # L1: Decimal
     take_profit_plan: str = ""
-    stop_loss_price: float | None = None
+    stop_loss_price: Any = None  # L1: Decimal
     stop_loss_hit: bool = False
     exit_reason: str = ""
     invalidation_level: str = ""
     lesson_takeaway: str = ""
     notes: str = ""
+
+    @_field_validator("actual_fill_price", "actual_quantity", mode="before")
+    @classmethod
+    def _coerce_required_money(cls, v: Any) -> _Decimal:
+        try:
+            return _parse_money(v)
+        except _MoneyError as exc:
+            raise ValueError(str(exc)) from exc
+
+    @_field_validator("pnl_estimate", mode="before")
+    @classmethod
+    def _coerce_pnl(cls, v: Any) -> _Decimal:
+        # PnL can be negative; coerce, default 0.
+        try:
+            return _parse_money(v if v is not None else "0")
+        except _MoneyError as exc:
+            raise ValueError(str(exc)) from exc
+
+    @_field_validator(
+        "runner_quantity",
+        "partial_take_profit_price",
+        "partial_take_profit_quantity",
+        "stop_loss_price",
+        mode="before",
+    )
+    @classmethod
+    def _coerce_optional_money(cls, v: Any) -> _Decimal | None:
+        try:
+            return _parse_money_opt(v)
+        except _MoneyError as exc:
+            raise ValueError(str(exc)) from exc
 
 
 class CancelManualTradeLogBody(BaseModel):
@@ -704,19 +918,20 @@ class ChartBootstrapBody(BaseModel):
 
 
 class MoltbookEntryBody(BaseModel):
-    event_id: str
-    ticker: str
-    original_signal_thesis: str
-    ai_interpretation: str
-    user_reflection: str
-    final_human_decision: str
-    manual_trade_log_id: str = ""
-    outcome: str = ""
-    mistake_type: str
-    lesson_learned: str
-    bias_detected: str = ""
-    recalibration_note: str = ""
-    future_rule_update: str = ""
+    # L2: every free-text field is length-capped.
+    event_id: str = Field(..., max_length=200)
+    ticker: str = Field(..., max_length=40)
+    original_signal_thesis: str = Field(..., min_length=1, max_length=4000)
+    ai_interpretation: str = Field(..., max_length=4000)
+    user_reflection: str = Field(..., max_length=4000)
+    final_human_decision: str = Field(..., max_length=4000)
+    manual_trade_log_id: str = Field("", max_length=200)
+    outcome: str = Field("", max_length=4000)
+    mistake_type: str = Field(..., min_length=1, max_length=200)
+    lesson_learned: str = Field(..., max_length=4000)
+    bias_detected: str = Field("", max_length=200)
+    recalibration_note: str = Field("", max_length=4000)
+    future_rule_update: str = Field("", max_length=4000)
 
 
 class ReconciliationAutoUpdateBody(BaseModel):
@@ -749,6 +964,34 @@ class ReconciliationAutoUpdateBody(BaseModel):
 
 @app.get("/health")
 def health() -> dict:
+    """D2 fix: minimal unauthenticated liveness probe.
+
+    Discloses ONLY status + version + advisory invariants.  No environment
+    label, no DB path, no security-posture flags.  Operators that need the
+    posture details should hit /health/full with the bearer token.
+    """
+    return {
+        "status": "ok",
+        "advisory_status": _ADVISORY_STATUS,
+        "execution_mode": _EXECUTION_MODE,
+        "execution_gate": "LOCKED",
+        "ai_execution_count": _AI_EXECUTION_COUNT,
+        "broker_api_called": False,
+        "broker_order_id": "NONE",
+        "human_review_required": True,
+        "version": _VERSION,
+    }
+
+
+@app.get("/health/full")
+def health_full(_auth: None = Depends(require_api_token_for_reads)) -> dict:
+    """D2 fix: detailed posture, token-gated.
+
+    Carries every field the old /health used to leak: environment tag, DB
+    path, allowed-origin count, rate-limit + body-size config, and the
+    new ``unauth_override_active`` flag so the operator can spot an
+    S1-bypassed deployment from a single curl.
+    """
     from datetime import datetime, timezone
 
     try:
@@ -777,10 +1020,16 @@ def health() -> dict:
         "db_available": db_available(),
         "db_path": safe_db_display_path(),
         "api_token_required": api_token_required(),
+        "loopback_bind": is_loopback_bind(),
+        "unauth_override_active": unauth_override_active(),
         "allowed_origins_count": len(_allowed),
         "rate_limit_enabled": _rate_limit_active,
         "max_request_bytes": _max_bytes,
         "security_headers_enabled": bool(security_headers()),
+        # R2: write-failure counter — non-zero means the server has been
+        # silently dropping writes; operator should check the logs.
+        "db_write_failures_total": _WRITE_FAILURE_COUNT,
+        "degraded": _WRITE_FAILURE_COUNT > 0,
         "generated_at": datetime.now(timezone.utc)
         .replace(microsecond=0)
         .isoformat(),
@@ -820,18 +1069,19 @@ def api_version() -> dict:
 
 
 @app.get("/signals")
-def get_signals(limit: int = 100, hours: int = 72) -> dict:
+def get_signals(limit: int = 100, hours: int = 72, _auth: None = Depends(require_api_token_for_reads)) -> dict:
     """Return Signal Inbox candidates derived from fresh signal_events.
 
-    Query params:
-      - limit: max items returned (clamped server-side)
-      - hours: freshness window (defaults to 72)
+    L4: ``limit`` clamped to [1, 500]; ``hours`` clamped to [1, 24*30].
     """
+    limit = clamp_limit(limit, default=100, ceiling=500)
+    hours = clamp_limit(hours, default=72, ceiling=24 * 30)
     return list_inbox_items(limit=limit, hours=hours)
 
 
 @app.get("/signals/diagnostics")
-def get_signals_diagnostics(hours: int = 72) -> dict:
+def get_signals_diagnostics(hours: int = 72, _auth: None = Depends(require_api_token_for_reads)) -> dict:
+    hours = clamp_limit(hours, default=72, ceiling=24 * 30)
     """Freshness + source-count diagnostic for the Signal Inbox bridge.
 
     Advisory-only — does not authorize any execution.
@@ -840,7 +1090,7 @@ def get_signals_diagnostics(hours: int = 72) -> dict:
 
 
 @app.get("/signals/{event_id}")
-def get_signal(event_id: str) -> dict:
+def get_signal(event_id: str, _auth: None = Depends(require_api_token_for_reads)) -> dict:
     return get_signal_detail(event_id)
 
 
@@ -921,18 +1171,55 @@ def get_supported_currencies() -> dict:
 @app.post("/manual-trades")
 def post_manual_trade(
     body: ManualTradeBody,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
     _auth: None = Depends(require_api_token),
 ) -> dict:
+    # L3 fix: replay the cached response when the operator retries with
+    # the same Idempotency-Key.  Single source of truth for "have we
+    # processed this request?" — protects against double-logged trades
+    # from sheet sync, browser reload, network retries.
+    try:
+        from scripts.idempotency import lookup as _idemp_lookup, store as _idemp_store, validate_key as _idemp_key
+    except ModuleNotFoundError:  # pragma: no cover
+        from idempotency import (  # type: ignore[no-redef]
+            lookup as _idemp_lookup,
+            store as _idemp_store,
+            validate_key as _idemp_key,
+        )
+
+    _key = _idemp_key(idempotency_key)
+    if _key:
+        cached = _idemp_lookup("POST /manual-trades", _key)
+        if cached is not None:
+            cached.setdefault("idempotent_replay", True)
+            return cached
+
+    # S9 fix: derive ``logged_by`` from the server's view of the caller,
+    # never trust the client.  Single shared token means we cannot identify
+    # the human operator individually, so we stamp the token-mode (or
+    # loopback-mode) along with the auth method used.  When you migrate
+    # to per-user tokens this is the single line that needs to change.
+    if api_token_required():
+        body.logged_by = "operator@token-auth"
+    elif is_loopback_bind():
+        body.logged_by = "operator@loopback"
+    else:
+        body.logged_by = "operator@unauth-override"
+    # L1 bridge: persistence layer still types money as float.  Convert at
+    # the boundary so the wire-validated Decimal does not become a float
+    # until the very last possible moment, preserving the operator's exact
+    # input through pydantic and through this handler.  Each _money_to_float
+    # call is a TODO marker for the schema migration.
     result = log_manual_trade(
         event_id=body.event_id,
         ticker=body.ticker,
         side=body.side,
-        quantity=body.quantity,
-        price=body.price,
+        quantity=_money_to_float(body.quantity),
+        price=_money_to_float(body.price),
         thesis=body.thesis,
         notes=body.notes,
         logged_by=body.logged_by,
-        leverage=body.leverage,
+        leverage=_money_to_float(body.leverage),
         invalidation_level=body.invalidation_level,
         expected_horizon=body.expected_horizon,
         risk_reason=body.risk_reason,
@@ -966,6 +1253,8 @@ def post_manual_trade(
         and "error" in result
         and result.get("status") != "logged"
     ):
+        # L3: do NOT cache validation-refusal responses — operator may
+        # resubmit a corrected payload under the same key.
         raise HTTPException(
             status_code=400,
             detail={
@@ -979,7 +1268,68 @@ def post_manual_trade(
                 "record_keeping_only": True,
             },
         )
+    # L3: cache the successful response so retries replay identically.
+    if _key and isinstance(result, dict):
+        try:
+            _idemp_store("POST /manual-trades", _key, result)
+        except Exception:  # pragma: no cover — non-critical
+            _logger.warning("idempotency store failed for /manual-trades")
     return result
+
+
+@app.delete("/reflections/{reflection_id}")
+def delete_reflection(
+    reflection_id: str, _auth: None = Depends(require_api_token)
+) -> dict:
+    """D1 fix: GDPR-style erasure of an individual reflection row.
+
+    Hard-deletes the row from ``user_reflections``.  This is record-keeping
+    only — it does NOT touch any broker, never increments
+    ``ai_execution_count``, and never modifies ``execution_gate``.
+    """
+    try:
+        try:
+            from scripts.persistence import soft_delete_reflection
+        except ModuleNotFoundError:
+            from persistence import soft_delete_reflection  # type: ignore
+        result = soft_delete_reflection(reflection_id)
+    except Exception as exc:
+        _logger.exception("delete_reflection failed for %s", reflection_id)
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "message": "delete_reflection_failed",
+                "reason": _safe_exc_summary(exc),
+                "broker_api_called": False,
+                "ai_execution_count": _AI_EXECUTION_COUNT,
+                "execution_gate": "LOCKED",
+                "record_keeping_only": True,
+            },
+        )
+    if not result.get("deleted"):
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "message": "reflection not found",
+                "reason": result.get("reason", "not_found"),
+                "reflection_id": reflection_id,
+                "broker_api_called": False,
+                "ai_execution_count": _AI_EXECUTION_COUNT,
+                "execution_gate": "LOCKED",
+                "record_keeping_only": True,
+            },
+        )
+    return {
+        **result,
+        "advisory_status": _ADVISORY_STATUS,
+        "execution_mode": _EXECUTION_MODE,
+        "execution_gate": "LOCKED",
+        "broker_api_called": False,
+        "broker_order_id": "NONE",
+        "ai_execution_count": _AI_EXECUTION_COUNT,
+        "human_review_required": True,
+        "record_keeping_only": True,
+    }
 
 
 @app.post("/manual-trades/{trade_id}/reconcile")
@@ -988,30 +1338,28 @@ def post_reconcile(
     body: ReconcileBody,
     _auth: None = Depends(require_api_token),
 ) -> dict:
+    # L1 bridge: Decimal → float at the persistence boundary (see comment in
+    # post_manual_trade above).
     return reconcile_trade(
         trade_id,
-        actual_fill_price=body.actual_fill_price,
-        actual_quantity=body.actual_quantity,
+        actual_fill_price=_money_to_float(body.actual_fill_price),
+        actual_quantity=_money_to_float(body.actual_quantity),
         outcome_notes=body.outcome_notes,
-        pnl_estimate=body.pnl_estimate,
+        pnl_estimate=_money_to_float(body.pnl_estimate),
         outcome_status=body.outcome_status,
         outcome_quality=body.outcome_quality,
         process_error=body.process_error,
         process_error_notes=body.process_error_notes,
         mistake_tags=body.mistake_tags,
         lesson=body.lesson,
-        # Sprint H — Reconciliation productisation.  These are forwarded
-        # directly to reconcile_trade which uses reconciliation_extras
-        # to compute realized P/L, set runner_status, and serialise the
-        # structured outcome into outcome_notes for downstream learning.
         post_trade_outcome=body.post_trade_outcome,
         reconciliation_status=body.reconciliation_status,
-        runner_quantity=body.runner_quantity,
+        runner_quantity=_money_to_float(body.runner_quantity),
         runner_status=body.runner_status,
-        partial_take_profit_price=body.partial_take_profit_price,
-        partial_take_profit_quantity=body.partial_take_profit_quantity,
+        partial_take_profit_price=_money_to_float(body.partial_take_profit_price),
+        partial_take_profit_quantity=_money_to_float(body.partial_take_profit_quantity),
         take_profit_plan=body.take_profit_plan,
-        stop_loss_price=body.stop_loss_price,
+        stop_loss_price=_money_to_float(body.stop_loss_price),
         stop_loss_hit=body.stop_loss_hit,
         exit_reason=body.exit_reason,
         invalidation_level=body.invalidation_level,
@@ -1081,7 +1429,7 @@ def post_cancel_manual_trade_log(
 
 
 @app.get("/manual-trades")
-def get_manual_trades(origin: str | None = "manual_trade_log") -> dict:
+def get_manual_trades(origin: str | None = "manual_trade_log", _auth: None = Depends(require_api_token_for_reads)) -> dict:
     """List logged manual trades.
 
     Default scope is ``origin=manual_trade_log`` so the Manual Trade Log
@@ -1112,7 +1460,7 @@ def get_manual_trades(origin: str | None = "manual_trade_log") -> dict:
 
 
 @app.get("/learning-completeness")
-def get_learning_completeness(limit: int | None = 50) -> dict:
+def get_learning_completeness(limit: int | None = 50, _auth: None = Depends(require_api_token_for_reads)) -> dict:
     """Return the learning-completeness report payload.
 
     Read-only.  Safe to call when the DB is missing or empty — returns a
@@ -1248,7 +1596,7 @@ def _cockpit_panel_data(subreports: dict, name: str) -> dict:
 
 
 @app.get("/diagnostics/cockpit")
-def get_diagnostics_cockpit() -> dict:
+def get_diagnostics_cockpit(_auth: None = Depends(require_api_token_for_reads)) -> dict:
     """Aggregate the advisory closed-loop diagnostics for the operator cockpit.
 
     Sourced from ``scripts.diagnostics_service.get_diagnostics_snapshot`` —
@@ -1393,7 +1741,7 @@ def get_diagnostics_cockpit() -> dict:
 
 
 @app.get("/source-health")
-def get_source_health() -> dict:
+def get_source_health(_auth: None = Depends(require_api_token_for_reads)) -> dict:
     result = list_inbox_items(write_runtime=False)
     stats = result.get("fabric_stats", {})
     bull_state = result.get("fabric_bull_state", "UNKNOWN")
@@ -1412,7 +1760,7 @@ def get_source_health() -> dict:
 
 
 @app.get("/source-health/summary")
-def get_source_health_summary() -> dict:
+def get_source_health_summary(_auth: None = Depends(require_api_token_for_reads)) -> dict:
     """Per-source classified health summary.
 
     Each entry exposes a sanitized human_message and a category code
@@ -1498,7 +1846,7 @@ def _build_live_sources_status(
             "manual_refresh_command": _SCHEDULER_HINT_MANUAL,
             "source_coverage_rows": {},
             "asia_disclosure_coverage_rows": [],
-            "error": str(exc),
+            "error": _safe_exc_summary(exc),
             "advisory_status": _ADVISORY_STATUS,
             "execution_gate": "LOCKED",
             "broker_api_called": False,
@@ -2011,7 +2359,7 @@ def _build_live_sources_status(
 
 
 @app.get("/live-sources/status")
-def get_live_sources_status() -> dict:
+def get_live_sources_status(_auth: None = Depends(require_api_token_for_reads)) -> dict:
     """Return per-source freshness state derived from source_run_log
     plus refresh metadata from live_source_refresh_runs.
 
@@ -2038,7 +2386,8 @@ def get_live_sources_status() -> dict:
 
 
 @app.get("/live-signals")
-def get_live_signals(source: str | None = None, limit: int = 100) -> dict:
+def get_live_signals(source: str | None = None, limit: int = 100, _auth: None = Depends(require_api_token_for_reads)) -> dict:
+    limit = clamp_limit(limit, default=100, ceiling=500)
     return _get_live_signals(source_name=source, limit=limit)
 
 
@@ -2052,8 +2401,19 @@ def get_chart_structure(
     symbol: str,
     source_event_id: str | None = None,
     limit: int = 100,
+    _auth: None = Depends(require_api_token_for_reads),
 ) -> dict:
+    limit = clamp_limit(limit, default=100, ceiling=2000)
     return _get_chart_structure(symbol=symbol, source_event_id=source_event_id, limit=limit)
+
+
+_BOOTSTRAP_SYMBOL_CALLS = 0
+
+
+def _reset_bootstrap_quota() -> None:
+    """Test helper: zero out the I2 bootstrap counter."""
+    global _BOOTSTRAP_SYMBOL_CALLS
+    _BOOTSTRAP_SYMBOL_CALLS = 0
 
 
 @app.post("/chart-structure/bootstrap-symbol")
@@ -2064,8 +2424,44 @@ def post_chart_structure_bootstrap(
     """Discover + backfill OHLCV for a missing symbol on demand.
 
     Read-only market-data ingestion. Never places orders, never connects to
-    a broker, never increments ai_execution_count. Returns sanitized status.
+    a broker, never increments ai_execution_count.
+
+    I2 fix: enforce per-process quota + denylist before invoking the
+    discovery/backfill pipeline so this route cannot be used as a free
+    egress + Yahoo rate-limit burn channel.
     """
+    global _BOOTSTRAP_SYMBOL_CALLS
+
+    symbol_upper = str(body.symbol or "").strip().upper()
+    if symbol_upper in bootstrap_symbol_denylist():
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "message": "symbol_denylisted",
+                "reason": "bootstrap_denylist",
+                "symbol": symbol_upper,
+                "broker_api_called": False,
+                "ai_execution_count": _AI_EXECUTION_COUNT,
+                "execution_gate": "LOCKED",
+            },
+        )
+
+    quota = bootstrap_symbol_quota()
+    if quota == 0 or _BOOTSTRAP_SYMBOL_CALLS >= quota:
+        raise HTTPException(
+            status_code=429,
+            detail={
+                "message": "bootstrap_quota_exhausted",
+                "reason": "bootstrap_quota",
+                "calls_so_far": _BOOTSTRAP_SYMBOL_CALLS,
+                "quota": quota,
+                "broker_api_called": False,
+                "ai_execution_count": _AI_EXECUTION_COUNT,
+                "execution_gate": "LOCKED",
+            },
+        )
+    _BOOTSTRAP_SYMBOL_CALLS += 1
+
     try:
         return _bootstrap_symbol(
             symbol=body.symbol,
@@ -2081,7 +2477,7 @@ def post_chart_structure_bootstrap(
             "discovery_status": "ERROR",
             "backfill_status": "SKIPPED",
             "candles_written": None,
-            "message": f"Unexpected error: {str(exc)[:200]}",
+            "message": f"Unexpected error: {_safe_exc_summary(exc)}",
             "advisory_status": _ADVISORY_STATUS,
             "execution_mode": _EXECUTION_MODE,
             "execution_gate": "LOCKED",
@@ -2124,7 +2520,8 @@ def _sec_persistence():
 
 
 @app.get("/securities/search")
-def search_securities(q: str = "", limit: int = 20) -> dict:
+def search_securities(q: str = "", limit: int = 20, _auth: None = Depends(require_api_token_for_reads)) -> dict:
+    limit = clamp_limit(limit, default=20, ceiling=200)
     try:
         search_fn, _, _ = _sec_persistence()
         results = search_fn(q, limit=limit) if q.strip() else []
@@ -2135,11 +2532,11 @@ def search_securities(q: str = "", limit: int = 20) -> dict:
             "results": results,
         }
     except Exception as exc:
-        return {**_SEC_SAFE_BASE, "query": q, "count": 0, "results": [], "error": str(exc)}
+        return {**_SEC_SAFE_BASE, "query": q, "count": 0, "results": [], "error": _safe_exc_summary(exc)}
 
 
 @app.get("/securities/{symbol}")
-def get_security(symbol: str) -> dict:
+def get_security(symbol: str, _auth: None = Depends(require_api_token_for_reads)) -> dict:
     try:
         try:
             from scripts.symbol_normalizer import normalize_symbol
@@ -2172,11 +2569,11 @@ def get_security(symbol: str) -> dict:
             "security": security,
         }
     except Exception as exc:
-        return {**_SEC_SAFE_BASE, "symbol": symbol, "found": False, "error": str(exc)}
+        return {**_SEC_SAFE_BASE, "symbol": symbol, "found": False, "error": _safe_exc_summary(exc)}
 
 
 @app.get("/securities/{symbol}/coverage")
-def get_security_coverage_endpoint(symbol: str) -> dict:
+def get_security_coverage_endpoint(symbol: str, _auth: None = Depends(require_api_token_for_reads)) -> dict:
     try:
         try:
             from scripts.symbol_normalizer import normalize_symbol
@@ -2194,7 +2591,7 @@ def get_security_coverage_endpoint(symbol: str) -> dict:
         return {
             **_SEC_SAFE_BASE,
             "canonical_symbol": symbol.upper(),
-            "error": str(exc),
+            "error": _safe_exc_summary(exc),
         }
 
 
@@ -2204,7 +2601,7 @@ def get_security_coverage_endpoint(symbol: str) -> dict:
 
 
 @app.get("/db/status")
-def get_db_status() -> dict:
+def get_db_status(_auth: None = Depends(require_api_token_for_reads)) -> dict:
     return _get_db_status()
 
 
@@ -2214,7 +2611,7 @@ def get_db_status() -> dict:
 
 
 @app.get("/self-test/summary")
-def get_self_test_summary() -> dict:
+def get_self_test_summary(_auth: None = Depends(require_api_token_for_reads)) -> dict:
     """Compact dashboard-friendly self-test rollup.
 
     Mirrors ``python scripts/self_test_report.py --json`` but at API-call
@@ -2231,7 +2628,7 @@ def get_self_test_summary() -> dict:
         return {
             "report": "self_test_summary",
             "db_available": False,
-            "error": str(exc),
+            "error": _safe_exc_summary(exc),
             "advisory_status": _ADVISORY_STATUS,
             "execution_gate": "LOCKED",
             "broker_api_called": False,
@@ -2243,7 +2640,7 @@ def get_self_test_summary() -> dict:
 
 
 @app.get("/self-test/reconciliation-queue")
-def get_reconciliation_queue(limit: int = 100) -> dict:
+def get_reconciliation_queue(limit: int = 100, _auth: None = Depends(require_api_token_for_reads)) -> dict:
     """Local reconciliation queue: unreconciled manual trades + summary.
 
     Read-only.  Never places, modifies, or cancels broker orders.  Mirrors
@@ -2286,7 +2683,7 @@ def get_reconciliation_queue(limit: int = 100) -> dict:
 
 
 @app.get("/moltbook")
-def get_moltbook() -> dict:
+def get_moltbook(_auth: None = Depends(require_api_token_for_reads)) -> dict:
     return list_moltbook_entries()
 
 
@@ -2425,32 +2822,32 @@ def post_reconciliation_auto_update(
 
 
 @app.get("/exports/signal-inbox.csv")
-def export_signal_inbox() -> Response:
+def export_signal_inbox(_auth: None = Depends(require_api_token_for_reads)) -> Response:
     return Response(content=export_signal_inbox_log(), media_type=_CSV_MEDIA_TYPE)
 
 
 @app.get("/exports/reflections.csv")
-def export_reflections() -> Response:
+def export_reflections(_auth: None = Depends(require_api_token_for_reads)) -> Response:
     return Response(content=export_reflection_log(), media_type=_CSV_MEDIA_TYPE)
 
 
 @app.get("/exports/manual-trades.csv")
-def export_manual_trades() -> Response:
+def export_manual_trades(_auth: None = Depends(require_api_token_for_reads)) -> Response:
     return Response(content=export_manual_trade_log(), media_type=_CSV_MEDIA_TYPE)
 
 
 @app.get("/exports/reconciliation.csv")
-def export_reconciliation() -> Response:
+def export_reconciliation(_auth: None = Depends(require_api_token_for_reads)) -> Response:
     return Response(content=export_reconciliation_log(), media_type=_CSV_MEDIA_TYPE)
 
 
 @app.get("/exports/moltbook.csv")
-def export_moltbook() -> Response:
+def export_moltbook(_auth: None = Depends(require_api_token_for_reads)) -> Response:
     return Response(content=export_moltbook_mistake_log(), media_type=_CSV_MEDIA_TYPE)
 
 
 @app.get("/exports/source-health.csv")
-def export_source_health() -> Response:
+def export_source_health(_auth: None = Depends(require_api_token_for_reads)) -> Response:
     return Response(content=export_source_health_log(), media_type=_CSV_MEDIA_TYPE)
 
 
@@ -2479,57 +2876,57 @@ except ModuleNotFoundError:  # pragma: no cover
 
 
 @app.get("/api/readiness/release-gate")
-def get_release_gate_readiness() -> dict:
+def get_release_gate_readiness(_auth: None = Depends(require_api_token_for_reads)) -> dict:
     return _read_artifact_envelope("release_gate")
 
 
 @app.get("/api/readiness/daily-signal")
-def get_daily_signal_readiness() -> dict:
+def get_daily_signal_readiness(_auth: None = Depends(require_api_token_for_reads)) -> dict:
     return _read_artifact_envelope("daily_signal")
 
 
 @app.get("/api/source-health")
-def get_source_health_api() -> dict:
+def get_source_health_api(_auth: None = Depends(require_api_token_for_reads)) -> dict:
     return _read_artifact_envelope("source_health")
 
 
 @app.get("/api/live-refresh/summary")
-def get_live_refresh_summary() -> dict:
+def get_live_refresh_summary(_auth: None = Depends(require_api_token_for_reads)) -> dict:
     return _read_artifact_envelope("live_refresh")
 
 
 @app.get("/api/portfolio-truth")
-def get_portfolio_truth_api() -> dict:
+def get_portfolio_truth_api(_auth: None = Depends(require_api_token_for_reads)) -> dict:
     return _read_artifact_envelope("portfolio_truth")
 
 
 @app.get("/api/fresh-discovery")
-def get_fresh_discovery_api() -> dict:
+def get_fresh_discovery_api(_auth: None = Depends(require_api_token_for_reads)) -> dict:
     return _read_artifact_envelope("fresh_discovery")
 
 
 @app.get("/api/why-today/summary")
-def get_why_today_summary() -> dict:
+def get_why_today_summary(_auth: None = Depends(require_api_token_for_reads)) -> dict:
     return _read_artifact_envelope("why_today")
 
 
 @app.get("/api/model-disagreement/summary")
-def get_model_disagreement_summary() -> dict:
+def get_model_disagreement_summary(_auth: None = Depends(require_api_token_for_reads)) -> dict:
     return _read_artifact_envelope("model_disagreement")
 
 
 @app.get("/api/signal-input-quality/summary")
-def get_signal_input_quality_summary() -> dict:
+def get_signal_input_quality_summary(_auth: None = Depends(require_api_token_for_reads)) -> dict:
     return _read_artifact_envelope("signal_input_quality")
 
 
 @app.get("/api/compliance/readiness")
-def get_compliance_readiness() -> dict:
+def get_compliance_readiness(_auth: None = Depends(require_api_token_for_reads)) -> dict:
     return _read_artifact_envelope("compliance_readiness")
 
 
 @app.get("/api/business-value/summary")
-def get_business_value_summary() -> dict:
+def get_business_value_summary(_auth: None = Depends(require_api_token_for_reads)) -> dict:
     return _read_artifact_envelope("business_value")
 
 
@@ -2571,14 +2968,25 @@ if __name__ == "__main__":  # pragma: no cover
 
         host = get_api_host()
         port = get_api_port()
+        # S1: preflight refuses to boot in unsafe configurations.  Run it
+        # here too (before uvicorn starts) so the operator sees the
+        # refusal in their shell, not in a Docker restart loop.
+        try:
+            preflight_auth_or_die()
+        except Exception as exc:
+            print(f"[FATAL] {exc}", file=sys.stderr)
+            sys.exit(2)
         if not api_token_required():
             print(
                 "[warning] MVP_API_TOKEN not set; mutating routes are unprotected. "
-                "Local-only use recommended.",
+                "Loopback-only use recommended.",
                 file=sys.stderr,
             )
-        print(f"[info] Starting Signal Advisory API at http://{host}:{port}")
-        uvicorn.run(app, host=host, port=port)
+        # A4: pin uvicorn to ONE worker.  The in-memory rate-limit and
+        # idempotency caches are per-process; multi-worker would split
+        # them and break both invariants.  See A4 in the audit.
+        print(f"[info] Starting Signal Advisory API at http://{host}:{port} (workers=1)")
+        uvicorn.run(app, host=host, port=port, workers=1)
     except ImportError:
         print("uvicorn not installed.  Run: pip install uvicorn")
         sys.exit(1)

@@ -385,6 +385,53 @@ def http_get_json(
     }
 
 
+def request_with_retry(
+    url: str,
+    *,
+    method: str = "GET",
+    headers: dict[str, str] | None = None,
+    params: dict[str, Any] | None = None,
+    json_body: Any = None,
+    timeout: float = 10.0,
+    retries: int = 2,
+    backoff_seconds: float = 0.5,
+):
+    """R3 fix: shared outbound HTTP helper with timeout + bounded retries.
+
+    Every loader should route through this so timeout / retry policy
+    lives in one place.  ``backoff_seconds`` is exponential with light
+    jitter.  Read-only: never places orders, never calls a broker,
+    never increments ``ai_execution_count``.
+    """
+    import random
+    import time
+
+    try:
+        import requests
+    except ImportError as exc:  # pragma: no cover
+        raise RuntimeError("requests is required for request_with_retry") from exc
+
+    last_exc: Exception | None = None
+    for attempt in range(max(1, int(retries) + 1)):
+        try:
+            return requests.request(
+                method=method.upper(),
+                url=url,
+                headers=headers,
+                params=params,
+                json=json_body,
+                timeout=timeout,
+            )
+        except requests.RequestException as exc:
+            last_exc = exc
+            if attempt >= retries:
+                break
+            sleep_s = backoff_seconds * (2**attempt) + random.uniform(0, 0.1)
+            time.sleep(sleep_s)
+    assert last_exc is not None
+    raise last_exc
+
+
 def compute_coverage_state(endpoint_rows: list[dict[str, Any]]) -> str:
     attempted = [row for row in endpoint_rows if bool(row.get("attempted", True))]
     if not attempted:

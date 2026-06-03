@@ -25,17 +25,25 @@ services:
     container_name: sleeping-passenger-backend
     restart: unless-stopped
     ports:
-      - "8000:8000"
+      # S1/S4 fix: bind to loopback by default.  To expose on a LAN, set
+      # HOST_BIND=0.0.0.0 in your shell env AND provide MVP_API_TOKEN
+      # in .env -- preflight_auth_or_die refuses to boot otherwise.
+      - "${HOST_BIND:-127.0.0.1}:8000:8000"
     environment:
       API_HOST: 0.0.0.0
       API_PORT: "8000"
       MVP_ENVIRONMENT: docker
       MVP_DB_PATH: /app/runtime/mvp_local.db
       ALLOWED_ORIGINS: "http://localhost:3000,http://127.0.0.1:3000"
-      # Optional: set MVP_API_TOKEN in your shell or a local .env file
-      # to require Bearer auth on mutating routes.  Left unset for parity
-      # with the local PowerShell flow.
+      # S1: REQUIRED when API_HOST is non-loopback.  Empty means the
+      # backend refuses to boot unless MVP_ALLOW_UNAUTH=1 is also set.
       MVP_API_TOKEN: "${MVP_API_TOKEN:-}"
+      # Explicit opt-out for one-off load tests on private networks.
+      # Loud: /health/full surfaces unauth_override_active=true.
+      MVP_ALLOW_UNAUTH: "${MVP_ALLOW_UNAUTH:-0}"
+      # S3: declare upstream proxy IPs so the limiter keys on the real
+      # X-Forwarded-For client IP, not the proxy IP.
+      MVP_TRUSTED_PROXIES: "${MVP_TRUSTED_PROXIES:-}"
     volumes:
       # Journaled data (SQLite, JSONL audit logs) persists across rebuilds.
       - ./runtime:/app/runtime
@@ -46,6 +54,23 @@ services:
       timeout: 5s
       retries: 3
       start_period: 10s
+
+  backup:
+    # R1 fix: hourly SQLite + paper-ledger snapshot, retained 14 days.
+    # Shares the backend image; runs the dedicated backup loop entry.
+    image: sleeping-passenger-backend:dev
+    container_name: sleeping-passenger-backup
+    depends_on:
+      backend:
+        condition: service_started
+    entrypoint: ["/bin/sh", "/app/scripts/backup_loop.sh"]
+    volumes:
+      - ./runtime:/app/runtime:ro
+      - ./backup_local_state:/app/backup_local_state
+    environment:
+      BACKUP_INTERVAL_SECONDS: "${BACKUP_INTERVAL_SECONDS:-3600}"
+      BACKUP_RETENTION_DAYS: "${BACKUP_RETENTION_DAYS:-14}"
+    restart: unless-stopped
 
   frontend:
     build:
@@ -58,7 +83,8 @@ services:
     container_name: sleeping-passenger-frontend
     restart: unless-stopped
     ports:
-      - "3000:3000"
+      # S1: loopback by default, override via HOST_BIND=0.0.0.0.
+      - "${HOST_BIND:-127.0.0.1}:3000:3000"
     environment:
       NODE_ENV: production
       PORT: "3000"

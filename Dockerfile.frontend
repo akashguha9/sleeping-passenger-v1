@@ -51,6 +51,10 @@ COPY --from=build /app/frontend/public ./public
 COPY --from=build /app/frontend/next.config.js ./next.config.js
 RUN npm ci --omit=dev
 
+# S4: run as the node base image's pre-existing non-root user.
+RUN chown -R node:node /app
+USER node
+
 EXPOSE 3000
 
 # `next start` honours $PORT / $HOSTNAME.

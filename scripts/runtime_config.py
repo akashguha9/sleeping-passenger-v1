@@ -43,11 +43,8 @@ _DEFAULT_API_PORT = 8000
 _DEFAULT_ALLOWED_ORIGINS = (
     "http://localhost:3000",
     "http://127.0.0.1:3000",
-    "http://sleepingpassenger",
-    "http://sleepingpassenger.local",
-    "http://sleepingpassenger:80",
-    "http://sleepingpassenger.local:80",
 )
+_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
 _DEFAULT_ENVIRONMENT = "local"
 
 # Day 11-25 hardening defaults
@@ -93,8 +90,10 @@ def get_allowed_origins() -> list[str]:
 def get_api_token() -> str | None:
     """Returns the API token if set, else None.
 
-    When None, mutating routes are unprotected — appropriate for local-only
-    use, but a warning is emitted at server startup.
+    When None, mutating routes are unprotected — appropriate for STRICT
+    loopback only.  A startup precondition refuses to boot the server in
+    that state unless ``MVP_ALLOW_UNAUTH=1`` is also set as an explicit
+    operator override (see ``preflight_auth_or_die``).
     """
     raw = os.environ.get("MVP_API_TOKEN", "")
     token = raw.strip()
@@ -104,6 +103,46 @@ def get_api_token() -> str | None:
 def api_token_required() -> bool:
     """True iff ``MVP_API_TOKEN`` is set and non-empty."""
     return get_api_token() is not None
+
+
+def is_loopback_bind(host: str | None = None) -> bool:
+    """True iff API_HOST resolves to a loopback name."""
+    candidate = (host if host is not None else get_api_host()).strip().lower()
+    return candidate in _LOOPBACK_HOSTS
+
+
+class StartupSecurityError(RuntimeError):
+    """Raised when the server's startup posture is unsafe and not explicitly overridden."""
+
+
+def preflight_auth_or_die() -> None:
+    """Refuse to boot if a non-loopback bind has no MVP_API_TOKEN set.
+
+    Override with ``MVP_ALLOW_UNAUTH=1`` (e.g. for a one-off load test on
+    a trusted private network).  The override is loud: it is surfaced on
+    /health/full and logged at startup.
+
+    Advisory invariants are not affected by this preflight — the
+    execution_gate stays LOCKED whether the server starts or not.
+    """
+    if api_token_required():
+        return
+    if is_loopback_bind():
+        return
+    if _bool_env("MVP_ALLOW_UNAUTH", False):
+        return
+    raise StartupSecurityError(
+        "Refusing to start: API_HOST="
+        + repr(get_api_host())
+        + " is non-loopback but MVP_API_TOKEN is not set. "
+        "Set MVP_API_TOKEN, bind API_HOST=127.0.0.1, or explicitly "
+        "set MVP_ALLOW_UNAUTH=1 to override."
+    )
+
+
+def unauth_override_active() -> bool:
+    """True iff the operator explicitly bypassed S1 preflight via MVP_ALLOW_UNAUTH=1."""
+    return _bool_env("MVP_ALLOW_UNAUTH", False) and not api_token_required()
 
 
 def get_environment_tag() -> str:
@@ -168,6 +207,123 @@ def get_max_request_bytes() -> int:
     if value < 1024:
         return _DEFAULT_MAX_REQUEST_BYTES
     return value
+
+
+def rate_limit_expensive_max_requests() -> int:
+    """I3 fix: stricter cap on the expensive read endpoints.
+
+    Defaults to 1/3 of the standard read cap so a single client can't
+    DoS the entire server by hammering ``/exports/*.csv`` or
+    ``/diagnostics/cockpit``.  Override with
+    ``MVP_RATE_LIMIT_EXPENSIVE_MAX_REQUESTS``.
+    """
+    standard = rate_limit_max_requests()
+    return _positive_int_env(
+        "MVP_RATE_LIMIT_EXPENSIVE_MAX_REQUESTS", max(1, standard // 3)
+    )
+
+
+def bootstrap_symbol_quota() -> int:
+    """I2 fix: hard cap on bootstrap-symbol calls per process.
+
+    Default 50 per process lifetime; override with
+    ``MVP_BOOTSTRAP_SYMBOL_QUOTA``.  Setting 0 disables the route.
+    """
+    raw = os.environ.get("MVP_BOOTSTRAP_SYMBOL_QUOTA", "").strip()
+    if not raw:
+        return 50
+    try:
+        return max(0, int(raw))
+    except ValueError:
+        return 50
+
+
+def bootstrap_symbol_denylist() -> frozenset[str]:
+    """I2 fix: explicit per-symbol denylist for the bootstrap route.
+
+    Set ``MVP_BOOTSTRAP_SYMBOL_DENYLIST`` to a comma-separated list of
+    symbols (case-insensitive) that should be refused.  Useful for
+    blocking symbols an operator has identified as Yahoo-rate-limit
+    triggers or known-bad data.
+    """
+    raw = os.environ.get("MVP_BOOTSTRAP_SYMBOL_DENYLIST", "").strip()
+    if not raw:
+        return frozenset()
+    return frozenset(
+        s.strip().upper() for s in raw.split(",") if s.strip()
+    )
+
+
+def get_trusted_proxies() -> frozenset[str]:
+    """Return the explicit allowlist of upstream proxy IPs.
+
+    S3 fix: only IPs in this set are allowed to set ``X-Forwarded-For``
+    on behalf of a real client.  Empty by default — the limiter ignores
+    proxy headers unless an operator declares the upstream IP.
+
+    Env var ``MVP_TRUSTED_PROXIES`` is comma-separated.  Loopback is
+    always trusted (uvicorn + a local reverse proxy is the common case).
+    """
+    base = {"127.0.0.1", "::1"}
+    raw = os.environ.get("MVP_TRUSTED_PROXIES", "").strip()
+    if raw:
+        for entry in raw.split(","):
+            entry = entry.strip()
+            if entry:
+                base.add(entry)
+    return frozenset(base)
+
+
+def clamp_limit(
+    value: int | None, *, default: int, ceiling: int, floor: int = 1
+) -> int:
+    """L4 fix: bound list-endpoint ``limit`` and ``hours`` params.
+
+    Behaviour:
+      * None / non-numeric → default.
+      * Negative → floor (default 1).
+      * Greater than ceiling → ceiling.
+      * Otherwise the value unchanged.
+
+    Pure helper so every route can wrap raw query-string ints with one
+    call:  ``limit = clamp_limit(limit, default=100, ceiling=500)``.
+    """
+    if value is None:
+        return default
+    try:
+        n = int(value)
+    except (TypeError, ValueError):
+        return default
+    if n < floor:
+        return floor
+    if n > ceiling:
+        return ceiling
+    return n
+
+
+def extract_client_ip(direct_host: str | None, forwarded_for: str | None) -> str:
+    """Resolve the real client IP for rate-limit keying.
+
+    S3 fix: previously the limiter keyed on ``request.client.host``
+    directly, so behind any reverse proxy every client looked identical.
+
+    Rules:
+      * If the direct host is in ``get_trusted_proxies``, parse the
+        left-most entry of ``X-Forwarded-For`` and use that.  This
+        matches the de-facto standard for L7 proxies (nginx/traefik).
+      * Otherwise use the direct host verbatim.  Untrusted proxies are
+        ignored — a client cannot spoof their own X-Forwarded-For.
+      * Returns ``"unknown"`` when everything is missing so the limiter
+        still has a string key.
+    """
+    direct = (direct_host or "").strip()
+    if not direct:
+        return "unknown"
+    if direct in get_trusted_proxies() and forwarded_for:
+        first = forwarded_for.split(",")[0].strip()
+        if first:
+            return first
+    return direct
 
 
 def security_headers() -> dict[str, str]:

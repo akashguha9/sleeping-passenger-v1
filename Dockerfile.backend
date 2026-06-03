@@ -2,18 +2,19 @@
 #
 # Backend container for the local advisory MVP.
 #
-# This image is LOCAL/DEMO-GRADE, not production:
-#   * SQLite under /app/runtime (must be mounted as a volume)
-#   * single uvicorn worker, sync routes
-#   * no auth unless MVP_API_TOKEN is set at runtime
-#   * no secrets are baked in -- pass them via `docker run -e` or compose env
+# Hardened post-audit (S4):
+#   * Runs as non-root user `app` (UID 10001).
+#   * Installs production requirements only.  Use Dockerfile.test for CI.
+#   * No dangling `adapters` copy (the directory does not exist in repo).
+#   * No secrets are baked in -- pass via `docker run -e` or compose env.
 #
 # Build:
 #     docker build -f Dockerfile.backend -t sleeping-passenger-backend:dev .
 #
 # Run (mount the host runtime/ so journaled data survives container removal):
-#     docker run --rm -p 8000:8000 \
+#     docker run --rm -p 127.0.0.1:8000:8000 \
 #         -e API_HOST=0.0.0.0 -e API_PORT=8000 -e MVP_ENVIRONMENT=docker \
+#         -e MVP_API_TOKEN=... \
 #         -v "$PWD/runtime":/app/runtime \
 #         sleeping-passenger-backend:dev
 
@@ -26,21 +27,30 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-# Install Python deps first for layer caching.
-COPY requirements.txt requirements-dev.txt ./
-RUN pip install --no-cache-dir -r requirements-dev.txt
+# S4: install production deps ONLY.  Dev/test deps live in
+# requirements-dev.txt and ship via a separate Dockerfile if needed.
+COPY requirements.txt ./
+RUN pip install --no-cache-dir -r requirements.txt \
+ && pip install --no-cache-dir fastapi "uvicorn[standard]"
 
-# Application code -- explicit copies only.  Avoid copying runtime/ or .env.
+# Application code -- explicit copies only.  Avoid copying runtime/, .env,
+# tests/, frontend/, or any *.md docs.  Note: `adapters/` was removed from
+# the original COPY list because the directory does not exist.
 COPY scripts ./scripts
 COPY config ./config
 COPY configs ./configs
-COPY adapters ./adapters
 COPY src ./src
-COPY conftest.py ./conftest.py
-COPY pytest.ini ./pytest.ini
 
-# Runtime DB lives here.  Compose mounts the host runtime/ over this path.
+# Runtime DB + logs.  Compose mounts host runtime/ over /app/runtime.
 RUN mkdir -p /app/runtime /app/logs
+
+# S4: create a dedicated non-root user with a high UID so it cannot collide
+# with host system users when the runtime volume is bind-mounted.
+RUN groupadd -r -g 10001 app \
+ && useradd  -r -u 10001 -g app --no-create-home --shell /sbin/nologin app \
+ && chown -R app:app /app
+
+USER app
 
 ENV API_HOST=0.0.0.0 \
     API_PORT=8000 \
@@ -49,7 +59,7 @@ ENV API_HOST=0.0.0.0 \
 
 EXPOSE 8000
 
-# /health on the public port -- exits non-zero if the API is unreachable.
+# /health is the minimal unauthenticated liveness probe (D2).
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD python -c "import urllib.request,sys; \
 import json; \

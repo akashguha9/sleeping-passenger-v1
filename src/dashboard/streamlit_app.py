@@ -1,7 +1,17 @@
-"""Streamlit dashboard for the read-only signal refinery MVP."""
+"""Streamlit dashboard for the read-only signal refinery MVP.
+
+U3 fix (PARTIAL): Streamlit has no built-in auth; the only safe deployment
+is loopback-only.  ``render_dashboard`` now enforces that posture: it
+refuses to render when Streamlit's listen address is non-loopback unless
+``MVP_DASHBOARD_ALLOW_NONLOOPBACK=1`` is set (the same explicit-override
+pattern S1 uses for the API).  Reads carry no PII beyond what's already
+in the SQLite store, but operator reflections / mistake tags are part of
+that store, so the refusal matters.
+"""
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 try:  # pragma: no cover - optional dependency path
@@ -11,11 +21,41 @@ except Exception:  # pragma: no cover - optional dependency path
 
 from src.storage.sqlite_store import DEFAULT_DB_PATH, SQLiteStore
 
+_LOOPBACK_HOSTS = {"127.0.0.1", "::1", "localhost"}
+
+
+def _dashboard_bind_is_loopback() -> bool:
+    """Inspect Streamlit's server address (or override) to decide if we
+    are bound to loopback only."""
+    host = os.environ.get("STREAMLIT_SERVER_ADDRESS", "").strip().lower()
+    if not host:
+        # Streamlit defaults to localhost when STREAMLIT_SERVER_ADDRESS is
+        # unset.  Treat that as loopback.
+        return True
+    return host in _LOOPBACK_HOSTS
+
+
+def _dashboard_unauth_override() -> bool:
+    return os.environ.get("MVP_DASHBOARD_ALLOW_NONLOOPBACK", "").strip() in (
+        "1",
+        "true",
+        "yes",
+    )
+
 
 def render_dashboard(db_path: str | Path = DEFAULT_DB_PATH) -> None:
     """Render the Streamlit dashboard if Streamlit is available."""
     if st is None:
         raise RuntimeError("Streamlit is not installed. Dashboard rendering is optional.")
+    if not _dashboard_bind_is_loopback() and not _dashboard_unauth_override():
+        st.error(
+            "Refusing to render: Streamlit dashboard is bound to a non-"
+            "loopback address but MVP_DASHBOARD_ALLOW_NONLOOPBACK is not "
+            "set.  This dashboard has no auth; expose it only to "
+            "localhost.  Set STREAMLIT_SERVER_ADDRESS=127.0.0.1 (or the "
+            "explicit override env var)."
+        )
+        return
     store = SQLiteStore(db_path)
     snapshots = store.read_latest_market_snapshots()
     scores = store.read_latest_signal_scores()

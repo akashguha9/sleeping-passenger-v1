@@ -1,0 +1,27 @@
+# D3 fix: secret-detection pre-commit + lightweight hygiene checks.
+#
+# Run locally:
+#   pip install pre-commit && pre-commit install
+#   pre-commit run --all-files
+#
+# CI mirrors these via .github/workflows/dep_audit.yml + the existing
+# pytest workflow.
+
+repos:
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.18.4
+    hooks:
+      - id: gitleaks
+        # Scan staged content for AWS keys, GCP creds, OAuth tokens,
+        # generic API keys, and other high-entropy patterns.
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: check-added-large-files
+        args: ["--maxkb=512"]
+      - id: detect-private-key
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+      - id: check-yaml
+      - id: check-merge-conflict
