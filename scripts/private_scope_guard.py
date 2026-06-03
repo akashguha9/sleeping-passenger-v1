@@ -146,6 +146,10 @@ APPROVED_DOMAINS: tuple[str, ...] = (
                         # fees + half-spread + slippage + FX RT). Consumed by
                         # backtest_entry_quality.walk_position to report
                         # gross+net P/L. No broker calls, no order placement.
+    "venue_calendars",  # venue_calendars.py — pure local-session-close lookup
+                        # for per-venue bar timestamps. Replaces the hardcoded
+                        # 'T16:00:00Z' in backfill_ohlcv_history. Read-only;
+                        # no broker calls, no order placement.
     # Daily fresh-data sprint — advisory-only payload builders + scoring signals
     # that feed (never execute) the five-model synthesis. Scores/gates only; no
     # broker execution, no order placement, no API trading writes.

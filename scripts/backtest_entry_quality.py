@@ -528,7 +528,11 @@ def build_report(xlsx: Path, as_of: date) -> dict[str, Any]:
         if not candles:
             continue
         buy_date = date.fromisoformat(p["buy_date"])
-        before = [c for c in candles if date.fromisoformat(c["date"]) <= buy_date]
+        # Point-in-time: STRICT prior-close only — exclude the buy-date bar
+        # from feature computation. Decision is taken on the close BEFORE
+        # buy_date; the buy is filled on buy_date open. Including the
+        # buy-date close in features would be same-bar leakage (T4 fix).
+        before = [c for c in candles if date.fromisoformat(c["date"]) < buy_date]
         if len(before) > 20:
             mom = (before[-1]["close"] - before[-21]["close"]) / before[-21]["close"]
             universe_mom_20d_by_date.setdefault(p["buy_date"], []).append(mom)
@@ -540,13 +544,17 @@ def build_report(xlsx: Path, as_of: date) -> dict[str, Any]:
         candles = stock_hist.get(yf_sym) or []
         buy_date = date.fromisoformat(p["buy_date"])
 
-        before = [c for c in candles if date.fromisoformat(c["date"]) <= buy_date]
-        after = [c for c in candles if date.fromisoformat(c["date"]) > buy_date]
+        # Features: strict prior-close (T4 — see comment above).
+        # Outcomes: buy-date forward, inclusive of buy_date (the fill happens
+        # at buy_date open; gaps and intraday lows from that bar count for
+        # stop / TP detection).
+        before = [c for c in candles if date.fromisoformat(c["date"]) < buy_date]
+        after = [c for c in candles if date.fromisoformat(c["date"]) >= buy_date]
 
         idx_sym = _INDEX_FOR_COUNTRY.get(country)
         idx_full = index_cache.get(idx_sym) if idx_sym else None
         idx_before = (
-            [c for c in idx_full if date.fromisoformat(c["date"]) <= buy_date]
+            [c for c in idx_full if date.fromisoformat(c["date"]) < buy_date]
             if idx_full else None
         )
 

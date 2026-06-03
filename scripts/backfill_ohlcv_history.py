@@ -69,20 +69,47 @@ def event_id(symbol: str, interval: str, date_str: str) -> str:
 # ---------------------------------------------------------------------------
 
 def _build_candle(symbol: str, interval: str, ts: str, row: object) -> dict:
-    """Build an advisory-stamped candle dict from a yfinance history row."""
+    """Build an advisory-stamped candle dict from a yfinance history row.
+
+    Adjustment tagging (T5 / C5): we fetch with ``auto_adjust=False`` so yfinance
+    returns RAW OHLC plus an additional ``Adj Close``. We store BOTH and tag
+    the price space, plus the corporate-action ratio ``adj_close / close`` -
+    if a future fetch returns a different ratio for an old bar, a corporate
+    action has happened since the snapshot, and downstream readers MUST
+    re-adjust historical entry/stop/TP levels before comparing to live prices.
+    """
     open_ = float(getattr(row, "Open", None) or row.get("Open", 0.0) or 0.0)  # type: ignore[union-attr]
     high = float(getattr(row, "High", None) or row.get("High", 0.0) or 0.0)  # type: ignore[union-attr]
     low = float(getattr(row, "Low", None) or row.get("Low", 0.0) or 0.0)  # type: ignore[union-attr]
     close = float(getattr(row, "Close", None) or row.get("Close", 0.0) or 0.0)  # type: ignore[union-attr]
+    # Adj Close is only present when auto_adjust=False. Pandas Series and
+    # dict-like rows both support .get("Adj Close"); attribute access can't be
+    # used because the column name has a space. Fall back to close when not
+    # provided (the adjustment_ratio is 1.0 by definition then).
+    adj_close_raw = None
+    if hasattr(row, "get"):
+        try:
+            adj_close_raw = row.get("Adj Close")  # type: ignore[union-attr]
+        except Exception:
+            adj_close_raw = None
+    adj_close = float(adj_close_raw) if adj_close_raw not in (None, "") else close
     volume = float(getattr(row, "Volume", None) or row.get("Volume", 0.0) or 0.0)  # type: ignore[union-attr]
+    adj_ratio = adj_close / close if close else 1.0
     return {
         "symbol": symbol.upper(),
         "interval": interval,
         "timestamp": ts,
+        # RAW (unadjusted) OHLC - the price that printed on the tape.
         "open": round(open_, 6),
         "high": round(high, 6),
         "low": round(low, 6),
         "close": round(close, 6),
+        # Adjusted close + the ratio used. Any future divergence in adj_ratio
+        # for a stored historical bar signals a corporate action and triggers
+        # re-adjustment of operator stop/TP levels.
+        "adj_close": round(adj_close, 6),
+        "adjustment_ratio": round(adj_ratio, 8),
+        "price_space": "raw_ohlc+adj_close",
         "volume": volume,
         "source": "yahoo_backfill",
         "advisory_status": _ADVISORY_STATUS,
@@ -120,7 +147,12 @@ def fetch_candles(
         sys.exit(1)
 
     try:
-        hist = yf.Ticker(symbol).history(period=period, interval=interval)
+        # auto_adjust=False so both raw OHLC and 'Adj Close' are returned;
+        # the downstream candle builder stores both and the adjustment_ratio
+        # so a corporate action between snapshots can be detected (T5/C5).
+        hist = yf.Ticker(symbol).history(
+            period=period, interval=interval, auto_adjust=False,
+        )
     except Exception as exc:
         print(f"  WARNING: yfinance fetch failed for {symbol}: {exc}", file=sys.stderr)
         return []
@@ -133,6 +165,15 @@ def fetch_candles(
         )
         return []
 
+    # Per-venue session-close timestamp (T5/H3 fix). The previous hardcoded
+    # 'T16:00:00Z' collapsed all venues onto one wall-clock time, mixing an
+    # Asian close that had already happened with a US close hours away.
+    try:
+        from scripts.venue_calendars import venue_close_iso
+    except ImportError:  # pragma: no cover - script-style env
+        from venue_calendars import venue_close_iso  # type: ignore[no-redef]
+    from datetime import date as _date
+
     candles: list[dict] = []
     for idx, row in hist.iterrows():
         try:
@@ -140,7 +181,7 @@ def fetch_candles(
             date_str = ts_str[:10]
             if len(date_str) < 10:
                 continue
-            ts = date_str + "T16:00:00Z"
+            ts = venue_close_iso(symbol, _date.fromisoformat(date_str))
         except Exception:
             continue
         candles.append(_build_candle(symbol, interval, ts, row))
