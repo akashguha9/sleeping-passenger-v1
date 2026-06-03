@@ -419,6 +419,11 @@ def build_report(xlsx: Path, as_of: date) -> dict[str, Any]:
     rows: list[dict[str, Any]] = []
     index_cache: dict[str, list[dict[str, Any]]] = {}
     universe_mom_20d_by_date: dict[str, list[float]] = {}
+    # Tickers for which yfinance returned no candles. The operator should tag
+    # the corresponding minimum_daily_universe.yaml row with
+    # ``notes: needs_provider_mapping`` so the loader filters it out.
+    no_data: list[dict[str, str]] = []
+    no_data_index: list[dict[str, str]] = []
 
     # First pass: fetch all stock histories so we can compute universe mom_20d
     # per buy-date.
@@ -431,13 +436,23 @@ def build_report(xlsx: Path, as_of: date) -> dict[str, Any]:
         stock_hist[yf_sym] = candles
         p["_yf_symbol"] = yf_sym
         p["_country"] = country
+        if not candles:
+            no_data.append({
+                "ticker_xlsx": p["ticker"],
+                "yf_symbol_tried": yf_sym,
+                "country": country,
+                "suggestion": "Add `notes: needs_provider_mapping` to the universe yaml row, or correct the yfinance symbol mapping in scripts/backtest_entry_quality.py:_EXCHANGE_TO_YF_SUFFIX.",
+            })
 
     # Index histories per country needed.
     countries = {p.get("_country") or to_yf_symbol(p["ticker"])[1] for p in positions}
     for c in countries:
         idx_sym = _INDEX_FOR_COUNTRY.get(c)
         if idx_sym and idx_sym not in index_cache:
-            index_cache[idx_sym] = fetch_history(idx_sym, as_of)
+            idx_candles = fetch_history(idx_sym, as_of)
+            index_cache[idx_sym] = idx_candles
+            if not idx_candles:
+                no_data_index.append({"country": c, "index_symbol_tried": idx_sym})
 
     # Build the universe of 20d returns observed in our sample, keyed by date,
     # for percentile calc. We use the position's own 20d return as one sample;
@@ -518,6 +533,8 @@ def build_report(xlsx: Path, as_of: date) -> dict[str, Any]:
         ],
         "metrics_real_all_positions": overall,
         "metrics_real_after_gate":   after_gate,
+        "no_data_symbols": no_data,
+        "no_data_indexes": no_data_index,
         "rows": rows,
     }
 
@@ -552,6 +569,26 @@ def _print_text_summary(report: dict[str, Any]) -> None:
         "  Caveat: 'after-gate' just drops rows; it does NOT model replacement "
         "picks. Use as directional, not predictive."
     )
+    no_data = report.get("no_data_symbols") or []
+    if no_data:
+        print()
+        print(f"=== yfinance returned NO data for {len(no_data)} symbol(s) ===")
+        for nd in no_data:
+            print(f"  ✗ {nd['ticker_xlsx']:<22} tried `{nd['yf_symbol_tried']}`  (country={nd['country']})")
+        print(
+            "  Action: add `notes: needs_provider_mapping` to the corresponding row in\n"
+            "  config/minimum_daily_universe.yaml, or fix the suffix in\n"
+            "  scripts/backtest_entry_quality.py:_EXCHANGE_TO_YF_SUFFIX. The universe\n"
+            "  loader filters out rows carrying that tag, so they won't enter discovery."
+        )
+    no_data_idx = report.get("no_data_indexes") or []
+    if no_data_idx:
+        print()
+        print(f"=== yfinance returned NO data for {len(no_data_idx)} index(es) ===")
+        for nd in no_data_idx:
+            print(f"  ✗ {nd['country']:<4}  tried `{nd['index_symbol_tried']}`")
+        print("  Action: update scripts/backtest_entry_quality.py:_INDEX_FOR_COUNTRY.")
+
     print()
     print("=== Per-position entry-quality score (sample, 20 rows) ===")
     fmt = "  {pass_s:1}  {tkr:<18} buy={buy_d}  eq_score={s:>5}  real={real:<10}  xlsx={xls:<10}  pl_real={pl:>+7}"

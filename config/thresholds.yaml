@@ -105,7 +105,11 @@ portfolio_diversification:
   max_picks_per_sector: 2
   # Aspirational visibility only — logged but never used to inject picks.
   target_distinct_countries: 5
-  # 30-largest-GDP set, Russia excluded (sanctions / untradeable).
+  # 25 of the 30 largest GDPs. Excluded:
+  #   - RU: sanctions / untradeable on IBKR.
+  #   - TR, ID, SA, AE: no clean single-name access; an ETF isn't a
+  #     single-name pick and would dilute the entry-quality gate. A
+  #     separate macro sleeve can re-introduce them later.
   country_eligibility:
     - US
     - CN
@@ -121,10 +125,7 @@ portfolio_diversification:
     - MX
     - ES
     - KR
-    - TR
-    - ID
     - NL
-    - SA
     - CH
     - PL
     - TW
@@ -135,4 +136,3 @@ portfolio_diversification:
     - AR
     - SG
     - AT
-    - AE

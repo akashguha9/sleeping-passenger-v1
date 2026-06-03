@@ -33,10 +33,13 @@ DEFAULTS: dict[str, Any] = {
     "max_picks_per_country": 2,
     "max_picks_per_sector": 2,
     "target_distinct_countries": 5,
+    # 25 of the 30 largest-GDP set. RU excluded (sanctions); TR/ID/SA/AE
+    # excluded (no clean single-name access — would require ETF-only entries
+    # that the entry-quality gate cannot evaluate).
     "country_eligibility": [
         "US", "CN", "DE", "JP", "GB", "IN", "FR", "IT", "BR", "CA",
-        "AU", "MX", "ES", "KR", "TR", "ID", "NL", "SA", "CH", "PL",
-        "TW", "IE", "BE", "SE", "IL", "AR", "SG", "AT", "AE",
+        "AU", "MX", "ES", "KR", "NL", "CH", "PL", "TW", "IE", "BE",
+        "SE", "IL", "AR", "SG", "AT",
     ],
 }
 
