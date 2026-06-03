@@ -220,3 +220,55 @@ buckets:
     - {ticker: BBAR, name: "BBVA Argentina (ADR)",     market: US, country: Argentina, sector: Financials, asset_type: equity, default_risk_band: high_beta, notes: "AR bank ADR"}
     - {ticker: PAM,  name: "Pampa Energia (ADR)",      market: US, country: Argentina, sector: Utilities,  asset_type: equity, default_risk_band: high_beta, notes: "AR utility ADR"}
     - {ticker: BMA,  name: "Banco Macro (ADR)",        market: US, country: Argentina, sector: Financials, asset_type: equity, default_risk_band: high_beta, notes: "AR bank ADR"}
+
+  INDONESIA_LARGE_CAP:
+    # Top-30 GDP coverage: Indonesia direct listings on IDX. yfinance .JK suffix.
+    - {ticker: BBCA.JK, name: "Bank Central Asia",  market: Indonesia, country: Indonesia, sector: Financials, asset_type: equity, default_risk_band: core, notes: "ID largest private bank"}
+    - {ticker: BBRI.JK, name: "Bank Rakyat Indonesia", market: Indonesia, country: Indonesia, sector: Financials, asset_type: equity, default_risk_band: core, notes: "ID state bank"}
+    - {ticker: TLKM.JK, name: "Telkom Indonesia",   market: Indonesia, country: Indonesia, sector: Telecom,    asset_type: equity, default_risk_band: core, notes: "ID telco incumbent"}
+
+  TURKEY_LARGE_CAP:
+    # Top-30 GDP coverage: Turkey direct listings on Borsa Istanbul. yfinance
+    # .IS suffix. Geopolitical / currency risk is real -- flagged high_beta.
+    - {ticker: AKBNK.IS, name: "Akbank",            market: Turkey, country: Turkey, sector: Financials, asset_type: equity, default_risk_band: high_beta, notes: "TR private bank"}
+    - {ticker: GARAN.IS, name: "Garanti BBVA",      market: Turkey, country: Turkey, sector: Financials, asset_type: equity, default_risk_band: high_beta, notes: "TR private bank"}
+    - {ticker: THYAO.IS, name: "Turkish Airlines",  market: Turkey, country: Turkey, sector: Industrials, asset_type: equity, default_risk_band: high_beta, notes: "TR flag carrier"}
+
+# ---------------------------------------------------------------------------
+# Honest gaps in single-stock coverage of the top-30 GDP list. These are
+# DOCUMENTED OMISSIONS, not silent absences. The brief explicitly forbids
+# padding the count with ETFs, so the following markets are tracked here
+# rather than seeded with ETF proxies disguised as single-name picks.
+#
+# - Russia (RU)         : sanctioned. Excluded by policy. No re-entry path.
+# - Saudi Arabia (SA)   : Tadawul foreign-retail access is heavily restricted;
+#                         Aramco (2222.SR) is technically listed but requires
+#                         a QFI / GCC-resident account most operators do not
+#                         have. No qualifying ADR. Track via ETF (KSA) only;
+#                         not added as a stock pick.
+# - United Arab Emirates: DFM / ADX foreign-retail access is limited; no
+#                         qualifying single-name ADR with broker support for
+#                         the operator's setup. Track via ETF (UAE) only.
+# - China (CN)          : direct A-share access requires a Stock-Connect
+#                         brokerage; covered here via US-listed ADRs
+#                         (CHINA_ADR bucket) which IS a real single-name path.
+# ---------------------------------------------------------------------------
+documented_gaps:
+  - country: Russia
+    iso: RU
+    reason: "Sanctioned (US/EU). Excluded by policy. No tradeable path."
+    direct_listings: false
+    adr: false
+    etf_proxy: null
+  - country: Saudi Arabia
+    iso: SA
+    reason: "Tadawul foreign-retail access restricted; no qualifying ADR for our brokerage."
+    direct_listings: false
+    adr: false
+    etf_proxy: "KSA"
+  - country: United Arab Emirates
+    iso: AE
+    reason: "DFM/ADX foreign-retail access limited; no qualifying ADR for our brokerage."
+    direct_listings: false
+    adr: false
+    etf_proxy: "UAE"

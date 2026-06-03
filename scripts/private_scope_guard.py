@@ -150,6 +150,10 @@ APPROVED_DOMAINS: tuple[str, ...] = (
                         # for per-venue bar timestamps. Replaces the hardcoded
                         # 'T16:00:00Z' in backfill_ohlcv_history. Read-only;
                         # no broker calls, no order placement.
+    "forward_shadow",   # forward_shadow_log.py — append-only JSONL of daily
+                        # gate decisions, would-have-bought verdicts, and
+                        # resolved-trade outcomes. Source of OOS evidence
+                        # before any rule is judged. Advisory-only.
     # Daily fresh-data sprint — advisory-only payload builders + scoring signals
     # that feed (never execute) the five-model synthesis. Scores/gates only; no
     # broker execution, no order placement, no API trading writes.
