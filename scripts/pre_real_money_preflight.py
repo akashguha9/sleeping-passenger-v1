@@ -163,10 +163,15 @@ def run_preflight(
         payload["subchecks"]["self_test_summary"] = str_result
 
     # 5. Reconciliation queue.
+    # Fail-CLOSED on import/call failure: a real-money gate that cannot
+    # measure the unreconciled backlog must not silently let the operator
+    # through. Silent unavailability previously hid the backlog signal
+    # entirely (e.g. syntax error in the queue module) and the gate
+    # returned ok=True with a blocking backlog.
     rq_run = _import_check("reconciliation_queue", "build_queue")
     rq_result = _safe_call(rq_run, path, limit=50, now=now)
     if rq_result is None:
-        warnings.append("reconciliation_queue_unavailable")
+        blocking_issues.append("reconciliation_queue_unavailable")
     else:
         payload["subchecks"]["reconciliation_queue"] = rq_result
         summary = rq_result.get("summary", {}) or {}

@@ -184,6 +184,42 @@ def test_unreconciled_full_review_threshold(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# Fail-CLOSED: subcheck unavailable must block
+# ---------------------------------------------------------------------------
+
+
+def test_reconciliation_queue_unavailable_blocks(tmp_path, monkeypatch):
+    """If the reconciliation queue subcheck can't even run (import error,
+    raised exception, etc.) the gate MUST block. A real-money gate that
+    cannot measure the backlog must fail closed, not silently pass.
+
+    This is the root cause of the audit's C4 finding: a syntax error in
+    reconciliation_queue.py silently disabled the backlog count, and the
+    gate returned ok=True even with a backlog above the BLOCK threshold.
+    """
+    root, db = _make_full_repo(tmp_path)
+    _insert_unreconciled(db, prp.UNRECONCILED_BLOCK_THRESHOLD)
+
+    # Simulate the subcheck being unimportable (e.g. syntax error in
+    # reconciliation_queue.py, which is exactly what hid the audit's C4).
+    original = prp._import_check
+
+    def stub_import_check(module: str, fn: str):
+        if module == "reconciliation_queue":
+            return None
+        return original(module, fn)
+
+    monkeypatch.setattr(prp, "_import_check", stub_import_check)
+
+    payload = prp.run_preflight(db, repo_root=root, env={})
+    assert payload["ok"] is False, (
+        "Preflight must fail CLOSED when the reconciliation backlog cannot "
+        "be measured; otherwise a broken subcheck silently clears deployment."
+    )
+    assert "reconciliation_queue_unavailable" in payload["blocking_issues"]
+
+
+# ---------------------------------------------------------------------------
 # Secret hygiene
 # ---------------------------------------------------------------------------
 

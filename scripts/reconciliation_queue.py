@@ -440,8 +440,9 @@ def build_queue(
                 for _ in PROBE_EVENT_ID_PREFIXES
             )
             probe_event_id_clause = f" AND ({event_id_clauses})"
+            _escape = "\\_"
             probe_event_id_params: tuple[Any, ...] = tuple(
-                f"{p.replace('_', r'\_')}%" for p in PROBE_EVENT_ID_PREFIXES
+                p.replace("_", _escape) + "%" for p in PROBE_EVENT_ID_PREFIXES
             )
         else:
             probe_event_id_clause = ""
