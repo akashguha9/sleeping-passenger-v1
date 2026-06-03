@@ -177,6 +177,13 @@ APPROVED_DOMAINS: tuple[str, ...] = (
     "compliance_trace",       # live_provider_compliance_trace.py — per-provider audit
     "backend_api_quality",    # backend_api_quality.py — readiness envelope
     "operator_live_provider", # operator_live_provider_refresh.py — explicit refresh
+    # Forensic-audit remediation — advisory-only correctness/integrity layer.
+    # Scores/records only; no broker execution, no order placement, no API
+    # trading writes.
+    "money",          # money.py (L1) — Decimal-faithful money parsing for the
+                      # manual-trade journal; replaces lossy float at the boundary
+    "idempotency",    # idempotency.py (L3) — Idempotency-Key dedupe cache for
+                      # POST /manual-trades; prevents double-logged journal rows
 )
 
 # Explicit allowlist for individual files / directories whose name does

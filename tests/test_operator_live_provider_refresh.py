@@ -44,24 +44,41 @@ class _FakeResponse:
 
 
 class _FakeRequests:
+    # NOTE: timestamps are computed RELATIVE to now so the freshness-uplift
+    # windows (sec_edgar 60d, gdelt 48h) hold no matter what wall-clock date
+    # the suite runs on.  The previous hardcoded absolute dates
+    # (2026-05-22 / 20260524T...) were a date-bomb: once "now" drifted >48h
+    # past the gdelt seendate, gdelt fell out of the fresh-uplift window and
+    # LPQ dropped 8.6 -> 8.45.  This is a TEST-DATA fix; the production
+    # lpq_uplift_score freshness logic and the 8.6 threshold are unchanged.
     @staticmethod
     def get(url, params=None, headers=None, timeout=None):
+        from datetime import datetime, timedelta, timezone
+
+        now = datetime.now(timezone.utc)
         if "sec.gov" in url:
+            recent = now - timedelta(days=5)  # well within the 60-day window
+            older = now - timedelta(days=7)
             return _FakeResponse({
                 "filings": {"recent": {
                     "form": ["10-K", "8-K"],
-                    "filingDate": ["2026-05-22", "2026-05-20"],
+                    "filingDate": [
+                        recent.strftime("%Y-%m-%d"),
+                        older.strftime("%Y-%m-%d"),
+                    ],
                     "accessionNumber": ["x1", "x2"],
                 }}
             })
         if "gdelt" in url:
+            seen_a = (now - timedelta(hours=1)).strftime("%Y%m%dT%H%M%SZ")
+            seen_b = (now - timedelta(hours=3)).strftime("%Y%m%dT%H%M%SZ")
             return _FakeResponse({"articles": [
                 {"url": "https://news.example.com/a",
                  "title": "Markets rally",
-                 "seendate": "20260524T120000Z"},
+                 "seendate": seen_a},
                 {"url": "https://news.example.com/b",
                  "title": "Inflation data",
-                 "seendate": "20260524T100000Z"},
+                 "seendate": seen_b},
             ]})
         return _FakeResponse({})
 

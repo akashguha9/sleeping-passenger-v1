@@ -120,6 +120,16 @@ DEFAULT_LOG_CANCEL_REASON: str = (
 # reconciliation_queue.py and learning_completeness_report.py.
 MANUAL_TRADE_LOG_PROVENANCE: str = "manual_trade_log"
 
+# Synthetic test-fixture markers that have no legitimate workflow at the
+# manual-trade endpoint.  Used both by ``log_manual_trade`` (defence in
+# depth) and by the api_server POST boundary (S9), which rejects an
+# explicit synthetic-identity claim BEFORE server-stamping logged_by.
+# ``paper_ledger_import`` is intentionally NOT here — paper imports are a
+# legitimate non-UI workflow.
+SYNTHETIC_LOGGED_BY_MARKERS: frozenset[str] = frozenset(
+    {"seed", "demo", "smoke_test", "smoke", "fixture", "mock", "sample", "calibration_seed"}
+)
+
 
 # ---------------------------------------------------------------------------
 # Dataclasses
@@ -1275,9 +1285,10 @@ def log_manual_trade(
 
     # Synthetic test-fixture markers that have no legitimate workflow.
     # (paper_ledger_import is intentionally absent — see note above.)
-    _LOGGED_BY_HARD_REJECT: frozenset[str] = frozenset(
-        {"seed", "demo", "smoke_test", "smoke", "fixture", "mock", "sample", "calibration_seed"}
-    )
+    # Promoted to module-level SYNTHETIC_LOGGED_BY_MARKERS so the HTTP
+    # boundary (S9 server-stamping in api_server) can reject these BEFORE
+    # it overwrites logged_by, keeping a single source of truth.
+    _LOGGED_BY_HARD_REJECT = SYNTHETIC_LOGGED_BY_MARKERS
 
     _thesis_norm = str(thesis or "").strip().lower()
     if _thesis_norm in PROBE_THESIS_VALUES:

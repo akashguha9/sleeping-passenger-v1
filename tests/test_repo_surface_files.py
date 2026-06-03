@@ -18,5 +18,13 @@ def test_requirements_manifest_exists_with_minimal_runtime_dependencies() -> Non
     assert requirements_path.exists()
     body = requirements_path.read_text(encoding="utf-8")
 
-    assert "pytest" in body
+    # Runtime-only manifest still carries the genuine runtime deps.
     assert "yfinance" in body
+    # S4 (completed): pytest is a TEST-ONLY dependency.  It must NOT appear
+    # in the runtime requirements.txt (it leaked CVE-2025-71176 into the
+    # prod image/manifest and tripped pip-audit).  It now lives in
+    # requirements-dev.txt only.
+    assert "pytest" not in body
+    dev_path = REPO_ROOT / "requirements-dev.txt"
+    assert dev_path.exists()
+    assert "pytest" in dev_path.read_text(encoding="utf-8")

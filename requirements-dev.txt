@@ -8,6 +8,10 @@
 
 -r requirements.txt
 
+# S4 (completes): pytest is a TEST-ONLY dependency — it must not ship in
+# the runtime requirements.txt or the prod image.  Pinned to >=9.0.3 to
+# clear CVE-2025-71176.
+pytest>=9.0.3,<10
 fastapi>=0.110,<1
 uvicorn>=0.27,<1
 pydantic>=2.6,<3

@@ -966,10 +966,17 @@ class ReconciliationAutoUpdateBody(BaseModel):
 def health() -> dict:
     """D2 fix: minimal unauthenticated liveness probe.
 
-    Discloses ONLY status + version + advisory invariants.  No environment
-    label, no DB path, no security-posture flags.  Operators that need the
-    posture details should hit /health/full with the bearer token.
+    Discloses ONLY benign operational fields: status, version, advisory
+    invariants, a boolean ``db_available`` (does the journal exist?), and
+    a ``generated_at`` timestamp.
+
+    Deliberately withholds SENSITIVE security posture — environment tag,
+    db_path, api_token_required, allowed_origins_count, rate_limit_enabled,
+    max_request_bytes, security_headers_enabled.  Those live on the
+    token-gated /health/full (D2: don't leak posture to unauth probes).
     """
+    from datetime import datetime, timezone
+
     return {
         "status": "ok",
         "advisory_status": _ADVISORY_STATUS,
@@ -980,6 +987,11 @@ def health() -> dict:
         "broker_order_id": "NONE",
         "human_review_required": True,
         "version": _VERSION,
+        # Benign operational fields — safe for an unauth uptime probe.
+        "db_available": db_available(),
+        "generated_at": datetime.now(timezone.utc)
+        .replace(microsecond=0)
+        .isoformat(),
     }
 
 
@@ -1193,6 +1205,31 @@ def post_manual_trade(
         if cached is not None:
             cached.setdefault("idempotent_replay", True)
             return cached
+
+    # S9 ordering: reject an EXPLICIT synthetic-identity claim (smoke_test,
+    # seed, fixture, …) at the boundary BEFORE we stamp the server identity.
+    # Rationale: such a request is test/automation traffic hitting a
+    # production endpoint — we refuse it loudly with a clear logged_by
+    # message rather than silently relabelling it as a real operator action.
+    # Only legitimate submissions proceed to the server-identity stamp.
+    try:
+        from scripts.signal_inbox_api import SYNTHETIC_LOGGED_BY_MARKERS as _SYNTH_MARKERS
+    except ModuleNotFoundError:  # pragma: no cover
+        from signal_inbox_api import SYNTHETIC_LOGGED_BY_MARKERS as _SYNTH_MARKERS  # type: ignore
+    if str(body.logged_by or "").strip().lower() in _SYNTH_MARKERS:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "message": "logged_by names a test/fixture source; not an explicit user action",
+                "reason": "synthetic_logged_by_rejected",
+                "broker_api_called": False,
+                "ai_execution_count": _AI_EXECUTION_COUNT,
+                "execution_gate": "LOCKED",
+                "execution_permission": False,
+                "can_execute": False,
+                "record_keeping_only": True,
+            },
+        )
 
     # S9 fix: derive ``logged_by`` from the server's view of the caller,
     # never trust the client.  Single shared token means we cannot identify

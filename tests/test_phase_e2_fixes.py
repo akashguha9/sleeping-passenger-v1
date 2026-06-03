@@ -137,12 +137,34 @@ def seed_mod():
 # A. CORS origin tests
 # ---------------------------------------------------------------------------
 
+# S7: the sleepingpassenger* hostnames were REMOVED from the default CORS
+# allowlist (a hosts-file remap could turn them into a trusted scripting
+# surface).  They are now opt-in only via ALLOWED_ORIGINS.  These tests are
+# inverted to pin the new secure default + the opt-in path.
+def _origins_with_env(value: str) -> list[str]:
+    import os
+    saved = os.environ.get("ALLOWED_ORIGINS")
+    os.environ["ALLOWED_ORIGINS"] = value
+    try:
+        from scripts.runtime_config import get_allowed_origins
+        return list(get_allowed_origins())
+    finally:
+        if saved is None:
+            os.environ.pop("ALLOWED_ORIGINS", None)
+        else:
+            os.environ["ALLOWED_ORIGINS"] = saved
+
+
 def test_cors_sleepingpassenger(cors_origins):
-    assert "http://sleepingpassenger" in cors_origins
+    # S7: absent from defaults...
+    assert "http://sleepingpassenger" not in cors_origins
+    # ...but available when the operator explicitly opts in.
+    assert "http://sleepingpassenger" in _origins_with_env("http://sleepingpassenger")
 
 
 def test_cors_sleepingpassenger_local(cors_origins):
-    assert "http://sleepingpassenger.local" in cors_origins
+    # S7: absent from defaults.
+    assert "http://sleepingpassenger.local" not in cors_origins
 
 
 def test_cors_localhost_3000(cors_origins):
@@ -154,11 +176,13 @@ def test_cors_127_0_0_1_3000(cors_origins):
 
 
 def test_cors_sleepingpassenger_port80(cors_origins):
-    assert "http://sleepingpassenger:80" in cors_origins
+    # S7: absent from defaults.
+    assert "http://sleepingpassenger:80" not in cors_origins
 
 
 def test_cors_sleepingpassenger_local_port80(cors_origins):
-    assert "http://sleepingpassenger.local:80" in cors_origins
+    # S7: absent from defaults.
+    assert "http://sleepingpassenger.local:80" not in cors_origins
 
 
 def test_cors_no_wildcard(cors_origins):

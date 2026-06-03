@@ -179,9 +179,16 @@ def test_rate_limiter_disabled_allows_burst(monkeypatch):
 
 
 def test_health_reports_security_posture(fresh_app):
-    """/health should surface rate_limit_enabled and security_headers_enabled."""
+    """D2: security posture now lives on the token-gated /health/full, not
+    the unauth /health probe.  fresh_app sets no token + loopback bind, so
+    /health/full is open here."""
     _, client = fresh_app
-    r = client.get("/health")
+    # The unauth probe must NOT leak posture flags.
+    minimal = client.get("/health").json()
+    for leaked in ("rate_limit_enabled", "max_request_bytes", "security_headers_enabled"):
+        assert leaked not in minimal, f"D2 regression: {leaked} on unauth /health"
+    # Full posture is reported on /health/full.
+    r = client.get("/health/full")
     body = r.json()
     assert "rate_limit_enabled" in body
     assert "max_request_bytes" in body

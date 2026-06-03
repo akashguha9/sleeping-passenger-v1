@@ -60,52 +60,72 @@ def test_health_safety_stamps_locked(client_default):
     assert data["human_review_required"] is True
 
 
+# D2: ``environment`` is SENSITIVE posture — moved off the unauth /health
+# probe onto the token-gated /health/full.  No token + loopback bind =>
+# /health/full is open, so no auth header needed for client_default.
 def test_health_default_environment(client_default):
-    data = client_default.get("/health").json()
+    data = client_default.get("/health/full").json()
     assert data["environment"] == "local"
+    # /health must NOT leak the environment tag.
+    assert "environment" not in client_default.get("/health").json()
 
 
+# D2: ``api_token_required`` is SENSITIVE posture — /health/full only.
 def test_health_reports_token_not_required_by_default(client_default):
-    data = client_default.get("/health").json()
+    data = client_default.get("/health/full").json()
     assert data["api_token_required"] is False
+    assert "api_token_required" not in client_default.get("/health").json()
 
 
 def test_health_db_fields_present(client_default):
-    data = client_default.get("/health").json()
-    assert "db_available" in data
-    assert "db_path" in data
+    # db_available is BENIGN operational — stays on the unauth /health.
+    health = client_default.get("/health").json()
+    assert "db_available" in health
+    # D2: db_path is SENSITIVE (filesystem layout) — /health/full only.
+    full = client_default.get("/health/full").json()
+    assert "db_path" not in health
+    assert "db_path" in full
     # db_path must be a string and must not be empty
-    assert isinstance(data["db_path"], str)
-    assert data["db_path"].strip()
+    assert isinstance(full["db_path"], str)
+    assert full["db_path"].strip()
     # db_path must NEVER leak the user's home directory or absolute path
-    assert "C:\\Users" not in data["db_path"]
-    assert "/Users/" not in data["db_path"]
+    assert "C:\\Users" not in full["db_path"]
+    assert "/Users/" not in full["db_path"]
 
 
+# D2: allowed_origins_count is SENSITIVE posture — /health/full only.
 def test_health_allowed_origins_count_is_int(client_default):
-    data = client_default.get("/health").json()
+    data = client_default.get("/health/full").json()
     assert isinstance(data["allowed_origins_count"], int)
     assert data["allowed_origins_count"] >= 1
 
 
+# generated_at is BENIGN operational — kept on the unauth /health.
 def test_health_generated_at_present(client_default):
     data = client_default.get("/health").json()
     assert "generated_at" in data
     assert data["generated_at"].endswith("+00:00") or data["generated_at"].endswith("Z")
 
 
+# D2: token set => /health/full requires the Bearer token.
 def test_health_reports_token_required_when_set(client_with_env):
-    data = client_with_env.get("/health").json()
+    data = client_with_env.get(
+        "/health/full", headers={"Authorization": "Bearer tkn"}
+    ).json()
     assert data["api_token_required"] is True
 
 
 def test_health_reports_custom_environment(client_with_env):
-    data = client_with_env.get("/health").json()
+    data = client_with_env.get(
+        "/health/full", headers={"Authorization": "Bearer tkn"}
+    ).json()
     assert data["environment"] == "ci-test"
 
 
 def test_health_reports_custom_allowed_origins_count(client_with_env):
-    data = client_with_env.get("/health").json()
+    data = client_with_env.get(
+        "/health/full", headers={"Authorization": "Bearer tkn"}
+    ).json()
     assert data["allowed_origins_count"] == 3
 
 

@@ -130,13 +130,18 @@ def test_contract_health(client) -> None:
     r = client.get("/health")
     assert r.status_code == 200
     body = r.json()
+    # Benign operational fields stay on the unauth /health probe.
     for k in (
         "status", "advisory_status", "execution_mode", "execution_gate",
         "ai_execution_count", "broker_api_called", "broker_order_id",
         "human_review_required", "version", "db_available",
-        "api_token_required",
     ):
         assert k in body, f"/health missing key {k}"
+    # D2: api_token_required is SENSITIVE posture — must NOT leak on the
+    # unauth probe; it lives on the token-gated /health/full instead.
+    assert "api_token_required" not in body
+    full = client.get("/health/full").json()
+    assert "api_token_required" in full
     _assert_advisory_stamps(body)
     _assert_safe_response_text(r.text)
 

@@ -230,10 +230,10 @@ def test_d2_health_is_minimal(monkeypatch):
     r = client.get("/health")
     assert r.status_code == 200
     body = r.json()
+    # D2 (corrected): SENSITIVE posture must NOT leak on the unauth probe.
     for leak in (
         "environment",
         "db_path",
-        "db_available",
         "api_token_required",
         "rate_limit_enabled",
         "max_request_bytes",
@@ -241,5 +241,8 @@ def test_d2_health_is_minimal(monkeypatch):
         "allowed_origins_count",
     ):
         assert leak not in body, f"D2 regression: {leak} still on /health"
+    # BENIGN operational fields ARE expected on /health (liveness probe).
+    assert "db_available" in body
+    assert "generated_at" in body
     for k, v in ADVISORY_INVARIANTS.items():
         assert body.get(k) == v

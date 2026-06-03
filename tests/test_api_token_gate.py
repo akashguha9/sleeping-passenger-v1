@@ -94,7 +94,12 @@ def client_with_token(monkeypatch):
 def test_no_token_get_health_open(client_no_token):
     r = client_no_token.get("/health")
     assert r.status_code == 200
-    assert r.json()["api_token_required"] is False
+    # D2: api_token_required is SENSITIVE posture — now on /health/full,
+    # not the unauth probe.  No token + loopback => /health/full is open.
+    assert "api_token_required" not in r.json()
+    full = client_no_token.get("/health/full")
+    assert full.status_code == 200
+    assert full.json()["api_token_required"] is False
 
 
 def test_no_token_post_manual_trade_allowed(client_no_token):
@@ -112,9 +117,16 @@ def test_no_token_post_manual_trade_allowed(client_no_token):
 
 
 def test_with_token_get_health_still_open(client_with_token):
+    # Minimal /health stays open even when a token is configured.
     r = client_with_token.get("/health")
     assert r.status_code == 200
-    assert r.json()["api_token_required"] is True
+    assert "api_token_required" not in r.json()
+    # D2: posture reported on /health/full, which now requires the token.
+    full = client_with_token.get(
+        "/health/full", headers={"Authorization": "Bearer test-secret-token"}
+    )
+    assert full.status_code == 200
+    assert full.json()["api_token_required"] is True
 
 
 def test_with_token_post_without_header_rejected(client_with_token):
