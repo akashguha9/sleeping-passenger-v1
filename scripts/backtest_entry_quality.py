@@ -37,9 +37,11 @@ from typing import Any
 
 try:
     from scripts.entry_quality_gate import compute_entry_quality, load_entry_quality_config
+    from scripts.execution_cost_model import book_trade_cost, load_cost_config
     from scripts.runtime_common import REPO_ROOT
 except ModuleNotFoundError:  # pragma: no cover - script-style env
     from entry_quality_gate import compute_entry_quality, load_entry_quality_config
+    from execution_cost_model import book_trade_cost, load_cost_config
     from runtime_common import REPO_ROOT
 
 
@@ -277,6 +279,9 @@ def walk_position(
     candles_after_buy: list[dict[str, Any]],
     buy_price: float,
     assumptions: dict[str, float],
+    *,
+    market: str | None = None,
+    cost_config: dict[str, dict[str, float]] | None = None,
 ) -> dict[str, Any]:
     """Replay TP1 / TP2 / runner / stop using true daily highs and lows.
 
@@ -352,12 +357,59 @@ def walk_position(
         else:
             result, status = "Open +", "Flat"
 
+    # ---- Per-fill execution cost model -------------------------------------
+    # Build the leg ledger that was ACTUALLY filled, then charge each leg its
+    # own commission + minimum + exchange fee + half-spread + slippage, plus
+    # a one-time FX round-trip on the lifecycle. This is the C3 fix: a
+    # winner produces 3 commissioned exits, not 1.
+    alloc = float(assumptions.get("alloc_eur", 50.0))
+    tp1_book = assumptions["tp1_book"]; tp2_book = assumptions["tp2_book"]
+    runner_frac = assumptions["runner"]
+    legs: list[tuple[str, float]] = [("BUY", 1.0)]
+    # Each TP that hit was its own commissioned exit, regardless of whether
+    # the trade subsequently stopped on the remainder.
+    if tp1_hit:
+        legs.append(("SELL", tp1_book))
+    if tp2_hit:
+        legs.append(("SELL", tp2_book))
+    if stopped:
+        # The stop closes the remaining open fraction at -5% in one fill.
+        sold_at_tps = (tp1_book if tp1_hit else 0.0) + (tp2_book if tp2_hit else 0.0)
+        remainder = 1.0 - sold_at_tps
+        if remainder > 1e-9:
+            legs.append(("SELL", remainder))
+    else:
+        # The runner / unsold portion is marked, not sold, unless the operator
+        # closes at as-of. Charge a runner-leg cost so the mark is realistic
+        # if/when the position is exited; otherwise we'd be reporting net P/L
+        # that ignores the inevitable exit cost.
+        if open_fraction > 1e-9:
+            legs.append(("SELL", open_fraction))
+    cost = None
+    cost_eur = 0.0
+    if market:
+        cost = book_trade_cost(
+            alloc_eur=alloc, market=market, leg_fractions=legs,
+            config=cost_config,
+        )
+        cost_eur = cost.total_eur
+
+    strategy_pl_pct_gross = realized + unrealized
+    pl_eur_gross = alloc * strategy_pl_pct_gross
+    pl_eur_net = pl_eur_gross - cost_eur
+    pl_pct_net = pl_eur_net / alloc if alloc else 0.0
+
     return {
         "result_real": result,
         "status_real": status,
         "realized_pct": round(realized, 6),
         "unrealized_pct": round(unrealized, 6),
-        "strategy_pl_pct_real": round(realized + unrealized, 6),
+        "strategy_pl_pct_real": round(strategy_pl_pct_gross, 6),
+        "strategy_pl_eur_real_gross": round(pl_eur_gross, 4),
+        "strategy_pl_eur_real_net": round(pl_eur_net, 4),
+        "strategy_pl_pct_real_net": round(pl_pct_net, 6),
+        "execution_cost_eur": round(cost_eur, 4),
+        "execution_cost_detail": cost.as_dict() if cost else None,
         "max_gain_real": round(max_gain, 6),
         "max_draw_real": round(max_draw, 6),
         "tp1_hit": tp1_hit, "tp2_hit": tp2_hit, "stopped": stopped,
@@ -385,20 +437,33 @@ def aggregate_metrics(rows: list[dict[str, Any]], pl_key: str, status_key: str) 
     pf = (sum(wins) / -sum(losses)) if losses and sum(losses) < 0 else None
     tp1_touch = sum(1 for r in rows if r.get("tp1_hit"))
     stop_touch = sum(1 for r in rows if r.get("stopped"))
+    # Net-of-cost expectancy (per-position EUR / alloc EUR). Computed only
+    # when cost rows are populated.
+    net_pl_eur = [r.get("strategy_pl_eur_real_net") for r in rows]
+    net_pl_eur = [x for x in net_pl_eur if isinstance(x, (int, float))]
+    cost_eur = [r.get("execution_cost_eur") for r in rows]
+    cost_eur = [x for x in cost_eur if isinstance(x, (int, float))]
     return {
         "n_total": len(rows),
         "n_moved": n,
         "n_wins": len(wins),
         "n_losses": len(losses),
         "win_rate": round(win_rate, 4),
-        "avg_win_pct": round(avg_win, 6),
-        "avg_loss_pct": round(avg_loss, 6),
-        "expectancy_per_trade": round(expectancy, 6),
-        "profit_factor": round(pf, 4) if pf is not None else None,
+        "avg_win_pct_gross": round(avg_win, 6),
+        "avg_loss_pct_gross": round(avg_loss, 6),
+        "expectancy_per_trade_gross_pct": round(expectancy, 6),
+        "expectancy_per_trade_net_eur": (
+            round(sum(net_pl_eur) / len(net_pl_eur), 4) if net_pl_eur else None
+        ),
+        "avg_cost_per_trade_eur": (
+            round(sum(cost_eur) / len(cost_eur), 4) if cost_eur else None
+        ),
+        "profit_factor_gross": round(pf, 4) if pf is not None else None,
         "tp1_touch_count": tp1_touch,
         "tp1_touch_rate": round(tp1_touch / len(rows), 4) if rows else None,
         "stop_touch_count": stop_touch,
         "stop_touch_rate": round(stop_touch / len(rows), 4) if rows else None,
+        "_caveat": "All in-sample. n is tiny, regime-bound; directional only.",
     }
 
 
@@ -416,6 +481,7 @@ def metrics_with_gate(rows: list[dict[str, Any]]) -> dict[str, Any]:
 def build_report(xlsx: Path, as_of: date) -> dict[str, Any]:
     assumptions, positions = parse_backtest_xlsx(xlsx)
     cfg = load_entry_quality_config()
+    cost_cfg = load_cost_config()
     rows: list[dict[str, Any]] = []
     index_cache: dict[str, list[dict[str, Any]]] = {}
     universe_mom_20d_by_date: dict[str, list[float]] = {}
@@ -492,7 +558,10 @@ def build_report(xlsx: Path, as_of: date) -> dict[str, Any]:
             config=cfg,
         )
 
-        walk = walk_position(after, p["buy_price"], assumptions)
+        walk = walk_position(
+            after, p["buy_price"], assumptions,
+            market=country, cost_config=cost_cfg,
+        )
 
         rows.append({
             "ticker": p["ticker"],
@@ -517,6 +586,22 @@ def build_report(xlsx: Path, as_of: date) -> dict[str, Any]:
 
     overall = aggregate_metrics(rows, "strategy_pl_pct_real", "status_real")
     after_gate = metrics_with_gate(rows)
+    # Per-market net expectancy: shows where round-trip cost exceeds the
+    # gross per-trade edge (the C3 finding's per-market test).
+    by_market: dict[str, dict[str, Any]] = {}
+    for r in rows:
+        m = r.get("country") or "?"
+        by_market.setdefault(m, {"n": 0, "gross_eur": 0.0, "net_eur": 0.0, "cost_eur": 0.0})
+        by_market[m]["n"] += 1
+        by_market[m]["gross_eur"] += float(r.get("strategy_pl_eur_real_gross") or 0.0)
+        by_market[m]["net_eur"] += float(r.get("strategy_pl_eur_real_net") or 0.0)
+        by_market[m]["cost_eur"] += float(r.get("execution_cost_eur") or 0.0)
+    for m, agg in by_market.items():
+        n = agg["n"] or 1
+        agg["avg_gross_eur"] = round(agg["gross_eur"] / n, 4)
+        agg["avg_net_eur"] = round(agg["net_eur"] / n, 4)
+        agg["avg_cost_eur"] = round(agg["cost_eur"] / n, 4)
+        agg["cost_exceeds_gross"] = agg["avg_cost_eur"] > max(agg["avg_gross_eur"], 0.0)
     return {
         "as_of": as_of.isoformat(),
         "xlsx_source": str(xlsx),
@@ -533,6 +618,7 @@ def build_report(xlsx: Path, as_of: date) -> dict[str, Any]:
         ],
         "metrics_real_all_positions": overall,
         "metrics_real_after_gate":   after_gate,
+        "metrics_by_market":          by_market,
         "no_data_symbols": no_data,
         "no_data_indexes": no_data_index,
         "rows": rows,

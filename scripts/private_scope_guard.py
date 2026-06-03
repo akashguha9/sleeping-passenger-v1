@@ -141,6 +141,11 @@ APPROVED_DOMAINS: tuple[str, ...] = (
                         # real daily OHLCV.
     "diversification",  # portfolio_diversification_cap.py — per-day country /
                         # sector tiebreaker applied to already-ranked candidates.
+    "execution_cost",   # execution_cost_model.py — pure per-fill, per-market
+                        # cost model (commission + minimum + exchange/regulatory
+                        # fees + half-spread + slippage + FX RT). Consumed by
+                        # backtest_entry_quality.walk_position to report
+                        # gross+net P/L. No broker calls, no order placement.
     # Daily fresh-data sprint — advisory-only payload builders + scoring signals
     # that feed (never execute) the five-model synthesis. Scores/gates only; no
     # broker execution, no order placement, no API trading writes.
