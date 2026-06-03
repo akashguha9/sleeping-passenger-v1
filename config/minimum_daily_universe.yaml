@@ -15,54 +15,208 @@
 
 buckets:
   US_MEGA_CAP:
-    - {ticker: AAPL,  name: "Apple Inc.",            market: US, country: "United States", asset_type: equity, default_risk_band: core, notes: "Mega-cap tech bellwether"}
-    - {ticker: MSFT,  name: "Microsoft Corp",        market: US, country: "United States", asset_type: equity, default_risk_band: core, notes: "Mega-cap software/AI"}
-    - {ticker: NVDA,  name: "NVIDIA Corp",           market: US, country: "United States", asset_type: equity, default_risk_band: core, notes: "AI/semiconductor leadership"}
-    - {ticker: AMZN,  name: "Amazon.com Inc.",       market: US, country: "United States", asset_type: equity, default_risk_band: core, notes: "Consumer/cloud mega-cap"}
-    - {ticker: META,  name: "Meta Platforms",        market: US, country: "United States", asset_type: equity, default_risk_band: core, notes: "Ad/AI mega-cap"}
-    - {ticker: GOOGL, name: "Alphabet Inc.",         market: US, country: "United States", asset_type: equity, default_risk_band: core, notes: "Search/AI mega-cap"}
-    - {ticker: TSLA,  name: "Tesla Inc.",            market: US, country: "United States", asset_type: equity, default_risk_band: high_beta, notes: "High-beta EV/AI"}
+    - {ticker: AAPL,  name: "Apple Inc.",            market: US, country: "United States", sector: Tech,           asset_type: equity, default_risk_band: core, notes: "Mega-cap tech bellwether"}
+    - {ticker: MSFT,  name: "Microsoft Corp",        market: US, country: "United States", sector: Tech,           asset_type: equity, default_risk_band: core, notes: "Mega-cap software/AI"}
+    - {ticker: NVDA,  name: "NVIDIA Corp",           market: US, country: "United States", sector: Semis,          asset_type: equity, default_risk_band: core, notes: "AI/semiconductor leadership"}
+    - {ticker: AMZN,  name: "Amazon.com Inc.",       market: US, country: "United States", sector: Discretionary,  asset_type: equity, default_risk_band: core, notes: "Consumer/cloud mega-cap"}
+    - {ticker: META,  name: "Meta Platforms",        market: US, country: "United States", sector: Tech,           asset_type: equity, default_risk_band: core, notes: "Ad/AI mega-cap"}
+    - {ticker: GOOGL, name: "Alphabet Inc.",         market: US, country: "United States", sector: Tech,           asset_type: equity, default_risk_band: core, notes: "Search/AI mega-cap"}
+    - {ticker: TSLA,  name: "Tesla Inc.",            market: US, country: "United States", sector: Autos,          asset_type: equity, default_risk_band: high_beta, notes: "High-beta EV/AI"}
   DEFENSE:
-    - {ticker: RTX, name: "RTX Corp",                market: US, country: "United States", asset_type: equity, default_risk_band: core, notes: "Defense/geopolitical sensitivity"}
-    - {ticker: LMT, name: "Lockheed Martin",         market: US, country: "United States", asset_type: equity, default_risk_band: core, notes: "Defense prime"}
-    - {ticker: NOC, name: "Northrop Grumman",        market: US, country: "United States", asset_type: equity, default_risk_band: core, notes: "Defense prime"}
-    - {ticker: GD,  name: "General Dynamics",        market: US, country: "United States", asset_type: equity, default_risk_band: core, notes: "Defense prime"}
-    - {ticker: LHX, name: "L3Harris Technologies",   market: US, country: "United States", asset_type: equity, default_risk_band: core, notes: "Defense/comms"}
+    - {ticker: RTX, name: "RTX Corp",                market: US, country: "United States", sector: Defense, asset_type: equity, default_risk_band: core, notes: "Defense/geopolitical sensitivity"}
+    - {ticker: LMT, name: "Lockheed Martin",         market: US, country: "United States", sector: Defense, asset_type: equity, default_risk_band: core, notes: "Defense prime"}
+    - {ticker: NOC, name: "Northrop Grumman",        market: US, country: "United States", sector: Defense, asset_type: equity, default_risk_band: core, notes: "Defense prime"}
+    - {ticker: GD,  name: "General Dynamics",        market: US, country: "United States", sector: Defense, asset_type: equity, default_risk_band: core, notes: "Defense prime"}
+    - {ticker: LHX, name: "L3Harris Technologies",   market: US, country: "United States", sector: Defense, asset_type: equity, default_risk_band: core, notes: "Defense/comms"}
   ENERGY:
-    - {ticker: XOM,  name: "Exxon Mobil",            market: US, country: "United States",  asset_type: equity, default_risk_band: core, notes: "Integrated oil major"}
-    - {ticker: CVX,  name: "Chevron Corp",           market: US, country: "United States",  asset_type: equity, default_risk_band: core, notes: "Integrated oil major"}
-    - {ticker: SHEL, name: "Shell plc (ADR)",        market: US, country: "United Kingdom", asset_type: equity, default_risk_band: core, notes: "Oil major ADR"}
-    - {ticker: TTE,  name: "TotalEnergies (ADR)",    market: US, country: "France",         asset_type: equity, default_risk_band: core, notes: "Oil major ADR"}
-    - {ticker: BP,   name: "BP plc (ADR)",           market: US, country: "United Kingdom", asset_type: equity, default_risk_band: core, notes: "Oil major ADR"}
+    - {ticker: XOM,  name: "Exxon Mobil",            market: US, country: "United States",  sector: Energy, asset_type: equity, default_risk_band: core, notes: "Integrated oil major"}
+    - {ticker: CVX,  name: "Chevron Corp",           market: US, country: "United States",  sector: Energy, asset_type: equity, default_risk_band: core, notes: "Integrated oil major"}
+    - {ticker: SHEL, name: "Shell plc (ADR)",        market: US, country: "United Kingdom", sector: Energy, asset_type: equity, default_risk_band: core, notes: "Oil major ADR"}
+    - {ticker: TTE,  name: "TotalEnergies (ADR)",    market: US, country: "France",         sector: Energy, asset_type: equity, default_risk_band: core, notes: "Oil major ADR"}
+    - {ticker: BP,   name: "BP plc (ADR)",           market: US, country: "United Kingdom", sector: Energy, asset_type: equity, default_risk_band: core, notes: "Oil major ADR"}
   SEMIS:
-    - {ticker: TSM,  name: "Taiwan Semiconductor (ADR)", market: US, country: "Taiwan",      asset_type: equity, default_risk_band: core, notes: "Foundry leader ADR"}
-    - {ticker: ASML, name: "ASML Holding (ADR)",     market: US, country: "Netherlands",     asset_type: equity, default_risk_band: core, notes: "EUV litho ADR"}
-    - {ticker: AMD,  name: "Advanced Micro Devices", market: US, country: "United States",   asset_type: equity, default_risk_band: core, notes: "CPU/GPU"}
-    - {ticker: AVGO, name: "Broadcom Inc.",          market: US, country: "United States",   asset_type: equity, default_risk_band: core, notes: "Semis/networking"}
-    - {ticker: INTC, name: "Intel Corp",             market: US, country: "United States",   asset_type: equity, default_risk_band: core, notes: "CPU/foundry turnaround"}
-    - {ticker: MU,   name: "Micron Technology",      market: US, country: "United States",   asset_type: equity, default_risk_band: core, notes: "Memory cycle"}
+    - {ticker: TSM,  name: "Taiwan Semiconductor (ADR)", market: US, country: "Taiwan",      sector: Semis, asset_type: equity, default_risk_band: core, notes: "Foundry leader ADR"}
+    - {ticker: ASML, name: "ASML Holding (ADR)",     market: US, country: "Netherlands",     sector: Semis, asset_type: equity, default_risk_band: core, notes: "EUV litho ADR"}
+    - {ticker: AMD,  name: "Advanced Micro Devices", market: US, country: "United States",   sector: Semis, asset_type: equity, default_risk_band: core, notes: "CPU/GPU"}
+    - {ticker: AVGO, name: "Broadcom Inc.",          market: US, country: "United States",   sector: Semis, asset_type: equity, default_risk_band: core, notes: "Semis/networking"}
+    - {ticker: INTC, name: "Intel Corp",             market: US, country: "United States",   sector: Semis, asset_type: equity, default_risk_band: core, notes: "CPU/foundry turnaround"}
+    - {ticker: MU,   name: "Micron Technology",      market: US, country: "United States",   sector: Semis, asset_type: equity, default_risk_band: core, notes: "Memory cycle"}
   INDIA_LARGE_CAP:
-    - {ticker: RELIANCE.NS,   name: "Reliance Industries",          market: India, country: India, asset_type: equity, default_risk_band: core, notes: "India conglomerate"}
-    - {ticker: HDFCBANK.NS,   name: "HDFC Bank",                    market: India, country: India, asset_type: equity, default_risk_band: core, notes: "India private bank"}
-    - {ticker: ICICIBANK.NS,  name: "ICICI Bank",                   market: India, country: India, asset_type: equity, default_risk_band: core, notes: "India private bank"}
-    - {ticker: BHARTIARTL.NS, name: "Bharti Airtel",                market: India, country: India, asset_type: equity, default_risk_band: core, notes: "India telecom"}
-    - {ticker: INFY.NS,       name: "Infosys",                      market: India, country: India, asset_type: equity, default_risk_band: core, notes: "India IT services"}
-    - {ticker: TCS.NS,        name: "Tata Consultancy Services",    market: India, country: India, asset_type: equity, default_risk_band: core, notes: "India IT services"}
+    - {ticker: RELIANCE.NS,   name: "Reliance Industries",          market: India, country: India, sector: Conglomerates, asset_type: equity, default_risk_band: core, notes: "India conglomerate"}
+    - {ticker: HDFCBANK.NS,   name: "HDFC Bank",                    market: India, country: India, sector: Financials,    asset_type: equity, default_risk_band: core, notes: "India private bank"}
+    - {ticker: ICICIBANK.NS,  name: "ICICI Bank",                   market: India, country: India, sector: Financials,    asset_type: equity, default_risk_band: core, notes: "India private bank"}
+    - {ticker: BHARTIARTL.NS, name: "Bharti Airtel",                market: India, country: India, sector: Telecom,       asset_type: equity, default_risk_band: core, notes: "India telecom"}
+    - {ticker: INFY.NS,       name: "Infosys",                      market: India, country: India, sector: Tech,          asset_type: equity, default_risk_band: core, notes: "India IT services"}
+    - {ticker: TCS.NS,        name: "Tata Consultancy Services",    market: India, country: India, sector: Tech,          asset_type: equity, default_risk_band: core, notes: "India IT services"}
   EUROPE_LARGE_CAP:
-    - {ticker: SAP.DE,  name: "SAP SE",         market: Germany,     country: Germany,     asset_type: equity, default_risk_band: core, notes: "EU enterprise software"}
-    - {ticker: ASML.AS, name: "ASML Holding",   market: Netherlands, country: Netherlands, asset_type: equity, default_risk_band: core, notes: "EUV litho (Amsterdam line)"}
-    - {ticker: SIE.DE,  name: "Siemens AG",     market: Germany,     country: Germany,     asset_type: equity, default_risk_band: core, notes: "EU industrials"}
-    - {ticker: RHM.DE,  name: "Rheinmetall AG", market: Germany,     country: Germany,     asset_type: equity, default_risk_band: core, notes: "EU defense/geopolitical"}
-    - {ticker: AIR.PA,  name: "Airbus SE",      market: France,      country: France,      asset_type: equity, default_risk_band: core, notes: "EU aerospace/defense"}
+    - {ticker: SAP.DE,  name: "SAP SE",         market: Germany,     country: Germany,     sector: Tech,        asset_type: equity, default_risk_band: core, notes: "EU enterprise software"}
+    - {ticker: ASML.AS, name: "ASML Holding",   market: Netherlands, country: Netherlands, sector: Semis,       asset_type: equity, default_risk_band: core, notes: "EUV litho (Amsterdam line)"}
+    - {ticker: SIE.DE,  name: "Siemens AG",     market: Germany,     country: Germany,     sector: Industrials, asset_type: equity, default_risk_band: core, notes: "EU industrials"}
+    - {ticker: RHM.DE,  name: "Rheinmetall AG", market: Germany,     country: Germany,     sector: Defense,     asset_type: equity, default_risk_band: core, notes: "EU defense/geopolitical"}
+    - {ticker: AIR.PA,  name: "Airbus SE",      market: France,      country: France,      sector: Defense,     asset_type: equity, default_risk_band: core, notes: "EU aerospace/defense"}
   MACRO_ETFS:
-    - {ticker: GLD,  name: "SPDR Gold Shares",          market: US, country: "United States", asset_type: etf, default_risk_band: macro_proxy, notes: "Gold safe-haven proxy"}
-    - {ticker: TLT,  name: "20+ Year Treasury ETF",     market: US, country: "United States", asset_type: etf, default_risk_band: macro_proxy, notes: "Long-duration proxy"}
-    - {ticker: TIP,  name: "TIPS Bond ETF",             market: US, country: "United States", asset_type: etf, default_risk_band: macro_proxy, notes: "Inflation-protected bonds proxy"}
-    - {ticker: EWG,  name: "Germany ETF",               market: US, country: "United States", asset_type: etf, default_risk_band: macro_proxy, notes: "Germany equity proxy"}
-    - {ticker: INDA, name: "India ETF",                 market: US, country: "United States", asset_type: etf, default_risk_band: macro_proxy, notes: "India equity proxy"}
-    - {ticker: FXI,  name: "China Large-Cap ETF",       market: US, country: "United States", asset_type: etf, default_risk_band: macro_proxy, notes: "China equity proxy"}
+    - {ticker: GLD,  name: "SPDR Gold Shares",          market: US, country: "United States", sector: MacroProxy, asset_type: etf, default_risk_band: macro_proxy, notes: "Gold safe-haven proxy"}
+    - {ticker: TLT,  name: "20+ Year Treasury ETF",     market: US, country: "United States", sector: MacroProxy, asset_type: etf, default_risk_band: macro_proxy, notes: "Long-duration proxy"}
+    - {ticker: TIP,  name: "TIPS Bond ETF",             market: US, country: "United States", sector: MacroProxy, asset_type: etf, default_risk_band: macro_proxy, notes: "Inflation-protected bonds proxy"}
+    - {ticker: EWG,  name: "Germany ETF",               market: US, country: "United States", sector: MacroProxy, asset_type: etf, default_risk_band: macro_proxy, notes: "Germany equity proxy"}
+    - {ticker: INDA, name: "India ETF",                 market: US, country: "United States", sector: MacroProxy, asset_type: etf, default_risk_band: macro_proxy, notes: "India equity proxy"}
+    - {ticker: FXI,  name: "China Large-Cap ETF",       market: US, country: "United States", sector: MacroProxy, asset_type: etf, default_risk_band: macro_proxy, notes: "China equity proxy"}
   HIGH_BETA_WATCH:
-    - {ticker: ZIM,  name: "ZIM Integrated Shipping",   market: US, country: "United States", asset_type: equity, default_risk_band: high_beta, notes: "High-beta shipping"}
-    - {ticker: ANET, name: "Arista Networks",           market: US, country: "United States", asset_type: equity, default_risk_band: high_beta, notes: "High-beta networking/AI"}
-    - {ticker: PLTR, name: "Palantir Technologies",     market: US, country: "United States", asset_type: equity, default_risk_band: high_beta, notes: "High-beta software"}
-    - {ticker: SMCI, name: "Super Micro Computer",      market: US, country: "United States", asset_type: equity, default_risk_band: high_beta, notes: "High-beta AI hardware"}
+    - {ticker: ZIM,  name: "ZIM Integrated Shipping",   market: US, country: "United States", sector: Industrials, asset_type: equity, default_risk_band: high_beta, notes: "High-beta shipping"}
+    - {ticker: ANET, name: "Arista Networks",           market: US, country: "United States", sector: Tech,        asset_type: equity, default_risk_band: high_beta, notes: "High-beta networking/AI"}
+    - {ticker: PLTR, name: "Palantir Technologies",     market: US, country: "United States", sector: Tech,        asset_type: equity, default_risk_band: high_beta, notes: "High-beta software"}
+    - {ticker: SMCI, name: "Super Micro Computer",      market: US, country: "United States", sector: Tech,        asset_type: equity, default_risk_band: high_beta, notes: "High-beta AI hardware"}
+
+  # --- DIRECT MARKETS (local exchange line on IBKR) ---------------------------
+  # yfinance symbols use the local-exchange suffix (.MI .MC .AS .BR .SW .ST .VI
+  # .WA .TO .AX .SI .L .T .KS). Seeded names verified for ticker syntax only —
+  # the operator-run backtest harness will flag any that returns no OHLCV with
+  # ``needs_provider_mapping`` so they're filtered out automatically.
+
+  UK_LARGE_CAP:
+    - {ticker: HSBA.L, name: "HSBC Holdings",         market: UK, country: "United Kingdom", sector: Financials, asset_type: equity, default_risk_band: core, notes: "UK global bank"}
+    - {ticker: AZN.L,  name: "AstraZeneca",           market: UK, country: "United Kingdom", sector: Healthcare, asset_type: equity, default_risk_band: core, notes: "UK pharma"}
+    - {ticker: SHEL.L, name: "Shell plc",             market: UK, country: "United Kingdom", sector: Energy,     asset_type: equity, default_risk_band: core, notes: "UK oil major (local line)"}
+    - {ticker: ULVR.L, name: "Unilever plc",          market: UK, country: "United Kingdom", sector: Staples,    asset_type: equity, default_risk_band: core, notes: "UK consumer staples"}
+    - {ticker: BP.L,   name: "BP plc",                market: UK, country: "United Kingdom", sector: Energy,     asset_type: equity, default_risk_band: core, notes: "UK oil major (local line)"}
+
+  JAPAN_LARGE_CAP:
+    - {ticker: 8306.T, name: "Mitsubishi UFJ Financial", market: Japan, country: Japan, sector: Financials, asset_type: equity, default_risk_band: core, notes: "JP mega-bank"}
+    - {ticker: 7203.T, name: "Toyota Motor",             market: Japan, country: Japan, sector: Autos,      asset_type: equity, default_risk_band: core, notes: "JP autos"}
+    - {ticker: 6758.T, name: "Sony Group",               market: Japan, country: Japan, sector: Tech,       asset_type: equity, default_risk_band: core, notes: "JP electronics/media"}
+    - {ticker: 9984.T, name: "SoftBank Group",           market: Japan, country: Japan, sector: Tech,       asset_type: equity, default_risk_band: high_beta, notes: "JP tech/holdings"}
+    - {ticker: 8035.T, name: "Tokyo Electron",           market: Japan, country: Japan, sector: Semis,      asset_type: equity, default_risk_band: core, notes: "JP semi equipment"}
+
+  KOREA_LARGE_CAP:
+    - {ticker: 005930.KS, name: "Samsung Electronics", market: Korea, country: "South Korea", sector: Tech,       asset_type: equity, default_risk_band: core, notes: "KR semis/electronics"}
+    - {ticker: 000660.KS, name: "SK Hynix",            market: Korea, country: "South Korea", sector: Semis,      asset_type: equity, default_risk_band: core, notes: "KR memory"}
+    - {ticker: 005380.KS, name: "Hyundai Motor",       market: Korea, country: "South Korea", sector: Autos,      asset_type: equity, default_risk_band: core, notes: "KR autos"}
+    - {ticker: 035420.KS, name: "Naver",               market: Korea, country: "South Korea", sector: Tech,       asset_type: equity, default_risk_band: core, notes: "KR internet"}
+    - {ticker: 035720.KS, name: "Kakao",               market: Korea, country: "South Korea", sector: Tech,       asset_type: equity, default_risk_band: high_beta, notes: "KR internet/platform"}
+
+  ITALY_LARGE_CAP:
+    - {ticker: ENI.MI,   name: "Eni SpA",              market: Italy, country: Italy, sector: Energy,     asset_type: equity, default_risk_band: core, notes: "IT oil major"}
+    - {ticker: ISP.MI,   name: "Intesa Sanpaolo",      market: Italy, country: Italy, sector: Financials, asset_type: equity, default_risk_band: core, notes: "IT bank"}
+    - {ticker: ENEL.MI,  name: "Enel",                 market: Italy, country: Italy, sector: Utilities,  asset_type: equity, default_risk_band: core, notes: "IT utility"}
+    - {ticker: STLAM.MI, name: "Stellantis",           market: Italy, country: Italy, sector: Autos,      asset_type: equity, default_risk_band: core, notes: "IT/EU autos"}
+    - {ticker: UCG.MI,   name: "UniCredit",            market: Italy, country: Italy, sector: Financials, asset_type: equity, default_risk_band: core, notes: "IT bank"}
+
+  SPAIN_LARGE_CAP:
+    - {ticker: SAN.MC,  name: "Banco Santander",       market: Spain, country: Spain, sector: Financials, asset_type: equity, default_risk_band: core, notes: "ES bank"}
+    - {ticker: IBE.MC,  name: "Iberdrola",             market: Spain, country: Spain, sector: Utilities,  asset_type: equity, default_risk_band: core, notes: "ES utility"}
+    - {ticker: BBVA.MC, name: "BBVA",                  market: Spain, country: Spain, sector: Financials, asset_type: equity, default_risk_band: core, notes: "ES bank"}
+    - {ticker: ITX.MC,  name: "Inditex",               market: Spain, country: Spain, sector: Discretionary, asset_type: equity, default_risk_band: core, notes: "ES apparel/retail"}
+    - {ticker: REP.MC,  name: "Repsol",                market: Spain, country: Spain, sector: Energy,     asset_type: equity, default_risk_band: core, notes: "ES oil major"}
+
+  NETHERLANDS_LARGE_CAP:
+    - {ticker: INGA.AS, name: "ING Groep",             market: Netherlands, country: Netherlands, sector: Financials,     asset_type: equity, default_risk_band: core, notes: "NL bank (ASML covered in EUROPE_LARGE_CAP)"}
+    - {ticker: HEIA.AS, name: "Heineken",              market: Netherlands, country: Netherlands, sector: Staples,        asset_type: equity, default_risk_band: core, notes: "NL beverages"}
+    - {ticker: AD.AS,   name: "Ahold Delhaize",        market: Netherlands, country: Netherlands, sector: Staples,        asset_type: equity, default_risk_band: core, notes: "NL grocer"}
+    - {ticker: PHIA.AS, name: "Philips",               market: Netherlands, country: Netherlands, sector: Healthcare,     asset_type: equity, default_risk_band: core, notes: "NL medtech"}
+    - {ticker: WKL.AS,  name: "Wolters Kluwer",        market: Netherlands, country: Netherlands, sector: Tech,           asset_type: equity, default_risk_band: core, notes: "NL information services"}
+
+  BELGIUM_LARGE_CAP:
+    - {ticker: ABI.BR,  name: "AB InBev",              market: Belgium, country: Belgium, sector: Staples,     asset_type: equity, default_risk_band: core, notes: "BE beverages"}
+    - {ticker: KBC.BR,  name: "KBC Group",             market: Belgium, country: Belgium, sector: Financials,  asset_type: equity, default_risk_band: core, notes: "BE bank/insurer"}
+    - {ticker: UCB.BR,  name: "UCB",                   market: Belgium, country: Belgium, sector: Healthcare,  asset_type: equity, default_risk_band: core, notes: "BE biopharma"}
+    - {ticker: SOLB.BR, name: "Solvay",                market: Belgium, country: Belgium, sector: Materials,   asset_type: equity, default_risk_band: core, notes: "BE chemicals"}
+    - {ticker: COLR.BR, name: "Colruyt",               market: Belgium, country: Belgium, sector: Staples,     asset_type: equity, default_risk_band: core, notes: "BE grocer"}
+
+  SWITZERLAND_LARGE_CAP:
+    - {ticker: NESN.SW, name: "Nestle",                market: Switzerland, country: Switzerland, sector: Staples,    asset_type: equity, default_risk_band: core, notes: "CH staples mega-cap"}
+    - {ticker: NOVN.SW, name: "Novartis",              market: Switzerland, country: Switzerland, sector: Healthcare, asset_type: equity, default_risk_band: core, notes: "CH pharma"}
+    - {ticker: ROG.SW,  name: "Roche Holding",         market: Switzerland, country: Switzerland, sector: Healthcare, asset_type: equity, default_risk_band: core, notes: "CH pharma"}
+    - {ticker: UBSG.SW, name: "UBS Group",             market: Switzerland, country: Switzerland, sector: Financials, asset_type: equity, default_risk_band: core, notes: "CH bank"}
+    - {ticker: ABBN.SW, name: "ABB",                   market: Switzerland, country: Switzerland, sector: Industrials,asset_type: equity, default_risk_band: core, notes: "CH industrials/electrification"}
+
+  SWEDEN_LARGE_CAP:
+    - {ticker: ERIC-B.ST, name: "Ericsson B",          market: Sweden, country: Sweden, sector: Tech,        asset_type: equity, default_risk_band: core, notes: "SE telecom equipment"}
+    - {ticker: HM-B.ST,   name: "H&M B",               market: Sweden, country: Sweden, sector: Discretionary, asset_type: equity, default_risk_band: core, notes: "SE apparel"}
+    - {ticker: VOLV-B.ST, name: "Volvo B",             market: Sweden, country: Sweden, sector: Industrials, asset_type: equity, default_risk_band: core, notes: "SE trucks/industrials"}
+    - {ticker: INVE-B.ST, name: "Investor B",          market: Sweden, country: Sweden, sector: Financials,  asset_type: equity, default_risk_band: core, notes: "SE holdings"}
+    - {ticker: ATCO-A.ST, name: "Atlas Copco A",       market: Sweden, country: Sweden, sector: Industrials, asset_type: equity, default_risk_band: core, notes: "SE industrials"}
+
+  AUSTRIA_LARGE_CAP:
+    - {ticker: EBS.VI, name: "Erste Group Bank",       market: Austria, country: Austria, sector: Financials,  asset_type: equity, default_risk_band: core, notes: "AT bank"}
+    - {ticker: VOE.VI, name: "Voestalpine",            market: Austria, country: Austria, sector: Materials,   asset_type: equity, default_risk_band: core, notes: "AT steel/specialty"}
+    - {ticker: OMV.VI, name: "OMV",                    market: Austria, country: Austria, sector: Energy,      asset_type: equity, default_risk_band: core, notes: "AT energy"}
+    - {ticker: RBI.VI, name: "Raiffeisen Bank Intl",   market: Austria, country: Austria, sector: Financials,  asset_type: equity, default_risk_band: core, notes: "AT bank"}
+    - {ticker: VER.VI, name: "Verbund",                market: Austria, country: Austria, sector: Utilities,   asset_type: equity, default_risk_band: core, notes: "AT utility"}
+
+  POLAND_LARGE_CAP:
+    - {ticker: PKO.WA, name: "PKO Bank Polski",        market: Poland, country: Poland, sector: Financials, asset_type: equity, default_risk_band: core, notes: "PL bank"}
+    - {ticker: PKN.WA, name: "PKN Orlen",              market: Poland, country: Poland, sector: Energy,     asset_type: equity, default_risk_band: core, notes: "PL energy"}
+    - {ticker: PZU.WA, name: "PZU",                    market: Poland, country: Poland, sector: Financials, asset_type: equity, default_risk_band: core, notes: "PL insurer"}
+    - {ticker: KGH.WA, name: "KGHM",                   market: Poland, country: Poland, sector: Materials,  asset_type: equity, default_risk_band: core, notes: "PL copper miner"}
+    - {ticker: CDR.WA, name: "CD Projekt",             market: Poland, country: Poland, sector: Tech,       asset_type: equity, default_risk_band: high_beta, notes: "PL video games"}
+
+  IRELAND_LARGE_CAP:
+    # Irish names are mostly US-listed; treat market=US but country=Ireland so
+    # the diversification cap sees them as distinct from US picks.
+    - {ticker: CRH,    name: "CRH plc",                market: US, country: Ireland, sector: Materials,   asset_type: equity, default_risk_band: core, notes: "IE building materials (NYSE)"}
+    - {ticker: RYAAY,  name: "Ryanair Holdings",       market: US, country: Ireland, sector: Industrials, asset_type: equity, default_risk_band: core, notes: "IE low-cost airline (NASDAQ ADR)"}
+    - {ticker: JAZZ,   name: "Jazz Pharmaceuticals",   market: US, country: Ireland, sector: Healthcare,  asset_type: equity, default_risk_band: core, notes: "IE pharma (NASDAQ)"}
+    - {ticker: ACN,    name: "Accenture",              market: US, country: Ireland, sector: Tech,        asset_type: equity, default_risk_band: core, notes: "IE IT services (NYSE)"}
+    - {ticker: MDT,    name: "Medtronic",              market: US, country: Ireland, sector: Healthcare,  asset_type: equity, default_risk_band: core, notes: "IE medtech (NYSE)"}
+
+  CANADA_LARGE_CAP:
+    - {ticker: RY.TO,   name: "Royal Bank of Canada",  market: Canada, country: Canada, sector: Financials, asset_type: equity, default_risk_band: core, notes: "CA bank"}
+    - {ticker: TD.TO,   name: "Toronto-Dominion Bank", market: Canada, country: Canada, sector: Financials, asset_type: equity, default_risk_band: core, notes: "CA bank"}
+    - {ticker: ENB.TO,  name: "Enbridge",              market: Canada, country: Canada, sector: Energy,     asset_type: equity, default_risk_band: core, notes: "CA pipelines"}
+    - {ticker: SHOP.TO, name: "Shopify",               market: Canada, country: Canada, sector: Tech,       asset_type: equity, default_risk_band: high_beta, notes: "CA e-commerce"}
+    - {ticker: CNQ.TO,  name: "Canadian Natural Res.", market: Canada, country: Canada, sector: Energy,     asset_type: equity, default_risk_band: core, notes: "CA oil & gas"}
+
+  AUSTRALIA_LARGE_CAP:
+    - {ticker: BHP.AX, name: "BHP Group",              market: Australia, country: Australia, sector: Materials,   asset_type: equity, default_risk_band: core, notes: "AU mining"}
+    - {ticker: CBA.AX, name: "Commonwealth Bank",      market: Australia, country: Australia, sector: Financials,  asset_type: equity, default_risk_band: core, notes: "AU bank"}
+    - {ticker: CSL.AX, name: "CSL Limited",            market: Australia, country: Australia, sector: Healthcare,  asset_type: equity, default_risk_band: core, notes: "AU biotech/plasma"}
+    - {ticker: WBC.AX, name: "Westpac",                market: Australia, country: Australia, sector: Financials,  asset_type: equity, default_risk_band: core, notes: "AU bank"}
+    - {ticker: MQG.AX, name: "Macquarie Group",        market: Australia, country: Australia, sector: Financials,  asset_type: equity, default_risk_band: core, notes: "AU financials/IB"}
+
+  SINGAPORE_LARGE_CAP:
+    - {ticker: D05.SI, name: "DBS Group",              market: Singapore, country: Singapore, sector: Financials, asset_type: equity, default_risk_band: core, notes: "SG bank"}
+    - {ticker: O39.SI, name: "OCBC",                   market: Singapore, country: Singapore, sector: Financials, asset_type: equity, default_risk_band: core, notes: "SG bank"}
+    - {ticker: U11.SI, name: "United Overseas Bank",   market: Singapore, country: Singapore, sector: Financials, asset_type: equity, default_risk_band: core, notes: "SG bank"}
+    - {ticker: Z74.SI, name: "Singtel",                market: Singapore, country: Singapore, sector: Telecom,    asset_type: equity, default_risk_band: core, notes: "SG telecom"}
+    - {ticker: ST.SI,  name: "Singapore Tech Engineering", market: Singapore, country: Singapore, sector: Industrials, asset_type: equity, default_risk_band: core, notes: "SG industrials/defense"}
+
+  # --- ADR-LISTED (US line, country tag preserved for diversification) -------
+
+  CHINA_ADR:
+    - {ticker: BABA, name: "Alibaba (ADR)",            market: US, country: China, sector: Discretionary, asset_type: equity, default_risk_band: core, notes: "CN e-commerce ADR"}
+    - {ticker: JD,   name: "JD.com (ADR)",             market: US, country: China, sector: Discretionary, asset_type: equity, default_risk_band: core, notes: "CN e-commerce ADR"}
+    - {ticker: PDD,  name: "PDD Holdings (ADR)",       market: US, country: China, sector: Discretionary, asset_type: equity, default_risk_band: high_beta, notes: "CN e-commerce ADR"}
+    - {ticker: NTES, name: "NetEase (ADR)",            market: US, country: China, sector: Tech,          asset_type: equity, default_risk_band: core, notes: "CN gaming/internet ADR"}
+    - {ticker: BIDU, name: "Baidu (ADR)",              market: US, country: China, sector: Tech,          asset_type: equity, default_risk_band: core, notes: "CN search/AI ADR"}
+
+  TAIWAN_ADR:
+    # TSM already lives in SEMIS — kept there to avoid duplicate discovery rows.
+    - {ticker: UMC, name: "United Microelectronics (ADR)", market: US, country: Taiwan, sector: Semis, asset_type: equity, default_risk_band: core, notes: "TW foundry ADR"}
+    - {ticker: ASX, name: "ASE Technology (ADR)",         market: US, country: Taiwan, sector: Semis, asset_type: equity, default_risk_band: core, notes: "TW IC packaging ADR"}
+
+  BRAZIL_ADR:
+    - {ticker: PBR,  name: "Petrobras (ADR)",          market: US, country: Brazil, sector: Energy,     asset_type: equity, default_risk_band: core, notes: "BR oil major ADR"}
+    - {ticker: VALE, name: "Vale (ADR)",               market: US, country: Brazil, sector: Materials,  asset_type: equity, default_risk_band: core, notes: "BR iron ore ADR"}
+    - {ticker: ITUB, name: "Itau Unibanco (ADR)",      market: US, country: Brazil, sector: Financials, asset_type: equity, default_risk_band: core, notes: "BR bank ADR"}
+    - {ticker: BBD,  name: "Banco Bradesco (ADR)",     market: US, country: Brazil, sector: Financials, asset_type: equity, default_risk_band: core, notes: "BR bank ADR"}
+    - {ticker: ABEV, name: "Ambev (ADR)",              market: US, country: Brazil, sector: Staples,    asset_type: equity, default_risk_band: core, notes: "BR beverages ADR"}
+
+  MEXICO_ADR:
+    - {ticker: AMX, name: "America Movil (ADR)",       market: US, country: Mexico, sector: Telecom,        asset_type: equity, default_risk_band: core, notes: "MX telecom ADR"}
+    - {ticker: FMX, name: "Fomento Economico (ADR)",   market: US, country: Mexico, sector: Staples,        asset_type: equity, default_risk_band: core, notes: "MX beverages/retail ADR"}
+    - {ticker: CX,  name: "CEMEX (ADR)",               market: US, country: Mexico, sector: Materials,      asset_type: equity, default_risk_band: core, notes: "MX cement ADR"}
+    - {ticker: KOF, name: "Coca-Cola FEMSA (ADR)",     market: US, country: Mexico, sector: Staples,        asset_type: equity, default_risk_band: core, notes: "MX beverages ADR"}
+
+  ISRAEL_ADR:
+    - {ticker: TEVA, name: "Teva Pharmaceutical (ADR)", market: US, country: Israel, sector: Healthcare, asset_type: equity, default_risk_band: core, notes: "IL pharma ADR"}
+    - {ticker: CHKP, name: "Check Point Software",      market: US, country: Israel, sector: Tech,       asset_type: equity, default_risk_band: core, notes: "IL cybersecurity"}
+    - {ticker: NICE, name: "NICE Ltd",                  market: US, country: Israel, sector: Tech,       asset_type: equity, default_risk_band: core, notes: "IL enterprise software"}
+    - {ticker: MNDY, name: "monday.com",                market: US, country: Israel, sector: Tech,       asset_type: equity, default_risk_band: high_beta, notes: "IL SaaS"}
+    - {ticker: WIX,  name: "Wix.com",                   market: US, country: Israel, sector: Tech,       asset_type: equity, default_risk_band: high_beta, notes: "IL website platform"}
+
+  ARGENTINA_ADR:
+    - {ticker: YPF,  name: "YPF (ADR)",                market: US, country: Argentina, sector: Energy,     asset_type: equity, default_risk_band: high_beta, notes: "AR energy ADR"}
+    - {ticker: GGAL, name: "Grupo Galicia (ADR)",      market: US, country: Argentina, sector: Financials, asset_type: equity, default_risk_band: high_beta, notes: "AR bank ADR"}
+    - {ticker: BBAR, name: "BBVA Argentina (ADR)",     market: US, country: Argentina, sector: Financials, asset_type: equity, default_risk_band: high_beta, notes: "AR bank ADR"}
+    - {ticker: PAM,  name: "Pampa Energia (ADR)",      market: US, country: Argentina, sector: Utilities,  asset_type: equity, default_risk_band: high_beta, notes: "AR utility ADR"}
+    - {ticker: BMA,  name: "Banco Macro (ADR)",        market: US, country: Argentina, sector: Financials, asset_type: equity, default_risk_band: high_beta, notes: "AR bank ADR"}

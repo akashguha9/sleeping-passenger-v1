@@ -95,6 +95,9 @@ def classify_candidate(
     chaos_risk: float = 0.0,
     staleness_label: str | None = None,
     why_today_score: float = 1.0,
+    entry_quality_pass: bool | None = None,
+    entry_quality_score: float | None = None,
+    entry_quality_reasons: list[str] | None = None,
     thresholds: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Return classification + human-readable reason for one candidate.
@@ -146,6 +149,12 @@ def classify_candidate(
             cqs, eqs, executable=False,
         )
 
+    # Entry-quality gate is opt-in: when not supplied (None) behave as if it
+    # had passed, preserving backward-compatible behaviour for callers that
+    # haven't wired daily OHLCV through yet. When supplied, a False blocks
+    # EXECUTABLE and routes to BUY-CANDIDATE / NOT-EXECUTABLE.
+    entry_quality_ok = entry_quality_pass is None or bool(entry_quality_pass)
+
     # Executable requires both quality and hygiene gates AND a fresh why-today.
     executable = (
         cqs >= cqs_min
@@ -154,6 +163,7 @@ def classify_candidate(
         and invalidation_ok
         and sizing_ok
         and why_today_ok
+        and entry_quality_ok
     )
     if executable:
         return _result(
@@ -178,6 +188,10 @@ def classify_candidate(
                 f"Missing sufficient why-today trigger (why_today_score "
                 f"{float(why_today_score):.2f} < {why_today_min:.2f})"
             )
+        if not entry_quality_ok:
+            eq_reasons = entry_quality_reasons or []
+            tail = f" ({'; '.join(eq_reasons)})" if eq_reasons else ""
+            missing.append(f"entry-quality gate failed{tail}")
         reason = "Good candidate, not executable because " + "; ".join(missing) + "."
         return _result("BUY-CANDIDATE / NOT-EXECUTABLE", reason, cqs, eqs, executable=False)
 
@@ -210,6 +224,7 @@ def build_candidate_executable_split(
     eqs_features: dict[str, dict[str, Any]] | None = None,
     staleness_labels: dict[str, str] | None = None,
     why_today_scores: dict[str, float] | None = None,
+    entry_quality_by_ticker: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Classify every discovered candidate into candidate/executable buckets.
 
@@ -217,11 +232,19 @@ def build_candidate_executable_split(
     without an entry defaults to 1.0 (no why-today penalty) to preserve
     backward-compatible behaviour; the daily pipeline passes real scores so the
     WHY_TODAY gate can block stale executables.
+
+    ``entry_quality_by_ticker`` maps normalized-ticker -> entry_quality_gate
+    result dict (``entry_quality_pass``, ``entry_quality_score``, ``reasons``).
+    Tickers not present skip the entry-quality gate (treated as pass) — wire
+    this in callers that have daily OHLCV available.
     """
     thresholds = load_discovery_thresholds()
     eqs_features = {normalize_ticker(k): v for k, v in (eqs_features or {}).items()}
     staleness_labels = {normalize_ticker(k): v for k, v in (staleness_labels or {}).items()}
     why_today_scores = {normalize_ticker(k): v for k, v in (why_today_scores or {}).items()}
+    entry_quality_by_ticker = {
+        normalize_ticker(k): v for k, v in (entry_quality_by_ticker or {}).items()
+    }
 
     rows: list[dict[str, Any]] = []
     for score in discovery["scored_candidates"]:
@@ -233,6 +256,10 @@ def build_candidate_executable_split(
         source_health = _clamp01(feats.get("source_health"))
         why_today = float(why_today_scores.get(ticker, 1.0))
         eqs_obj = compute_eqs(feats)
+        eq = entry_quality_by_ticker.get(ticker)
+        eq_pass = eq.get("entry_quality_pass") if isinstance(eq, dict) else None
+        eq_score = eq.get("entry_quality_score") if isinstance(eq, dict) else None
+        eq_reasons = eq.get("reasons") if isinstance(eq, dict) else None
         verdict = classify_candidate(
             cqs=score["cqs"],
             eqs=eqs_obj["eqs"],
@@ -243,6 +270,9 @@ def build_candidate_executable_split(
             chaos_risk=score.get("chaos_risk", 0.0),
             staleness_label=staleness_labels.get(ticker),
             why_today_score=why_today,
+            entry_quality_pass=eq_pass,
+            entry_quality_score=eq_score,
+            entry_quality_reasons=eq_reasons,
             thresholds=thresholds,
         )
         rows.append(
@@ -253,6 +283,8 @@ def build_candidate_executable_split(
                 "eqs": eqs_obj["eqs"],
                 "eqs_components": eqs_obj["components"],
                 "why_today_score": round(why_today, 4),
+                "entry_quality_pass": eq_pass,
+                "entry_quality_score": eq_score,
                 "classification": verdict["classification"],
                 "executable": verdict["executable"],
                 "reason": verdict["reason"],

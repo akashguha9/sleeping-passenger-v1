@@ -131,6 +131,16 @@ APPROVED_DOMAINS: tuple[str, ...] = (
     "discovery",        # fresh_market_discovery.py — null-safe candidate quality score
     "candidate_executable",  # candidate_executable_split.py — CQS/EQS classification
     "anti_staleness",   # anti_staleness.py — freshness labels + novelty enforcement
+    # Selection-pipeline gate sprint — advisory-only entry-quality + portfolio
+    # diversification layer. Pure scoring/gating modules consumed by the
+    # candidate→executable split. No broker execution, no order placement, no
+    # API trading writes.
+    "entry_quality",    # entry_quality_gate.py — trend / momentum / extension /
+                        # liquidity gate; backtest_entry_quality.py — operator-run
+                        # validation harness that re-walks past positions through
+                        # real daily OHLCV.
+    "diversification",  # portfolio_diversification_cap.py — per-day country /
+                        # sector tiebreaker applied to already-ranked candidates.
     # Daily fresh-data sprint — advisory-only payload builders + scoring signals
     # that feed (never execute) the five-model synthesis. Scores/gates only; no
     # broker execution, no order placement, no API trading writes.

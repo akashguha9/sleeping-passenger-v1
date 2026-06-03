@@ -57,3 +57,82 @@ daily_discovery:
     STALE_24H: 0.20
     STALE_48H: 0.35
     HISTORICAL_ONLY: 0.50
+
+# Entry-quality gate — blocks "falling-knife" entries and over-extended buys.
+# Computed per-ticker at buy-time from daily OHLCV. All numeric bounds are
+# configurable; defaults are intentionally conservative.
+# A name fails the gate when entry_quality_pass=false and is routed to
+# BUY-CANDIDATE / NOT-EXECUTABLE (never erased from discovery).
+entry_quality:
+  enabled: true
+  # Trend (regime) gates — required for "core" risk band.
+  require_close_above_sma50: true
+  require_sma50_rising: true
+  require_close_above_sma200_for_core: true
+  # Distance from SMA50: avoid both falling knives (well below) and stretched buys.
+  dist_from_sma50_min: -0.02   # close must be within -2% of SMA50 or higher
+  dist_from_sma50_max:  0.12   # ...and not more than +12% above (mean-reversion zone)
+  # 20-day momentum percentile vs the day's scored universe.
+  mom_20d_percentile_min: 0.40 # top 60% of names by 20d return
+  # Relative strength vs local index (20d): require positive.
+  rs_vs_index_min: 0.0
+  # Distance from 52-week high — block buys clustered right at the high.
+  extension_vs_52w_high_max: -0.02   # must be ≥ 2% below the 252-day high
+  # ATR(14)/close band — filters chop + illiquid blowups.
+  atr14_pct_min: 0.010
+  atr14_pct_max: 0.060
+  # Liquidity floor in local currency. Operator-overridable per market.
+  adv_local_min: 5_000_000
+  # Soft score weights (used to produce entry_quality_score ∈ [0,1] for ranking).
+  # The hard pass/fail is independent of these weights.
+  score_weights:
+    trend_50: 0.20
+    trend_200: 0.15
+    dist_from_sma50: 0.15
+    mom_20d: 0.20
+    rs_vs_index: 0.15
+    extension_vs_52w_high: 0.10
+    atr14_pct: 0.05
+
+# Daily portfolio diversification — TIEBREAKER, not a quota.
+# Applied after entry-quality + composite ranking. Country/sector caps filter
+# the already-passing list. We never inject a name to satisfy a min country
+# count; if there aren't enough quality-passing candidates, we emit fewer picks.
+portfolio_diversification:
+  enabled: true
+  max_picks_per_day: 10
+  max_picks_per_country: 2
+  max_picks_per_sector: 2
+  # Aspirational visibility only — logged but never used to inject picks.
+  target_distinct_countries: 5
+  # 25 of the 30 largest GDPs. Excluded:
+  #   - RU: sanctions / untradeable on IBKR.
+  #   - TR, ID, SA, AE: no clean single-name access; an ETF isn't a
+  #     single-name pick and would dilute the entry-quality gate. A
+  #     separate macro sleeve can re-introduce them later.
+  country_eligibility:
+    - US
+    - CN
+    - DE
+    - JP
+    - GB
+    - IN
+    - FR
+    - IT
+    - BR
+    - CA
+    - AU
+    - MX
+    - ES
+    - KR
+    - NL
+    - CH
+    - PL
+    - TW
+    - IE
+    - BE
+    - SE
+    - IL
+    - AR
+    - SG
+    - AT

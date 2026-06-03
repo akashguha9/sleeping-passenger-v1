@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import json
 import types
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -43,14 +43,31 @@ class _FakeResponse:
         return self._payload
 
 
+def _gdelt_seendate(offset: timedelta) -> str:
+    """gdelt seendate is ``YYYYMMDDTHHMMSSZ``."""
+    return (datetime.now(timezone.utc) - offset).strftime("%Y%m%dT%H%M%SZ")
+
+
+def _sec_filing_date(offset: timedelta) -> str:
+    """SEC filingDate is ``YYYY-MM-DD``."""
+    return (datetime.now(timezone.utc) - offset).strftime("%Y-%m-%d")
+
+
 class _FakeRequests:
+    """Healthy-provider mock. All timestamps are wall-clock-relative so the
+    fixture cannot silently rot past per-provider freshness caps (gdelt 48h,
+    sec_edgar 60d) the way hardcoded absolute dates do."""
+
     @staticmethod
     def get(url, params=None, headers=None, timeout=None):
         if "sec.gov" in url:
             return _FakeResponse({
                 "filings": {"recent": {
                     "form": ["10-K", "8-K"],
-                    "filingDate": ["2026-05-22", "2026-05-20"],
+                    "filingDate": [
+                        _sec_filing_date(timedelta(days=2)),
+                        _sec_filing_date(timedelta(days=4)),
+                    ],
                     "accessionNumber": ["x1", "x2"],
                 }}
             })
@@ -58,10 +75,28 @@ class _FakeRequests:
             return _FakeResponse({"articles": [
                 {"url": "https://news.example.com/a",
                  "title": "Markets rally",
-                 "seendate": "20260524T120000Z"},
+                 "seendate": _gdelt_seendate(timedelta(hours=1))},
                 {"url": "https://news.example.com/b",
                  "title": "Inflation data",
-                 "seendate": "20260524T100000Z"},
+                 "seendate": _gdelt_seendate(timedelta(hours=3))},
+            ]})
+        return _FakeResponse({})
+
+
+class _FakeRequestsStaleGdelt:
+    """Same as ``_FakeRequests`` except gdelt's seendate is past its 48h
+    freshness cap. Exercises the LIVE_VERIFIED-but-stale → uplift-excluded
+    path (3 verified providers but only 2 fresh → LPQ 8.45)."""
+
+    @staticmethod
+    def get(url, params=None, headers=None, timeout=None):
+        if "sec.gov" in url:
+            return _FakeRequests.get(url, params, headers, timeout)
+        if "gdelt" in url:
+            return _FakeResponse({"articles": [
+                {"url": "https://news.example.com/a",
+                 "title": "Old news",
+                 "seendate": _gdelt_seendate(timedelta(hours=72))},
             ]})
         return _FakeResponse({})
 
@@ -150,6 +185,37 @@ def test_mocked_three_providers_lift_lpq_to_8_6(monkeypatch):
     for ev in summary["providers_evidence"]:
         if ev["verification_status"] == "LIVE_VERIFIED":
             assert ev["latest_provider_timestamp_utc"]
+
+
+def test_stale_gdelt_still_verified_but_excluded_from_uplift(monkeypatch):
+    """Three providers LIVE_VERIFIED but one (gdelt) past its 48h freshness
+    cap → uplift counts 2 → LPQ floor is 8.45, not 8.6. Locks the
+    LIVE_VERIFIED-but-stale path so a future fixture/code change cannot
+    silently route stale data to the 3-provider floor.
+    """
+    monkeypatch.setenv("MVP_LIVE_REFRESH_OK", "1")
+    monkeypatch.setenv("SEC_USER_AGENT", "test test@example.com")
+    summary = olpr.refresh_providers(
+        yfinance_module=_fake_yfinance(),
+        requests_module=_FakeRequestsStaleGdelt,
+    )
+    assert summary["ok"] is True
+    # All three providers still verify (gdelt returned a real timestamp).
+    assert set(summary["providers_live_verified"]) == {
+        "yfinance", "sec_edgar", "gdelt"
+    }
+    # …but only 2 count toward the uplift because gdelt is past 48h.
+    uplift = summary.get("lpq_uplift") or {}
+    assert uplift.get("live_verified_provider_count") == 2
+    assert set(uplift.get("live_verified_providers") or []) == {"yfinance", "sec_edgar"}
+    assert "gdelt" not in (uplift.get("live_verified_providers") or [])
+    # Spec: 2 fresh providers → max(previous, 8.45). Previous fixture is 8.2.
+    assert summary["live_payload_quality_score"] == 8.45
+    gdelt_ev = next(
+        ev for ev in summary["providers_evidence"] if ev["provider"] == "gdelt"
+    )
+    assert gdelt_ev["verification_status"] == "LIVE_VERIFIED"
+    assert gdelt_ev["freshness_age_hours"] > 48.0
 
 
 def test_mocked_yfinance_only_lifts_lpq_to_8_35(monkeypatch):

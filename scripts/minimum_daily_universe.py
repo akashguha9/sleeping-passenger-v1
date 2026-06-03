@@ -165,6 +165,13 @@ def _coerce_rows_from_yaml(data: Any) -> list[dict[str, Any]] | None:
             ticker = normalize_ticker(entry.get("ticker"))
             if not ticker:
                 continue
+            notes = str(entry.get("notes") or "")
+            # Filter symbols flagged as not yet wired up to a real data
+            # provider. The backtest harness writes this tag for tickers
+            # yfinance returned no candles for, so they don't silently
+            # enter the daily discovery pool.
+            if "needs_provider_mapping" in notes:
+                continue
             rows.append(
                 {
                     "ticker": ticker,
@@ -172,11 +179,12 @@ def _coerce_rows_from_yaml(data: Any) -> list[dict[str, Any]] | None:
                     "bucket": str(bucket),
                     "market": str(entry.get("market") or defaults.get("market", "US")),
                     "country": str(entry.get("country") or defaults.get("country", "United States")),
+                    "sector": str(entry.get("sector") or defaults.get("sector", "")),
                     "asset_type": str(entry.get("asset_type") or defaults.get("asset_type", "equity")),
                     "default_risk_band": str(
                         entry.get("default_risk_band") or defaults.get("default_risk_band", "watch")
                     ),
-                    "notes": str(entry.get("notes") or ""),
+                    "notes": notes,
                 }
             )
     return rows or None
