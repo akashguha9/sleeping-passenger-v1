@@ -85,16 +85,29 @@ def build_signal_quality_report(
     behavioral_tests_expected: int = 1,
     score_contract_present: bool = True,
     feedback_human_reviewed: bool = False,
+    calibration_map: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     status = str(metrics.get("calibration_status", "NO_DATA"))
     real_n = int(metrics.get("real_n", 0) or 0)
     paper_n = int(metrics.get("paper_n", 0) or 0)
+    backtest_n = int(metrics.get("backtest_n", 0) or 0)
+    eligible_n = int(metrics.get("eligible_n", 0) or 0)
     n = int(metrics.get("n", 0) or 0)
     ece = metrics.get("ece")
     brier = metrics.get("brier")
 
     C = _calibration_component(status, real_n)
-    ece_score = max(0.0, 1.0 - (ece / 0.20)) if ece is not None else 0.0
+    # If an OOS-validated recalibration exists, signal quality reflects the
+    # IMPROVED (recalibrated) ECE — honest credit for actually fixing
+    # calibration, not just measuring it.
+    ece_used = ece
+    recalibrated = False
+    if calibration_map and calibration_map.get("improved_out_of_sample"):
+        cal_ece = calibration_map.get("cal_test_ece")
+        if cal_ece is not None and ece is not None and cal_ece < ece:
+            ece_used = cal_ece
+            recalibrated = True
+    ece_score = max(0.0, 1.0 - (ece_used / 0.20)) if ece_used is not None else 0.0
     brier_score = max(0.0, 1.0 - (brier / 0.25)) if brier is not None else 0.0
     cov = max(0.0, min(1.0, float(coverage_score)))
     feedback = _feedback_component(recommendation, human_reviewed=feedback_human_reviewed)
@@ -107,8 +120,12 @@ def build_signal_quality_report(
 
     caps: list[float] = []
     caps_applied: list[str] = []
-    if real_n == 0 and paper_n == 0:
-        caps.append(7.0); caps_applied.append("no_real_or_paper_outcomes")
+    # Signal quality measures whether the SCORES are good. Real, paper, AND
+    # backtest evidence all count here (backtest = real forward returns), but
+    # NOT for real-money readiness (that keys on real_n alone). Fixtures and
+    # no-data are still hard-capped.
+    if eligible_n == 0:
+        caps.append(7.0); caps_applied.append("no_eligible_outcomes")
     if status == "NO_DATA":
         caps.append(7.0); caps_applied.append("calibration_no_data")
     if status == "FIXTURE_ONLY":
@@ -143,7 +160,9 @@ def build_signal_quality_report(
             "Brier_score": round(brier_score, 4), "Coverage_score": cov,
             "Feedback_score": feedback, "Behavioral_test_score": round(bt, 4),
         },
-        "calibration_status": status, "real_n": real_n, "paper_n": paper_n, "n": n,
+        "calibration_status": status, "real_n": real_n, "paper_n": paper_n,
+        "backtest_n": backtest_n, "eligible_n": eligible_n, "n": n,
+        "recalibration_applied": recalibrated,
         "recommended_next_data_needed": next_data,
         **analysis,
         **_ADVISORY_STAMPS,
@@ -169,11 +188,22 @@ def build_signal_quality_report_from_db(db_path: Path | None = None) -> dict[str
         rec = build_recommendation_from_metrics(metrics)
         # behavioural tests proxy: import isolation holds -> treat as 1/1.
         bt_pass = 1 if cmb.core_import_violations() == [] else 0
+        # Fit an OOS-validated recalibration map from the extracted outcomes.
+        cmap = None
+        try:
+            from scripts.outcome_evidence_extractor import extract_from_db
+            from scripts.calibration_map import fit_from_outcomes
+        except ModuleNotFoundError:  # pragma: no cover - script-style fallback
+            from outcome_evidence_extractor import extract_from_db  # type: ignore[no-redef]
+            from calibration_map import fit_from_outcomes  # type: ignore[no-redef]
+        outcomes = extract_from_db(db_path)
+        cmap = fit_from_outcomes(outcomes).to_dict() if outcomes else None
     except Exception:  # pragma: no cover - defensive
-        metrics, coverage, rec, bt_pass = {"calibration_status": "NO_DATA"}, 0.0, None, 0
+        metrics, coverage, rec, bt_pass, cmap = {"calibration_status": "NO_DATA"}, 0.0, None, 0, None
     return build_signal_quality_report(
         metrics, coverage_score=coverage, recommendation=rec,
         behavioral_tests_passed=bt_pass, behavioral_tests_expected=1,
+        calibration_map=cmap,
     )
 
 

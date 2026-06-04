@@ -3050,6 +3050,28 @@ def get_real_money_readiness(_auth: None = Depends(require_api_token_for_reads))
     return assess_real_money_readiness()
 
 
+@app.get("/api/calibration-map")
+def get_calibration_map(_auth: None = Depends(require_api_token_for_reads)) -> dict:
+    """OOS-validated recalibration status (isotonic/Platt) from local outcomes.
+
+    Reports whether the raw scores can be recalibrated into honest
+    probabilities and by how much ECE/Brier improve out of sample. Advisory —
+    a recalibrated probability never enables sizing on its own.
+    """
+    try:
+        from scripts.outcome_evidence_extractor import extract_from_db
+        from scripts.calibration_map import fit_from_outcomes
+    except ModuleNotFoundError:  # pragma: no cover - script-style fallback
+        from outcome_evidence_extractor import extract_from_db  # type: ignore[no-redef]
+        from calibration_map import fit_from_outcomes  # type: ignore[no-redef]
+    outcomes = extract_from_db(None)
+    result = fit_from_outcomes(outcomes).to_dict() if outcomes else {
+        "method": "identity", "improved_out_of_sample": False, "train_n": 0, "test_n": 0,
+        "advisory_only": True, "human_review_required": True, "broker_api_called": False,
+    }
+    return result
+
+
 @app.get("/api/signal-quality")
 def get_signal_quality(_auth: None = Depends(require_api_token_for_reads)) -> dict:
     """Outcome-backed signal quality score (advisory-only).

@@ -43,6 +43,7 @@ CORE_MODULES: frozenset[str] = frozenset({
     "outcome_evidence", "outcome_evidence_extractor", "securities_master_coverage",
     "runtime_common", "private_scope_guard", "core_module_boundary",
     "signal_refinery", "signal_reactor", "chronology_store", "chronology_detectors",
+    "calibration_map", "backtest_calibration", "signal_quality_report",
 })
 
 # Experimental: archetype/mythology layers that are NOT load-bearing. The

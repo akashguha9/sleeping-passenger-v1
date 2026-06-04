@@ -54,12 +54,18 @@ def build_score_contract(
     *,
     label: str = "score",
     human_sizing_approved: bool = False,
+    calibration_map: Any = None,
 ) -> dict[str, Any]:
     """Wrap a raw score with calibration metadata.
 
     ``calibrated_score`` is populated only when the calibration status is
     CALIBRATED *and* a human has approved sizing — otherwise None. We never
     fabricate a calibrated number from an uncalibrated score.
+
+    ``recalibrated_score`` is the OOS-validated recalibration of the raw score
+    (isotonic/Platt) when a ``calibration_map`` that improved out of sample is
+    supplied — an honest probability, but advisory: it does NOT by itself
+    enable sizing (provenance gating still applies).
     """
     env = score_calibration_envelope(raw_score, summary, label=label)
     status = env["score_calibration_status"]
@@ -67,10 +73,22 @@ def build_score_contract(
     # approval. Either alone is insufficient.
     should_drive = bool(env["score_should_drive_sizing"]) and bool(human_sizing_approved)
     calibrated_score = raw_score if (status == CALIBRATED and should_drive) else None
+
+    recalibrated_score = None
+    recalibration_method = None
+    if calibration_map is not None and getattr(calibration_map, "improved", False):
+        try:
+            recalibrated_score = round(float(calibration_map.apply(float(raw_score))), 6)
+            recalibration_method = getattr(calibration_map, "method", None)
+        except (TypeError, ValueError):
+            recalibrated_score = None
+
     return {
         "label": label,
         "raw_score": raw_score,
         "calibrated_score": calibrated_score,
+        "recalibrated_score": recalibrated_score,
+        "recalibration_method": recalibration_method,
         "calibration_status": status,
         "sample_size": env["score_sample_size"],
         "should_drive_sizing": should_drive,
