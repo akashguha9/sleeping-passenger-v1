@@ -184,6 +184,21 @@ APPROVED_DOMAINS: tuple[str, ...] = (
                       # manual-trade journal; replaces lossy float at the boundary
     "idempotency",    # idempotency.py (L3) — Idempotency-Key dedupe cache for
                       # POST /manual-trades; prevents double-logged journal rows
+    # Gap-area remediation — advisory-only canonical tagging + observation
+    # scaffold.  Scores/labels only; no broker execution, no order placement,
+    # no API trading writes.
+    "tag_engine",     # tag_engine.py — canonical candidate-classification tag catalog
+    "chronology",     # chronology_store.py / chronology_detectors.py — observation
+                      # substrate + fail-closed T1-T4 detector stubs (NOT_IMPLEMENTED)
+    "governance_verdict",  # governance_verdict.py — extracted system-readiness
+                           # verdict (god-module reduction); pure, no execution
+    "action_doctrine",     # action_doctrine_status.py — UNRATIFIED doctrine
+                           # status reporter; unlocks nothing, no execution
+    "observation",         # run_observation_cycle.py — observation-only T1-T4
+                           # cycle runner; no execution, no broker
+    "decision_board",      # manual_decision_board.py — advisory-only human-review
+                           # classifier; emits no order/execution instruction
+    "mvp_readiness",       # mvp_readiness_report.py — single advisory truth surface
 )
 
 # Explicit allowlist for individual files / directories whose name does

@@ -58,6 +58,7 @@ try:
     from scripts.signal_conversion_monitor import build_signal_conversion_report
     from scripts.snapshot_logger import build_snapshot_row, log_snapshot
     from scripts.trend_engine import build_trend_report
+    from scripts.artifact_coherence_check import build_artifact_coherence_report
 except ModuleNotFoundError:
     from attention_proxy_engine import build_attention_proxy_report
     from action_engine import build_action_report
@@ -120,6 +121,33 @@ except ModuleNotFoundError:
     from signal_conversion_monitor import build_signal_conversion_report
     from snapshot_logger import build_snapshot_row, log_snapshot
     from trend_engine import build_trend_report
+    from artifact_coherence_check import build_artifact_coherence_report
+
+
+def format_artifact_coherence_advisory(
+    runtime_dir: Path | None = None,
+    snapshot_log_path: Path | None = None,
+) -> str:
+    """Read-only advisory line surfacing stale/legacy artifact counts.
+
+    Advisory only: this reads runtime artifacts to count stale, legacy, and
+    mismatched-metadata outputs and surfaces them in ``--summary``. It never
+    deletes or rewrites artifacts and never reads or alters governance flags
+    (``can_deploy_capital``, ``system_readiness_state``, ``policy_state``,
+    etc.). It does not influence readiness — it only warns the operator that
+    stale artifacts may be present.
+    """
+    report = build_artifact_coherence_report(
+        runtime_dir=runtime_dir,
+        snapshot_log_path=snapshot_log_path,
+    )
+    return (
+        "artifact_coherence_advisory="
+        f"stale={len(report['stale_artifacts'])} "
+        f"legacy={len(report['legacy_artifacts'])} "
+        f"mismatched={len(report['mismatched_fields'])} "
+        f"coherent={str(report['coherent']).lower()}"
+    )
 
 
 def run_diagnostics_pipeline(
@@ -624,6 +652,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     if args.summary or args.contextual_interpretation_summary:
         print(format_pipeline_health_summary(report))
+        print(format_artifact_coherence_advisory())
     else:
         print(json.dumps(report, indent=2))
     return 0

@@ -19,6 +19,7 @@ try:
         log_observation as _chronology_log_observation,
         log_snapshot as _chronology_log_snapshot,
     )
+    from scripts import tag_engine as tags
 except ModuleNotFoundError:
     from runtime_common import (
         LOG_DIR,
@@ -33,6 +34,7 @@ except ModuleNotFoundError:
         log_observation as _chronology_log_observation,
         log_snapshot as _chronology_log_snapshot,
     )
+    import tag_engine as tags
 
 
 DEFAULT_CHRONOLOGY_DB_PATH = LOG_DIR / "observation.db"
@@ -123,9 +125,9 @@ def _transition_state_rows_from_state(state: dict) -> list[dict]:
         return []
 
     tracked_states = {
-        "BLOCKED_PROMOTABLE_CLEAN_CANDIDATE",
-        "CLEAN_READY_PENDING_TRIGGER",
-        "CLEAN_ENTRY_ELIGIBLE",
+        tags.BLOCKED_PROMOTABLE_CLEAN_CANDIDATE,
+        tags.CLEAN_READY_PENDING_TRIGGER,
+        tags.CLEAN_ENTRY_ELIGIBLE,
     }
     rows: list[dict] = []
     for row in watchlist_rows:
@@ -167,14 +169,14 @@ def _summarize_watchlist_intelligence_from_state(state: dict) -> dict:
         if not ticker:
             continue
         watchlist_tier = str(row.get("watchlist_tier") or "").upper()
-        if watchlist_tier == "PROMOTABLE" and ticker not in promotable_names:
+        if watchlist_tier == tags.PROMOTABLE and ticker not in promotable_names:
             promotable_names.append(ticker)
-        if watchlist_tier == "STANDARD" and ticker not in standard_names:
+        if watchlist_tier == tags.STANDARD and ticker not in standard_names:
             standard_names.append(ticker)
 
     blocked_names = _watchlist_names_by_pre_entry_state(
         state,
-        "BLOCKED_PROMOTABLE_CLEAN_CANDIDATE",
+        tags.BLOCKED_PROMOTABLE_CLEAN_CANDIDATE,
     )
     return {
         "promotable_watchlist_count": len(promotable_names),
@@ -243,15 +245,15 @@ def build_snapshot_row(
     blocked_names = (
         [item["ticker"] for item in health_report.get("blocked_promotable_candidate_queue", [])]
         if isinstance(health_report, dict)
-        else _watchlist_names_by_pre_entry_state(state, "BLOCKED_PROMOTABLE_CLEAN_CANDIDATE")
+        else _watchlist_names_by_pre_entry_state(state, tags.BLOCKED_PROMOTABLE_CLEAN_CANDIDATE)
     )
     clean_ready_names = _watchlist_names_by_pre_entry_state(
         state,
-        "CLEAN_READY_PENDING_TRIGGER",
+        tags.CLEAN_READY_PENDING_TRIGGER,
     )
     clean_entry_eligible_names = _watchlist_names_by_pre_entry_state(
         state,
-        "CLEAN_ENTRY_ELIGIBLE",
+        tags.CLEAN_ENTRY_ELIGIBLE,
     )
     if isinstance(health_report, dict):
         packet_summary = health_report.get("packet_summary", {})

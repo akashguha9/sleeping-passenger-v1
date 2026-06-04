@@ -831,42 +831,14 @@ def run_targeted_tests(repo_root: Path | None = None) -> dict[str, Any]:
     }
 
 
-def determine_system_readiness(
-    scm_review: dict[str, Any],
-    execution_policy: dict[str, Any],
-    friction_report: dict[str, Any],
-    open_positions_summary: dict[str, Any],
-    active_blockers: list[str],
-) -> tuple[str, bool]:
-    critical_blockers = {"GSCE_PHASE_LOCK", "REALM_BIS"}
-    friction_band = friction_report.get("friction_band", "HIGH_FRICTION")
-    scm_rate = float(scm_review.get("scm_rate", 0.0))
-    policy_state = str(execution_policy.get("policy_state", "UNKNOWN")).upper()
-
-    if not open_positions_summary.get("valid", False):
-        return "NOT_READY", False
-
-    if (
-        policy_state in {"RESTRICTED", "BLOCKED", "DO_NOT_DEPLOY", "NOT_READY"}
-        and (
-            friction_band == "HIGH_FRICTION"
-            or scm_rate < 0.30
-            or bool(critical_blockers.intersection(active_blockers))
-        )
-    ):
-        return "DO_NOT_DEPLOY", False
-
-    if friction_band == "HIGH_FRICTION" or policy_state in {"RESTRICTED", "BLOCKED"}:
-        return "NOT_READY", False
-
-    if (
-        not execution_policy.get("allow_new_risk", False)
-        or friction_band == "MEDIUM_FRICTION"
-        or scm_review.get("scm_state") == "LOW_CONVERSION"
-    ):
-        return "LIMITED_DEPLOY", False
-
-    return "READY", True
+# determine_system_readiness was extracted to scripts/governance_verdict.py
+# (god-module reduction; behaviour byte-identical, golden-tested). Re-exported
+# here so existing internal callers and `from pipeline_health_report import
+# determine_system_readiness` keep working unchanged.
+try:
+    from scripts.governance_verdict import determine_system_readiness
+except ModuleNotFoundError:  # pragma: no cover - script-path fallback
+    from governance_verdict import determine_system_readiness
 
 
 def summarize_watchlist_intelligence(watchlist_diagnostics: dict[str, Any]) -> dict[str, Any]:

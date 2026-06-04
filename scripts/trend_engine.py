@@ -13,6 +13,7 @@ try:
         repo_relative,
         write_json_atomic,
     )
+    from scripts import tag_engine as tags
 except ModuleNotFoundError:
     from runtime_common import (
         SNAPSHOT_LOG_PATH,
@@ -21,6 +22,7 @@ except ModuleNotFoundError:
         repo_relative,
         write_json_atomic,
     )
+    import tag_engine as tags
 
 
 SCENARIO_ORDER = ("LIVE", "GSCE_CLEAR", "REALM_BIS_CLEAR", "ALL_CLEAR")
@@ -557,12 +559,12 @@ def build_trend_report(
         "clean_ready_pending_trigger_trend_label": _queue_trend_label(
             rows,
             "clean_ready_pending_trigger_count",
-            "CLEAN_READY_PENDING_TRIGGER",
+            tags.CLEAN_READY_PENDING_TRIGGER,
         ),
         "clean_entry_eligible_trend_label": _queue_trend_label(
             rows,
             "clean_entry_eligible_count",
-            "CLEAN_ENTRY_ELIGIBLE",
+            tags.CLEAN_ENTRY_ELIGIBLE,
         ),
         "transition_pressure_state": _derive_transition_pressure_state(rows),
         "transition_readiness_state": _derive_transition_readiness_state(rows),

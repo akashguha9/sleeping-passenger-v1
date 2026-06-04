@@ -21,6 +21,7 @@ try:
         write_json_atomic,
     )
     from scripts.signal_conversion_monitor import build_signal_conversion_report
+    from scripts import tag_engine as tags
 except ModuleNotFoundError:
     from execution_governance import assess_action_governance, summarize_action_governance
     from runtime_common import (
@@ -34,9 +35,11 @@ except ModuleNotFoundError:
         write_json_atomic,
     )
     from signal_conversion_monitor import build_signal_conversion_report
+    import tag_engine as tags
 
-ACTION_ORDER = ["EXIT_NOW", "REDUCE", "HOLD", "MONITOR", "BLOCK_ENTRY"]
-OPTIONAL_ACTION_ORDER = ["REVIEW_FOR_ENTRY"]
+# Canonical action vocabulary sourced from tag_engine (values byte-identical).
+ACTION_ORDER = [tags.EXIT_NOW, tags.REDUCE, tags.HOLD, tags.MONITOR, tags.BLOCK_ENTRY]
+OPTIONAL_ACTION_ORDER = [tags.REVIEW_FOR_ENTRY]
 
 
 def _load_optional_runtime_artifact(path: Path | None) -> dict[str, Any]:
@@ -207,7 +210,7 @@ def _select_action(
 ) -> tuple[str, list[str]]:
     reasons: list[str] = []
     signal_state = (signal_row or {}).get("signal_state", "UNKNOWN")
-    pre_entry_state = str((signal_row or {}).get("pre_entry_state") or "NONE").upper()
+    pre_entry_state = str((signal_row or {}).get("pre_entry_state") or tags.NONE).upper()
     entry_type = (signal_row or {}).get("entry_type") or (position or {}).get(
         "entry_type", "UNKNOWN"
     )
@@ -216,16 +219,16 @@ def _select_action(
 
     if position and position.get("state") == "EXIT_PENDING":
         reasons.append("Position already marked EXIT_PENDING")
-        return "EXIT_NOW", reasons
+        return tags.EXIT_NOW, reasons
     if _price_breached_stop(position):
         reasons.append("Current price breached stop_loss")
-        return "EXIT_NOW", reasons
+        return tags.EXIT_NOW, reasons
     if position and position.get("chaos_flag") is True and "REALM_BIS" in active_blockers:
         reasons.append("Chaos position is live while REALM_BIS is active")
-        return "EXIT_NOW", reasons
+        return tags.EXIT_NOW, reasons
     if _price_reached_target(position):
         reasons.append("Current price reached take_profit")
-        return "REDUCE", reasons
+        return tags.REDUCE, reasons
     if (
         has_open_position
         and position
@@ -233,62 +236,62 @@ def _select_action(
         and not policy.get("allow_new_risk", False)
     ):
         reasons.append("Policy is blocked while holding a CHAOS position")
-        return "REDUCE", reasons
+        return tags.REDUCE, reasons
 
     # UPGRADE 1: promotable-candidate-aware BLOCK_ENTRY reason.
     # Routes to BLOCK_ENTRY (same as generic watchlist path) but with richer
     # reason text surfacing the promotable classification. No count change.
     if (
-        pre_entry_state == "BLOCKED_PROMOTABLE_CLEAN_CANDIDATE"
+        pre_entry_state == tags.BLOCKED_PROMOTABLE_CLEAN_CANDIDATE
         and "GSCE_PHASE_LOCK" in active_blockers
     ):
         reasons.append(
             "Promotable clean candidate remains blocked while GSCE_PHASE_LOCK is active"
         )
-        return "BLOCK_ENTRY", reasons
+        return tags.BLOCK_ENTRY, reasons
 
     if (
-        pre_entry_state == "CLEAN_READY_PENDING_TRIGGER"
+        pre_entry_state == tags.CLEAN_READY_PENDING_TRIGGER
         and not policy.get("allow_new_risk", False)
     ):
         reasons.append(
             "Promotable clean candidate advanced to CLEAN_READY_PENDING_TRIGGER after GSCE_PHASE_LOCK cleared; policy still forbids new risk"
         )
-        return "MONITOR", reasons
+        return tags.MONITOR, reasons
 
     if (
-        pre_entry_state == "CLEAN_ENTRY_ELIGIBLE"
+        pre_entry_state == tags.CLEAN_ENTRY_ELIGIBLE
         and policy.get("allow_new_risk", False)
     ):
         if perception_row is not None and not bool(perception_row.get("gravity_pass", False)):
             reasons.append(
                 "Perception control high-constraint evaluation did not survive review promotion"
             )
-            return "MONITOR", reasons
+            return tags.MONITOR, reasons
         launch_row = _lookup_launch_row(ticker, signal_refinery_report)
         launch_state = str((launch_row or {}).get("launch_state") or "").upper()
         if launch_state == "BLOCKED_CROWDING":
             reasons.append("Launch control blocked review because repricing headroom is too low")
-            return "BLOCK_ENTRY", reasons
+            return tags.BLOCK_ENTRY, reasons
         if launch_state in {"BLOCKED_VALIDATION", "BLOCKED_POLICY", "BLOCKED_THERMAL"}:
             reasons.append(f"Launch control blocked review: {launch_state}")
-            return "MONITOR", reasons
+            return tags.MONITOR, reasons
         reasons.append(
             "Promotable clean candidate is fully gate-cleared and ready for entry review"
         )
-        return "REVIEW_FOR_ENTRY", reasons
+        return tags.REVIEW_FOR_ENTRY, reasons
 
     if signal_state == "WATCHLIST" and "GSCE_PHASE_LOCK" in active_blockers:
         reasons.append("Signal remains WATCHLIST while GSCE_PHASE_LOCK is active")
-        return "BLOCK_ENTRY", reasons
+        return tags.BLOCK_ENTRY, reasons
     if entry_type == "CLEAN" and not active_blockers and policy.get("allow_new_risk", False):
         if has_open_position:
             reasons.append("Clean position has no active blockers and policy allows new risk")
-            return "HOLD", reasons
+            return tags.HOLD, reasons
         reasons.append("Clean signal has no active blockers but no position is live yet")
-        return "MONITOR", reasons
+        return tags.MONITOR, reasons
     reasons.append("No hard rule matched; using deterministic MONITOR fallback")
-    return "MONITOR", reasons
+    return tags.MONITOR, reasons
 
 
 def _build_external_observation_context(

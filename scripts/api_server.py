@@ -333,22 +333,27 @@ def _log_source_health(stats: dict, bull_state: str) -> None:
             _WRITE_FAILURE_COUNT,
         )
 
-_CSV_MEDIA_TYPE = "text/csv; charset=utf-8"
-_ADVISORY_STATUS = "ADVISORY_ONLY"
-_EXECUTION_MODE = "HUMAN_ONLY"
-_AI_EXECUTION_COUNT = 0
-
-
-def _safe_exc_summary(exc: BaseException) -> str:
-    """S6 fix: return ``ExceptionType`` only.
-
-    Eliminates leakage of absolute paths, DB filenames, and third-party
-    library internals through per-route ``"error": _safe_exc_summary(exc)`` shortcuts.
-    Full detail is still written to the server log via _logger.exception
-    from the calling site.
-    """
-    return type(exc).__name__
-_VERSION = "1.0.0"
+# Advisory response-contract constants + pure sanitizer extracted to
+# scripts/api_response_contract.py (god-module reduction). Re-imported under
+# their original private names so all route references stay byte-identical.
+try:
+    from scripts.api_response_contract import (
+        CSV_MEDIA_TYPE as _CSV_MEDIA_TYPE,
+        ADVISORY_STATUS as _ADVISORY_STATUS,
+        EXECUTION_MODE as _EXECUTION_MODE,
+        AI_EXECUTION_COUNT as _AI_EXECUTION_COUNT,
+        API_VERSION as _VERSION,
+        safe_exc_summary as _safe_exc_summary,
+    )
+except ModuleNotFoundError:  # pragma: no cover - script-path fallback
+    from api_response_contract import (  # type: ignore[no-redef]
+        CSV_MEDIA_TYPE as _CSV_MEDIA_TYPE,
+        ADVISORY_STATUS as _ADVISORY_STATUS,
+        EXECUTION_MODE as _EXECUTION_MODE,
+        AI_EXECUTION_COUNT as _AI_EXECUTION_COUNT,
+        API_VERSION as _VERSION,
+        safe_exc_summary as _safe_exc_summary,
+    )
 
 
 class _NoopApp:

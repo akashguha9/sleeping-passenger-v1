@@ -10,7 +10,7 @@
  *     Buy / Sell / Execute trade / Arbitrage / Risk-free wording.
  */
 // @ts-ignore
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, act } from '@testing-library/react';
 import { vi } from 'vitest';
 
 // @ts-ignore
@@ -100,6 +100,32 @@ function makePolyEvent() {
   };
 }
 
+function makeDisagreementEvent() {
+  // A disagreement row that MENTIONS Kalshi in its text but whose canonical
+  // source is NOT kalshi. It must never appear in the Kalshi source tab.
+  return {
+    id: 700,
+    event_id: 'poly_btc__kalshi_btc',
+    source_name: 'prediction_market_disagreement',
+    raw_payload: {
+      pair_id: 'poly_btc__kalshi_btc',
+      customer_label: 'Prediction Market Disagreement Alert',
+      poly_title: 'Will Bitcoin hit a new high in May?',
+      kalshi_title: 'How high will Bitcoin get in May?',
+      advisory_status: 'ADVISORY_ONLY',
+      execution_gate: 'LOCKED',
+      human_review_required: true,
+      broker_api_called: false,
+      ai_execution_count: 0,
+    },
+    fetched_at: '2026-05-24T00:00:00Z',
+    advisory_status: 'ADVISORY_ONLY',
+    human_review_required: true,
+    execution_gate: 'LOCKED',
+    ai_execution_count: 0,
+  };
+}
+
 function makeStatus(overrides: any = {}) {
   return {
     operation: 'get_live_sources_status',
@@ -133,8 +159,9 @@ describe('Live Signals — Kalshi first-class tab', () => {
       ...SAFETY,
     });
 
-    render(<LiveSignalsPage />);
-
+    await act(async () => {
+      render(<LiveSignalsPage />);
+    });
     await waitFor(() => screen.getByRole('button', { name: 'Kalshi' }));
     const polyBtn = screen.getByRole('button', { name: 'Polymarket' });
     const kalshiBtn = screen.getByRole('button', { name: 'Kalshi' });
@@ -156,11 +183,18 @@ describe('Live Signals — Kalshi first-class tab', () => {
       };
     });
 
-    render(<LiveSignalsPage />);
+    await act(async () => {
+      render(<LiveSignalsPage />);
+    });
     await waitFor(() => screen.getByRole('button', { name: 'Kalshi' }));
-    (screen.getByRole('button', { name: 'Kalshi' }) as HTMLButtonElement).click();
-
-    await waitFor(() => screen.getAllByTestId('signal-event-card'));
+    await act(async () => {
+      (screen.getByRole('button', { name: 'Kalshi' }) as HTMLButtonElement).click();
+    });
+    // Wait for the DOM to settle on the Kalshi-only view (avoids capturing a
+    // transient stale render while the source-scoped refetch is in flight).
+    await waitFor(() => {
+      expect(screen.getAllByTestId('signal-event-card')).toHaveLength(1);
+    });
     const cards = screen.getAllByTestId('signal-event-card');
     expect(cards).toHaveLength(1);
     expect(cards[0].textContent).toMatch(/Bitcoin/i);
@@ -174,10 +208,13 @@ describe('Live Signals — Kalshi first-class tab', () => {
       return { live_signal_events: events, count: events.length, ...SAFETY };
     });
 
-    render(<LiveSignalsPage />);
+    await act(async () => {
+      render(<LiveSignalsPage />);
+    });
     await waitFor(() => screen.getByRole('button', { name: 'Polymarket' }));
-    (screen.getByRole('button', { name: 'Polymarket' }) as HTMLButtonElement).click();
-
+    await act(async () => {
+      (screen.getByRole('button', { name: 'Polymarket' }) as HTMLButtonElement).click();
+    });
     await waitFor(() => screen.getAllByTestId('signal-event-card'));
     for (const card of screen.getAllByTestId('signal-event-card')) {
       // No Kalshi event_id, ticker, or category should appear in the
@@ -192,14 +229,79 @@ describe('Live Signals — Kalshi first-class tab', () => {
       return { live_signal_events: events, count: events.length, ...SAFETY };
     });
 
-    render(<LiveSignalsPage />);
+    await act(async () => {
+      render(<LiveSignalsPage />);
+    });
     await waitFor(() => screen.getByRole('button', { name: 'All Sources' }));
-    (screen.getByRole('button', { name: 'All Sources' }) as HTMLButtonElement).click();
-
+    await act(async () => {
+      (screen.getByRole('button', { name: 'All Sources' }) as HTMLButtonElement).click();
+    });
     await waitFor(() => screen.getAllByTestId('signal-event-card'));
     const allText = screen.getAllByTestId('signal-event-card').map((c) => c.textContent || '').join('|');
     expect(allText).toMatch(/Polymarket/i);
     expect(allText).toMatch(/Kalshi/i);
+  });
+
+  it('Kalshi tab excludes prediction_market_disagreement rows even if they mention Kalshi', async () => {
+    // Even if the kalshi-scoped response carries a leaked disagreement row
+    // (or stale All-Sources data lingers), the canonical source guard keeps
+    // the Kalshi tab strictly source_name === 'kalshi'.
+    mockLiveSignals.mockImplementation(async (source?: string) => {
+      const events =
+        source === 'kalshi'
+          ? [makeKalshiEvent(), makeDisagreementEvent()]
+          : [makePolyEvent(), makeKalshiEvent(), makeDisagreementEvent()];
+      return { live_signal_events: events, count: events.length, ...SAFETY };
+    });
+
+    await act(async () => {
+      render(<LiveSignalsPage />);
+    });
+    await waitFor(() => screen.getByRole('button', { name: 'Kalshi' }));
+    await act(async () => {
+      (screen.getByRole('button', { name: 'Kalshi' }) as HTMLButtonElement).click();
+    });
+    await waitFor(() => {
+      const cards = screen.getAllByTestId('signal-event-card');
+      expect(cards).toHaveLength(1);
+    });
+    const cards = screen.getAllByTestId('signal-event-card');
+    expect(cards).toHaveLength(1);
+    expect(cards[0].textContent).toMatch(/Kalshi/i);
+    // The disagreement detail block must NOT be present in the Kalshi tab.
+    expect(screen.queryByTestId('disagreement-detail-block')).toBeNull();
+  });
+
+  it('switching All Sources → Kalshi replaces visible cards (no stale append)', async () => {
+    mockLiveSignals.mockImplementation(async (source?: string) => {
+      const events =
+        source === 'kalshi' ? [makeKalshiEvent()] : [makePolyEvent(), makeKalshiEvent()];
+      return { live_signal_events: events, count: events.length, ...SAFETY };
+    });
+
+    await act(async () => {
+      render(<LiveSignalsPage />);
+    });
+    // All Sources first: both rows visible.
+    await waitFor(() => {
+      expect(screen.getAllByTestId('signal-event-card')).toHaveLength(2);
+    });
+
+    await act(async () => {
+
+      (screen.getByRole('button', { name: 'Kalshi' }) as HTMLButtonElement).click();
+
+    });
+    // After switching, exactly the single Kalshi card remains — the Polymarket
+    // card is replaced, not appended to.
+    await waitFor(() => {
+      const cards = screen.getAllByTestId('signal-event-card');
+      expect(cards).toHaveLength(1);
+    });
+    const cards = screen.getAllByTestId('signal-event-card');
+    expect(cards).toHaveLength(1);
+    expect(cards[0].textContent).not.toMatch(/Apple/i); // the Polymarket row is gone
+    expect(cards[0].textContent).toMatch(/Bitcoin/i);
   });
 
   it('Kalshi cards never use Buy / Sell / Execute / Arbitrage language', async () => {
@@ -209,10 +311,13 @@ describe('Live Signals — Kalshi first-class tab', () => {
       ...SAFETY,
     });
 
-    render(<LiveSignalsPage />);
+    await act(async () => {
+      render(<LiveSignalsPage />);
+    });
     await waitFor(() => screen.getByRole('button', { name: 'Kalshi' }));
-    (screen.getByRole('button', { name: 'Kalshi' }) as HTMLButtonElement).click();
-
+    await act(async () => {
+      (screen.getByRole('button', { name: 'Kalshi' }) as HTMLButtonElement).click();
+    });
     await waitFor(() => screen.getAllByTestId('signal-event-card'));
     const card = screen.getAllByTestId('signal-event-card')[0];
     const text = (card.textContent || '').toLowerCase();
