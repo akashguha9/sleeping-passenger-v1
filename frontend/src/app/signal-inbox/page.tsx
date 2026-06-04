@@ -54,14 +54,21 @@ export default function SignalInboxPage() {
   const [sortBy, setSortBy] = useState('severity');
 
   useEffect(() => {
-    Promise.all([getSignals(50, 72), getSignalsDiagnostics(72)]).then(
-      ([signalsRes, diag]) => {
+    Promise.all([getSignals(50, 72), getSignalsDiagnostics(72)])
+      .then(([signalsRes, diag]) => {
         setResponse(signalsRes.data);
         setIsMock(signalsRes.isMock);
         setDiagnostics(diag);
+      })
+      .catch(() => {
+        // getSignals already falls back to mock data on error, but if the
+        // promise chain ever rejects we must still clear the spinner rather
+        // than leave the inbox stuck on "Loading signals…".
+        setIsMock(true);
+      })
+      .finally(() => {
         setLoading(false);
-      },
-    );
+      });
   }, []);
 
   const { items, fabric_bull_state } = response;

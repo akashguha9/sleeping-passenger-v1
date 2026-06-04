@@ -981,17 +981,26 @@ export default function LiveSignalsPage() {
       getLiveSignals(sourceFilter || undefined, 200),
       getSourceHealthSummary(),
       getLiveSourcesStatus(),
-    ]).then(([result, h, r]) => {
-      if (!result) {
+    ])
+      .then(([result, h, r]) => {
+        if (!result) {
+          setBackendOffline(true);
+        } else {
+          setBackendOffline(false);
+          setData(result);
+        }
+        setHealth(h);
+        setRefreshStatus(r);
+      })
+      .catch(() => {
+        // Defence in depth: the apiClient wrappers already swallow errors
+        // and return null, but if anything unexpected rejects we must not
+        // strand the page on "Loading…". Treat it as backend-offline.
         setBackendOffline(true);
-      } else {
-        setBackendOffline(false);
-        setData(result);
-      }
-      setHealth(h);
-      setRefreshStatus(r);
-      setLoading(false);
-    });
+      })
+      .finally(() => {
+        setLoading(false);
+      });
   }, [sourceFilter]);
 
   const filtered = useMemo(() => {

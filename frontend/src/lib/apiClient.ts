@@ -148,12 +148,37 @@ export class ApiHttpError extends Error {
   }
 }
 
+// Hard ceiling on how long any single backend request may stay pending.
+//
+// Without this, a backend that accepts the TCP connection but never
+// responds (a blocked/slow route, a stalled proxy) leaves `fetch` pending
+// forever. Pages that `await Promise.all([...])` before clearing their
+// `loading` flag then spin on "Loading…" indefinitely. Aborting after a
+// bounded interval guarantees every request settles, so the existing
+// per-call `try/catch` wrappers can fall back to null / mock instead of
+// hanging the UI. Override with NEXT_PUBLIC_API_TIMEOUT_MS if needed.
+const REQUEST_TIMEOUT_MS = (() => {
+  const raw = Number(process.env.NEXT_PUBLIC_API_TIMEOUT_MS);
+  return Number.isFinite(raw) && raw > 0 ? raw : 12_000;
+})();
+
 async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const headers = buildHeaders(init);
-  const res = await fetch(`${API_BASE}${path}`, {
-    ...init,
-    headers,
-  });
+  // Per-request abort timer. If the caller already supplied a signal we
+  // still layer our own timeout on top so a hung request can never escape
+  // the ceiling.
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE}${path}`, {
+      ...init,
+      headers,
+      signal: init?.signal ?? controller.signal,
+    });
+  } finally {
+    clearTimeout(timer);
+  }
   if (res.status === 401 || res.status === 403) {
     throw new ApiTokenRequiredError(res.status);
   }
