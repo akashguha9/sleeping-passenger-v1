@@ -32,7 +32,7 @@ export function ReadinessModeBadge({ readiness }: Props) {
           Real-money readiness: {view.label}
         </span>
         {view.score !== null && (
-          <span className="opacity-80">score {view.score}/7</span>
+          <span className="opacity-80">score {view.score}/{view.max}</span>
         )}
       </div>
       <p className="mt-1 leading-snug opacity-90">{view.plain}</p>

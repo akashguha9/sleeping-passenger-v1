@@ -40,6 +40,7 @@ describe('ReadinessModeBadge', () => {
         readiness={{
           allowed_mode: 'TINY_MANUAL_PROBE_ONLY',
           readiness_score: 6.5,
+          readiness_max: 8,
           reason: 'Scores are not calibrated enough to size from. Tiny manual probes only.',
         }}
       />,
@@ -49,7 +50,7 @@ describe('ReadinessModeBadge', () => {
     expect(el.getAttribute('data-advisory-only')).toBe('true');
     expect(el.getAttribute('data-execution-permission')).toBe('false');
     expect(/not calibrated enough to size/i.test(el.textContent ?? '')).toBe(true);
-    expect(/6\.5\/7/.test(el.textContent ?? '')).toBe(true);
+    expect(/6\.5\/8/.test(el.textContent ?? '')).toBe(true);
   });
 
   it('never emits execution / broker language in any mode', () => {
@@ -57,7 +58,8 @@ describe('ReadinessModeBadge', () => {
       'SCALE_BLOCKED',
       'PAPER_ONLY',
       'TINY_MANUAL_PROBE_ONLY',
-      'MANUAL_REAL_MONEY_READY',
+      'MANUAL_REAL_MONEY_READY_SMALL_ONLY',
+      'MANUAL_REAL_MONEY_READY_CALIBRATED',
     ]) {
       const { container, unmount } = render(
         <ReadinessModeBadge readiness={{ allowed_mode: mode }} />,

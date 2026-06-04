@@ -331,27 +331,24 @@ def run_preflight(
 
 
 # ---------------------------------------------------------------------------
-# Real-money readiness assessment (additive — does not change run_preflight)
+# Real-money readiness assessment v2 (additive — run_preflight untouched)
 # ---------------------------------------------------------------------------
 
-# Allowed operating modes, from most restrictive to least.
+# Allowed operating modes.
 MODE_SCALE_BLOCKED = "SCALE_BLOCKED"
 MODE_PAPER_ONLY = "PAPER_ONLY"
 MODE_TINY_PROBE = "TINY_MANUAL_PROBE_ONLY"
-MODE_MANUAL_READY = "MANUAL_REAL_MONEY_READY"
+MODE_MANUAL_SMALL = "MANUAL_REAL_MONEY_READY_SMALL_ONLY"
+MODE_MANUAL_CALIBRATED = "MANUAL_REAL_MONEY_READY_CALIBRATED"
+# Back-compat alias (older callers/tests referenced MODE_MANUAL_READY).
+MODE_MANUAL_READY = MODE_MANUAL_SMALL
 
-# This gate is for *manual* real-money readiness only. It can never certify
-# scaling, so the score is hard-capped here.
-READINESS_MAX = 7.0
+# This MVP can reach manual real-money readiness but never scaling.
+READINESS_MAX = 8.0
 
 
 def _execution_surface_present() -> bool:
-    """True if the advisory contract's no-execution invariants are broken.
-
-    The advisory contract is the single source of truth: can_execute and
-    broker_api_called must be False and jsonl must not be canonical. If any of
-    those flip, an execution surface has appeared and we hard-fail.
-    """
+    """True if the advisory contract's no-execution invariants are broken."""
     try:
         try:
             from scripts import advisory_contract as ac
@@ -366,12 +363,30 @@ def _execution_surface_present() -> bool:
             return True
         return False
     except Exception:
-        # If we cannot even confirm the contract, treat as unsafe.
         return True
 
 
+def _advisory_invariants_ok() -> bool:
+    return not _execution_surface_present()
+
+
+def _persistence_score() -> float:
+    """1.0 when SQLite is canonical and JSONL is audit-only."""
+    try:
+        try:
+            from scripts import advisory_contract as ac
+        except ModuleNotFoundError:  # pragma: no cover - script-style fallback
+            import advisory_contract as ac  # type: ignore[no-redef]
+        sqlite_canon = getattr(ac, "sqlite_is_canonical", None)
+        jsonl_canon = getattr(ac, "jsonl_is_canonical", None)
+        if sqlite_canon is True and jsonl_canon is False:
+            return 1.0
+        return 0.5
+    except Exception:
+        return 0.0
+
+
 def _leverage_governance_active() -> bool:
-    """True if leverage governance is importable and actually flags a breach."""
     try:
         try:
             from scripts.leverage_governance import validate_leverage_policy
@@ -386,28 +401,54 @@ def _leverage_governance_active() -> bool:
 def _feedback_loop_available() -> bool:
     try:
         try:
-            from scripts.calibration_recommendations import build_recommendation  # noqa: F401
+            from scripts.calibration_recommendations import build_recommendation_from_metrics  # noqa: F401
         except ModuleNotFoundError:  # pragma: no cover - script-style fallback
-            from calibration_recommendations import build_recommendation  # noqa: F401
+            from calibration_recommendations import build_recommendation_from_metrics  # noqa: F401
         return True
     except Exception:
         return False
 
 
-def _calibration_status(db_path: Path | None) -> tuple[str, bool, int]:
+def _backup_score() -> float:
     try:
         try:
-            from scripts.score_calibration import build_score_calibration_report
+            from scripts import backup_local_state  # noqa: F401
         except ModuleNotFoundError:  # pragma: no cover - script-style fallback
-            from score_calibration import build_score_calibration_report  # type: ignore[no-redef]
-        rep = build_score_calibration_report(db_path)
-        return (
-            str(rep.get("calibration_status", "UNCALIBRATED")),
-            bool(rep.get("score_should_drive_sizing", False)),
-            int(rep.get("sample_size", 0) or 0),
-        )
+            import backup_local_state  # noqa: F401
+        return 1.0
     except Exception:
-        return "UNCALIBRATED", False, 0
+        return 0.5
+
+
+def _securities_coverage_score(db_path: Path | None) -> float:
+    try:
+        try:
+            from scripts.securities_master_coverage import build_coverage_report
+        except ModuleNotFoundError:  # pragma: no cover - script-style fallback
+            from securities_master_coverage import build_coverage_report  # type: ignore[no-redef]
+        rep = build_coverage_report(db_path)
+        return float(rep.get("score", 0.0))
+    except Exception:
+        return 0.0
+
+
+def _calibration_probe(db_path: Path | None) -> dict:
+    """Full calibration metrics from REAL extracted outcomes (provenance-aware)."""
+    try:
+        try:
+            from scripts.score_calibration import build_calibration_metrics_report
+        except ModuleNotFoundError:  # pragma: no cover - script-style fallback
+            from score_calibration import build_calibration_metrics_report  # type: ignore[no-redef]
+        return build_calibration_metrics_report(db_path)
+    except Exception:
+        return {"calibration_status": "NO_DATA", "real_n": 0, "paper_n": 0, "n": 0}
+
+
+def _calibration_score(status: str) -> float:
+    return {
+        "NO_DATA": 0.0, "FIXTURE_ONLY": 0.0, "LOW_SAMPLE": 0.2,
+        "CALIBRATING": 0.5, "CALIBRATED": 0.8, "MIS_CALIBRATED": 0.4,
+    }.get(status, 0.0)
 
 
 def assess_real_money_readiness(
@@ -418,118 +459,140 @@ def assess_real_money_readiness(
     preflight: dict[str, Any] | None = None,
     now: _dt.datetime | None = None,
 ) -> dict[str, Any]:
-    """Score honest manual real-money readiness and pick an allowed mode.
-
-    Caps (per product policy):
-      * execution surface present        -> HARD FAIL (0.0, SCALE_BLOCKED)
-      * leverage governance missing       -> cap 5.0
-      * calibration UNCALIBRATED          -> cap 6.5
-      * backend/frontend tests failing    -> cap 6.0
-      * clean safety+leverage+calibration+feedback -> may reach 7.0 (never more)
-    """
+    """Dimensional manual real-money readiness gate (v2). Read-only; never
+    authorises execution. Hard-capped at READINESS_MAX (8.0) — never scaling."""
     now = now or _dt.datetime.now(_dt.timezone.utc)
     blockers: list[str] = []
     warnings: list[str] = []
-    checks: dict[str, Any] = {}
 
     exec_surface = _execution_surface_present()
+    A = 0.0 if exec_surface else 1.0
+    E = 0.0 if exec_surface else 1.0
+    P = _persistence_score()
     leverage_active = _leverage_governance_active()
+    L = 1.0 if leverage_active else 0.0
+    J = _securities_coverage_score(db_path)
+    cal = _calibration_probe(db_path)
+    cal_status = str(cal.get("calibration_status", "NO_DATA"))
+    real_n = int(cal.get("real_n", 0) or 0)
+    paper_n = int(cal.get("paper_n", 0) or 0)
+    C = _calibration_score(cal_status)
     feedback = _feedback_loop_available()
-    cal_status, cal_drives_sizing, cal_sample = _calibration_status(db_path)
-    pf = preflight if preflight is not None else run_preflight(db_path, now=now)
-    pf_ok = bool(pf.get("ok", False))
+    F = 1.0 if feedback else 0.0
+    tests_failing = (backend_tests_passing is False) or (frontend_tests_passing is False)
+    T = 0.0 if tests_failing else 1.0
+    B = _backup_score()
+    U = 1.0
 
-    checks["execution_surface_present"] = exec_surface
-    checks["leverage_governance_active"] = leverage_active
-    checks["jurisdiction_resolution_available"] = leverage_active
-    checks["feedback_loop_available"] = feedback
-    checks["calibration_status"] = cal_status
-    checks["score_should_drive_sizing"] = cal_drives_sizing
-    checks["calibration_sample_size"] = cal_sample
-    checks["preflight_ok"] = pf_ok
-    checks["backend_tests_passing"] = backend_tests_passing
-    checks["frontend_tests_passing"] = frontend_tests_passing
+    checks = {
+        "advisory_invariant": A, "no_execution_surface": E, "persistence": P,
+        "leverage_governance": L, "jurisdiction_coverage": J, "calibration": C,
+        "feedback_loop": F, "test_confidence": T, "backup": B, "ui_clarity": U,
+        "calibration_status": cal_status, "real_n": real_n, "paper_n": paper_n,
+        "securities_coverage_score": J,
+        "backend_tests_passing": backend_tests_passing,
+        "frontend_tests_passing": frontend_tests_passing,
+    }
+
+    R_raw = 10.0 * (
+        0.15 * A + 0.15 * E + 0.10 * P + 0.10 * L + 0.10 * J
+        + 0.15 * C + 0.10 * F + 0.10 * T + 0.03 * B + 0.02 * U
+    )
 
     # --- HARD FAIL: any execution surface ---
     if exec_surface:
         blockers.append("execution_surface_present")
         payload = {
-            "report": "real_money_readiness",
-            "readiness_score": 0.0,
-            "allowed_mode": MODE_SCALE_BLOCKED,
-            "blockers": blockers,
-            "warnings": warnings,
-            "checks": checks,
-            "reason": (
-                "HARD FAIL: an execution surface was detected (advisory "
-                "invariants broken). Real-money use is forbidden until the "
-                "no-execution contract holds."
-            ),
+            "report": "real_money_readiness", "readiness_score": 0.0,
+            "readiness_max": READINESS_MAX, "allowed_mode": MODE_SCALE_BLOCKED,
+            "blockers": blockers, "warnings": warnings, "checks": checks,
+            "dimensions": {k: checks[k] for k in (
+                "advisory_invariant", "no_execution_surface", "persistence",
+                "leverage_governance", "jurisdiction_coverage", "calibration",
+                "feedback_loop", "test_confidence", "backup", "ui_clarity")},
+            "calibration_status": cal_status, "real_n": real_n, "paper_n": paper_n,
+            "reason": ("HARD FAIL: execution surface detected (advisory invariants "
+                       "broken). Real-money use forbidden."),
             "generated_at": now.isoformat(timespec="seconds").replace("+00:00", "Z"),
         }
         payload.update(_SAFETY_STAMPS)
         return payload
 
-    score = READINESS_MAX  # start at the gate's max; apply caps downward
+    caps: list[float] = [READINESS_MAX]
 
-    if not leverage_active:
+    if L < 0.8:
         blockers.append("leverage_governance_missing")
-        score = min(score, 5.0)
-
-    if cal_status == "UNCALIBRATED":
+        caps.append(5.0)
+    if C == 0.0:
         warnings.append("scores_uncalibrated")
-        score = min(score, 6.5)
-
-    if cal_drives_sizing:
-        # Sizing should never be auto-enabled by a read path.
-        warnings.append("score_should_drive_sizing_true_review_manually")
-
-    if backend_tests_passing is False or frontend_tests_passing is False:
+        caps.append(6.5)
+    if cal_status in {"NO_DATA", "FIXTURE_ONLY", "LOW_SAMPLE"}:
+        caps.append(6.5)
+    if cal_status == "CALIBRATING":
+        caps.append(7.0)
+    if cal_status == "CALIBRATED" and real_n < 50:
+        # paper-calibrated (real_n<50) -> small-only ceiling
+        caps.append(7.0)
+        if real_n < 20:
+            caps.append(7.0)
+    if cal_status == "CALIBRATED" and real_n >= 50:
+        caps.append(8.0)
+    if cal_status == "MIS_CALIBRATED":
+        warnings.append("miscalibrated_review_required")
+        caps.append(6.5)
+    if tests_failing:
         blockers.append("tests_failing")
-        score = min(score, 6.0)
-
-    if not pf_ok:
+        caps.append(6.0)
+    if not (preflight if preflight is not None else run_preflight(db_path, now=now)).get("ok", False):
         blockers.append("preflight_blocking_issues")
-        score = min(score, 6.0)
-
+        caps.append(6.0)
+    if J < 0.80:
+        warnings.append("securities_coverage_weak")
+        caps.append(7.0)
     if not feedback:
         warnings.append("feedback_loop_unavailable")
 
-    # --- Decide allowed mode ---
-    if not leverage_active or not pf_ok or (backend_tests_passing is False) or (frontend_tests_passing is False):
-        allowed = MODE_PAPER_ONLY
-    elif cal_status == "UNCALIBRATED":
-        allowed = MODE_TINY_PROBE
-    elif score >= 7.0 and cal_status in {"CALIBRATING", "CALIBRATED"}:
-        allowed = MODE_MANUAL_READY
-    else:
-        allowed = MODE_TINY_PROBE
+    R = round(min(R_raw, *caps), 2)
 
-    score = round(min(score, READINESS_MAX), 2)
+    # --- Allowed mode from R ---
+    if R < 6.0:
+        allowed = MODE_PAPER_ONLY
+    elif R < 7.0:
+        allowed = MODE_TINY_PROBE
+    elif R < 8.0:
+        allowed = MODE_MANUAL_SMALL
+    else:
+        allowed = MODE_MANUAL_CALIBRATED
 
     if allowed == MODE_PAPER_ONLY:
-        reason = "Blocking issues present — paper trading only until resolved."
+        reason = "Paper trading only — blockers present. Human execution required."
     elif allowed == MODE_TINY_PROBE:
-        reason = (
-            "Safety and leverage governance hold, but scores are not yet "
-            "calibrated on real outcomes. Tiny manual probes only; do not size "
-            "from scores; keep reconciling to build calibration evidence."
-        )
+        reason = ("Safety holds but scores are not calibrated enough to size from. "
+                  "Tiny manual probes only; human execution required.")
+    elif allowed == MODE_MANUAL_SMALL:
+        reason = ("Manual real-money permitted at SMALL size only (calibration not "
+                  "yet real-grade). Position sizing human-controlled; human execution "
+                  "required. Not scaling-ready.")
     else:
-        reason = (
-            "Safety, leverage governance, calibration status, and the feedback "
-            "loop all hold. Manual real-money trades are permitted with "
-            "discipline. NOT scaling-ready — this gate caps at 7.0."
-        )
+        reason = ("Real-calibrated on >=50 real outcomes. Manual real-money permitted "
+                  "with discipline. Human execution required. Not scaling-ready.")
 
     payload = {
         "report": "real_money_readiness",
-        "readiness_score": score,
+        "readiness_score": R,
+        "readiness_raw": round(R_raw, 2),
         "readiness_max": READINESS_MAX,
         "allowed_mode": allowed,
         "blockers": blockers,
         "warnings": warnings,
         "checks": checks,
+        "dimensions": {
+            "A": A, "E": E, "P": P, "L": L, "J": J,
+            "C": C, "F": F, "T": T, "B": B, "U": U,
+        },
+        "calibration_status": cal_status,
+        "real_n": real_n,
+        "paper_n": paper_n,
         "reason": reason,
         "generated_at": now.isoformat(timespec="seconds").replace("+00:00", "Z"),
     }
