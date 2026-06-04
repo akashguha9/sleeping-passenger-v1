@@ -93,6 +93,8 @@ data/logs/*
 *.tsv
 *.parquet
 *.db
+# Committed CSV templates (negate the blanket *.csv ignore above).
+!templates/outcome_import_template.csv
 *.sqlite
 *.sqlite3
 

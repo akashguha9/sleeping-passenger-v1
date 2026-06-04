@@ -1,0 +1,4 @@
+source_type,trade_id,signal_id,ticker,opened_at,closed_at,direction,entry_price,exit_price,realized_pnl,capital_at_risk,leverage,score_at_entry,archetype,signal_class,notes
+PAPER_TRADE,PT_0001,EV_RELIANCE_01,RELIANCE,2026-01-05,2026-01-20,LONG,2800,2940,,,1.0,0.72,HURACAN,momentum,paper rehearsal entry
+REAL_MANUAL_TRADE,MT_0001,EV_AAPL_01,AAPL,2026-02-03,2026-02-18,LONG,190.0,201.5,,,1.0,0.68,,breakout,hand-entered real trade
+REAL_MANUAL_TRADE,MT_0002,,INFY,2026-02-10,2026-02-24,LONG,,,1500,10000,1.0,0.55,,mean_reversion,pnl-based real outcome

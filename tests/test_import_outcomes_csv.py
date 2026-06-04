@@ -98,9 +98,13 @@ def test_dry_run_writes_nothing(tmp_path):
 
 
 def test_template_file_parses():
-    rows = list(csv.DictReader(Path("templates/outcome_import_template.csv").open(encoding="utf-8-sig")))
+    # Resolve relative to the repo root so the test is cwd-independent.
+    repo_root = Path(__file__).resolve().parents[1]
+    template = repo_root / "templates" / "outcome_import_template.csv"
+    assert template.exists(), f"committed template missing: {template}"
+    rows = list(csv.DictReader(template.open(encoding="utf-8-sig")))
     assert len(rows) >= 3
-    rep = imp.import_outcomes(rows, db_path=Path("/tmp/never_written.db"), dry_run=True)
+    rep = imp.import_outcomes(rows, db_path=repo_root / "_never_written.db", dry_run=True)
     assert rep["rejected_count"] == 0  # template is valid
 
 
