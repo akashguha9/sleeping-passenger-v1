@@ -111,6 +111,14 @@ export interface ManualTradeLog {
   quantity: number;
   price: number;
   leverage?: number;
+  // P0 leverage governance — computed at log time. A breaching trade is still
+  // recorded (journal, not an execution blocker) but flagged so the operator
+  // sees the policy breach. Display-only — never grants execution permission.
+  leverage_ceiling?: number;
+  leverage_breach?: boolean;
+  leverage_policy_severity?: 'NONE' | 'WARNING' | 'POLICY_BREACH' | string;
+  leverage_policy_reason?: string;
+  jurisdiction_group?: 'INDIA' | 'REST_OF_WORLD' | 'UNKNOWN' | string;
   executed_at: string;
   thesis: string;
   notes: string;

@@ -203,9 +203,46 @@ function TradeCard({ t }: { t: ManualTradeLog }) {
           {leverage !== '1.0x' && (
             <span className="sp-chip sp-chip-gold">Lev · {leverage}</span>
           )}
+          {t.leverage_breach && (
+            <span
+              data-testid="leverage-breach-chip"
+              className="text-[10px] font-semibold px-2 py-0.5 rounded-full font-mono uppercase tracking-widest"
+              style={{
+                color: '#f87171',
+                border: '1px solid rgba(248,113,113,0.4)',
+                background: 'rgba(248,113,113,0.08)',
+              }}
+              title={t.leverage_policy_reason || 'Leverage policy breach'}
+            >
+              Policy breach
+            </span>
+          )}
         </div>
         <HumanOnlyBadge />
       </div>
+
+      {t.leverage_breach && (
+        <div
+          data-testid="leverage-breach-warning"
+          className="mb-3 rounded-md px-2.5 py-1.5 text-[11px] leading-snug font-mono"
+          style={{ color: '#f87171', border: '1px solid rgba(248,113,113,0.4)', background: 'rgba(248,113,113,0.06)' }}
+        >
+          <span className="font-semibold uppercase tracking-widest">
+            Leverage policy breach
+          </span>
+          {t.jurisdiction_group && (
+            <span className="ml-2 opacity-80">{t.jurisdiction_group}</span>
+          )}
+          {typeof t.leverage_ceiling === 'number' && (
+            <span className="ml-2 opacity-80">ceiling {t.leverage_ceiling}x</span>
+          )}
+          <p className="mt-1 opacity-90">
+            {t.leverage_policy_reason ||
+              'This recorded trade exceeded its jurisdiction leverage ceiling.'}{' '}
+            Manual review required · journal record only.
+          </p>
+        </div>
+      )}
 
       <div className="grid grid-cols-4 gap-2 text-xs mb-3">
         <Stat label="Size" value={String(t.quantity)} />
