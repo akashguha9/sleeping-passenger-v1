@@ -12,9 +12,11 @@ try:
         get_source_mode,
         load_json_file,
     )
+    from scripts.tag_engine import emit_tag
 except ModuleNotFoundError:
     from moltbook_loader import load_moltbook_bundle
     from runtime_common import SIGNAL_VOCODER_ETIL_INPUTS_PATH, get_source_mode, load_json_file
+    from tag_engine import emit_tag
 
 SCM_HIGH_CONVERSION = 0.60
 SCM_PARTIAL_CONVERSION = 0.30
@@ -431,7 +433,7 @@ def derive_watchlist_diagnostics(
         if promotable_clean_candidate:
             promotable_count += 1
 
-        watchlist_tier = "PROMOTABLE" if promotable_clean_candidate else "STANDARD"
+        watchlist_tier = emit_tag("PROMOTABLE") if promotable_clean_candidate else emit_tag("STANDARD")
         if promotable_clean_candidate:
             gsce_phase_lock_active = bool(
                 gate_states.get(
@@ -448,17 +450,17 @@ def derive_watchlist_diagnostics(
             )
             if can_advance_to_clean_ready:
                 if realm_bis_active:
-                    candidate_conversion_state = "CLEAN_READY_PENDING"
-                    pre_entry_state = "CLEAN_READY_PENDING_TRIGGER"
+                    candidate_conversion_state = emit_tag("CLEAN_READY_PENDING")
+                    pre_entry_state = emit_tag("CLEAN_READY_PENDING_TRIGGER")
                 else:
-                    candidate_conversion_state = "CLEAN_ENTRY_ELIGIBLE"
-                    pre_entry_state = "CLEAN_ENTRY_ELIGIBLE"
+                    candidate_conversion_state = emit_tag("CLEAN_ENTRY_ELIGIBLE")
+                    pre_entry_state = emit_tag("CLEAN_ENTRY_ELIGIBLE")
             else:
-                candidate_conversion_state = "PROMOTABLE_WATCHLIST"
-                pre_entry_state = "BLOCKED_PROMOTABLE_CLEAN_CANDIDATE"
+                candidate_conversion_state = emit_tag("PROMOTABLE_WATCHLIST")
+                pre_entry_state = emit_tag("BLOCKED_PROMOTABLE_CLEAN_CANDIDATE")
         else:
-            candidate_conversion_state = "NOT_EXECUTED"
-            pre_entry_state = "NONE"
+            candidate_conversion_state = emit_tag("NOT_EXECUTED")
+            pre_entry_state = emit_tag("NONE")
 
         watchlist_signals.append(
             {

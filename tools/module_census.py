@@ -57,7 +57,7 @@ def _resolve_to_scripts_file(module_parts: list[str]) -> Path | None:
 def _imports_from_file(path: Path) -> set[Path]:
     """Return scripts/ files imported by ``path`` (top-level + subpackage)."""
     try:
-        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        tree = ast.parse(path.read_text(encoding="utf-8-sig"), filename=str(path))
     except (SyntaxError, OSError, UnicodeDecodeError):
         return set()
     edges: set[Path] = set()
@@ -121,7 +121,7 @@ def _modules_referenced_by_tests() -> set[str]:
     tops = set(_top_level_modules())
     for path in TESTS_DIR.rglob("*.py"):
         try:
-            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+            tree = ast.parse(path.read_text(encoding="utf-8-sig"), filename=str(path))
         except (SyntaxError, OSError, UnicodeDecodeError):
             continue
         for node in ast.walk(tree):
@@ -134,13 +134,18 @@ def _modules_referenced_by_tests() -> set[str]:
                 parts = node.module.split(".")
                 if parts[0] == "scripts" and len(parts) >= 2 and parts[1] in tops:
                     referenced.add(parts[1])
+                elif parts[0] == "scripts" and len(parts) == 1:
+                    # `from scripts import foo, bar` — the modules are names.
+                    for alias in node.names:
+                        if alias.name in tops:
+                            referenced.add(alias.name)
                 elif parts[0] in tops:
                     referenced.add(parts[0])
     return referenced
 
 
 def _line_count(stem: str) -> int:
-    return len((SCRIPTS_DIR / f"{stem}.py").read_text(encoding="utf-8").splitlines())
+    return len((SCRIPTS_DIR / f"{stem}.py").read_text(encoding="utf-8-sig").splitlines())
 
 
 def _has_dedicated_test(stem: str) -> bool:

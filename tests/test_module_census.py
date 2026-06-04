@@ -15,7 +15,7 @@ from pathlib import Path
 
 # Pinned ceiling = current ACTIVE count (today's number + 0). See
 # docs/module_census.md. Raising this is a deliberate act, not an accident.
-ACTIVE_CEILING = 68
+ACTIVE_CEILING = 69
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS_DIR = REPO_ROOT / "scripts"
@@ -38,7 +38,7 @@ def _resolve(parts: list[str]) -> Path | None:
 
 def _edges(path: Path) -> set[Path]:
     try:
-        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        tree = ast.parse(path.read_text(encoding="utf-8-sig"), filename=str(path))
     except (SyntaxError, OSError, UnicodeDecodeError):
         return set()
     out: set[Path] = set()
