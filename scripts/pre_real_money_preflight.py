@@ -451,6 +451,51 @@ def _calibration_score(status: str) -> float:
     }.get(status, 0.0)
 
 
+def _test_confidence_probe(
+    db_path: Path | None = None, *, now: _dt.datetime | None = None
+) -> dict[str, Any]:
+    """Read a RECORDED test result instead of assuming the suite passes.
+
+    Honesty principle: *unknown is not pass*. The previous gate defaulted
+    ``T=1.0`` whenever no test result was handed in — so a never-run suite
+    scored identically to a green one. This probe reads
+    ``runtime/test_status.json`` (written by ``bootstrap_runtime.py`` / CI):
+
+        {"passing": true, "passed": 812, "failed": 0, "generated_at": "..."}
+
+    Returns ``{"score", "failing", "unverified"}``:
+      * fresh + green   -> 1.0, failing=False, unverified=False
+      * fresh + red     -> 0.0, failing=True
+      * missing / stale -> 0.7, unverified=True (degraded, never silently 1.0)
+    """
+    now = now or _dt.datetime.now(_dt.timezone.utc)
+    try:
+        rroot = Path(__file__).resolve().parents[1]
+        path = rroot / "runtime" / "test_status.json"
+        if not path.exists():
+            return {"score": 0.7, "failing": False, "unverified": True}
+        data = json.loads(path.read_text(encoding="utf-8"))
+        ts = data.get("generated_at")
+        if ts:
+            try:
+                gen = _dt.datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+                if gen.tzinfo is None:
+                    gen = gen.replace(tzinfo=_dt.timezone.utc)
+                if (now - gen) > _dt.timedelta(days=7):
+                    return {"score": 0.7, "failing": False, "unverified": True}
+            except Exception:
+                pass
+        failed = int(data.get("failed", 0) or 0)
+        passed = int(data.get("passed", 0) or 0)
+        if failed > 0 or data.get("passing") is False:
+            return {"score": 0.0, "failing": True, "unverified": False}
+        if passed > 0 or data.get("passing") is True:
+            return {"score": 1.0, "failing": False, "unverified": False}
+        return {"score": 0.7, "failing": False, "unverified": True}
+    except Exception:
+        return {"score": 0.7, "failing": False, "unverified": True}
+
+
 def assess_real_money_readiness(
     db_path: Path | None = None,
     *,
@@ -479,8 +524,17 @@ def assess_real_money_readiness(
     C = _calibration_score(cal_status)
     feedback = _feedback_loop_available()
     F = 1.0 if feedback else 0.0
-    tests_failing = (backend_tests_passing is False) or (frontend_tests_passing is False)
-    T = 0.0 if tests_failing else 1.0
+    # Test confidence: honour explicit caller-supplied results; otherwise probe
+    # a recorded status (unknown != pass).
+    if backend_tests_passing is None and frontend_tests_passing is None:
+        _tc = _test_confidence_probe(db_path, now=now)
+        T = _tc["score"]
+        tests_failing = _tc["failing"]
+        if _tc["unverified"]:
+            warnings.append("test_confidence_unverified")
+    else:
+        tests_failing = (backend_tests_passing is False) or (frontend_tests_passing is False)
+        T = 0.0 if tests_failing else 1.0
     B = _backup_score()
     U = 1.0
 

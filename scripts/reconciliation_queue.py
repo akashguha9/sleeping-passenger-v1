@@ -440,8 +440,13 @@ def build_queue(
                 for _ in PROBE_EVENT_ID_PREFIXES
             )
             probe_event_id_clause = f" AND ({event_id_clauses})"
+            # NB: keep the backslash escape OUT of the f-string expression —
+            # backslashes inside f-string braces are a SyntaxError on Py<3.12,
+            # which silently broke this module's import (and the preflight
+            # reconciliation subcheck) until 3.12.
+            _esc_underscore = "\\_"
             probe_event_id_params: tuple[Any, ...] = tuple(
-                f"{p.replace('_', r'\_')}%" for p in PROBE_EVENT_ID_PREFIXES
+                p.replace("_", _esc_underscore) + "%" for p in PROBE_EVENT_ID_PREFIXES
             )
         else:
             probe_event_id_clause = ""
