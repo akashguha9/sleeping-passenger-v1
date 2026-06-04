@@ -11,6 +11,7 @@ import { MOCK_INBOX_RESPONSE } from '@/lib/mockData';
 import { SignalCard } from '@/components/SignalCard';
 import { BullStateBadge } from '@/components/BullStateBadge';
 import { AdvisoryOnlyBadge } from '@/components/AdvisoryOnlyBadge';
+import { ScoreCalibrationBadge } from '@/components/ScoreCalibrationBadge';
 import { SourceHealthWarnings } from '@/components/SourceHealthWarnings';
 import {
   ALL_ACTIONS,
@@ -147,6 +148,10 @@ export default function SignalInboxPage() {
           )}
         </div>
       )}
+
+      {/* Score calibration — scores must never be shown as validated unless
+          there is enough reconciled-outcome evidence. */}
+      {!loading && <ScoreCalibrationBadge calibration={response.score_calibration} />}
 
       {/* Header */}
       <div className="flex items-start justify-between">

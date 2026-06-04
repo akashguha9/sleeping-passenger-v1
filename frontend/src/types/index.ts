@@ -1,3 +1,5 @@
+import type { ScoreCalibration } from '@/lib/scoreCalibration';
+
 export type BullState =
   | 'HURACÁN'
   | 'AVENTADOR'
@@ -274,6 +276,9 @@ export interface InboxListResponse {
   signal_source?: 'live_events' | 'legacy_fabric' | string;
   freshness_window_hours?: number;
   mock_fallback?: boolean;
+  // Honest calibration status for the priority scores in `items`. When absent
+  // or UNCALIBRATED the UI must warn the operator not to size from the score.
+  score_calibration?: ScoreCalibration;
   advisory_status: string;
   human_review_required: boolean;
   execution_mode: string;

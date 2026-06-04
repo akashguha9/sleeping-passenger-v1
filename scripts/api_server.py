@@ -1101,7 +1101,23 @@ def get_signals(limit: int = 100, hours: int = 72, _auth: None = Depends(require
     """
     limit = clamp_limit(limit, default=100, ceiling=500)
     hours = clamp_limit(hours, default=72, ceiling=24 * 30)
-    return list_inbox_items(limit=limit, hours=hours)
+    result = list_inbox_items(limit=limit, hours=hours)
+    # Attach the honest calibration status so the precise-looking priority
+    # scores in every item can never be rendered as if they were validated.
+    # Advisory-only; never authorises sizing or execution.
+    try:
+        from scripts.score_calibration import build_score_calibration_report
+    except ModuleNotFoundError:  # pragma: no cover - script-style fallback
+        try:
+            from score_calibration import build_score_calibration_report  # type: ignore[no-redef]
+        except Exception:
+            build_score_calibration_report = None  # type: ignore[assignment]
+    if isinstance(result, dict) and build_score_calibration_report is not None:
+        try:
+            result["score_calibration"] = build_score_calibration_report()
+        except Exception:  # pragma: no cover - defensive
+            pass
+    return result
 
 
 @app.get("/signals/diagnostics")
@@ -2981,6 +2997,21 @@ def get_compliance_readiness(_auth: None = Depends(require_api_token_for_reads))
 @app.get("/api/business-value/summary")
 def get_business_value_summary(_auth: None = Depends(require_api_token_for_reads)) -> dict:
     return _read_artifact_envelope("business_value")
+
+
+@app.get("/api/score-calibration")
+def get_score_calibration(_auth: None = Depends(require_api_token_for_reads)) -> dict:
+    """Honest calibration status for the signal scores.
+
+    Computed from reconciled outcomes in the local DB. Tells the operator
+    whether the precise-looking scores are actually backed by evidence yet —
+    advisory-only, never authorises sizing or execution.
+    """
+    try:
+        from scripts.score_calibration import build_score_calibration_report
+    except ModuleNotFoundError:  # pragma: no cover - script-style fallback
+        from score_calibration import build_score_calibration_report  # type: ignore[no-redef]
+    return build_score_calibration_report()
 
 
 @app.post("/api/live-refresh/run")
