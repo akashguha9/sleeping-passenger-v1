@@ -3050,6 +3050,20 @@ def get_real_money_readiness(_auth: None = Depends(require_api_token_for_reads))
     return assess_real_money_readiness()
 
 
+@app.get("/api/signal-quality")
+def get_signal_quality(_auth: None = Depends(require_api_token_for_reads)) -> dict:
+    """Outcome-backed signal quality score (advisory-only).
+
+    Combines calibration metrics, securities coverage, the feedback loop, and
+    import-hygiene into a single honest score with hard caps. Read-only.
+    """
+    try:
+        from scripts.signal_quality_report import build_signal_quality_report_from_db
+    except ModuleNotFoundError:  # pragma: no cover - script-style fallback
+        from signal_quality_report import build_signal_quality_report_from_db  # type: ignore[no-redef]
+    return build_signal_quality_report_from_db()
+
+
 @app.get("/api/calibration-recommendations")
 def get_calibration_recommendations(_auth: None = Depends(require_api_token_for_reads)) -> dict:
     """Guarded calibration recommendations from reconciled outcomes.
