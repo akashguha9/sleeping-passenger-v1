@@ -66,6 +66,18 @@ excluded from the pipeline).
 - **Can execute trades:** no (read-only). Surfaced at `/api/readiness/real-money`.
 - **Behavioural tests:** `tests/test_real_money_readiness.py`.
 
+### `scripts/calibration_map.py` — OOS-validated recalibration
+- **Purpose:** learn `calibrated_p = f(raw_score)` (isotonic PAV + Platt) and keep it only if it beats raw Brier out of sample.
+- **Decision function:** `fit_calibration_map(scores, ys)` → `CalibrationMap{method, apply()}`; `fit_from_outcomes(outcomes)`.
+- **Can execute trades:** no. Recalibrated probabilities are advisory; never enable sizing. Surfaced at `/api/calibration-map`.
+- **Behavioural tests:** `tests/test_calibration_map.py` (OOS ECE reduction proven).
+
+### `scripts/backtest_calibration.py` — Backtest evidence (IMPORTED_BACKTEST)
+- **Purpose:** walk-forward over historical OHLCV → outcomes with real forward returns, zero lookahead, explicit provenance.
+- **Decision function:** `backtest_symbol(...)`, `run_backtest(...)`.
+- **Can execute trades:** no. Calibrates the scores, never lifts real-money readiness (keys on real_n).
+- **Behavioural tests:** `tests/test_backtest_calibration.py` (no-lookahead, provenance, readiness-not-lifted).
+
 ### `scripts/score_calibration.py` — Honest score calibration
 - **Purpose:** prevent false confidence by labelling every score with its calibration status computed from reconciled outcomes.
 - **Decision function:** `compute_score_calibration(reconciliations)` → win_rate / false_positive_rate / avg return / sample_size / `calibration_status` (UNCALIBRATED / LOW_SAMPLE / CALIBRATING / CALIBRATED). `score_calibration_envelope(...)` sets `score_should_drive_sizing` (True only when CALIBRATED).
