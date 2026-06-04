@@ -348,8 +348,12 @@ def build_report(
                 for _ in PROBE_EVENT_ID_PREFIXES
             )
             probe_event_id_clause = f" AND ({ev_clauses})"
+            # Backslash must stay OUT of the f-string expression — it is a
+            # SyntaxError on Py<3.12 (same latent bug fixed in
+            # reconciliation_queue.py). Keep this 3.11-compatible.
+            _esc_underscore = "\\_"
             probe_event_id_params: tuple[Any, ...] = tuple(
-                f"{p.replace('_', r'\_')}%" for p in PROBE_EVENT_ID_PREFIXES
+                p.replace("_", _esc_underscore) + "%" for p in PROBE_EVENT_ID_PREFIXES
             )
         else:
             probe_event_id_clause = ""

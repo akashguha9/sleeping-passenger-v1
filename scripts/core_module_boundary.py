@@ -112,6 +112,10 @@ _SUPPORT_EXPLICIT: frozenset[str] = frozenset({
     "manual_trade_origin", "manual_decision_board", "operator_auth",
     "operator_control", "supported_currencies", "symbol_normalizer",
     "reflection_frameworks", "daily_payload", "daily_scoring", "trend_engine",
+    # Hackathon sprint: advisory-only support tooling (not CORE, not imported
+    # by CORE). discovery_v2 = transparent candidate scorer; bootstrap_runtime =
+    # idempotent durable-state rebuild for ephemeral web sessions.
+    "discovery_v2", "bootstrap_runtime",
 })
 
 

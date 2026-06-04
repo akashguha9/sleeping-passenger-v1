@@ -203,6 +203,11 @@ APPROVED_DOMAINS: tuple[str, ...] = (
     "decision_board",      # manual_decision_board.py — advisory-only human-review
                            # classifier; emits no order/execution instruction
     "mvp_readiness",       # mvp_readiness_report.py — single advisory truth surface
+    # Hackathon sprint — advisory-only durable-state rebuild for ephemeral web
+    # sessions (re-seeds securities master, re-imports paper outcomes, ingests
+    # canonical holdings, records test status). No broker execution, no order
+    # placement, no API trading writes.
+    "bootstrap",           # bootstrap_runtime.py
 )
 
 # Explicit allowlist for individual files / directories whose name does
