@@ -1,0 +1,24 @@
+{
+  "subsystem": "chronology_observation",
+  "readiness_score": "7/10 (structural; forward-observation confidence not yet earned)",
+  "detectors": {
+    "any_detector_available": true,
+    "implemented_count": 4,
+    "total_detectors": 4,
+    "detectors": {
+      "T1_event_prior": "INSUFFICIENT_DATA",
+      "T2_persistence": "INSUFFICIENT_DATA",
+      "T3_contradiction": "INSUFFICIENT_DATA",
+      "T4_outcome": "OUTCOME_PENDING"
+    },
+    "note": "T1-T4 implemented (observation-only, fail-closed). No detector authorizes any action; no execution path exists."
+  },
+  "observation_data_counts": {
+    "FORWARD_REAL": 0,
+    "HISTORICAL_BACKFILL": 0,
+    "SYNTHETIC_TEST": 0
+  },
+  "forward_real_present": false,
+  "ceiling_note": "Cannot exceed 7 without accumulated FORWARD_REAL observations over time.",
+  "authorizes_action": false
+}

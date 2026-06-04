@@ -69,25 +69,26 @@ def test_pattern_hit_rate_never_fabricated_with_zero_observations(tmp_path: Path
         conn.close()
 
 
-def test_detector_readiness_t1_implemented_t2_t4_not() -> None:
+def test_detector_readiness_all_four_implemented() -> None:
     summary = det.detector_readiness_summary()
-    # T1 is now implemented (observation-only); T2/T3/T4 remain unimplemented.
-    assert summary["implemented_count"] == 1
+    # T1-T4 are all implemented (observation-only, fail-closed).
+    assert summary["implemented_count"] == 4
     assert summary["any_detector_available"] is True
     assert summary["total_detectors"] == 4
     assert summary["detectors"]["T1_event_prior"] == "INSUFFICIENT_DATA"
 
 
-def test_t2_t3_t4_still_fail_closed() -> None:
-    for fn in (
-        det.detect_t2_asset_attachment,
-        det.detect_t3_commitment,
-        det.detect_t4_market_confirmation,
+def test_t2_t3_t4_implemented_and_fail_closed_on_no_args() -> None:
+    # Implemented (available) but fail CLOSED (not detected) when given no data.
+    for fn, expect_status in (
+        (det.detect_t2_asset_attachment, "INSUFFICIENT_DATA"),
+        (det.detect_t3_commitment, "INSUFFICIENT_DATA"),
+        (det.detect_t4_market_confirmation, "OUTCOME_PENDING"),
     ):
         result = fn()
-        assert result.available is False
+        assert result.available is True
         assert result.detected is False
-        assert result.status == "NOT_IMPLEMENTED"
+        assert result.status == expect_status
 
 
 def test_t1_no_arg_call_fails_closed() -> None:

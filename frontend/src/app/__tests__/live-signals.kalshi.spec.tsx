@@ -10,7 +10,7 @@
  *     Buy / Sell / Execute trade / Arbitrage / Risk-free wording.
  */
 // @ts-ignore
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, act } from '@testing-library/react';
 import { vi } from 'vitest';
 
 // @ts-ignore
@@ -159,8 +159,9 @@ describe('Live Signals — Kalshi first-class tab', () => {
       ...SAFETY,
     });
 
-    render(<LiveSignalsPage />);
-
+    await act(async () => {
+      render(<LiveSignalsPage />);
+    });
     await waitFor(() => screen.getByRole('button', { name: 'Kalshi' }));
     const polyBtn = screen.getByRole('button', { name: 'Polymarket' });
     const kalshiBtn = screen.getByRole('button', { name: 'Kalshi' });
@@ -182,10 +183,13 @@ describe('Live Signals — Kalshi first-class tab', () => {
       };
     });
 
-    render(<LiveSignalsPage />);
+    await act(async () => {
+      render(<LiveSignalsPage />);
+    });
     await waitFor(() => screen.getByRole('button', { name: 'Kalshi' }));
-    (screen.getByRole('button', { name: 'Kalshi' }) as HTMLButtonElement).click();
-
+    await act(async () => {
+      (screen.getByRole('button', { name: 'Kalshi' }) as HTMLButtonElement).click();
+    });
     // Wait for the DOM to settle on the Kalshi-only view (avoids capturing a
     // transient stale render while the source-scoped refetch is in flight).
     await waitFor(() => {
@@ -204,10 +208,13 @@ describe('Live Signals — Kalshi first-class tab', () => {
       return { live_signal_events: events, count: events.length, ...SAFETY };
     });
 
-    render(<LiveSignalsPage />);
+    await act(async () => {
+      render(<LiveSignalsPage />);
+    });
     await waitFor(() => screen.getByRole('button', { name: 'Polymarket' }));
-    (screen.getByRole('button', { name: 'Polymarket' }) as HTMLButtonElement).click();
-
+    await act(async () => {
+      (screen.getByRole('button', { name: 'Polymarket' }) as HTMLButtonElement).click();
+    });
     await waitFor(() => screen.getAllByTestId('signal-event-card'));
     for (const card of screen.getAllByTestId('signal-event-card')) {
       // No Kalshi event_id, ticker, or category should appear in the
@@ -222,10 +229,13 @@ describe('Live Signals — Kalshi first-class tab', () => {
       return { live_signal_events: events, count: events.length, ...SAFETY };
     });
 
-    render(<LiveSignalsPage />);
+    await act(async () => {
+      render(<LiveSignalsPage />);
+    });
     await waitFor(() => screen.getByRole('button', { name: 'All Sources' }));
-    (screen.getByRole('button', { name: 'All Sources' }) as HTMLButtonElement).click();
-
+    await act(async () => {
+      (screen.getByRole('button', { name: 'All Sources' }) as HTMLButtonElement).click();
+    });
     await waitFor(() => screen.getAllByTestId('signal-event-card'));
     const allText = screen.getAllByTestId('signal-event-card').map((c) => c.textContent || '').join('|');
     expect(allText).toMatch(/Polymarket/i);
@@ -244,10 +254,13 @@ describe('Live Signals — Kalshi first-class tab', () => {
       return { live_signal_events: events, count: events.length, ...SAFETY };
     });
 
-    render(<LiveSignalsPage />);
+    await act(async () => {
+      render(<LiveSignalsPage />);
+    });
     await waitFor(() => screen.getByRole('button', { name: 'Kalshi' }));
-    (screen.getByRole('button', { name: 'Kalshi' }) as HTMLButtonElement).click();
-
+    await act(async () => {
+      (screen.getByRole('button', { name: 'Kalshi' }) as HTMLButtonElement).click();
+    });
     await waitFor(() => {
       const cards = screen.getAllByTestId('signal-event-card');
       expect(cards).toHaveLength(1);
@@ -266,14 +279,19 @@ describe('Live Signals — Kalshi first-class tab', () => {
       return { live_signal_events: events, count: events.length, ...SAFETY };
     });
 
-    render(<LiveSignalsPage />);
+    await act(async () => {
+      render(<LiveSignalsPage />);
+    });
     // All Sources first: both rows visible.
     await waitFor(() => {
       expect(screen.getAllByTestId('signal-event-card')).toHaveLength(2);
     });
 
-    (screen.getByRole('button', { name: 'Kalshi' }) as HTMLButtonElement).click();
+    await act(async () => {
 
+      (screen.getByRole('button', { name: 'Kalshi' }) as HTMLButtonElement).click();
+
+    });
     // After switching, exactly the single Kalshi card remains — the Polymarket
     // card is replaced, not appended to.
     await waitFor(() => {
@@ -293,10 +311,13 @@ describe('Live Signals — Kalshi first-class tab', () => {
       ...SAFETY,
     });
 
-    render(<LiveSignalsPage />);
+    await act(async () => {
+      render(<LiveSignalsPage />);
+    });
     await waitFor(() => screen.getByRole('button', { name: 'Kalshi' }));
-    (screen.getByRole('button', { name: 'Kalshi' }) as HTMLButtonElement).click();
-
+    await act(async () => {
+      (screen.getByRole('button', { name: 'Kalshi' }) as HTMLButtonElement).click();
+    });
     await waitFor(() => screen.getAllByTestId('signal-event-card'));
     const card = screen.getAllByTestId('signal-event-card')[0];
     const text = (card.textContent || '').toLowerCase();

@@ -7,10 +7,10 @@ Companion to `docs/module_census.md` (raw tiers). This file holds the
 
 | Metric | Value |
 |---|---|
-| Total `scripts/*.py` | 325 |
+| Total `scripts/*.py` | 330 |
 | ACTIVE (orchestrator path) | 70 |
-| API_REACHED | 54 |
-| TEST_ONLY | 132 |
+| API_REACHED | 55 |
+| TEST_ONLY | 136 |
 | ORPHAN (this branch) | 69 |
 
 The earlier "145 orphans" figure was a measurement artifact (BOM + `from
@@ -57,9 +57,11 @@ split.** Recommended order (lowest risk / highest value first):
    `system_readiness_state`) was extracted to `scripts/governance_verdict.py`
    (pure, re-exported for compatibility, golden-tested byte-identical). The
    god-module dropped 4996 → 4968. Remaining future seams below.
-2. **`api_server.py` (3029)** — separate Pydantic request/response models +
-   money validators into `api_models.py`, leaving routes behind. Seam: models
-   are already grouped in a contiguous block.
+2. **`api_server.py` (3029)** — ✅ first seam extracted: the advisory
+   response-contract constants + pure exception sanitizer moved to
+   `scripts/api_response_contract.py` (byte-identical, golden-tested). Next:
+   separate Pydantic request/response models + money validators into
+   `api_models.py`, leaving routes behind.
 3. **`structural_admission_layer.py` (2318)** — extract the ~30 input
    dataclasses + enums into `structural_admission_types.py`, leaving scoring +
    admission decision. Seam: types are contiguous at the top of the file.

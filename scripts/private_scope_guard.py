@@ -194,6 +194,11 @@ APPROVED_DOMAINS: tuple[str, ...] = (
                            # verdict (god-module reduction); pure, no execution
     "action_doctrine",     # action_doctrine_status.py — UNRATIFIED doctrine
                            # status reporter; unlocks nothing, no execution
+    "observation",         # run_observation_cycle.py — observation-only T1-T4
+                           # cycle runner; no execution, no broker
+    "decision_board",      # manual_decision_board.py — advisory-only human-review
+                           # classifier; emits no order/execution instruction
+    "mvp_readiness",       # mvp_readiness_report.py — single advisory truth surface
 )
 
 # Explicit allowlist for individual files / directories whose name does

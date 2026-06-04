@@ -10,7 +10,7 @@
  *   - Stale-source banner wording uses "hours" not "h" or bare number
  */
 // @ts-ignore
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, act } from '@testing-library/react';
 import { vi } from 'vitest';
 
 // @ts-ignore
@@ -94,7 +94,9 @@ describe('Live Signals Auto-refresh panel', () => {
         execution_gate: 'LOCKED',
       },
     }));
-    render(<LiveSignalsPage />);
+    await act(async () => {
+      render(<LiveSignalsPage />);
+    });
     await waitFor(() =>
       expect(screen.getByTestId('auto-refresh-panel')).toBeTruthy(),
     );
@@ -124,7 +126,9 @@ describe('Live Signals Auto-refresh panel', () => {
         execution_gate: 'LOCKED',
       },
     }));
-    render(<LiveSignalsPage />);
+    await act(async () => {
+      render(<LiveSignalsPage />);
+    });
     await waitFor(() =>
       expect(screen.getByTestId('auto-refresh-panel')).toBeTruthy(),
     );
@@ -151,7 +155,9 @@ describe('Live Signals Auto-refresh panel', () => {
         execution_gate: 'LOCKED',
       },
     }));
-    render(<LiveSignalsPage />);
+    await act(async () => {
+      render(<LiveSignalsPage />);
+    });
     await waitFor(() =>
       expect(screen.getByTestId('auto-refresh-panel')).toBeTruthy(),
     );
@@ -174,7 +180,9 @@ describe('Live Signals Auto-refresh panel', () => {
         execution_gate: 'LOCKED',
       },
     }));
-    render(<LiveSignalsPage />);
+    await act(async () => {
+      render(<LiveSignalsPage />);
+    });
     await waitFor(() => {
       const txt = document.body.textContent ?? '';
       expect(txt).toMatch(/older than 6 hours/i);

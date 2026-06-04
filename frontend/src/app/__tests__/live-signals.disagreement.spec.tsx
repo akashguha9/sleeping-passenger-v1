@@ -14,7 +14,7 @@
  *   - Forbidden customer-facing trading language is absent.
  */
 // @ts-ignore
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, act } from '@testing-library/react';
 import { vi } from 'vitest';
 
 // @ts-ignore
@@ -203,8 +203,9 @@ describe('Live Signals — Disagreements first-class tab', () => {
       ...SAFETY,
     });
 
-    render(<LiveSignalsPage />);
-
+    await act(async () => {
+      render(<LiveSignalsPage />);
+    });
     await waitFor(() => screen.getByRole('button', { name: 'Disagreements' }));
     const kalshiBtn = screen.getByRole('button', { name: 'Kalshi' });
     const disagreementsBtn = screen.getByRole('button', { name: 'Disagreements' });
@@ -222,10 +223,13 @@ describe('Live Signals — Disagreements first-class tab', () => {
       return { live_signal_events: events, count: events.length, ...SAFETY };
     });
 
-    render(<LiveSignalsPage />);
+    await act(async () => {
+      render(<LiveSignalsPage />);
+    });
     await waitFor(() => screen.getByRole('button', { name: 'Disagreements' }));
-    (screen.getByRole('button', { name: 'Disagreements' }) as HTMLButtonElement).click();
-
+    await act(async () => {
+      (screen.getByRole('button', { name: 'Disagreements' }) as HTMLButtonElement).click();
+    });
     await waitFor(() => screen.getAllByTestId('disagreement-detail-block'));
     expect(seenSources).toContain('prediction_market_disagreement');
   });
@@ -237,10 +241,13 @@ describe('Live Signals — Disagreements first-class tab', () => {
       ...SAFETY,
     });
 
-    render(<LiveSignalsPage />);
+    await act(async () => {
+      render(<LiveSignalsPage />);
+    });
     await waitFor(() => screen.getByRole('button', { name: 'Disagreements' }));
-    (screen.getByRole('button', { name: 'Disagreements' }) as HTMLButtonElement).click();
-
+    await act(async () => {
+      (screen.getByRole('button', { name: 'Disagreements' }) as HTMLButtonElement).click();
+    });
     await waitFor(() => screen.getAllByTestId('disagreement-detail-block'));
     const block = screen.getAllByTestId('disagreement-detail-block')[0];
     expect(block.textContent).toMatch(/Polymarket/);
@@ -266,10 +273,13 @@ describe('Live Signals — Disagreements first-class tab', () => {
       ...SAFETY,
     });
 
-    render(<LiveSignalsPage />);
+    await act(async () => {
+      render(<LiveSignalsPage />);
+    });
     await waitFor(() => screen.getByRole('button', { name: 'Disagreements' }));
-    (screen.getByRole('button', { name: 'Disagreements' }) as HTMLButtonElement).click();
-
+    await act(async () => {
+      (screen.getByRole('button', { name: 'Disagreements' }) as HTMLButtonElement).click();
+    });
     await waitFor(() => screen.getAllByTestId('disagreement-detail-block'));
     const block = screen.getAllByTestId('disagreement-detail-block')[0];
     expect(block.textContent).toMatch(/SAME_EVENT_DIFFERENT_THRESHOLD/);
@@ -286,10 +296,13 @@ describe('Live Signals — Disagreements first-class tab', () => {
       return { live_signal_events: events, count: events.length, ...SAFETY };
     });
 
-    render(<LiveSignalsPage />);
+    await act(async () => {
+      render(<LiveSignalsPage />);
+    });
     await waitFor(() => screen.getByRole('button', { name: 'All Sources' }));
-    (screen.getByRole('button', { name: 'All Sources' }) as HTMLButtonElement).click();
-
+    await act(async () => {
+      (screen.getByRole('button', { name: 'All Sources' }) as HTMLButtonElement).click();
+    });
     await waitFor(() => screen.getAllByTestId('signal-event-card'));
     const blocks = screen.queryAllByTestId('disagreement-detail-block');
     expect(blocks.length).toBeGreaterThanOrEqual(1);
@@ -301,10 +314,13 @@ describe('Live Signals — Disagreements first-class tab', () => {
       return { live_signal_events: events, count: events.length, ...SAFETY };
     });
 
-    render(<LiveSignalsPage />);
+    await act(async () => {
+      render(<LiveSignalsPage />);
+    });
     await waitFor(() => screen.getByRole('button', { name: 'Polymarket' }));
-    (screen.getByRole('button', { name: 'Polymarket' }) as HTMLButtonElement).click();
-
+    await act(async () => {
+      (screen.getByRole('button', { name: 'Polymarket' }) as HTMLButtonElement).click();
+    });
     await waitFor(() => screen.getAllByTestId('signal-event-card'));
     expect(screen.queryAllByTestId('disagreement-detail-block')).toHaveLength(0);
   });
@@ -315,10 +331,13 @@ describe('Live Signals — Disagreements first-class tab', () => {
       return { live_signal_events: events, count: events.length, ...SAFETY };
     });
 
-    render(<LiveSignalsPage />);
+    await act(async () => {
+      render(<LiveSignalsPage />);
+    });
     await waitFor(() => screen.getByRole('button', { name: 'Kalshi' }));
-    (screen.getByRole('button', { name: 'Kalshi' }) as HTMLButtonElement).click();
-
+    await act(async () => {
+      (screen.getByRole('button', { name: 'Kalshi' }) as HTMLButtonElement).click();
+    });
     await waitFor(() => screen.getAllByTestId('signal-event-card'));
     expect(screen.queryAllByTestId('disagreement-detail-block')).toHaveLength(0);
   });
@@ -330,10 +349,13 @@ describe('Live Signals — Disagreements first-class tab', () => {
       ...SAFETY,
     });
 
-    render(<LiveSignalsPage />);
+    await act(async () => {
+      render(<LiveSignalsPage />);
+    });
     await waitFor(() => screen.getByRole('button', { name: 'Disagreements' }));
-    (screen.getByRole('button', { name: 'Disagreements' }) as HTMLButtonElement).click();
-
+    await act(async () => {
+      (screen.getByRole('button', { name: 'Disagreements' }) as HTMLButtonElement).click();
+    });
     await waitFor(() => screen.getAllByTestId('pair-score-components'));
     const componentsBlock = screen.getAllByTestId('pair-score-components')[0];
     expect(componentsBlock.textContent).toMatch(/Pair score components/i);
@@ -376,10 +398,13 @@ describe('Live Signals — Disagreements first-class tab', () => {
       ...SAFETY,
     });
 
-    render(<LiveSignalsPage />);
+    await act(async () => {
+      render(<LiveSignalsPage />);
+    });
     await waitFor(() => screen.getByRole('button', { name: 'Disagreements' }));
-    (screen.getByRole('button', { name: 'Disagreements' }) as HTMLButtonElement).click();
-
+    await act(async () => {
+      (screen.getByRole('button', { name: 'Disagreements' }) as HTMLButtonElement).click();
+    });
     await waitFor(() => screen.getAllByTestId('pair-score-embedding-fallback'));
     const fallback = screen.getAllByTestId('pair-score-embedding-fallback')[0];
     expect(fallback.textContent).toMatch(/Embedding unavailable/i);
@@ -407,10 +432,13 @@ describe('Live Signals — Disagreements first-class tab', () => {
       ...SAFETY,
     });
 
-    render(<LiveSignalsPage />);
+    await act(async () => {
+      render(<LiveSignalsPage />);
+    });
     await waitFor(() => screen.getByRole('button', { name: 'Disagreements' }));
-    (screen.getByRole('button', { name: 'Disagreements' }) as HTMLButtonElement).click();
-
+    await act(async () => {
+      (screen.getByRole('button', { name: 'Disagreements' }) as HTMLButtonElement).click();
+    });
     await waitFor(() => screen.getAllByTestId('pair-score-components-fallback'));
     const fallback = screen.getAllByTestId('pair-score-components-fallback')[0];
     expect(fallback.textContent).toMatch(/Pair score components unavailable/i);
@@ -423,10 +451,13 @@ describe('Live Signals — Disagreements first-class tab', () => {
       ...SAFETY,
     });
 
-    render(<LiveSignalsPage />);
+    await act(async () => {
+      render(<LiveSignalsPage />);
+    });
     await waitFor(() => screen.getByRole('button', { name: 'Disagreements' }));
-    (screen.getByRole('button', { name: 'Disagreements' }) as HTMLButtonElement).click();
-
+    await act(async () => {
+      (screen.getByRole('button', { name: 'Disagreements' }) as HTMLButtonElement).click();
+    });
     await waitFor(() => screen.getAllByTestId('disagreement-detail-block'));
     for (const card of screen.getAllByTestId('signal-event-card')) {
       const text = (card.textContent || '').toLowerCase();

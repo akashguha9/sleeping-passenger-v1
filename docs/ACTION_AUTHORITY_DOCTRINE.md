@@ -100,7 +100,22 @@ permit any trade.
 Until every box is checked by a human, `action_authority` stays REVOKED and
 this system remains advisory-only.
 
-## Why this stays at ~2/10 (the right reason)
+## Advisory Manual Decision Board (does NOT lift any lock)
+
+An **advisory-only** Manual Decision Board now exists
+(`scripts/manual_decision_board.py`, doctrine in
+`docs/MANUAL_DECISION_BOARD_DOCTRINE.md`). It classifies candidates for **human
+review only** (`MANUAL_REVIEW_CANDIDATE` / `WATCH` / `WAIT` / `AVOID` /
+`RISK_BLOCK` / `EXISTING_HOLDING_REVIEW` / `REDUCE_REVIEW` /
+`OUTCOME_REVIEW_NEEDED`) and emits no `BUY`/`SELL`/`ENTER`/`EXECUTE`/`ORDER`.
+
+It reports three advisory states that **coexist with revoked authority**:
+`ADVISORY_DECISION_BOARD_AVAILABLE`, `OPERATOR_CONTRACT_UNRATIFIED`,
+`EXECUTION_AUTHORITY_REVOKED`. The board raises *manual advisory decision
+maturity* only — **not** execution maturity. `action_authority` stays REVOKED;
+all five ratification gates below remain unmet.
+
+## Why this stays at ~2/10 for EXECUTION (the right reason)
 
 The capability gap is not missing code — it is missing **ratified doctrine**.
 Adding a BUY path now would invert the safety posture (HARD_VETO,

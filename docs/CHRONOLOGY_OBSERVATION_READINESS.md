@@ -1,53 +1,63 @@
 # Chronology / Observation Readiness
 
-**Status: OBSERVATION-GATED. Current readiness ≈ 4/10. Do not raise above 5
-without accumulated FORWARD observations.**
+**Status: OBSERVATION-GATED. Current readiness ≈ 7/10 (structural). CANNOT rise
+above 7 without accumulated FORWARD-REAL observations over time.**
 
 This document is the honest record of what the chronology subsystem can and
 cannot do today. It exists so no reader mistakes *scaffolding* for *capability*.
 
+## Detector implementation matrix
+
+| Detector | Status | Fires on | Fail-closed |
+|---|---|---|---|
+| **T1 event-prior** | IMPLEMENTED | prob-delta ≥ floor **and** z-score ≥ floor **and** volume ≥ floor; ≥ N prior steps | `INSUFFICIENT_DATA` |
+| **T2 persistence** | IMPLEMENTED | repeated T1 fires ≥ `min_hits` | `INSUFFICIENT_DATA` below sample |
+| **T3 contradiction** | IMPLEMENTED | probability reversal / volume collapse / stale-source marker | `INSUFFICIENT_DATA` on missing fields |
+| **T4 outcome** | IMPLEMENTED | a real **logged** resolved outcome | `OUTCOME_PENDING` (never infers outcome/PnL) |
+
+All four are observation-only, deterministic, and authorize nothing.
+
 ## 1. What exists today (real)
 
-- `scripts/chronology_store.py` — a SQLite store with:
-  - **v0 (live):** `observations`, `snapshots` tables + validated insert helpers.
-    These are used by `snapshot_logger` on the active path.
-  - **v1 (now populated by the runner):** `signal_candidates`,
-    `chronology_events`, `pattern_hit_rates` tables exist (created additively,
-    `IF NOT EXISTS`), with fail-closed insert helpers.
-- `scripts/chronology_detectors.py`:
-  - **T1 event-prior — IMPLEMENTED, observation-only, fail-closed.** Fires only
-    when the latest probability step is both large (≥ delta floor) and
-    statistically anomalous (z-score of the latest step vs prior steps ≥
-    z-floor) AND clears a volume floor; requires ≥ N prior steps or returns
-    `INSUFFICIENT_DATA`. Never fabricates, never authorizes action.
-  - **T2/T3/T4 — still `NOT_IMPLEMENTED` / fail-closed.**
-- `scripts/chronology_observation_runner.py` — reads `signal_candidates`,
-  evaluates T1, writes one `chronology_events` row per candidate, and updates
-  `pattern_hit_rates` **observation frequencies only**. It imports no execution
-  /broker/action code (test-enforced) and fails closed on missing data.
+- `scripts/chronology_store.py` — `observations`/`snapshots` (v0, active path)
+  plus `signal_candidates`/`chronology_events`/`pattern_hit_rates` (v1) with
+  fail-closed insert helpers.
+- `scripts/chronology_detectors.py` — **T1–T4 all implemented**, observation-only,
+  fail-closed (matrix above). No synthetic fallback; no action authorization.
+- `scripts/run_observation_cycle.py` — runs T1–T4 over `signal_candidates`,
+  writes one `chronology_events` row per detector, and **recomputes**
+  `pattern_hit_rates` from the events table as honest observation *frequencies*
+  (never PnL/edge; `hit_rate` stays `NULL` at zero). T2 accumulates across
+  repeated cycles.
+- `scripts/chronology_replay_lab.py` — deterministic replay that labels every
+  row's provenance as `FORWARD_REAL` / `HISTORICAL_BACKFILL` / `SYNTHETIC_TEST`,
+  **conservatively defaulting unlabelled rows to `SYNTHETIC_TEST`** and keeping
+  structural replay coverage SEPARATE from forward-observation confidence.
+- `scripts/chronology_observation_runner.py` — the earlier T1-only runner (kept).
 
-## 2. What does NOT exist (do not claim)
+All of the above import no execution/broker/action code (ast-test enforced).
 
-- **T2 (asset attachment), T3 (commitment), T4 (market confirmation)** — NOT
-  implemented.
-- A real **forward-observation dataset**. T1 is correct and tested on synthetic
-  fixtures, but no live forward observations have been accumulated. The
-  `pattern_hit_rates` "hit_rate" is an observation *frequency*, NOT a
-  performance/edge claim, and stays `NULL` at zero observations.
-- `scripts/event_prior_detector.py` remains a *time-clustering* helper; it is
-  distinct from the T1 detector above and does not feed it.
-- **Backfill adapter** (coarse classes `BF_CHAOS` / `BF_PIPELINE_APPROVED` /
-  `BF_DISCRETIONARY` from moltbook) — NOT implemented.
-- **Pattern classifier / hit-rate surface** — table exists; no classifier
-  writes to it.
-- **Observation-cycle runner** — NOT implemented.
+## 2. What is NOT earned (do not claim)
 
-## 3. Why this is deliberately low
+- A real **FORWARD-REAL observation dataset**. The detectors are correct and
+  tested on synthetic/historical fixtures, but **zero forward-real observations
+  have accumulated**. `pattern_hit_rates` reflects *observation frequency over
+  whatever data was replayed*, NOT live forward performance.
+- Replaying `HISTORICAL_BACKFILL` / `SYNTHETIC_TEST` data is **structural only**
+  and is never counted as forward-real (enforced in `chronology_replay_lab`).
+- **Backfill adapter** (`BF_CHAOS` / `BF_PIPELINE_APPROVED` / `BF_DISCRETIONARY`
+  coarse classes from moltbook) — still NOT implemented.
+- `scripts/event_prior_detector.py` remains a separate time-clustering helper;
+  it is distinct from T1 and does not feed it.
 
-Observation mode must be **earned by forward observations**, not asserted by
-code. Building detectors before there is observed data to validate them would
-manufacture false confidence — exactly the failure this project guards against.
-The discipline is *observation-before-execution*.
+## 3. Why this is 7, not higher
+
+Observation mode is now **operational** — the full T1–T4 cycle runs end-to-end
+on existing/historical/synthetic data with honest provenance labels. That earns
+*structural* readiness (≈7). It does **not** earn *confidence*: confidence must
+be accumulated from FORWARD-REAL observations over time, and there are none yet.
+Score is capped at 7 until `forward_real_count` rises with real elapsed
+observation. The discipline remains *observation-before-execution*.
 
 ## 4. No authority is conferred by chronology
 

@@ -1,0 +1,43 @@
+{
+  "subsystem": "advisory_decision_readiness",
+  "readiness_score": "4/10 (manual advisory decision maturity \u2014 NOT execution maturity)",
+  "doctrine": {
+    "overall": "UNRATIFIED",
+    "ratified": false,
+    "gates": {
+      "authority": "UNRATIFIED",
+      "unit_of_learning": "UNRATIFIED",
+      "operator_contract": "UNRATIFIED",
+      "observation_evidence": "UNRATIFIED",
+      "safety_rollback": "UNRATIFIED"
+    },
+    "doc": "docs/ACTION_AUTHORITY_DOCTRINE.md",
+    "authorizes_action": false,
+    "note": "Doctrine is UNRATIFIED. This module unlocks nothing; ratification is a human act recorded outside code. action_authority stays REVOKED regardless of this status."
+  },
+  "advisory_decision_board": {
+    "board_state": "ADVISORY_DECISION_BOARD_AVAILABLE",
+    "execution_authority": "EXECUTION_AUTHORITY_REVOKED",
+    "operator_contract": "OPERATOR_CONTRACT_UNRATIFIED",
+    "classifications": [
+      "MANUAL_REVIEW_CANDIDATE",
+      "WATCH",
+      "WAIT",
+      "AVOID",
+      "RISK_BLOCK",
+      "EXISTING_HOLDING_REVIEW",
+      "REDUCE_REVIEW",
+      "OUTCOME_REVIEW_NEEDED"
+    ],
+    "forbidden_terms_never_emitted": [
+      "BUY",
+      "SELL",
+      "ENTER",
+      "EXECUTE",
+      "ORDER",
+      "BROKER_ROUTE"
+    ]
+  },
+  "execution_readiness": "NONE \u2014 action_authority REVOKED, execution_integrity LOCKED, busquets HARD_VETO",
+  "authorizes_action": false
+}

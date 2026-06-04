@@ -13,7 +13,7 @@
  *   - Advisory-only badges remain visible.
  */
 // @ts-ignore
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { render, screen, waitFor, within, act } from '@testing-library/react';
 import { vi } from 'vitest';
 
 // @ts-ignore
@@ -180,11 +180,14 @@ describe('Etherscan tab — optional, not configured, with archived rows', () =>
   });
 
   it('does NOT render generic "Total Signals" / "Latest Fetched" labels', async () => {
-    render(<LiveSignalsPage />);
+    await act(async () => {
+      render(<LiveSignalsPage />);
+    });
     // Switch to the Etherscan tab so the source-aware tiles render.
     await waitFor(() => screen.getByRole('button', { name: 'Etherscan' }));
-    (screen.getByRole('button', { name: 'Etherscan' }) as HTMLButtonElement).click();
-
+    await act(async () => {
+      (screen.getByRole('button', { name: 'Etherscan' }) as HTMLButtonElement).click();
+    });
     await waitFor(() =>
       expect(screen.queryByTestId('signal-stat-tiles')).toBeTruthy(),
     );
@@ -196,10 +199,13 @@ describe('Etherscan tab — optional, not configured, with archived rows', () =>
   });
 
   it('renders Current live signals 0, Archived/persisted rows 25, Latest archived row', async () => {
-    render(<LiveSignalsPage />);
+    await act(async () => {
+      render(<LiveSignalsPage />);
+    });
     await waitFor(() => screen.getByRole('button', { name: 'Etherscan' }));
-    (screen.getByRole('button', { name: 'Etherscan' }) as HTMLButtonElement).click();
-
+    await act(async () => {
+      (screen.getByRole('button', { name: 'Etherscan' }) as HTMLButtonElement).click();
+    });
     await waitFor(() => screen.getByTestId('tile-current-live'));
     const liveTile = screen.getByTestId('tile-current-live');
     expect(liveTile.textContent).toMatch(/Current live signals/i);
@@ -215,10 +221,13 @@ describe('Etherscan tab — optional, not configured, with archived rows', () =>
   });
 
   it('renders the optional-not-configured display banner', async () => {
-    render(<LiveSignalsPage />);
+    await act(async () => {
+      render(<LiveSignalsPage />);
+    });
     await waitFor(() => screen.getByRole('button', { name: 'Etherscan' }));
-    (screen.getByRole('button', { name: 'Etherscan' }) as HTMLButtonElement).click();
-
+    await act(async () => {
+      (screen.getByRole('button', { name: 'Etherscan' }) as HTMLButtonElement).click();
+    });
     await waitFor(() =>
       expect(screen.getByTestId('selected-source-display-banner')).toBeTruthy(),
     );
@@ -229,10 +238,13 @@ describe('Etherscan tab — optional, not configured, with archived rows', () =>
   });
 
   it('marks individual Etherscan cards as archived (not current live)', async () => {
-    render(<LiveSignalsPage />);
+    await act(async () => {
+      render(<LiveSignalsPage />);
+    });
     await waitFor(() => screen.getByRole('button', { name: 'Etherscan' }));
-    (screen.getByRole('button', { name: 'Etherscan' }) as HTMLButtonElement).click();
-
+    await act(async () => {
+      (screen.getByRole('button', { name: 'Etherscan' }) as HTMLButtonElement).click();
+    });
     await waitFor(() => screen.getAllByTestId('signal-event-card'));
     const cards = screen.getAllByTestId('signal-event-card');
     expect(cards.length).toBeGreaterThan(0);
@@ -306,10 +318,13 @@ describe('Asia Disclosure tab — planned, coverage rows', () => {
   });
 
   it('renders the planned/coverage empty-state banner instead of generic empty', async () => {
-    render(<LiveSignalsPage />);
+    await act(async () => {
+      render(<LiveSignalsPage />);
+    });
     await waitFor(() => screen.getByRole('button', { name: 'Asia Disclosure' }));
-    (screen.getByRole('button', { name: 'Asia Disclosure' }) as HTMLButtonElement).click();
-
+    await act(async () => {
+      (screen.getByRole('button', { name: 'Asia Disclosure' }) as HTMLButtonElement).click();
+    });
     await waitFor(() =>
       expect(
         screen.getByTestId('asia-disclosure-empty-coverage-banner'),
@@ -323,10 +338,13 @@ describe('Asia Disclosure tab — planned, coverage rows', () => {
   });
 
   it('renders the 11-country coverage table without India', async () => {
-    render(<LiveSignalsPage />);
+    await act(async () => {
+      render(<LiveSignalsPage />);
+    });
     await waitFor(() => screen.getByRole('button', { name: 'Asia Disclosure' }));
-    (screen.getByRole('button', { name: 'Asia Disclosure' }) as HTMLButtonElement).click();
-
+    await act(async () => {
+      (screen.getByRole('button', { name: 'Asia Disclosure' }) as HTMLButtonElement).click();
+    });
     await waitFor(() =>
       expect(screen.getByTestId('asia-disclosure-coverage-table')).toBeTruthy(),
     );
@@ -338,10 +356,13 @@ describe('Asia Disclosure tab — planned, coverage rows', () => {
   });
 
   it('reports Current live signals 0 + Coverage rows 11 in summary tiles', async () => {
-    render(<LiveSignalsPage />);
+    await act(async () => {
+      render(<LiveSignalsPage />);
+    });
     await waitFor(() => screen.getByRole('button', { name: 'Asia Disclosure' }));
-    (screen.getByRole('button', { name: 'Asia Disclosure' }) as HTMLButtonElement).click();
-
+    await act(async () => {
+      (screen.getByRole('button', { name: 'Asia Disclosure' }) as HTMLButtonElement).click();
+    });
     await waitFor(() => screen.getByTestId('tile-current-live'));
     expect(screen.getByTestId('tile-current-live').textContent).toMatch(
       /Current live signals/i,
@@ -391,7 +412,9 @@ describe('Stale active sources — GDELT remains visible and not hidden', () => 
       }),
     );
 
-    render(<LiveSignalsPage />);
+    await act(async () => {
+      render(<LiveSignalsPage />);
+    });
     await waitFor(() =>
       expect(screen.getByTestId('stale-refresh-banner')).toBeTruthy(),
     );
