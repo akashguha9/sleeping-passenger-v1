@@ -38,7 +38,7 @@ if str(_REPO_ROOT) not in sys.path:
 
 _OUTCOMES_CSV = _REPO_ROOT / "analysis" / "portfolio_2026_05" / "outcomes.csv"
 _HOLDINGS_JSON = _REPO_ROOT / "data" / "daily_payload" / "verified_current_holdings.json"
-_TEST_STATUS = _REPO_ROOT / "runtime" / "test_status.json"
+_TEST_STATUS = _REPO_ROOT / "runtime" / "status" / "test_status.json"
 
 
 def _now_iso() -> str:

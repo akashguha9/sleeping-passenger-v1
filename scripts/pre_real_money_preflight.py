@@ -471,7 +471,9 @@ def _test_confidence_probe(
     now = now or _dt.datetime.now(_dt.timezone.utc)
     try:
         rroot = Path(__file__).resolve().parents[1]
-        path = rroot / "runtime" / "test_status.json"
+        # Lives under runtime/status/ (a subdir) so it is NOT a top-level
+        # runtime/*.json artifact-coherence scans as a pipeline artifact.
+        path = rroot / "runtime" / "status" / "test_status.json"
         if not path.exists():
             return {"score": 0.7, "failing": False, "unverified": True}
         data = json.loads(path.read_text(encoding="utf-8"))
