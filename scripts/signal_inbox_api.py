@@ -258,6 +258,10 @@ class ManualTradeLog:
     leverage_policy_severity: str = "NONE"
     leverage_policy_reason: str = ""
     jurisdiction_group: str = "UNKNOWN"
+    # How the jurisdiction was resolved: EXPLICIT / SECURITIES_MASTER /
+    # TICKER_HEURISTIC / UNKNOWN_FAIL_CLOSED. Record-only; never grants
+    # execution permission.
+    jurisdiction_resolution_source: str = "UNKNOWN_FAIL_CLOSED"
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -1286,12 +1290,28 @@ def log_manual_trade(
             from scripts.leverage_governance import validate_leverage_policy
         except ModuleNotFoundError:  # pragma: no cover - script-style fallback
             from leverage_governance import validate_leverage_policy  # type: ignore[no-redef]
+        # Inject the securities-master lookup so jurisdiction can be resolved
+        # from the canonical DB (precedence: explicit > master > ticker
+        # suffix > unknown-fail-closed).  Read-only; never grants execution.
+        _sec_lookup = None
+        if _DB_AVAILABLE and _persistence is not None:
+            def _sec_lookup(sym: str):  # type: ignore[misc]
+                try:
+                    # Read DB_PATH at call time (not the def-time default) so
+                    # the canonical runtime DB — or a per-test override — is
+                    # honoured. Read-only.
+                    return _persistence.get_global_security(
+                        sym, db_path=_persistence.DB_PATH
+                    )
+                except Exception:
+                    return None
         _lev_policy = validate_leverage_policy(
             ticker=ticker,
             leverage=leverage_val,
             jurisdiction=jurisdiction or None,
             exchange=exchange or None,
             country=country or None,
+            securities_lookup=_sec_lookup,
         )
     except Exception:  # pragma: no cover - defensive
         _lev_policy = {
@@ -1299,6 +1319,7 @@ def log_manual_trade(
             "breach": leverage_val > 1.0,
             "severity": "POLICY_BREACH" if leverage_val > 1.0 else "WARNING",
             "jurisdiction_group": "UNKNOWN",
+            "jurisdiction_resolution_source": "UNKNOWN_FAIL_CLOSED",
             "reason": "leverage governance unavailable; failed closed to spot-only",
         }
 
@@ -1521,6 +1542,9 @@ def log_manual_trade(
         leverage_policy_severity=str(_lev_policy.get("severity", "NONE")),
         leverage_policy_reason=str(_lev_policy.get("reason", "")),
         jurisdiction_group=str(_lev_policy.get("jurisdiction_group", "UNKNOWN")),
+        jurisdiction_resolution_source=str(
+            _lev_policy.get("jurisdiction_resolution_source", "UNKNOWN_FAIL_CLOSED")
+        ),
     )
     append_jsonl(MANUAL_TRADE_LOG, trade.to_dict(), stamp=False)
     if _DB_AVAILABLE and _persistence is not None:
@@ -1557,6 +1581,7 @@ def log_manual_trade(
                 leverage_policy_severity=trade.leverage_policy_severity,
                 leverage_policy_reason=trade.leverage_policy_reason,
                 jurisdiction_group=trade.jurisdiction_group,
+                jurisdiction_resolution_source=trade.jurisdiction_resolution_source,
             )
         except Exception:
             pass
@@ -1576,6 +1601,7 @@ def log_manual_trade(
         "leverage_policy_severity": trade.leverage_policy_severity,
         "leverage_policy_reason": trade.leverage_policy_reason,
         "jurisdiction_group": trade.jurisdiction_group,
+        "jurisdiction_resolution_source": trade.jurisdiction_resolution_source,
         "invalidation_level": trade.invalidation_level,
         "expected_horizon": trade.expected_horizon,
         "risk_reason": trade.risk_reason,

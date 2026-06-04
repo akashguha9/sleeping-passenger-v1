@@ -448,6 +448,10 @@ def _additive_migrations(conn: sqlite3.Connection) -> None:
         ("manual_trades", "leverage_policy_severity", "TEXT NOT NULL DEFAULT 'NONE'"),
         ("manual_trades", "leverage_policy_reason", "TEXT NOT NULL DEFAULT ''"),
         ("manual_trades", "jurisdiction_group", "TEXT NOT NULL DEFAULT 'UNKNOWN'"),
+        # How the jurisdiction was resolved (EXPLICIT / SECURITIES_MASTER /
+        # TICKER_HEURISTIC / UNKNOWN_FAIL_CLOSED). Additive; legacy rows default
+        # to UNKNOWN_FAIL_CLOSED. Record-only; never grants execution.
+        ("manual_trades", "jurisdiction_resolution_source", "TEXT NOT NULL DEFAULT 'UNKNOWN_FAIL_CLOSED'"),
         # Reconciliation outcome-quality / process-error fields.
         ("reconciliation_results", "outcome_quality", "TEXT NOT NULL DEFAULT ''"),
         ("reconciliation_results", "process_error", "TEXT NOT NULL DEFAULT ''"),
@@ -838,6 +842,7 @@ def insert_manual_trade(
     leverage_policy_severity: str = "NONE",
     leverage_policy_reason: str = "",
     jurisdiction_group: str = "UNKNOWN",
+    jurisdiction_resolution_source: str = "UNKNOWN_FAIL_CLOSED",
 ) -> None:
     """Insert a manual trade record. ``leverage`` is record-only (record-keeping
     of human leverage choice — no broker margin/execution implications).
@@ -926,6 +931,11 @@ def insert_manual_trade(
     jur_group_norm = str(jurisdiction_group or "UNKNOWN").strip().upper()
     if jur_group_norm not in {"INDIA", "REST_OF_WORLD", "UNKNOWN"}:
         jur_group_norm = "UNKNOWN"
+    jur_src_norm = str(jurisdiction_resolution_source or "UNKNOWN_FAIL_CLOSED").strip().upper()
+    if jur_src_norm not in {
+        "EXPLICIT", "SECURITIES_MASTER", "TICKER_HEURISTIC", "UNKNOWN_FAIL_CLOSED"
+    }:
+        jur_src_norm = "UNKNOWN_FAIL_CLOSED"
 
     conn = _get_conn(db_path)
     try:
@@ -1004,6 +1014,9 @@ def insert_manual_trade(
                 lev_reason_norm,
                 jur_group_norm,
             )
+        if "jurisdiction_resolution_source" in cols:
+            cols_sql = cols_sql + ", jurisdiction_resolution_source"
+            vals = vals + (jur_src_norm,)
         placeholders = ", ".join(["?"] * len(vals))
         conn.execute(
             f"INSERT OR IGNORE INTO manual_trades ({cols_sql}) VALUES ({placeholders})",

@@ -89,64 +89,138 @@ def _norm(value: Any) -> str:
     return str(value or "").strip().upper()
 
 
+# Jurisdiction-resolution provenance — how we decided the jurisdiction group.
+SRC_EXPLICIT = "EXPLICIT"
+SRC_SECURITIES_MASTER = "SECURITIES_MASTER"
+SRC_TICKER_HEURISTIC = "TICKER_HEURISTIC"
+SRC_UNKNOWN_FAIL_CLOSED = "UNKNOWN_FAIL_CLOSED"
+
+
+def _classify_hints(jurisdiction: str, exchange: str, country: str) -> tuple[str, str] | None:
+    """Classify explicit jurisdiction/exchange/country hints to a group.
+
+    Returns ``(group, human_reason_fragment)`` or None if the hints recognise
+    nothing. Pure string logic; reused for both explicit input and
+    securities-master rows.
+    """
+    j, x, c = _norm(jurisdiction), _norm(exchange), _norm(country)
+    if j in _INDIA_JURISDICTIONS:
+        return INDIA, f"jurisdiction={j}"
+    if c in _INDIA_COUNTRIES:
+        return INDIA, f"country={c}"
+    if x in _INDIA_EXCHANGES:
+        return INDIA, f"exchange={x}"
+    if j in _ROW_JURISDICTIONS:
+        return REST_OF_WORLD, f"jurisdiction={j}"
+    if c in _ROW_COUNTRIES:
+        return REST_OF_WORLD, f"country={c}"
+    if x in _ROW_EXCHANGES:
+        return REST_OF_WORLD, f"exchange={x}"
+    return None
+
+
+def _classify_ticker(ticker: str) -> tuple[str, str] | None:
+    """Classify a ticker by suffix/prefix heuristic. Pure string logic."""
+    t = _norm(ticker)
+    if not t:
+        return None
+    if t.startswith(_INDIA_TICKER_PREFIXES) or t.endswith(_INDIA_TICKER_SUFFIXES):
+        return INDIA, f"ticker={t} suffix"
+    if t.endswith(_ROW_TICKER_SUFFIXES):
+        return REST_OF_WORLD, f"ticker={t} suffix"
+    return None
+
+
+def _ceiling_for(group: str) -> float:
+    return INDIA_LEVERAGE_CEILING if group == INDIA else ROW_LEVERAGE_CEILING
+
+
 def resolve_leverage_ceiling(
     ticker: Any = None,
     jurisdiction: Any = None,
     exchange: Any = None,
     country: Any = None,
+    *,
+    securities_lookup: Any = None,
 ) -> dict[str, Any]:
-    """Resolve the leverage ceiling and jurisdiction group for an instrument.
+    """Resolve the leverage ceiling, jurisdiction group, and how it was decided.
 
     Resolution precedence (first positive match wins):
-      1. explicit jurisdiction / country / exchange hints
-      2. ticker suffix / prefix (e.g. ``RELIANCE.NS`` -> India, ``VOD.L`` -> ROW)
+      1. EXPLICIT          — caller-supplied jurisdiction / country / exchange
+      2. SECURITIES_MASTER — ``securities_lookup(ticker)`` row's exchange/country
+      3. TICKER_HEURISTIC  — ticker suffix/prefix (``RELIANCE.NS`` -> India)
+      4. UNKNOWN_FAIL_CLOSED — spot-only (1.0x); leverage above 1.0x is a breach
 
-    Returns a dict with ``ceiling``, ``jurisdiction_group`` and ``reason``.
-    Unknown instruments fail closed to the rest-of-world spot ceiling (1.0x)
-    but are reported as ``UNKNOWN`` so the caller can warn the operator.
+    ``securities_lookup`` is an optional callable ``ticker -> dict | None`` with
+    ``exchange_code`` / ``country`` keys (e.g. persistence.get_global_security).
+    Injecting it keeps this module pure (no DB import) and fully testable.
+
+    Returns ``{jurisdiction_group, ceiling, reason, resolution_source}``.
     """
-    j = _norm(jurisdiction)
-    c = _norm(country)
-    x = _norm(exchange)
-    t = _norm(ticker)
+    # 1. EXPLICIT hints
+    hit = _classify_hints(jurisdiction, exchange, country)
+    if hit is not None:
+        group, frag = hit
+        return _resolved(group, frag, SRC_EXPLICIT)
 
-    # --- India (explicit hints) ---
-    if j in _INDIA_JURISDICTIONS:
-        return _ceiling(INDIA, INDIA_LEVERAGE_CEILING,
-                        f"jurisdiction={j} -> India equities, 4.0x ceiling")
-    if c in _INDIA_COUNTRIES:
-        return _ceiling(INDIA, INDIA_LEVERAGE_CEILING,
-                        f"country={c} -> India equities, 4.0x ceiling")
-    if x in _INDIA_EXCHANGES:
-        return _ceiling(INDIA, INDIA_LEVERAGE_CEILING,
-                        f"exchange={x} -> India equities, 4.0x ceiling")
+    # 2. SECURITIES MASTER
+    if securities_lookup is not None:
+        row = _safe_lookup(securities_lookup, ticker)
+        if row:
+            hit = _classify_hints(
+                jurisdiction=None,
+                exchange=row.get("exchange_code"),
+                country=row.get("country"),
+            )
+            if hit is not None:
+                group, frag = hit
+                return _resolved(
+                    group, f"securities master ({frag})", SRC_SECURITIES_MASTER
+                )
 
-    # --- Rest-of-world (explicit hints) ---
-    if j in _ROW_JURISDICTIONS:
-        return _ceiling(REST_OF_WORLD, ROW_LEVERAGE_CEILING,
-                        f"jurisdiction={j} -> rest-of-world, spot-only (1.0x)")
-    if c in _ROW_COUNTRIES:
-        return _ceiling(REST_OF_WORLD, ROW_LEVERAGE_CEILING,
-                        f"country={c} -> rest-of-world, spot-only (1.0x)")
-    if x in _ROW_EXCHANGES:
-        return _ceiling(REST_OF_WORLD, ROW_LEVERAGE_CEILING,
-                        f"exchange={x} -> rest-of-world, spot-only (1.0x)")
+    # 3. TICKER HEURISTIC
+    hit = _classify_ticker(ticker)
+    if hit is not None:
+        group, frag = hit
+        return _resolved(group, frag, SRC_TICKER_HEURISTIC)
 
-    # --- Ticker suffix / prefix fallback ---
-    if t:
-        if t.startswith(_INDIA_TICKER_PREFIXES) or t.endswith(_INDIA_TICKER_SUFFIXES):
-            return _ceiling(INDIA, INDIA_LEVERAGE_CEILING,
-                            f"ticker={t} suffix -> India equities, 4.0x ceiling")
-        if t.endswith(_ROW_TICKER_SUFFIXES):
-            return _ceiling(REST_OF_WORLD, ROW_LEVERAGE_CEILING,
-                            f"ticker={t} suffix -> rest-of-world, spot-only (1.0x)")
+    # 4. UNKNOWN — fail closed to spot-only
+    return {
+        "jurisdiction_group": UNKNOWN,
+        "ceiling": ROW_LEVERAGE_CEILING,
+        "reason": (
+            "jurisdiction could not be verified from explicit input, securities "
+            "master, or ticker; failing closed to spot-only (1.0x) — leverage "
+            "above 1.0x is a breach"
+        ),
+        "resolution_source": SRC_UNKNOWN_FAIL_CLOSED,
+    }
 
-    # --- Unknown: fail closed to spot-only, but flag as unverified ---
-    return _ceiling(
-        UNKNOWN, ROW_LEVERAGE_CEILING,
-        "jurisdiction could not be verified from ticker/exchange/country; "
-        "failing closed to spot-only (1.0x) — leverage above 1.0x is a breach",
-    )
+
+def _safe_lookup(securities_lookup: Any, ticker: Any) -> dict[str, Any] | None:
+    """Call the injected lookup defensively; never raise into the policy path."""
+    sym = _norm(ticker)
+    if not sym:
+        return None
+    try:
+        row = securities_lookup(sym)
+    except Exception:  # pragma: no cover - defensive
+        return None
+    return row if isinstance(row, dict) else None
+
+
+def _resolved(group: str, frag: str, source: str) -> dict[str, Any]:
+    ceiling = _ceiling_for(group)
+    if group == INDIA:
+        reason = f"{frag} -> India equities, {ceiling:g}x ceiling [{source}]"
+    else:
+        reason = f"{frag} -> rest-of-world, spot-only ({ceiling:g}x) [{source}]"
+    return {
+        "jurisdiction_group": group,
+        "ceiling": float(ceiling),
+        "reason": reason,
+        "resolution_source": source,
+    }
 
 
 def _ceiling(group: str, ceiling: float, reason: str) -> dict[str, Any]:
@@ -159,6 +233,8 @@ def validate_leverage_policy(
     jurisdiction: Any = None,
     exchange: Any = None,
     country: Any = None,
+    *,
+    securities_lookup: Any = None,
 ) -> dict[str, Any]:
     """Validate a (possibly historical) leverage choice against the doctrine.
 
@@ -181,10 +257,12 @@ def validate_leverage_policy(
         actual = DEFAULT_LEVERAGE
 
     resolved = resolve_leverage_ceiling(
-        ticker=ticker, jurisdiction=jurisdiction, exchange=exchange, country=country
+        ticker=ticker, jurisdiction=jurisdiction, exchange=exchange,
+        country=country, securities_lookup=securities_lookup,
     )
     ceiling = resolved["ceiling"]
     group = resolved["jurisdiction_group"]
+    resolution_source = resolved["resolution_source"]
     breach = actual > ceiling + _EPSILON
 
     if breach:
@@ -219,6 +297,7 @@ def validate_leverage_policy(
         "breach": breach,
         "severity": severity,
         "jurisdiction_group": group,
+        "jurisdiction_resolution_source": resolution_source,
         "reason": reason,
         # Advisory invariants — constant, never granted by this layer.
         "advisory_only": True,
@@ -231,6 +310,10 @@ __all__ = [
     "INDIA_LEVERAGE_CEILING",
     "ROW_LEVERAGE_CEILING",
     "DEFAULT_LEVERAGE",
+    "SRC_EXPLICIT",
+    "SRC_SECURITIES_MASTER",
+    "SRC_TICKER_HEURISTIC",
+    "SRC_UNKNOWN_FAIL_CLOSED",
     "INDIA",
     "REST_OF_WORLD",
     "UNKNOWN",
