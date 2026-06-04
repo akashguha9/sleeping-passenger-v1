@@ -1,0 +1,14 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 scripts/bootstrap_runtime.py --run-tests >/dev/null 2>&1 || true"
+          }
+        ]
+      }
+    ]
+  }
+}
