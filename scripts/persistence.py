@@ -288,6 +288,27 @@ CREATE TABLE IF NOT EXISTS global_security_aliases (
 );
 CREATE INDEX IF NOT EXISTS idx_gsa_alias ON global_security_aliases(alias);
 CREATE INDEX IF NOT EXISTS idx_gsa_canonical ON global_security_aliases(canonical_symbol);
+CREATE TABLE IF NOT EXISTS ohlcv_bars (
+    ticker TEXT NOT NULL,
+    date TEXT NOT NULL,
+    open REAL,
+    high REAL,
+    low REAL,
+    close REAL,
+    adjusted_close REAL,
+    volume REAL,
+    source TEXT NOT NULL DEFAULT '',
+    data_vendor TEXT NOT NULL DEFAULT '',
+    exchange TEXT NOT NULL DEFAULT '',
+    currency TEXT NOT NULL DEFAULT '',
+    corporate_action_adjusted INTEGER NOT NULL DEFAULT 0,
+    imported_at TEXT NOT NULL DEFAULT '',
+    advisory_only TEXT NOT NULL DEFAULT 'ADVISORY_ONLY',
+    human_execution_required INTEGER NOT NULL DEFAULT 1,
+    broker_api_called INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (ticker, date, source)
+);
+CREATE INDEX IF NOT EXISTS idx_ohlcv_ticker ON ohlcv_bars(ticker);
 """
 
 # Track which DB paths have been initialized this process (avoids repeat schema runs)
@@ -1232,6 +1253,88 @@ def get_all_reconciliations(db_path: Path = DB_PATH) -> list[dict[str, Any]]:
     finally:
         conn.close()
     return [_to_dict(r) for r in rows]
+
+
+# ---------------------------------------------------------------------------
+# OHLCV bars (read-only historical price store for backtest evidence)
+# ---------------------------------------------------------------------------
+
+
+def insert_ohlcv_bars(bars: list[dict[str, Any]], db_path: Path = DB_PATH) -> int:
+    """Idempotently upsert validated OHLCV bars. Returns rows written.
+
+    Read-only historical data: every row carries advisory stamps and NEVER
+    implies broker connectivity. Uniqueness is (ticker, date, source) so
+    re-importing the same file is a no-op.
+    """
+    if not bars:
+        return 0
+    conn = _get_conn(db_path)
+    written = 0
+    try:
+        for b in bars:
+            cur = conn.execute(
+                "INSERT OR IGNORE INTO ohlcv_bars"
+                " (ticker, date, open, high, low, close, adjusted_close, volume,"
+                "  source, data_vendor, exchange, currency, corporate_action_adjusted,"
+                "  imported_at, advisory_only, human_execution_required, broker_api_called)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (
+                    str(b["ticker"]).strip().upper(),
+                    str(b["date"]).strip(),
+                    _coerce_num(b.get("open")),
+                    _coerce_num(b.get("high")),
+                    _coerce_num(b.get("low")),
+                    _coerce_num(b.get("close")),
+                    _coerce_num(b.get("adjusted_close")),
+                    _coerce_num(b.get("volume")),
+                    str(b.get("source", "")).strip(),
+                    str(b.get("data_vendor", "")).strip(),
+                    str(b.get("exchange", "")).strip(),
+                    str(b.get("currency", "")).strip(),
+                    1 if b.get("corporate_action_adjusted") else 0,
+                    str(b.get("imported_at", "") or utc_timestamp()),
+                    "ADVISORY_ONLY",
+                    1,
+                    0,
+                ),
+            )
+            written += cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
+        conn.commit()
+    finally:
+        conn.close()
+    return written
+
+
+def _coerce_num(value: Any) -> float | None:
+    if value is None or value == "":
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def get_ohlcv_bars(ticker: str, db_path: Path = DB_PATH) -> list[dict[str, Any]]:
+    """Return all bars for a ticker ordered by date ascending."""
+    conn = _get_conn(db_path)
+    try:
+        rows = conn.execute(
+            "SELECT * FROM ohlcv_bars WHERE ticker=? ORDER BY date ASC",
+            (str(ticker).strip().upper(),),
+        ).fetchall()
+    finally:
+        conn.close()
+    return [_to_dict(r) for r in rows]
+
+
+def count_ohlcv_bars(db_path: Path = DB_PATH) -> int:
+    conn = _get_conn(db_path)
+    try:
+        row = conn.execute("SELECT COUNT(*) AS c FROM ohlcv_bars").fetchone()
+    finally:
+        conn.close()
+    return int(row["c"]) if row else 0
 
 
 # ---------------------------------------------------------------------------

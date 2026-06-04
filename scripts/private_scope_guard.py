@@ -224,6 +224,9 @@ EXPLICIT_IN_SCOPE: frozenset[str] = frozenset({
     "outcome_evidence_extractor.py",
     "securities_master_coverage.py",
     "core_module_boundary.py",
+    # Real-evidence sprint: read-only OHLCV import for backtest evidence.
+    "ohlcv_import_contract.py",
+    "import_ohlcv_csv.py",
 })
 
 # Modules deliberately marked OUT_OF_SCOPE inside ``scripts/``.  This
