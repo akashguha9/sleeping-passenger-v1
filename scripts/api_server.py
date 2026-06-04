@@ -3014,6 +3014,21 @@ def get_score_calibration(_auth: None = Depends(require_api_token_for_reads)) ->
     return build_score_calibration_report()
 
 
+@app.get("/api/calibration-recommendations")
+def get_calibration_recommendations(_auth: None = Depends(require_api_token_for_reads)) -> dict:
+    """Guarded calibration recommendations from reconciled outcomes.
+
+    The Moltbook/reconciliation feedback loop, made safe: recommends whether a
+    score threshold should move but NEVER auto-applies (applied always False,
+    human_review_required always True). Advisory-only.
+    """
+    try:
+        from scripts.calibration_recommendations import build_recommendation_report
+    except ModuleNotFoundError:  # pragma: no cover - script-style fallback
+        from calibration_recommendations import build_recommendation_report  # type: ignore[no-redef]
+    return build_recommendation_report()
+
+
 @app.post("/api/live-refresh/run")
 def post_live_refresh_run(
     _auth: None = Depends(require_api_token),
