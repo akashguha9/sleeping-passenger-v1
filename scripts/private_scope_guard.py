@@ -228,6 +228,7 @@ EXPLICIT_IN_SCOPE: frozenset[str] = frozenset({
     "ohlcv_import_contract.py",
     "import_ohlcv_csv.py",
     "run_imported_backtest.py",
+    "import_outcomes_csv.py",
 })
 
 # Modules deliberately marked OUT_OF_SCOPE inside ``scripts/``.  This

@@ -309,6 +309,31 @@ CREATE TABLE IF NOT EXISTS ohlcv_bars (
     PRIMARY KEY (ticker, date, source)
 );
 CREATE INDEX IF NOT EXISTS idx_ohlcv_ticker ON ohlcv_bars(ticker);
+CREATE TABLE IF NOT EXISTS imported_outcomes (
+    outcome_id TEXT PRIMARY KEY,
+    source_type TEXT NOT NULL,
+    ticker TEXT NOT NULL DEFAULT '',
+    direction TEXT NOT NULL DEFAULT 'UNKNOWN',
+    signal_id TEXT,
+    trade_id TEXT,
+    opened_at TEXT,
+    closed_at TEXT,
+    entry_price REAL,
+    exit_price REAL,
+    realized_pnl REAL,
+    capital_at_risk REAL,
+    leverage REAL NOT NULL DEFAULT 1.0,
+    score_at_entry REAL,
+    archetype TEXT,
+    signal_class TEXT,
+    jurisdiction_group TEXT NOT NULL DEFAULT 'UNKNOWN',
+    notes TEXT NOT NULL DEFAULT '',
+    imported_at TEXT NOT NULL DEFAULT '',
+    advisory_only TEXT NOT NULL DEFAULT 'ADVISORY_ONLY',
+    human_execution_required INTEGER NOT NULL DEFAULT 1,
+    broker_api_called INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_imported_outcomes_src ON imported_outcomes(source_type);
 """
 
 # Track which DB paths have been initialized this process (avoids repeat schema runs)
@@ -1335,6 +1360,88 @@ def count_ohlcv_bars(db_path: Path = DB_PATH) -> int:
     finally:
         conn.close()
     return int(row["c"]) if row else 0
+
+
+# ---------------------------------------------------------------------------
+# Imported outcomes (paper / real-manual / backtest evidence, idempotent)
+# ---------------------------------------------------------------------------
+
+_IMPORTED_OUTCOME_COLS = (
+    "outcome_id", "source_type", "ticker", "direction", "signal_id", "trade_id",
+    "opened_at", "closed_at", "entry_price", "exit_price", "realized_pnl",
+    "capital_at_risk", "leverage", "score_at_entry", "archetype", "signal_class",
+    "jurisdiction_group", "notes",
+)
+
+
+def insert_imported_outcomes(rows: list[dict[str, Any]], db_path: Path = DB_PATH) -> int:
+    """Idempotently upsert imported outcome rows (raw inputs). PK = outcome_id.
+
+    Stores only the raw inputs; eligibility/quality/labels are recomputed on
+    read via outcome_evidence.build_outcome so the math stays centralised.
+    Read-only journal evidence — advisory stamps, never a broker call.
+    """
+    if not rows:
+        return 0
+    conn = _get_conn(db_path)
+    written = 0
+    try:
+        for r in rows:
+            cur = conn.execute(
+                "INSERT OR IGNORE INTO imported_outcomes"
+                " (outcome_id, source_type, ticker, direction, signal_id, trade_id,"
+                "  opened_at, closed_at, entry_price, exit_price, realized_pnl,"
+                "  capital_at_risk, leverage, score_at_entry, archetype, signal_class,"
+                "  jurisdiction_group, notes, imported_at, advisory_only,"
+                "  human_execution_required, broker_api_called)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (
+                    str(r["outcome_id"]),
+                    str(r.get("source_type", "")).upper(),
+                    str(r.get("ticker", "")).upper(),
+                    str(r.get("direction", "UNKNOWN")).upper(),
+                    _opt_str(r.get("signal_id")),
+                    _opt_str(r.get("trade_id")),
+                    _opt_str(r.get("opened_at")),
+                    _opt_str(r.get("closed_at")),
+                    _coerce_num(r.get("entry_price")),
+                    _coerce_num(r.get("exit_price")),
+                    _coerce_num(r.get("realized_pnl")),
+                    _coerce_num(r.get("capital_at_risk")),
+                    _coerce_num(r.get("leverage")) or 1.0,
+                    _coerce_num(r.get("score_at_entry")),
+                    _opt_str(r.get("archetype")),
+                    _opt_str(r.get("signal_class")),
+                    str(r.get("jurisdiction_group", "UNKNOWN")).upper(),
+                    str(r.get("notes", "")),
+                    utc_timestamp(),
+                    "ADVISORY_ONLY", 1, 0,
+                ),
+            )
+            written += cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
+        conn.commit()
+    finally:
+        conn.close()
+    return written
+
+
+def _opt_str(value: Any) -> str | None:
+    if value is None:
+        return None
+    s = str(value).strip()
+    return s or None
+
+
+def get_imported_outcome_rows(db_path: Path = DB_PATH) -> list[dict[str, Any]]:
+    """Return raw imported-outcome input rows (for rebuilding evidence)."""
+    conn = _get_conn(db_path)
+    try:
+        rows = conn.execute(
+            "SELECT * FROM imported_outcomes ORDER BY outcome_id"
+        ).fetchall()
+    finally:
+        conn.close()
+    return [_to_dict(r) for r in rows]
 
 
 # ---------------------------------------------------------------------------
