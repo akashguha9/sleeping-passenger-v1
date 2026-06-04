@@ -394,6 +394,26 @@ def compute_calibration_metrics(
         and bool(human_approved)
     )
 
+    # Murphy decomposition (binned): Brier = Reliability - Resolution + Uncertainty.
+    base_rate = sum(p[0] for p in pts) / m
+    reliability = 0.0
+    resolution = 0.0
+    reliability_diagram: list[dict[str, Any]] = []
+    for b in bucket_rows:
+        nk = b["n"]
+        if not nk or b["confidence"] is None:
+            continue
+        reliability += (nk / m) * (b["confidence"] - b["accuracy"]) ** 2
+        resolution += (nk / m) * (b["accuracy"] - base_rate) ** 2
+        reliability_diagram.append(
+            {"confidence": b["confidence"], "accuracy": b["accuracy"], "n": nk}
+        )
+    uncertainty = base_rate * (1.0 - base_rate)
+    binned_brier = reliability - resolution + uncertainty
+
+    # Bootstrap 95% CI on ECE (deterministic).
+    ece_lower, ece_upper = _bootstrap_ece_ci(pts, buckets)
+
     base.update({
         "n": m,
         "calibration_status": status,
@@ -405,11 +425,55 @@ def compute_calibration_metrics(
         "wilson_lower": wl, "wilson_upper": wu,
         "posterior_mean": post_mean, "posterior_var": post_var,
         "should_drive_sizing": should_drive,
+        # Murphy decomposition + reliability diagram + bootstrap CI.
+        "base_rate": base_rate,
+        "reliability": reliability,
+        "resolution": resolution,
+        "uncertainty": uncertainty,
+        "binned_brier": binned_brier,
+        "reliability_diagram": reliability_diagram,
+        "ece_ci_lower": ece_lower,
+        "ece_ci_upper": ece_upper,
         "message": _metrics_message(status, prov),
     })
     base.update(_ADVISORY_STAMPS)
     base["human_review_required"] = True
     return base
+
+
+def _bootstrap_ece_ci(
+    pts: list[tuple[float, float, Any, Any]],
+    buckets: tuple[tuple[float, float], ...],
+    *,
+    n_boot: int = 300,
+    seed: int = 1234,
+) -> tuple[float | None, float | None]:
+    """Deterministic bootstrap 95% percentile CI for ECE."""
+    import random as _random
+
+    m = len(pts)
+    if m < 5:
+        return (None, None)
+    rng = _random.Random(seed)
+    eces: list[float] = []
+    for _ in range(n_boot):
+        sample = [pts[rng.randrange(m)] for _ in range(m)]
+        ece = 0.0
+        for lo, hi in buckets:
+            members = [p for p in sample if lo <= p[1] < hi]
+            nk = len(members)
+            if nk == 0:
+                continue
+            conf = sum(p[1] for p in members) / nk
+            acc = sum(p[0] for p in members) / nk
+            ece += (nk / m) * abs(acc - conf)
+        eces.append(ece)
+    eces.sort()
+    lo_idx = int(0.025 * (len(eces) - 1))
+    hi_idx = int(0.975 * (len(eces) - 1))
+    return (eces[lo_idx], eces[hi_idx])
+
+
 
 
 def _metrics_message(status: str, prov: dict[str, int]) -> str:
