@@ -435,6 +435,19 @@ def _additive_migrations(conn: sqlite3.Connection) -> None:
         # broker.  Legacy rows default to '' and read back as the explicit
         # "—" placeholder in the UI.
         ("manual_trades", "ai_model_used", "TEXT NOT NULL DEFAULT ''"),
+        # P0 leverage governance.  Computed at log time from the product
+        # doctrine (scripts/leverage_governance.py): India equities up to 4.0x,
+        # rest-of-world spot-only (1.0x), unknown jurisdiction fails closed to
+        # 1.0x.  ``leverage_breach`` (0/1) marks a recorded trade that exceeded
+        # its ceiling — the row is still kept (journal, not execution blocker)
+        # so the breach is visible.  Additive; legacy rows default to the
+        # safe spot-only / no-breach / UNKNOWN stamp.  None of these grant
+        # execution permission; the broker stamps are unchanged.
+        ("manual_trades", "leverage_ceiling", "REAL NOT NULL DEFAULT 1.0"),
+        ("manual_trades", "leverage_breach", "INTEGER NOT NULL DEFAULT 0"),
+        ("manual_trades", "leverage_policy_severity", "TEXT NOT NULL DEFAULT 'NONE'"),
+        ("manual_trades", "leverage_policy_reason", "TEXT NOT NULL DEFAULT ''"),
+        ("manual_trades", "jurisdiction_group", "TEXT NOT NULL DEFAULT 'UNKNOWN'"),
         # Reconciliation outcome-quality / process-error fields.
         ("reconciliation_results", "outcome_quality", "TEXT NOT NULL DEFAULT ''"),
         ("reconciliation_results", "process_error", "TEXT NOT NULL DEFAULT ''"),
@@ -820,6 +833,11 @@ def insert_manual_trade(
     created_via: str = "",
     currency: str = "",
     ai_model_used: str = "",
+    leverage_ceiling: float = 1.0,
+    leverage_breach: bool | int | None = None,
+    leverage_policy_severity: str = "NONE",
+    leverage_policy_reason: str = "",
+    jurisdiction_group: str = "UNKNOWN",
 ) -> None:
     """Insert a manual trade record. ``leverage`` is record-only (record-keeping
     of human leverage choice — no broker margin/execution implications).
@@ -892,6 +910,23 @@ def insert_manual_trade(
     if len(ai_model_used_norm) > 120:
         ai_model_used_norm = ai_model_used_norm[:120]
 
+    # Normalise leverage-governance stamps at the persistence boundary.  These
+    # are record-only: they never grant execution permission.
+    try:
+        lev_ceiling_norm = float(leverage_ceiling) if leverage_ceiling is not None else 1.0
+    except (TypeError, ValueError):
+        lev_ceiling_norm = 1.0
+    lev_breach_norm = 1 if leverage_breach else 0
+    lev_sev_norm = str(leverage_policy_severity or "NONE").strip().upper()
+    if lev_sev_norm not in {"NONE", "WARNING", "POLICY_BREACH"}:
+        lev_sev_norm = "NONE"
+    lev_reason_norm = str(leverage_policy_reason or "").strip()
+    if len(lev_reason_norm) > 500:
+        lev_reason_norm = lev_reason_norm[:500]
+    jur_group_norm = str(jurisdiction_group or "UNKNOWN").strip().upper()
+    if jur_group_norm not in {"INDIA", "REST_OF_WORLD", "UNKNOWN"}:
+        jur_group_norm = "UNKNOWN"
+
     conn = _get_conn(db_path)
     try:
         cols = {row[1] for row in conn.execute("PRAGMA table_info(manual_trades)")}
@@ -957,6 +992,18 @@ def insert_manual_trade(
         if has_ai_model_used:
             cols_sql = cols_sql + ", ai_model_used"
             vals = vals + (ai_model_used_norm,)
+        if "leverage_ceiling" in cols:
+            cols_sql = cols_sql + (
+                ", leverage_ceiling, leverage_breach,"
+                " leverage_policy_severity, leverage_policy_reason, jurisdiction_group"
+            )
+            vals = vals + (
+                lev_ceiling_norm,
+                lev_breach_norm,
+                lev_sev_norm,
+                lev_reason_norm,
+                jur_group_norm,
+            )
         placeholders = ", ".join(["?"] * len(vals))
         conn.execute(
             f"INSERT OR IGNORE INTO manual_trades ({cols_sql}) VALUES ({placeholders})",

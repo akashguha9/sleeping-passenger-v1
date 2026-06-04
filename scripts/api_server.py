@@ -834,6 +834,14 @@ class ManualTradeBody(BaseModel):
     # cap) and reads back via the same field name.  Storing this NEVER
     # grants execution permission and never reaches a broker.
     ai_model_used: str = ""
+    # P0 leverage governance — optional jurisdiction hints so the server can
+    # resolve the leverage ceiling (India 4.0x / rest-of-world 1.0x / unknown
+    # fails closed to 1.0x).  Legacy clients omit these; the server then
+    # resolves jurisdiction from the ticker suffix.  Supplying them NEVER
+    # grants execution permission and never reaches a broker.
+    exchange: str = Field("", max_length=32)
+    country: str = Field("", max_length=32)
+    jurisdiction: str = Field("", max_length=32)
 
     @_field_validator("quantity", "price", "leverage", mode="before")
     @classmethod
@@ -1283,6 +1291,9 @@ def post_manual_trade(
         trade_mode=body.trade_mode,
         currency=body.currency,
         ai_model_used=body.ai_model_used,
+        exchange=body.exchange,
+        country=body.country,
+        jurisdiction=body.jurisdiction,
     )
     # log_manual_trade returns a structured error dict (status="error" or
     # status!="logged" with an "error" key) when the row looks like a

@@ -246,6 +246,18 @@ class ManualTradeLog:
     # permission, never calls a broker, and never alters the safety
     # stamps.
     ai_model_used: str = ""
+    # Leverage governance (P0 repair).  Computed from the product doctrine in
+    # scripts/leverage_governance.py at log time: Indian equities permit up to
+    # 4.0x as a ceiling, rest-of-world is spot-only (1.0x), unknown jurisdiction
+    # fails closed to 1.0x.  Recording a breaching historical trade is still
+    # allowed — the row is stamped leverage_breach=True with the policy details
+    # so the breach is VISIBLE, never silently normalised.  These fields are
+    # pure record-keeping: storing them NEVER grants execution permission.
+    leverage_ceiling: float = 1.0
+    leverage_breach: bool = False
+    leverage_policy_severity: str = "NONE"
+    leverage_policy_reason: str = ""
+    jurisdiction_group: str = "UNKNOWN"
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -1208,6 +1220,9 @@ def log_manual_trade(
     trade_mode: str = "REAL_MANUAL",
     currency: str = "",
     ai_model_used: str = "",
+    exchange: str = "",
+    country: str = "",
+    jurisdiction: str = "",
 ) -> dict[str, Any]:
     """7. Log a manual trade execution (HUMAN_ONLY; no broker API called).
 
@@ -1215,10 +1230,21 @@ def log_manual_trade(
     submit any order to any broker or exchange.  broker_api_called is always
     False.  ai_execution_count is always 0.
 
-    leverage is a numeric record-only field (e.g. 1.0x, 2.5x).  It must be
-    >= 1.0 and <= 25.0.  Missing / null defaults to 1.0.  Storing leverage
-    here does NOT enable any broker margin behaviour — this remains pure
-    record-keeping.
+    leverage is a numeric record-only field (e.g. 1.0x, 2.5x).  As a sanity
+    bound it must be >= 1.0 and <= 25.0.  Missing / null defaults to 1.0.
+    Storing leverage here does NOT enable any broker margin behaviour — this
+    remains pure record-keeping.
+
+    Leverage GOVERNANCE (P0): the logged leverage is validated against the
+    product doctrine via scripts/leverage_governance.py — Indian equities
+    (NSE/BSE/IN) may use up to 4.0x; rest-of-world is spot-only (1.0x);
+    unknown jurisdiction fails closed to 1.0x.  Jurisdiction is resolved from
+    the optional exchange / country / jurisdiction kwargs, else the ticker
+    suffix (e.g. ``.NS`` -> India, ``.L`` -> rest-of-world).  A trade that
+    breaches the ceiling is STILL recorded (this is a journal, not an
+    execution blocker), but the row is stamped leverage_breach=True with the
+    severity and reason so the breach is visible rather than silently
+    normalised.  This never places, routes, or authorises any order.
 
     The operator-discipline keyword args
     (invalidation_level, expected_horizon, risk_reason, entry_reason,
@@ -1250,6 +1276,31 @@ def log_manual_trade(
             "log_manual_trade",
             f"leverage must be between {_LEVERAGE_MIN} and {_LEVERAGE_MAX}",
         )
+
+    # P0 leverage governance — classify the logged leverage against the
+    # product doctrine.  This NEVER blocks the journal record; it stamps the
+    # breach so the operator sees it.  Failure of the governance module must
+    # not break logging, so it degrades to a safe UNKNOWN/spot-only stamp.
+    try:
+        try:
+            from scripts.leverage_governance import validate_leverage_policy
+        except ModuleNotFoundError:  # pragma: no cover - script-style fallback
+            from leverage_governance import validate_leverage_policy  # type: ignore[no-redef]
+        _lev_policy = validate_leverage_policy(
+            ticker=ticker,
+            leverage=leverage_val,
+            jurisdiction=jurisdiction or None,
+            exchange=exchange or None,
+            country=country or None,
+        )
+    except Exception:  # pragma: no cover - defensive
+        _lev_policy = {
+            "ceiling": 1.0,
+            "breach": leverage_val > 1.0,
+            "severity": "POLICY_BREACH" if leverage_val > 1.0 else "WARNING",
+            "jurisdiction_group": "UNKNOWN",
+            "reason": "leverage governance unavailable; failed closed to spot-only",
+        }
 
     # Seed/demo/probe rejection.  This entry point is what stamps a row
     # with created_via='manual_trade_log', which is what makes the row
@@ -1465,6 +1516,11 @@ def log_manual_trade(
         created_via=MANUAL_TRADE_LOG_PROVENANCE,
         currency=_safe_currency(currency),
         ai_model_used=_safe_ai_model_used(ai_model_used),
+        leverage_ceiling=float(_lev_policy.get("ceiling", 1.0)),
+        leverage_breach=bool(_lev_policy.get("breach", False)),
+        leverage_policy_severity=str(_lev_policy.get("severity", "NONE")),
+        leverage_policy_reason=str(_lev_policy.get("reason", "")),
+        jurisdiction_group=str(_lev_policy.get("jurisdiction_group", "UNKNOWN")),
     )
     append_jsonl(MANUAL_TRADE_LOG, trade.to_dict(), stamp=False)
     if _DB_AVAILABLE and _persistence is not None:
@@ -1496,6 +1552,11 @@ def log_manual_trade(
                 created_via=trade.created_via,
                 currency=trade.currency,
                 ai_model_used=trade.ai_model_used,
+                leverage_ceiling=trade.leverage_ceiling,
+                leverage_breach=trade.leverage_breach,
+                leverage_policy_severity=trade.leverage_policy_severity,
+                leverage_policy_reason=trade.leverage_policy_reason,
+                jurisdiction_group=trade.jurisdiction_group,
             )
         except Exception:
             pass
@@ -1509,6 +1570,12 @@ def log_manual_trade(
         "quantity": trade.quantity,
         "price": trade.price,
         "leverage": trade.leverage,
+        # P0 leverage-governance stamps — visible breach reporting.
+        "leverage_ceiling": trade.leverage_ceiling,
+        "leverage_breach": trade.leverage_breach,
+        "leverage_policy_severity": trade.leverage_policy_severity,
+        "leverage_policy_reason": trade.leverage_policy_reason,
+        "jurisdiction_group": trade.jurisdiction_group,
         "invalidation_level": trade.invalidation_level,
         "expected_horizon": trade.expected_horizon,
         "risk_reason": trade.risk_reason,
