@@ -1,8 +1,14 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { getDiagnosticsCockpit, type CockpitResponse } from '@/lib/apiClient';
+import {
+  getDiagnosticsCockpit,
+  getRealMoneyReadiness,
+  type CockpitResponse,
+} from '@/lib/apiClient';
 import { AdvisoryOnlyBadge } from '@/components/AdvisoryOnlyBadge';
+import { ReadinessModeBadge } from '@/components/ReadinessModeBadge';
+import type { RealMoneyReadiness } from '@/lib/realMoneyReadiness';
 
 function Stat({ label, value }: { label: string; value: string | number }) {
   return (
@@ -127,6 +133,7 @@ function DiagnosticsIntegrityPanel({ data }: { data: CockpitResponse }) {
 
 export default function CockpitPage() {
   const [data, setData] = useState<CockpitResponse | null>(null);
+  const [readiness, setReadiness] = useState<RealMoneyReadiness | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -134,6 +141,7 @@ export default function CockpitPage() {
       setData(res);
       setLoading(false);
     });
+    getRealMoneyReadiness().then(setReadiness);
   }, []);
 
   return (
@@ -157,6 +165,9 @@ export default function CockpitPage() {
         Human execution required. No broker action is performed. AI execution count is always{' '}
         <span className="text-emerald-400 font-mono font-bold">0</span>.
       </div>
+
+      {/* Manual real-money readiness mode — plain language, advisory-only. */}
+      {readiness && <ReadinessModeBadge readiness={readiness} />}
 
       {loading ? (
         <div className="text-center py-16 text-slate-500 text-sm">Loading cockpit…</div>

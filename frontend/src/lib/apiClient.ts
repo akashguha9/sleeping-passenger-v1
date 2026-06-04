@@ -1,4 +1,5 @@
 import { API_BASE } from './config';
+import type { RealMoneyReadiness } from './realMoneyReadiness';
 import {
   MOCK_INBOX_RESPONSE,
   MOCK_MOLTBOOK_ENTRIES,
@@ -542,6 +543,14 @@ export async function getLiveSourcesStatus(): Promise<LiveSourcesStatusResponse 
 export async function getDbStatus(): Promise<DbStatusResponse | null> {
   try {
     return await apiFetch<DbStatusResponse>('/db/status');
+  } catch {
+    return null;
+  }
+}
+
+export async function getRealMoneyReadiness(): Promise<RealMoneyReadiness | null> {
+  try {
+    return await apiFetch<RealMoneyReadiness>('/api/readiness/real-money');
   } catch {
     return null;
   }

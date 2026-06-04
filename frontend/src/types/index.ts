@@ -119,6 +119,12 @@ export interface ManualTradeLog {
   leverage_policy_severity?: 'NONE' | 'WARNING' | 'POLICY_BREACH' | string;
   leverage_policy_reason?: string;
   jurisdiction_group?: 'INDIA' | 'REST_OF_WORLD' | 'UNKNOWN' | string;
+  jurisdiction_resolution_source?:
+    | 'EXPLICIT'
+    | 'SECURITIES_MASTER'
+    | 'TICKER_HEURISTIC'
+    | 'UNKNOWN_FAIL_CLOSED'
+    | string;
   executed_at: string;
   thesis: string;
   notes: string;

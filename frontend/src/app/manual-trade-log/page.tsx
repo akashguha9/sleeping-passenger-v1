@@ -268,6 +268,22 @@ function TradeCard({ t }: { t: ManualTradeLog }) {
         </span>
       </div>
 
+      {(t.jurisdiction_group || typeof t.leverage_ceiling === 'number') && (
+        <div
+          className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] font-mono mb-2"
+          style={{ color: 'var(--sp-mist)' }}
+          data-testid={`manual-trade-jurisdiction-${t.trade_id}`}
+        >
+          <span>Jurisdiction: <span style={{ color: 'var(--sp-bone)' }}>{t.jurisdiction_group || 'UNKNOWN'}</span></span>
+          {typeof t.leverage_ceiling === 'number' && (
+            <span>Ceiling: <span style={{ color: 'var(--sp-bone)' }}>{t.leverage_ceiling}x</span></span>
+          )}
+          {t.jurisdiction_resolution_source && (
+            <span>Source: <span style={{ color: 'var(--sp-bone)' }}>{t.jurisdiction_resolution_source}</span></span>
+          )}
+        </div>
+      )}
+
       <div className="flex items-center gap-3 text-[10px] font-mono flex-wrap" style={{ color: 'var(--sp-mist)' }}>
         <span className="truncate">{t.trade_id}</span>
         <span>·</span>

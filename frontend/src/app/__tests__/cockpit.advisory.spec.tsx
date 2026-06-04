@@ -23,6 +23,8 @@ declare const beforeEach: any;
 
 vi.mock('@/lib/apiClient', () => ({
   getDiagnosticsCockpit: vi.fn(),
+  // Cockpit also fetches the real-money readiness mode. Mock to a safe no-op.
+  getRealMoneyReadiness: vi.fn().mockResolvedValue(null),
 }));
 
 import { getDiagnosticsCockpit } from '@/lib/apiClient';
