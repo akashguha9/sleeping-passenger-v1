@@ -58,3 +58,31 @@ securities:
   - {symbol: "079550", exchange: KRX, country: KR, currency: KRW, name: LIG Nex1, asset_type: EQUITY}
   - {symbol: "454910", exchange: KRX, country: KR, currency: KRW, name: Doosan Robotics, asset_type: EQUITY}
   - {symbol: "394280", exchange: KOSDAQ, country: KR, currency: KRW, name: Oneconnect, asset_type: EQUITY}
+  # --- Added from 2026-05/06 paper-book evidence trail (real tracked positions) ---
+  # United States
+  - {symbol: TSLA, exchange: NASDAQ, country: US, currency: USD, name: Tesla, asset_type: EQUITY}
+  - {symbol: LHX,  exchange: NYSE, country: US, currency: USD, name: L3Harris Technologies, asset_type: EQUITY}
+  - {symbol: INDA, exchange: NYSEARCA, country: US, currency: USD, name: iShares MSCI India ETF, asset_type: ETF}
+  - {symbol: EWG,  exchange: NYSEARCA, country: US, currency: USD, name: iShares MSCI Germany ETF, asset_type: ETF}
+  # United Kingdom
+  - {symbol: SHEL, exchange: LON, country: GB, currency: GBP, name: Shell plc, asset_type: EQUITY}
+  # India
+  - {symbol: TCS,  exchange: NSE, country: IN, currency: INR, name: Tata Consultancy Services, asset_type: EQUITY}
+  # Germany (Xetra)
+  - {symbol: SIE,  exchange: ETR, country: DE, currency: EUR, name: Siemens, asset_type: EQUITY}
+  # Japan (TYO)
+  - {symbol: "8002", exchange: TYO, country: JP, currency: JPY, name: Marubeni, asset_type: EQUITY}
+  - {symbol: "5445", exchange: TYO, country: JP, currency: JPY, name: Tokyo Tekko, asset_type: EQUITY}
+  - {symbol: "3675", exchange: TYO, country: JP, currency: JPY, name: Cross Marketing, asset_type: EQUITY}
+  - {symbol: "6877", exchange: TYO, country: JP, currency: JPY, name: Obara Group, asset_type: EQUITY}
+  - {symbol: "7203", exchange: TYO, country: JP, currency: JPY, name: Toyota Motor, asset_type: EQUITY}
+  # South Korea (KRX)
+  - {symbol: "078930", exchange: KRX, country: KR, currency: KRW, name: GS Holdings, asset_type: EQUITY}
+  - {symbol: "001800", exchange: KRX, country: KR, currency: KRW, name: Orion Holdings, asset_type: EQUITY}
+  - {symbol: "003240", exchange: KRX, country: KR, currency: KRW, name: Taekwang Industrial, asset_type: EQUITY}
+  - {symbol: "004890", exchange: KRX, country: KR, currency: KRW, name: Dongil Industries, asset_type: EQUITY}
+  - {symbol: "004990", exchange: KRX, country: KR, currency: KRW, name: Lotte Corp, asset_type: EQUITY}
+  - {symbol: "009310", exchange: KRX, country: KR, currency: KRW, name: Charm Engineering, asset_type: EQUITY}
+  - {symbol: "016880", exchange: KRX, country: KR, currency: KRW, name: Woongjin, asset_type: EQUITY}
+  # Canada (TSX)
+  - {symbol: CNQ,  exchange: TSE, country: CA, currency: CAD, name: Canadian Natural Resources, asset_type: EQUITY}

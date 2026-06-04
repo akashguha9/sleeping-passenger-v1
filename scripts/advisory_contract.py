@@ -39,6 +39,12 @@ AI_EXECUTION_COUNT = 0
 # hard product invariant: nothing in this repo may flip JSONL to canonical.
 CANONICAL_STORE = "sqlite"
 AUDIT_ONLY_STORE = "jsonl"
+# Module-level mirror of canonical_truth_declaration() so readers (the
+# real-money readiness gate's persistence dimension) can resolve the truth
+# model as attributes. Always True/False respectively — flipping jsonl to
+# canonical is a hard product-invariant violation.
+sqlite_is_canonical = True
+jsonl_is_canonical = False
 
 # The only states an advisory layer may degrade *to* when inputs are missing
 # or invalid.  None of these is an execution instruction.  A normaliser /
