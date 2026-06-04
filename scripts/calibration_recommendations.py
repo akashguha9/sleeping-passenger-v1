@@ -57,6 +57,20 @@ RECOMMEND_TIGHTEN = "RECOMMEND_TIGHTEN"
 RECOMMEND_MAINTAIN = "RECOMMEND_MAINTAIN"
 RECOMMEND_LOOSEN_SLIGHTLY = "RECOMMEND_LOOSEN_SLIGHTLY"
 
+# Metrics-driven recommendation categories (build_recommendation_from_metrics).
+TIGHTEN_THRESHOLDS = "TIGHTEN_THRESHOLDS"
+MAINTAIN_THRESHOLDS = "MAINTAIN_THRESHOLDS"
+CONSIDER_MINOR_LOOSENING = "CONSIDER_MINOR_LOOSENING"
+MIS_CALIBRATED_REVIEW_REQUIRED = "MIS_CALIBRATED_REVIEW_REQUIRED"
+
+# Threshold-shift math constants.
+ETA = 0.10              # learning rate on (FPR - FPR_target)
+FPR_TARGET = 0.35       # target false-positive rate
+DTAU_BOUND = 0.10       # |Δτ| hard bound
+ECE_MAX = 0.10
+MIN_LOOSEN_BUCKET_N = 30
+LOOSEN_WILSON_FLOOR = 0.50
+
 # Minimum resolved outcomes before we will recommend any threshold move.
 MIN_SAMPLE_TO_RECOMMEND = 20
 # Outcome-rate triggers.
@@ -196,6 +210,143 @@ def build_recommendation_report(db_path: Path | None = None) -> dict[str, Any]:
     except Exception:  # pragma: no cover - defensive
         rows = []
     return build_recommendation(rows)
+
+
+def _bounded(x: float, bound: float = DTAU_BOUND) -> float:
+    return min(bound, max(-bound, x))
+
+
+def _bucket_dtau(bucket: dict[str, Any]) -> float:
+    """Per-bucket threshold shift Δτ_k. Tighten if overconfident; loosen only
+    under strict evidence; else 0."""
+    import math as _math
+
+    nk = int(bucket.get("n", 0) or 0)
+    if nk == 0 or bucket.get("accuracy") is None or bucket.get("confidence") is None:
+        return 0.0
+    gap = float(bucket["accuracy"]) - float(bucket["confidence"])
+    wins = int(bucket.get("wins", 0) or 0)
+    losses = int(bucket.get("losses", 0) or 0)
+    fpr_k = losses / max(1, wins + losses)
+    dtau = _bounded(ETA * (fpr_k - FPR_TARGET))
+
+    if gap < 0:  # overconfident -> tighten
+        return abs(dtau)
+    if gap > 0:  # underconfident -> loosen only with strong evidence
+        avg_ret = bucket.get("avg_return")
+        # Wilson lower bound for this bucket.
+        denom = 1 + (1.96 ** 2) / nk
+        p = wins / nk
+        center = (p + (1.96 ** 2) / (2 * nk)) / denom
+        half = 1.96 * _math.sqrt((p * (1 - p) / nk + (1.96 ** 2) / (4 * nk * nk))) / denom
+        wilson_lower = max(0.0, center - half)
+        if nk >= MIN_LOOSEN_BUCKET_N and (avg_ret is not None and avg_ret > 0) and wilson_lower > LOOSEN_WILSON_FLOOR:
+            return -abs(dtau)
+    return 0.0
+
+
+def build_recommendation_from_metrics(metrics: dict[str, Any]) -> dict[str, Any]:
+    """Bucket-aware recommendation from compute_calibration_metrics output.
+
+    Produces a mathematically-derived global threshold shift and a category,
+    but NEVER auto-applies (applied=False, human_review_required=True).
+    """
+    n = int(metrics.get("n", 0) or 0)
+    ece = metrics.get("ece")
+    buckets = metrics.get("buckets", []) or []
+    wins = int(metrics.get("wins", 0) or 0)
+    losses = int(metrics.get("losses", 0) or 0)
+    fpr_global = losses / max(1, wins + losses)
+
+    # Global Δτ as the n-weighted mean of per-bucket shifts.
+    dtau_global = 0.0
+    per_bucket: list[dict[str, Any]] = []
+    if n > 0:
+        for b in buckets:
+            nk = int(b.get("n", 0) or 0)
+            if nk == 0:
+                continue
+            dk = _bucket_dtau(b)
+            w_k = nk / n
+            dtau_global += w_k * dk
+            per_bucket.append({
+                "lower": b.get("lower"), "upper": b.get("upper"), "n": nk,
+                "gap": (None if b.get("accuracy") is None else float(b["accuracy"]) - float(b["confidence"])),
+                "dtau": dk,
+            })
+    dtau_global = _bounded(dtau_global)
+
+    # Overall positive gap (underconfident) + positive avg return signal.
+    overall_gap_positive = False
+    if buckets:
+        accs = [float(b["accuracy"]) for b in buckets if b.get("accuracy") is not None]
+        confs = [float(b["confidence"]) for b in buckets if b.get("confidence") is not None]
+        if accs and confs:
+            overall_gap_positive = (sum(accs) / len(accs)) > (sum(confs) / len(confs))
+    avg_return = metrics.get("avg_return")
+
+    # Category decision (priority order).
+    if n < MIN_SAMPLE_TO_RECOMMEND:
+        category = OBSERVE_MORE_DATA
+    elif n < 50:
+        category = LOW_SAMPLE_DO_NOT_ADJUST
+    elif ece is not None and ece > ECE_MAX:
+        category = MIS_CALIBRATED_REVIEW_REQUIRED
+    elif fpr_global > FPR_TARGET:
+        category = TIGHTEN_THRESHOLDS
+    elif abs(dtau_global) < 0.02:
+        category = MAINTAIN_THRESHOLDS
+    elif overall_gap_positive and (avg_return is not None and avg_return > 0):
+        category = CONSIDER_MINOR_LOOSENING
+    else:
+        category = MAINTAIN_THRESHOLDS
+
+    # Confidence of the recommendation.
+    import math as _math
+    conf = 0.0
+    if n > 0 and ece is not None:
+        conf = min(1.0, _math.sqrt(n / 50.0) * (1.0 - ece))
+
+    # Recommended global shift respects the category (no shift below n>=50).
+    if category in {OBSERVE_MORE_DATA, LOW_SAMPLE_DO_NOT_ADJUST, MIS_CALIBRATED_REVIEW_REQUIRED}:
+        recommended_shift = 0.0
+    elif category == TIGHTEN_THRESHOLDS:
+        recommended_shift = abs(dtau_global) if dtau_global != 0 else _bounded(ETA * (fpr_global - FPR_TARGET))
+        recommended_shift = abs(recommended_shift)
+    elif category == CONSIDER_MINOR_LOOSENING:
+        recommended_shift = -abs(dtau_global)
+    else:
+        recommended_shift = 0.0
+
+    payload = {
+        "report": "calibration_recommendations_v2",
+        "recommendation": category,
+        "recommended_threshold_shift": round(_bounded(recommended_shift), 6),
+        "confidence": round(conf, 6),
+        "sample_size": n,
+        "global_fpr": fpr_global,
+        "ece": ece,
+        "dtau_global": round(dtau_global, 6),
+        "per_bucket": per_bucket,
+        "applied": False,           # NEVER auto-applied
+        "auto_apply": False,
+        "human_review_required": True,
+    }
+    payload.update(_ADVISORY_STAMPS)
+    return payload
+
+
+def build_recommendation_from_metrics_report(db_path: Path | None = None) -> dict[str, Any]:
+    """Extract outcomes, compute metrics, then derive a v2 recommendation."""
+    try:
+        try:
+            from scripts.score_calibration import build_calibration_metrics_report
+        except ModuleNotFoundError:  # pragma: no cover - script-style fallback
+            from score_calibration import build_calibration_metrics_report  # type: ignore[no-redef]
+        metrics = build_calibration_metrics_report(db_path)
+    except Exception:  # pragma: no cover - defensive
+        metrics = {"n": 0, "buckets": [], "ece": None}
+    return build_recommendation_from_metrics(metrics)
 
 
 def _build_parser() -> argparse.ArgumentParser:
