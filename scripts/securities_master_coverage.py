@@ -156,6 +156,15 @@ def compute_coverage(
         "score": S,
         "status": status,
         "gaps": gaps,
+        # Spec-named aliases (stable contract for the evidence pipeline).
+        "required_universe_count": total,
+        "resolved_count": resolvable,
+        "coverage_C": C,
+        "mean_completeness_M": M,
+        "jurisdiction_resolvability_J": J,
+        "securities_score_S": S,
+        "coverage_status": status,
+        "missing_symbols": gaps,
         **_ADVISORY_STAMPS,
     }
 

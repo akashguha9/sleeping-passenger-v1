@@ -120,3 +120,61 @@ def test_advisory_stamps_present(tmp_path):
     rep = smc.build_coverage_report(db_path=tmp_path / "x.db")
     assert rep["advisory_status"] == "ADVISORY_ONLY"
     assert rep["broker_api_called"] is False
+
+
+# --- Phase 1: spec-named JSON contract + idempotency ------------------------
+
+SPEC_FIELDS = (
+    "required_universe_count", "resolved_count", "coverage_C",
+    "mean_completeness_M", "jurisdiction_resolvability_J", "securities_score_S",
+    "coverage_status", "missing_symbols", "advisory_only",
+    "human_execution_required", "broker_api_called",
+)
+
+
+def test_json_report_has_spec_fields(tmp_path):
+    rep = smc.build_coverage_report(db_path=tmp_path / "x.db")
+    for f in SPEC_FIELDS:
+        assert f in rep, f"missing spec field {f}"
+    assert rep["advisory_only"] is True
+    assert rep["human_execution_required"] is True
+    assert rep["broker_api_called"] is False
+
+
+def test_seeding_is_idempotent(tmp_path):
+    db = tmp_path / "seed.db"
+    uni = smc.load_seed_universe()
+    n1 = smc.seed_universe(uni, db)
+    r1 = smc.build_coverage_report(db_path=db)
+    n2 = smc.seed_universe(uni, db)          # seed again
+    r2 = smc.build_coverage_report(db_path=db)
+    assert n1 == n2 == len(uni)
+    assert r1["resolved_count"] == r2["resolved_count"]  # no duplication
+    assert r1["securities_score_S"] == r2["securities_score_S"]
+
+
+def test_s_formula_exact_with_spec_aliases():
+    universe = [
+        {"symbol": "AAA", "exchange": "NASDAQ", "country": "US", "currency": "USD", "name": "A", "asset_type": "EQUITY"},
+        {"symbol": "BBB", "exchange": "NSE", "country": "IN", "currency": "INR", "name": "B", "asset_type": "EQUITY"},
+    ]
+    master = {"AAA": {"canonical_symbol": "AAA", "exchange_code": "NASDAQ", "country": "US",
+                      "currency": "USD", "name": "A", "asset_type": "EQUITY"}}
+    rep = smc.compute_coverage(universe, lambda s: master.get(s))
+    # C=0.5, M=0.5, J=0.5 -> S = 0.5*0.5 + 0.3*0.5 + 0.2*0.5 = 0.5
+    assert rep["securities_score_S"] == 0.5
+    assert rep["coverage_C"] == 0.5
+    assert rep["missing_symbols"] == ["BBB"]
+
+
+def test_unknown_ticker_remains_fail_closed_after_seed(tmp_path):
+    from scripts import leverage_governance as lg
+    from scripts import persistence
+    db = tmp_path / "seed.db"
+    smc.seed_universe(smc.load_seed_universe(), db)
+    res = lg.validate_leverage_policy(
+        ticker="NOT_A_REAL_TICKER", leverage=3.0,
+        securities_lookup=lambda s: persistence.get_global_security(s, db_path=db),
+    )
+    assert res["jurisdiction_resolution_source"] == lg.SRC_UNKNOWN_FAIL_CLOSED
+    assert res["breach"] is True
