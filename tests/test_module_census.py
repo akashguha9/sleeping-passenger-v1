@@ -15,7 +15,7 @@ from pathlib import Path
 
 # Pinned ceiling = current ACTIVE count (today's number + 0). See
 # docs/module_census.md. Raising this is a deliberate act, not an accident.
-ACTIVE_CEILING = 69
+ACTIVE_CEILING = 70
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS_DIR = REPO_ROOT / "scripts"

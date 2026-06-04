@@ -1,7 +1,7 @@
 # Chronology / Observation Readiness
 
-**Status: OBSERVATION-GATED. Current readiness ≈ 2/10. Do not raise without
-forward observations.**
+**Status: OBSERVATION-GATED. Current readiness ≈ 4/10. Do not raise above 5
+without accumulated FORWARD observations.**
 
 This document is the honest record of what the chronology subsystem can and
 cannot do today. It exists so no reader mistakes *scaffolding* for *capability*.
@@ -11,20 +11,31 @@ cannot do today. It exists so no reader mistakes *scaffolding* for *capability*.
 - `scripts/chronology_store.py` — a SQLite store with:
   - **v0 (live):** `observations`, `snapshots` tables + validated insert helpers.
     These are used by `snapshot_logger` on the active path.
-  - **v1 (scaffold only):** `signal_candidates`, `chronology_events`,
-    `pattern_hit_rates` tables now exist (created additively, `IF NOT EXISTS`),
-    with fail-closed insert helpers. **They are empty. Nothing populates them.**
-- `scripts/chronology_detectors.py` — typed interfaces for T1–T4 detectors.
-  **All return `available=False` / `NOT_IMPLEMENTED`.** No synthetic fallback.
+  - **v1 (now populated by the runner):** `signal_candidates`,
+    `chronology_events`, `pattern_hit_rates` tables exist (created additively,
+    `IF NOT EXISTS`), with fail-closed insert helpers.
+- `scripts/chronology_detectors.py`:
+  - **T1 event-prior — IMPLEMENTED, observation-only, fail-closed.** Fires only
+    when the latest probability step is both large (≥ delta floor) and
+    statistically anomalous (z-score of the latest step vs prior steps ≥
+    z-floor) AND clears a volume floor; requires ≥ N prior steps or returns
+    `INSUFFICIENT_DATA`. Never fabricates, never authorizes action.
+  - **T2/T3/T4 — still `NOT_IMPLEMENTED` / fail-closed.**
+- `scripts/chronology_observation_runner.py` — reads `signal_candidates`,
+  evaluates T1, writes one `chronology_events` row per candidate, and updates
+  `pattern_hit_rates` **observation frequencies only**. It imports no execution
+  /broker/action code (test-enforced) and fails closed on missing data.
 
 ## 2. What does NOT exist (do not claim)
 
-- **T1 (event prior: probability delta + z-score + volume floor)** — NOT
-  implemented. `scripts/event_prior_detector.py` performs *time-clustering of
-  observations only*; it does **not** satisfy the T1 specification and must not
-  be represented as T1.
 - **T2 (asset attachment), T3 (commitment), T4 (market confirmation)** — NOT
   implemented.
+- A real **forward-observation dataset**. T1 is correct and tested on synthetic
+  fixtures, but no live forward observations have been accumulated. The
+  `pattern_hit_rates` "hit_rate" is an observation *frequency*, NOT a
+  performance/edge claim, and stays `NULL` at zero observations.
+- `scripts/event_prior_detector.py` remains a *time-clustering* helper; it is
+  distinct from the T1 detector above and does not feed it.
 - **Backfill adapter** (coarse classes `BF_CHAOS` / `BF_PIPELINE_APPROVED` /
   `BF_DISCRETIONARY` from moltbook) — NOT implemented.
 - **Pattern classifier / hit-rate surface** — table exists; no classifier

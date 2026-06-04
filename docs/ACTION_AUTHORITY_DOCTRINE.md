@@ -72,6 +72,34 @@ It is explicitly NOT an execution authorization.
 
 ---
 
+---
+
+## Ratification checklist (all UNRATIFIED)
+
+The doctrine is **UNRATIFIED**. Machine-readable status:
+`scripts/action_doctrine_status.py` (`doctrine_status()` → `overall=UNRATIFIED`,
+`is_ratified()` → `False`). That module unlocks nothing — it only records.
+
+Each gate must be satisfied **in writing by the human operator, outside code**.
+Code cannot self-ratify; even a future "ratified" record would not by itself
+permit any trade.
+
+- [ ] **Gate 1 — Authority.** Named operator only; written, timestamped
+      pre-commitment (thesis, size cap, invalidation); green suite +
+      observation-period precondition; narrow scope + expiry.
+- [ ] **Gate 2 — Unit of learning.** One thesis bound to one ticker (Moltbook
+      hypothesis as falsifiable parent); evidence + invalidation defined.
+- [ ] **Gate 3 — Operator contract.** What the system promises / never
+      promises; what stays human-only; what is logged before/after.
+- [ ] **Gate 4 — Observation evidence.** Documented minimum forward-observation
+      cycles accumulated (see `docs/CHRONOLOGY_OBSERVATION_READINESS.md`); no
+      backfilled evidence counts.
+- [ ] **Gate 5 — Safety rollback.** A written procedure to re-REVOKE authority
+      and unwind, and the conditions that auto-trigger it.
+
+Until every box is checked by a human, `action_authority` stays REVOKED and
+this system remains advisory-only.
+
 ## Why this stays at ~2/10 (the right reason)
 
 The capability gap is not missing code — it is missing **ratified doctrine**.

@@ -57,6 +57,14 @@ def test_source_chain_is_truthful_single_source() -> None:
     assert chain["stale_cache_enabled"] is False  # no stale cache claimed
 
 
+def test_source_chain_discloses_disabled_optionals_without_counting_them() -> None:
+    chain = mda.market_data_source_chain()
+    # Disabled paid skeletons are disclosed but never counted as live redundancy.
+    assert chain["optional_sources_active"] is False
+    assert chain["live_source_count"] == 1
+    assert set(chain["optional_disabled_sources"]) == {"alpha_vantage", "twelve_data", "polygon"}
+
+
 def test_seeded_placeholder_contract_preserved() -> None:
     # The seeded describe() must still be an explicit placeholder (consumed by
     # runtime_common / repo_operating_mode), now WITH honest source-chain.

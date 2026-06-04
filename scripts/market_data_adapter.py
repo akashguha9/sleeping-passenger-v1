@@ -130,6 +130,15 @@ def market_data_source_chain() -> dict:
         "fallback_sources": [],
         "stale_cache_enabled": False,
         "failure_mode": "structured_non_raising",  # ok=False, quote=None on failure
+        # Honest disclosure: optional paid providers exist ONLY as disabled,
+        # credential-gated skeletons (scripts/ingestion/market_data_loader.py).
+        # They are NOT active fallbacks and do NOT count toward live_source_count.
+        "optional_disabled_sources": ["alpha_vantage", "twelve_data", "polygon"],
+        "optional_sources_active": False,
+        "optional_sources_note": (
+            "Disabled skeletons; require API keys/credentials. Not wired, not "
+            "tested as live, and not counted as redundancy."
+        ),
     }
 
 

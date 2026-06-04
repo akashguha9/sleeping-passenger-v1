@@ -190,6 +190,10 @@ APPROVED_DOMAINS: tuple[str, ...] = (
     "tag_engine",     # tag_engine.py — canonical candidate-classification tag catalog
     "chronology",     # chronology_store.py / chronology_detectors.py — observation
                       # substrate + fail-closed T1-T4 detector stubs (NOT_IMPLEMENTED)
+    "governance_verdict",  # governance_verdict.py — extracted system-readiness
+                           # verdict (god-module reduction); pure, no execution
+    "action_doctrine",     # action_doctrine_status.py — UNRATIFIED doctrine
+                           # status reporter; unlocks nothing, no execution
 )
 
 # Explicit allowlist for individual files / directories whose name does

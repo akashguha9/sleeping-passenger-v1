@@ -69,13 +69,30 @@ def test_pattern_hit_rate_never_fabricated_with_zero_observations(tmp_path: Path
         conn.close()
 
 
-def test_all_t_detectors_fail_closed() -> None:
+def test_detector_readiness_t1_implemented_t2_t4_not() -> None:
     summary = det.detector_readiness_summary()
-    assert summary["any_detector_available"] is False
-    assert summary["implemented_count"] == 0
+    # T1 is now implemented (observation-only); T2/T3/T4 remain unimplemented.
+    assert summary["implemented_count"] == 1
+    assert summary["any_detector_available"] is True
     assert summary["total_detectors"] == 4
-    for fn in det.ALL_DETECTORS:
+    assert summary["detectors"]["T1_event_prior"] == "INSUFFICIENT_DATA"
+
+
+def test_t2_t3_t4_still_fail_closed() -> None:
+    for fn in (
+        det.detect_t2_asset_attachment,
+        det.detect_t3_commitment,
+        det.detect_t4_market_confirmation,
+    ):
         result = fn()
         assert result.available is False
         assert result.detected is False
         assert result.status == "NOT_IMPLEMENTED"
+
+
+def test_t1_no_arg_call_fails_closed() -> None:
+    # Called with no observation -> implemented but INSUFFICIENT_DATA (no fire).
+    result = det.detect_t1_event_prior()
+    assert result.available is True
+    assert result.detected is False
+    assert result.status == "INSUFFICIENT_DATA"

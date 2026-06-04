@@ -121,6 +121,45 @@ CANONICAL_TAG_COUNT = len(_CATALOG)
 
 _BY_ID: dict[str, Tag] = {t.id: t for t in _CATALOG}
 
+# --------------------------------------------------------------------------
+# Canonical id constants. Import these instead of raw string literals so the
+# catalog is the single definition site. Value == id (by design).
+# A test asserts this block stays in lock-step with _CATALOG.
+# --------------------------------------------------------------------------
+PROMOTABLE = "PROMOTABLE"
+PROMOTABLE_WATCHLIST = "PROMOTABLE_WATCHLIST"
+CLEAN_READY_PENDING = "CLEAN_READY_PENDING"
+CLEAN_READY_PENDING_TRIGGER = "CLEAN_READY_PENDING_TRIGGER"
+CLEAN_ENTRY_ELIGIBLE = "CLEAN_ENTRY_ELIGIBLE"
+REVIEW_FOR_ENTRY = "REVIEW_FOR_ENTRY"
+BLOCKED_PROMOTABLE_CLEAN_CANDIDATE = "BLOCKED_PROMOTABLE_CLEAN_CANDIDATE"
+BLOCK_ENTRY = "BLOCK_ENTRY"
+STANDARD = "STANDARD"
+NOT_EXECUTED = "NOT_EXECUTED"
+NONE = "NONE"
+HOLD = "HOLD"
+MONITOR = "MONITOR"
+EXIT_NOW = "EXIT_NOW"
+REDUCE = "REDUCE"
+
+# Catalog versioning + fingerprint. The fingerprint changes ONLY when the
+# catalog content (id/family/dimensions) changes; a test pins it so accidental
+# drift is caught and intentional changes are explicit.
+TAG_CATALOG_VERSION = "1.0.0"
+
+
+def catalog_fingerprint() -> str:
+    """Stable 16-hex-char fingerprint over (id, family, dimensions)."""
+    import hashlib
+
+    payload = "|".join(
+        f"{t.id}:{t.family.value}:{','.join(t.dimensions)}" for t in _CATALOG
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
+
+
+TAG_CATALOG_FINGERPRINT = catalog_fingerprint()
+
 
 def get_tag_catalog() -> tuple[Tag, ...]:
     """Return the full immutable canonical catalog."""
