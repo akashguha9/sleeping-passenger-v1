@@ -1,5 +1,6 @@
 import { API_BASE } from './config';
 import type { RealMoneyReadiness } from './realMoneyReadiness';
+import type { CalibrationMap } from './calibrationMap';
 import {
   MOCK_INBOX_RESPONSE,
   MOCK_MOLTBOOK_ENTRIES,
@@ -551,6 +552,14 @@ export async function getDbStatus(): Promise<DbStatusResponse | null> {
 export async function getRealMoneyReadiness(): Promise<RealMoneyReadiness | null> {
   try {
     return await apiFetch<RealMoneyReadiness>('/api/readiness/real-money');
+  } catch {
+    return null;
+  }
+}
+
+export async function getCalibrationMap(): Promise<CalibrationMap | null> {
+  try {
+    return await apiFetch<CalibrationMap>('/api/calibration-map');
   } catch {
     return null;
   }

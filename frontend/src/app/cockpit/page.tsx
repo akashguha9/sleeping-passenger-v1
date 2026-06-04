@@ -4,11 +4,14 @@ import { useState, useEffect } from 'react';
 import {
   getDiagnosticsCockpit,
   getRealMoneyReadiness,
+  getCalibrationMap,
   type CockpitResponse,
 } from '@/lib/apiClient';
 import { AdvisoryOnlyBadge } from '@/components/AdvisoryOnlyBadge';
 import { ReadinessModeBadge } from '@/components/ReadinessModeBadge';
+import { ReliabilityBadge } from '@/components/ReliabilityBadge';
 import type { RealMoneyReadiness } from '@/lib/realMoneyReadiness';
+import type { CalibrationMap } from '@/lib/calibrationMap';
 
 function Stat({ label, value }: { label: string; value: string | number }) {
   return (
@@ -134,6 +137,7 @@ function DiagnosticsIntegrityPanel({ data }: { data: CockpitResponse }) {
 export default function CockpitPage() {
   const [data, setData] = useState<CockpitResponse | null>(null);
   const [readiness, setReadiness] = useState<RealMoneyReadiness | null>(null);
+  const [calMap, setCalMap] = useState<CalibrationMap | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -142,6 +146,7 @@ export default function CockpitPage() {
       setLoading(false);
     });
     getRealMoneyReadiness().then(setReadiness);
+    getCalibrationMap().then(setCalMap);
   }, []);
 
   return (
@@ -168,6 +173,9 @@ export default function CockpitPage() {
 
       {/* Manual real-money readiness mode — plain language, advisory-only. */}
       {readiness && <ReadinessModeBadge readiness={readiness} />}
+
+      {/* Score recalibration reliability — advisory-only. */}
+      {calMap && <ReliabilityBadge map={calMap} />}
 
       {loading ? (
         <div className="text-center py-16 text-slate-500 text-sm">Loading cockpit…</div>

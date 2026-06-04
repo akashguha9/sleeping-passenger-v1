@@ -25,6 +25,7 @@ vi.mock('@/lib/apiClient', () => ({
     allowed_mode: 'TINY_MANUAL_PROBE_ONLY', readiness_score: 6.5, readiness_max: 8,
     reason: 'Scores are not calibrated enough to size from. Tiny manual probes only.',
   }),
+  getCalibrationMap: vi.fn().mockResolvedValue(null),
   getSignals: vi.fn().mockResolvedValue({
     data: {
       operation: 'list_inbox_items', item_count: 0, items: [],
