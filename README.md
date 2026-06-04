@@ -4,6 +4,12 @@
 > signals into a SQLite store, surfaces them in a Next.js dashboard, and lets
 > a human reflect, log a manual trade, and reconcile the outcome.
 
+## Python version
+
+This project requires **Python >= 3.12**. The test suite and several runtime
+modules use PEP 701 f-strings (backslashes inside f-string expressions), which
+are a `SyntaxError` on 3.11 and earlier. CI runs on Python 3.13.
+
 ## Who this is for
 
 One person — you — running this on your own laptop to enforce trade-journal

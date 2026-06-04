@@ -1,3 +1,16 @@
+"""Intentional placeholder quote-contract — NOT the active market-data adapter.
+
+The live, working, never-raising quote/volume adapter is
+``scripts/yahoo_market_data_adapter.py``. Read that file for real fetches.
+
+This stub exists only so ``runtime_common`` / ``repo_operating_mode`` can stamp
+``quote_provider_state=placeholder`` in runtime and operating-mode metadata
+while the seeded pipeline runs independently of any market-data ingestion. It
+returns a structured, never-live contract (``ok=False``, ``quote=None``) and
+deliberately advertises itself as a placeholder; do not mistake it for the
+canonical adapter.
+"""
+
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
@@ -61,7 +74,7 @@ class PlaceholderMarketDataAdapter:
             symbol=normalized_symbol,
             ok=False,
             quote=None,
-            error=f"{self.requested_provider} adapter not wired; returning placeholder contract only.",
+            error=f"{self.requested_provider} adapter is an intentional placeholder; the active adapter is scripts/yahoo_market_data_adapter.py.",
             retriable=True,
         )
 
@@ -81,5 +94,5 @@ def describe_market_data_adapter(provider: str | None = None) -> dict:
         "contract_state": "placeholder",
         "truth_origin_tags": ["placeholder"],
         "contract_sample": sample,
-        "note": "Placeholder adapter only. Core Moltbook and SCM runtime remain independent from market-data ingestion.",
+        "note": "Intentional placeholder contract. The active quote adapter is scripts/yahoo_market_data_adapter.py; core Moltbook and SCM runtime remain independent from market-data ingestion.",
     }
