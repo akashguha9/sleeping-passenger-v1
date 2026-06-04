@@ -1,0 +1,62 @@
+exchange,ticker,current_price,period_high,period_low,confidence,notes
+NSE,BHARTIARTL,1818.50,1883.50,1815.40,med,no TP; high=entry; window straddles buy
+NSE,ICICIBANK,1245.50,1277.00,1227.00,med,no TP no stop; ~flat
+NSE,HDFCBANK,745.80,768.55,726.65,low,low 726.65 may predate entry; stop flagged; could be only -2.9pct
+NSE,RELIANCE,1301.70,1335.20,1290.00,med,no TP; low above stop; open -2.5pct
+NSE,TCS,2241.00,2245.00,2241.00,med,bought 06-03 after ~9pct drop; short window
+NYSE,INFY,12.39,13.41,12.37,med,Infosys US ADR; TP1 hit post-entry; runner -2.2pct
+NYSE,ANET,137.53,141.97,137.53,med,no TP no stop; open -3.1pct
+NYSE,XOM,153.08,157.92,151.30,med,no TP; low above stop; open -3.1pct
+NYSE,RTX,179.45,180.41,171.18,high,TP1 hit not TP2; runner +4.8pct
+NYSE,LMT,512.03,522.50,510.00,med,no TP no stop; open -2.0pct
+NYSE,CVX,185.00,195.17,184.02,med,low<stop; current -5.2pct confirms stop
+NYSEARCA,GLD,407.91,418.07,406.23,med,no TP no stop; open -2.4pct
+NYSE,TSM,436.69,450.16,393.26,high,TP1+TP2 hit post-entry; runner +11pct
+NYSE,WMT,119.39,134.20,117.58,high,no TP; low<stop; current -10pct confirms stop
+NYSE,JPM,300.50,301.96,296.56,med,no TP no stop; ~flat
+NYSE,VALE,16.85,17.34,16.35,med,TP1 hit not TP2; runner +3pct
+NYSE,ZIM,24.98,25.16,24.80,low,no TP no stop; ~flat
+NYSE,NOC,534.60,555.58,529.00,med,no TP; low just above stop; open -3.8pct
+NYSE,BHP,93.15,93.70,84.60,high,TP1+TP2 hit post-entry; runner +10pct
+NYSE,GD,341.46,346.82,337.04,med,no TP no stop; ~flat
+NYSEARCA,INDA,48.03,48.03,47.36,med,bought 06-03; open +1.4pct
+NYSEARCA,EWG,43.60,43.60,42.77,low,bought 06-03; open +1.9pct
+NYSE,LHX,307.62,307.62,302.19,med,bought 06-04; open +1.8pct
+ETR,SAP,163.32,163.52,136.26,med,VERIFIED Xetra; ran 141->163; TP1+TP2 hit; runner +15.6pct
+EPA,AIR,176.10,177.10,169.68,med,no TP no stop; open +2.1pct
+ETR,AIR,176.10,177.10,169.68,med,no TP no stop; open +1.8pct
+ETR,XAD5,369.36,369.36,369.36,low,instrument ambiguous; no reliable quote; treated flat
+ETR,RHM,1189.00,1300.00,1176.80,med,TP1 hit 5/29 not TP2; runner -3.1pct
+ETR,SIE,271.08,276.88,269.55,high,bought 06-04; open -1.9pct
+LON,HSBA,1355.20,1392.20,1355.20,med,bought 06-01; open -2.7pct
+LON,SHEL,3196.00,3270.00,3196.00,med,bought 06-03; open -2.3pct
+TYO,8306,2999,3047,2972,high,MUFG; no TP no stop; ~flat
+TYO,291A,1751,1760,1740,low,recent IPO; quotes unavailable; ~flat
+TYO,8002,4918,4990,4833,med,Marubeni; ~flat
+TYO,5445,1799,1810,1790,low,stale/ambiguous; ~flat
+TYO,3675,573,580,570,med,Cross Marketing; ~flat
+TYO,6877,6280,6320,6240,low,conflicting quotes; ~flat
+TYO,7203,2861,2877,2856,high,Toyota; bought 06-04; ~flat
+NASDAQ,CSCO,126.50,129.62,118.21,high,post-entry rally to record; TP1+TP2 hit; runner +7pct
+NASDAQ,MSFT,427.34,427.34,405.00,low,high straddled pre-entry; neutralized; no confirmed TP; open +2.2pct
+NASDAQ,ASML,1726.36,1743.27,1460.00,low,US ADR ran +18pct; TP hit but EUR/USD mixed
+NASDAQ,NVDA,214.75,224.00,205.00,low,high/low straddled pre-entry; neutralized; ~flat
+NASDAQ,AVGO,407.06,481.57,403.01,med,ATH 481 on 6/2 post-entry then -13pct; TP1+TP2 booked; runner -1.7pct
+NASDAQ,GOOGL,363.52,383.00,358.53,med,ATH 402 was pre-entry; no post-entry TP; current confirms -5pct stop
+NASDAQ,AMZN,250.65,278.56,247.71,med,high<TP1; low<stop; current -5.9pct confirms stop
+NASDAQ,META,622.98,624.15,600.27,med,no TP no stop; open +2.1pct
+NASDAQ,AAPL,310.74,316.94,308.85,med,no TP no stop; open +0.6pct
+NASDAQ,AMD,542.52,542.52,467.51,low,rallied +16pct past entry; TP1+TP2 booked; runner big
+NASDAQ,TSLA,422.73,426.35,418.04,high,bought 06-03; one-day window; ~flat
+KRX,003550,140000,140000,138000,low,stale data; entry-anchored ~flat
+KRX,079550,726000,730000,726000,low,conflicting data; entry-anchored ~flat
+KRX,454910,166700,166700,164000,low,sparse data; entry-anchored ~flat
+KOSDAQ,394280,16180,16180,15140,med,maps to Openedges; TP1 hit; runner +6.9pct
+KRX,078930,76300,76300,75000,low,stale data; entry-anchored ~flat
+KRX,001800,26950,26950,26500,med,Orion Holdings; ~flat
+KRX,003240,919000,930000,919000,low,conflicting data; entry-anchored ~flat
+KRX,004890,37400,37400,37050,med,thin trading; ~flat
+KRX,004990,25200,26100,25000,med,June 2 close 25200; open -3.4pct
+KRX,009310,1065,1075,1050,low,thin/obscure; entry-anchored ~flat
+KRX,016880,2160,2160,2015,low,uncertain; nominal TP1 hit; runner +7.2pct
+TSE,CNQ,66.36,66.36,66.00,high,Toronto CAD; bought 06-04; ~flat
