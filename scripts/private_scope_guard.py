@@ -218,6 +218,12 @@ EXPLICIT_IN_SCOPE: frozenset[str] = frozenset({
     # Core score-honesty contract shared by the scoring APIs — keeps a precise
     # score from ever being presented as validated. In-scope by definition.
     "score_output_contract.py",
+    # Calibration/data/hygiene sprint core modules — all advisory-only,
+    # no-execution, and load-bearing for honest real-money readiness.
+    "outcome_evidence.py",
+    "outcome_evidence_extractor.py",
+    "securities_master_coverage.py",
+    "core_module_boundary.py",
 })
 
 # Modules deliberately marked OUT_OF_SCOPE inside ``scripts/``.  This
