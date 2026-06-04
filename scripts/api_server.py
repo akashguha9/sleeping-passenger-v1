@@ -1114,7 +1114,28 @@ def get_signals(limit: int = 100, hours: int = 72, _auth: None = Depends(require
             build_score_calibration_report = None  # type: ignore[assignment]
     if isinstance(result, dict) and build_score_calibration_report is not None:
         try:
-            result["score_calibration"] = build_score_calibration_report()
+            summary = build_score_calibration_report()
+            result["score_calibration"] = summary
+            # Attach the uniform score contract for the priority scores in
+            # this response. should_drive_sizing stays False (no human sizing
+            # approval is granted via a read endpoint). Advisory-only.
+            try:
+                from scripts.score_output_contract import build_score_contract
+            except ModuleNotFoundError:  # pragma: no cover - script-style fallback
+                from score_output_contract import build_score_contract  # type: ignore[no-redef]
+            top = None
+            items = result.get("items") if isinstance(result.get("items"), list) else []
+            if items:
+                try:
+                    top = max(
+                        (float(it.get("priority_score", 0.0)) for it in items),
+                        default=None,
+                    )
+                except (TypeError, ValueError):
+                    top = None
+            result["score_contract"] = build_score_contract(
+                top, summary, label="priority_score"
+            )
         except Exception:  # pragma: no cover - defensive
             pass
     return result
