@@ -81,6 +81,10 @@ APPROVED_DOMAINS: tuple[str, ...] = (
     "execution_governance",
     "execution_integrity_audit",
     "no_execution",
+    # leverage governance/safety is a core advisory-risk domain: the doctrine
+    # ceilings (India 4x / rest-of-world 1x) and the manual-trade-log breach
+    # check live here. leverage_safety_layer.py + leverage_governance.py.
+    "leverage",
     "hygiene",
     "complex_systems",  # advisory-only complex-systems signal doctrine layer
     # Kanté defensive sprint — advisory-only safety / deploy / compliance layer.
