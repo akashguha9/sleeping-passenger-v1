@@ -112,6 +112,9 @@ _SUPPORT_EXPLICIT: frozenset[str] = frozenset({
     "manual_trade_origin", "manual_decision_board", "operator_auth",
     "operator_control", "supported_currencies", "symbol_normalizer",
     "reflection_frameworks", "daily_payload", "daily_scoring", "trend_engine",
+    # Local maintenance utility: wipes the operator's local Manual Trade Log /
+    # Reconciliation / Moltbook records. Advisory record-keeping admin tool.
+    "reset_local_logs",
 })
 
 

@@ -229,6 +229,11 @@ EXPLICIT_IN_SCOPE: frozenset[str] = frozenset({
     "import_ohlcv_csv.py",
     "run_imported_backtest.py",
     "import_outcomes_csv.py",
+    # Local operator maintenance utility: wipes the operator's own Manual
+    # Trade Log / Reconciliation / Moltbook records from the local SQLite DB
+    # and JSONL logs. Advisory record-keeping only — no broker execution,
+    # no order placement. Guarded by operator_permission_guard (ADMIN).
+    "reset_local_logs.py",
 })
 
 # Modules deliberately marked OUT_OF_SCOPE inside ``scripts/``.  This

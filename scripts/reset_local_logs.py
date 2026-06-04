@@ -31,14 +31,23 @@ Safety
   to it (``mvp_local.db.bak-YYYYMMDDTHHMMSSZ``) unless ``--no-backup``.
 * This is record-keeping only. It never calls a broker and never changes
   ``ai_execution_count`` / ``broker_api_called`` — those stay 0 / false.
+* ``--apply`` is a privileged maintenance action routed through the operator
+  guard (``operator_permission_guard`` + ``operator_audit_log``): it requires
+  the ADMIN role and is audited. The dry-run needs no role. The guard never
+  unlocks broker execution.
 
 Usage
 -----
-    python scripts/reset_local_logs.py                # dry run (shows counts)
-    python scripts/reset_local_logs.py --apply        # wipe for real (+backup)
-    python scripts/reset_local_logs.py --apply --no-backup
-    python scripts/reset_local_logs.py --apply --keep-jsonl   # DB only
-    python scripts/reset_local_logs.py --db /path/to/mvp_local.db --apply
+    python scripts/reset_local_logs.py                       # dry run (no role)
+    python scripts/reset_local_logs.py --apply --operator-role admin   # wipe (+backup)
+    # ...or set the role via env instead of the flag:
+    MVP_OPERATOR_ROLE=ADMIN python scripts/reset_local_logs.py --apply
+    python scripts/reset_local_logs.py --apply --operator-role admin --no-backup
+    python scripts/reset_local_logs.py --apply --operator-role admin --keep-jsonl
+    python scripts/reset_local_logs.py --db /path/to/mvp_local.db --apply --operator-role admin
+
+On Windows PowerShell, set the env var for one session with:
+    $env:MVP_OPERATOR_ROLE = "ADMIN"
 """
 
 from __future__ import annotations
@@ -59,6 +68,21 @@ if str(_SCRIPTS_DIR) not in sys.path:
 import persistence  # noqa: E402
 import signal_inbox_api  # noqa: E402
 import moltbook_api  # noqa: E402
+
+# Operator-guard boundary. This is a high-severity local mutation (it runs
+# ``DELETE FROM`` on the runtime DB), so — like the other maintenance scripts
+# (moltbook_cleanup_fake_seed, quarantine_fake_manual_trades, …) — the
+# destructive ``--apply`` path routes through the centralized operator guard:
+# ADMIN authorization is required and the mutation is audited. Advisory-only;
+# the guard NEVER unlocks broker execution.
+try:  # noqa: E402
+    from scripts import operator_permission_guard as _guard
+except ModuleNotFoundError:  # pragma: no cover - script-style fallback
+    import operator_permission_guard as _guard  # type: ignore[no-redef]
+try:  # noqa: E402
+    from scripts.operator_audit_log import enforce as _enforce
+except ModuleNotFoundError:  # pragma: no cover - script-style fallback
+    from operator_audit_log import enforce as _enforce  # type: ignore[no-redef]
 
 # Tables to purge, in an order that is safe regardless of any future foreign
 # keys (children before parents).
@@ -128,6 +152,15 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Only purge the DB tables; leave the JSONL fallback logs alone.",
     )
+    parser.add_argument(
+        "--operator-role",
+        default=None,
+        help=(
+            "Operator role for the guard (VIEWER/OPERATOR/ADMIN). --apply is a "
+            "privileged maintenance action and requires ADMIN; resolves from the "
+            "MVP_OPERATOR_ROLE env var when omitted. Never unlocks execution."
+        ),
+    )
     args = parser.parse_args(argv)
 
     db_path: Path = args.db
@@ -167,43 +200,87 @@ def main(argv: list[str] | None = None) -> int:
             + ("" if args.keep_jsonl else f" and {total_lines} JSONL line(s)")
             + ".\n  Re-run with --apply to perform the wipe."
         )
+        # Advisory dry-run receipt (audit-only, never canonical) — the same
+        # convention the other guarded maintenance scripts follow.
+        _guard.write_dry_run_receipt(
+            "reset_local_logs", target_count=total_rows, db_path=str(db_path)
+        )
         return 0
 
     # --- APPLY -----------------------------------------------------------
-    if db_path.exists() and not args.no_backup:
-        backup = db_path.with_name(f"{db_path.name}.bak-{_utc_stamp()}")
-        shutil.copy2(db_path, backup)
-        print(f"\n[reset_local_logs] backup written: {backup}")
+    # Operator authorization. ``--apply`` is a privileged ADMIN maintenance
+    # action (it deletes rows from the runtime DB). ``enforce`` audits and
+    # fails closed; ``build_apply_decision`` produces the guard-validated
+    # PermissionDecision the mutation context requires. Advisory-only — the
+    # decision carries execution_gate=LOCKED, broker_api_called=False.
+    try:
+        _enforce(
+            "cleanup_scripts",
+            role=args.operator_role,
+            resource="manual_trades,reconciliation_results,moltbook_entries",
+        )
+    except PermissionError as exc:
+        print(f"[reset_local_logs] [DENY] {exc}")
+        print(
+            "  --apply requires ADMIN. Re-run with --operator-role admin "
+            "or set MVP_OPERATOR_ROLE=ADMIN."
+        )
+        return 2
+    try:
+        decision = _guard.build_apply_decision(
+            "reset_local_logs",
+            _guard.OperationClass.REPAIR_WRITE,
+            str(db_path),
+            operator_role=args.operator_role,
+            reason=(
+                f"{_guard.NO_DRY_RUN_NEEDED}: idempotent full-table wipe of the "
+                "local advisory journals; default mode is the read-only dry-run."
+            ),
+        )
+    except PermissionError as exc:
+        print(f"[reset_local_logs] [DENY] {exc}")
+        return 2
 
-    deleted_rows = 0
-    if db_path.exists():
-        conn = sqlite3.connect(str(db_path))
-        try:
-            for table in _TABLES:
-                exists = conn.execute(
-                    "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
-                    (table,),
-                ).fetchone()
-                if not exists:
-                    continue
-                cur = conn.execute(f"DELETE FROM {table}")
-                deleted_rows += cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
-            conn.commit()
-            # Reclaim space and reset autoincrement counters for a clean slate.
-            conn.execute("VACUUM")
-        finally:
-            conn.close()
-    print(f"[reset_local_logs] deleted {deleted_rows} DB row(s).")
+    with _guard.guarded_mutation_context(
+        decision,
+        operation_name="reset_local_logs",
+        operation_class=_guard.OperationClass.REPAIR_WRITE,
+        require_dry_run=False,
+    ):
+        if db_path.exists() and not args.no_backup:
+            backup = db_path.with_name(f"{db_path.name}.bak-{_utc_stamp()}")
+            shutil.copy2(db_path, backup)
+            print(f"\n[reset_local_logs] backup written: {backup}")
 
-    cleared_files = 0
-    if not args.keep_jsonl:
-        for path in _JSONL_LOGS:
-            if path.exists():
-                path.unlink()
-                cleared_files += 1
-        print(f"[reset_local_logs] removed {cleared_files} JSONL log file(s).")
-    else:
-        print("[reset_local_logs] --keep-jsonl set; JSONL logs left untouched.")
+        deleted_rows = 0
+        if db_path.exists():
+            conn = sqlite3.connect(str(db_path))
+            try:
+                for table in _TABLES:
+                    exists = conn.execute(
+                        "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+                        (table,),
+                    ).fetchone()
+                    if not exists:
+                        continue
+                    cur = conn.execute(f"DELETE FROM {table}")
+                    deleted_rows += cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
+                conn.commit()
+                # Reclaim space and reset autoincrement counters for a clean slate.
+                conn.execute("VACUUM")
+            finally:
+                conn.close()
+        print(f"[reset_local_logs] deleted {deleted_rows} DB row(s).")
+
+        cleared_files = 0
+        if not args.keep_jsonl:
+            for path in _JSONL_LOGS:
+                if path.exists():
+                    path.unlink()
+                    cleared_files += 1
+            print(f"[reset_local_logs] removed {cleared_files} JSONL log file(s).")
+        else:
+            print("[reset_local_logs] --keep-jsonl set; JSONL logs left untouched.")
 
     print(
         "\n[reset_local_logs] done. Manual Trade Log, Reconciliation, and "
