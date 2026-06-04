@@ -1,0 +1,60 @@
+# Securities seed universe — the active/tracked tickers the MVP must resolve.
+# Advisory-only static metadata. No live fetch. No execution. No broker API.
+#
+# Each entry: symbol (canonical, bare), exchange (code), country (ISO-2),
+# currency (ISO), name, asset_type. Jurisdiction is derived from country.
+# Duplicate bare symbols (e.g. AIR on EPA and ETR) are de-duplicated by the
+# loader keeping the first occurrence; both are REST_OF_WORLD so leverage
+# governance is unaffected.
+
+advisory_status: ADVISORY_ONLY
+execution_gate: LOCKED
+human_review_required: true
+
+securities:
+  # --- India (NSE/BSE) ---
+  - {symbol: BHARTIARTL, exchange: NSE, country: IN, currency: INR, name: Bharti Airtel, asset_type: EQUITY}
+  - {symbol: ICICIBANK,  exchange: NSE, country: IN, currency: INR, name: ICICI Bank, asset_type: EQUITY}
+  - {symbol: HDFCBANK,    exchange: NSE, country: IN, currency: INR, name: HDFC Bank, asset_type: EQUITY}
+  - {symbol: RELIANCE,    exchange: NSE, country: IN, currency: INR, name: Reliance Industries, asset_type: EQUITY}
+  - {symbol: INFY,        exchange: NYSE, country: US, currency: USD, name: Infosys ADR, asset_type: EQUITY}
+  # --- US (NASDAQ/NYSE/NYSEARCA) ---
+  - {symbol: CSCO,  exchange: NASDAQ, country: US, currency: USD, name: Cisco, asset_type: EQUITY}
+  - {symbol: ANET,  exchange: NYSE,   country: US, currency: USD, name: Arista Networks, asset_type: EQUITY}
+  - {symbol: XOM,   exchange: NYSE,   country: US, currency: USD, name: ExxonMobil, asset_type: EQUITY}
+  - {symbol: RTX,   exchange: NYSE,   country: US, currency: USD, name: RTX Corp, asset_type: EQUITY}
+  - {symbol: LMT,   exchange: NYSE,   country: US, currency: USD, name: Lockheed Martin, asset_type: EQUITY}
+  - {symbol: CVX,   exchange: NYSE,   country: US, currency: USD, name: Chevron, asset_type: EQUITY}
+  - {symbol: MSFT,  exchange: NASDAQ, country: US, currency: USD, name: Microsoft, asset_type: EQUITY}
+  - {symbol: ASML,  exchange: NASDAQ, country: US, currency: USD, name: ASML ADR, asset_type: EQUITY}
+  - {symbol: GLD,   exchange: NYSEARCA, country: US, currency: USD, name: SPDR Gold Shares, asset_type: ETF}
+  - {symbol: TSM,   exchange: NYSE,   country: US, currency: USD, name: TSMC ADR, asset_type: EQUITY}
+  - {symbol: WMT,   exchange: NYSE,   country: US, currency: USD, name: Walmart, asset_type: EQUITY}
+  - {symbol: JPM,   exchange: NYSE,   country: US, currency: USD, name: JPMorgan Chase, asset_type: EQUITY}
+  - {symbol: VALE,  exchange: NYSE,   country: US, currency: USD, name: Vale ADR, asset_type: EQUITY}
+  - {symbol: ZIM,   exchange: NYSE,   country: US, currency: USD, name: ZIM Integrated, asset_type: EQUITY}
+  - {symbol: NVDA,  exchange: NASDAQ, country: US, currency: USD, name: NVIDIA, asset_type: EQUITY}
+  - {symbol: AVGO,  exchange: NASDAQ, country: US, currency: USD, name: Broadcom, asset_type: EQUITY}
+  - {symbol: NOC,   exchange: NYSE,   country: US, currency: USD, name: Northrop Grumman, asset_type: EQUITY}
+  - {symbol: BHP,   exchange: NYSE,   country: US, currency: USD, name: BHP ADR, asset_type: EQUITY}
+  - {symbol: GOOGL, exchange: NASDAQ, country: US, currency: USD, name: Alphabet, asset_type: EQUITY}
+  - {symbol: AMZN,  exchange: NASDAQ, country: US, currency: USD, name: Amazon, asset_type: EQUITY}
+  - {symbol: META,  exchange: NASDAQ, country: US, currency: USD, name: Meta Platforms, asset_type: EQUITY}
+  - {symbol: AAPL,  exchange: NASDAQ, country: US, currency: USD, name: Apple, asset_type: EQUITY}
+  - {symbol: AMD,   exchange: NASDAQ, country: US, currency: USD, name: AMD, asset_type: EQUITY}
+  - {symbol: GD,    exchange: NYSE,   country: US, currency: USD, name: General Dynamics, asset_type: EQUITY}
+  # --- Europe (ETR/EPA) ---
+  - {symbol: SAP,   exchange: ETR, country: DE, currency: EUR, name: SAP SE, asset_type: EQUITY}
+  - {symbol: AIR,   exchange: EPA, country: FR, currency: EUR, name: Airbus SE, asset_type: EQUITY}
+  - {symbol: XAD5,  exchange: ETR, country: DE, currency: EUR, name: Xtrackers ETF, asset_type: ETF}
+  - {symbol: RHM,   exchange: ETR, country: DE, currency: EUR, name: Rheinmetall, asset_type: EQUITY}
+  # --- UK (LON) ---
+  - {symbol: HSBA,  exchange: LON, country: GB, currency: GBP, name: HSBC Holdings, asset_type: EQUITY}
+  # --- Japan (TYO) ---
+  - {symbol: "8306", exchange: TYO, country: JP, currency: JPY, name: Mitsubishi UFJ, asset_type: EQUITY}
+  - {symbol: 291A,  exchange: TYO, country: JP, currency: JPY, name: TYO 291A, asset_type: EQUITY}
+  # --- South Korea (KRX/KOSDAQ) ---
+  - {symbol: "003550", exchange: KRX, country: KR, currency: KRW, name: LG Corp, asset_type: EQUITY}
+  - {symbol: "079550", exchange: KRX, country: KR, currency: KRW, name: LIG Nex1, asset_type: EQUITY}
+  - {symbol: "454910", exchange: KRX, country: KR, currency: KRW, name: Doosan Robotics, asset_type: EQUITY}
+  - {symbol: "394280", exchange: KOSDAQ, country: KR, currency: KRW, name: Oneconnect, asset_type: EQUITY}
