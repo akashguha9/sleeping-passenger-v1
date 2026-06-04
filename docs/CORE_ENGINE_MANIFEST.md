@@ -47,6 +47,25 @@ excluded from the pipeline).
 - **Can execute trades:** no (read-only).
 - **Behavioural tests:** `tests/test_event_prior_detector.py`, `tests/test_core_engine_behavior.py` (insufficient data → no window; threshold met → window; spread-out → no cluster).
 
+### `scripts/calibration_recommendations.py` — Guarded feedback loop
+- **Purpose:** turn reconciled outcomes + Moltbook into a threshold-shift recommendation, never auto-applied.
+- **Decision function:** `build_recommendation(reconciliations, bucket_key=...)` → `OBSERVE_MORE_DATA` / `LOW_SAMPLE_DO_NOT_ADJUST` / `RECOMMEND_TIGHTEN` / `RECOMMEND_MAINTAIN` / `RECOMMEND_LOOSEN_SLIGHTLY` with `recommended_threshold_shift`, `confidence`, `applied=False`.
+- **Influences operator recommendation:** advisory only; `auto_apply=False` always.
+- **Can execute trades:** no. Surfaced at `/api/calibration-recommendations`.
+- **Behavioural tests:** `tests/test_calibration_recommendations.py`.
+
+### `scripts/score_output_contract.py` — Score honesty contract
+- **Purpose:** ensure no score travels without calibration metadata.
+- **Decision function:** `build_score_contract(raw_score, summary, human_sizing_approved=...)`; `should_drive_sizing` True only when CALIBRATED **and** human-approved; `calibrated_score` never fabricated.
+- **Can execute trades:** no. Attached to `/signals` (`score_contract`).
+- **Behavioural tests:** `tests/test_score_output_contract.py`.
+
+### `scripts/pre_real_money_preflight.py` — Real-money readiness gate
+- **Purpose:** score honest manual real-money readiness and pick an allowed mode.
+- **Decision function:** `assess_real_money_readiness(...)` → mode (`SCALE_BLOCKED` / `PAPER_ONLY` / `TINY_MANUAL_PROBE_ONLY` / `MANUAL_REAL_MONEY_READY`); hard caps (exec surface=0, leverage missing≤5, uncalibrated≤6.5, tests/preflight fail≤6, clean≤7). Capped at 7.0 — never scaling.
+- **Can execute trades:** no (read-only). Surfaced at `/api/readiness/real-money`.
+- **Behavioural tests:** `tests/test_real_money_readiness.py`.
+
 ### `scripts/score_calibration.py` — Honest score calibration
 - **Purpose:** prevent false confidence by labelling every score with its calibration status computed from reconciled outcomes.
 - **Decision function:** `compute_score_calibration(reconciliations)` → win_rate / false_positive_rate / avg return / sample_size / `calibration_status` (UNCALIBRATED / LOW_SAMPLE / CALIBRATING / CALIBRATED). `score_calibration_envelope(...)` sets `score_should_drive_sizing` (True only when CALIBRATED).

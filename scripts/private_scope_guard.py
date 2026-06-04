@@ -215,6 +215,9 @@ EXPLICIT_IN_SCOPE: frozenset[str] = frozenset({
     "fixtures",
     "__init__.py",
     "__pycache__",
+    # Core score-honesty contract shared by the scoring APIs — keeps a precise
+    # score from ever being presented as validated. In-scope by definition.
+    "score_output_contract.py",
 })
 
 # Modules deliberately marked OUT_OF_SCOPE inside ``scripts/``.  This
