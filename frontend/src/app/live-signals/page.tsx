@@ -997,9 +997,17 @@ export default function LiveSignalsPage() {
   const filtered = useMemo(() => {
     if (!data) return [];
     return data.live_signal_events
+      // Strict canonical source guard. When a specific source tab is selected,
+      // render ONLY rows whose canonical `source_name` matches the selected
+      // source. This keeps the Kalshi tab Kalshi-only (excluding Polymarket and
+      // prediction_market_disagreement rows that merely mention "Kalshi" in
+      // their text), and prevents a stale All-Sources response — still in state
+      // while a source-scoped refetch is in flight — from leaking foreign rows
+      // into a source tab. All Sources (sourceFilter === '') shows everything.
+      .filter((ev) => sourceFilter === '' || ev.source_name === sourceFilter)
       .filter((ev) => !isKalshiQuarantined(ev))
       .filter((ev) => matchesSearch(ev, searchQuery));
-  }, [data, searchQuery]);
+  }, [data, searchQuery, sourceFilter]);
 
   const kalshiQuarantinedCount = useMemo(() => {
     if (!data) return 0;
