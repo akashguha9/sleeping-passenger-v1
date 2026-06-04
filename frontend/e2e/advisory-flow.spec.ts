@@ -26,6 +26,10 @@ async function stubBackend(page: Page) {
     r.fulfill({ json: { calibration_status: 'UNCALIBRATED', sample_size: 0,
       score_should_drive_sizing: false, message: 'Do not size from this score.',
       advisory_status: 'ADVISORY_ONLY', broker_api_called: false } }));
+  await page.route('**/api/calibration-map', (r) =>
+    r.fulfill({ json: { method: 'identity', improved_out_of_sample: false,
+      raw_test_ece: 0, cal_test_ece: 0, train_n: 0, test_n: 0,
+      advisory_only: true, human_review_required: true, broker_api_called: false } }));
   await page.route('**/signals**', (r) =>
     r.fulfill({ json: { operation: 'list_inbox_items', item_count: 0, items: [],
       fabric_bull_state: 'NEUTRAL', fabric_stats: {}, signal_source: 'live_events',
