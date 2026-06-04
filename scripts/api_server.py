@@ -3035,6 +3035,21 @@ def get_score_calibration(_auth: None = Depends(require_api_token_for_reads)) ->
     return build_score_calibration_report()
 
 
+@app.get("/api/readiness/real-money")
+def get_real_money_readiness(_auth: None = Depends(require_api_token_for_reads)) -> dict:
+    """Honest manual real-money readiness gate.
+
+    Scores readiness (capped at 7.0 — never scaling-ready) and returns an
+    allowed_mode: SCALE_BLOCKED / PAPER_ONLY / TINY_MANUAL_PROBE_ONLY /
+    MANUAL_REAL_MONEY_READY. Read-only; never authorises execution.
+    """
+    try:
+        from scripts.pre_real_money_preflight import assess_real_money_readiness
+    except ModuleNotFoundError:  # pragma: no cover - script-style fallback
+        from pre_real_money_preflight import assess_real_money_readiness  # type: ignore[no-redef]
+    return assess_real_money_readiness()
+
+
 @app.get("/api/calibration-recommendations")
 def get_calibration_recommendations(_auth: None = Depends(require_api_token_for_reads)) -> dict:
     """Guarded calibration recommendations from reconciled outcomes.

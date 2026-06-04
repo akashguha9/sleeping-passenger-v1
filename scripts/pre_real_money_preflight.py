@@ -331,6 +331,213 @@ def run_preflight(
 
 
 # ---------------------------------------------------------------------------
+# Real-money readiness assessment (additive — does not change run_preflight)
+# ---------------------------------------------------------------------------
+
+# Allowed operating modes, from most restrictive to least.
+MODE_SCALE_BLOCKED = "SCALE_BLOCKED"
+MODE_PAPER_ONLY = "PAPER_ONLY"
+MODE_TINY_PROBE = "TINY_MANUAL_PROBE_ONLY"
+MODE_MANUAL_READY = "MANUAL_REAL_MONEY_READY"
+
+# This gate is for *manual* real-money readiness only. It can never certify
+# scaling, so the score is hard-capped here.
+READINESS_MAX = 7.0
+
+
+def _execution_surface_present() -> bool:
+    """True if the advisory contract's no-execution invariants are broken.
+
+    The advisory contract is the single source of truth: can_execute and
+    broker_api_called must be False and jsonl must not be canonical. If any of
+    those flip, an execution surface has appeared and we hard-fail.
+    """
+    try:
+        try:
+            from scripts import advisory_contract as ac
+        except ModuleNotFoundError:  # pragma: no cover - script-style fallback
+            import advisory_contract as ac  # type: ignore[no-redef]
+        stamps = ac.advisory_safety_stamps()
+        if stamps.get("can_execute", False) or stamps.get("broker_api_called", False):
+            return True
+        if stamps.get("ai_execution_count", 0) not in (0, None):
+            return True
+        if getattr(ac, "jsonl_is_canonical", False):
+            return True
+        return False
+    except Exception:
+        # If we cannot even confirm the contract, treat as unsafe.
+        return True
+
+
+def _leverage_governance_active() -> bool:
+    """True if leverage governance is importable and actually flags a breach."""
+    try:
+        try:
+            from scripts.leverage_governance import validate_leverage_policy
+        except ModuleNotFoundError:  # pragma: no cover - script-style fallback
+            from leverage_governance import validate_leverage_policy  # type: ignore[no-redef]
+        row = validate_leverage_policy(ticker="X", leverage=2.0, exchange="NASDAQ")
+        return bool(row.get("breach")) and "jurisdiction_resolution_source" in row
+    except Exception:
+        return False
+
+
+def _feedback_loop_available() -> bool:
+    try:
+        try:
+            from scripts.calibration_recommendations import build_recommendation  # noqa: F401
+        except ModuleNotFoundError:  # pragma: no cover - script-style fallback
+            from calibration_recommendations import build_recommendation  # noqa: F401
+        return True
+    except Exception:
+        return False
+
+
+def _calibration_status(db_path: Path | None) -> tuple[str, bool, int]:
+    try:
+        try:
+            from scripts.score_calibration import build_score_calibration_report
+        except ModuleNotFoundError:  # pragma: no cover - script-style fallback
+            from score_calibration import build_score_calibration_report  # type: ignore[no-redef]
+        rep = build_score_calibration_report(db_path)
+        return (
+            str(rep.get("calibration_status", "UNCALIBRATED")),
+            bool(rep.get("score_should_drive_sizing", False)),
+            int(rep.get("sample_size", 0) or 0),
+        )
+    except Exception:
+        return "UNCALIBRATED", False, 0
+
+
+def assess_real_money_readiness(
+    db_path: Path | None = None,
+    *,
+    backend_tests_passing: bool | None = None,
+    frontend_tests_passing: bool | None = None,
+    preflight: dict[str, Any] | None = None,
+    now: _dt.datetime | None = None,
+) -> dict[str, Any]:
+    """Score honest manual real-money readiness and pick an allowed mode.
+
+    Caps (per product policy):
+      * execution surface present        -> HARD FAIL (0.0, SCALE_BLOCKED)
+      * leverage governance missing       -> cap 5.0
+      * calibration UNCALIBRATED          -> cap 6.5
+      * backend/frontend tests failing    -> cap 6.0
+      * clean safety+leverage+calibration+feedback -> may reach 7.0 (never more)
+    """
+    now = now or _dt.datetime.now(_dt.timezone.utc)
+    blockers: list[str] = []
+    warnings: list[str] = []
+    checks: dict[str, Any] = {}
+
+    exec_surface = _execution_surface_present()
+    leverage_active = _leverage_governance_active()
+    feedback = _feedback_loop_available()
+    cal_status, cal_drives_sizing, cal_sample = _calibration_status(db_path)
+    pf = preflight if preflight is not None else run_preflight(db_path, now=now)
+    pf_ok = bool(pf.get("ok", False))
+
+    checks["execution_surface_present"] = exec_surface
+    checks["leverage_governance_active"] = leverage_active
+    checks["jurisdiction_resolution_available"] = leverage_active
+    checks["feedback_loop_available"] = feedback
+    checks["calibration_status"] = cal_status
+    checks["score_should_drive_sizing"] = cal_drives_sizing
+    checks["calibration_sample_size"] = cal_sample
+    checks["preflight_ok"] = pf_ok
+    checks["backend_tests_passing"] = backend_tests_passing
+    checks["frontend_tests_passing"] = frontend_tests_passing
+
+    # --- HARD FAIL: any execution surface ---
+    if exec_surface:
+        blockers.append("execution_surface_present")
+        payload = {
+            "report": "real_money_readiness",
+            "readiness_score": 0.0,
+            "allowed_mode": MODE_SCALE_BLOCKED,
+            "blockers": blockers,
+            "warnings": warnings,
+            "checks": checks,
+            "reason": (
+                "HARD FAIL: an execution surface was detected (advisory "
+                "invariants broken). Real-money use is forbidden until the "
+                "no-execution contract holds."
+            ),
+            "generated_at": now.isoformat(timespec="seconds").replace("+00:00", "Z"),
+        }
+        payload.update(_SAFETY_STAMPS)
+        return payload
+
+    score = READINESS_MAX  # start at the gate's max; apply caps downward
+
+    if not leverage_active:
+        blockers.append("leverage_governance_missing")
+        score = min(score, 5.0)
+
+    if cal_status == "UNCALIBRATED":
+        warnings.append("scores_uncalibrated")
+        score = min(score, 6.5)
+
+    if cal_drives_sizing:
+        # Sizing should never be auto-enabled by a read path.
+        warnings.append("score_should_drive_sizing_true_review_manually")
+
+    if backend_tests_passing is False or frontend_tests_passing is False:
+        blockers.append("tests_failing")
+        score = min(score, 6.0)
+
+    if not pf_ok:
+        blockers.append("preflight_blocking_issues")
+        score = min(score, 6.0)
+
+    if not feedback:
+        warnings.append("feedback_loop_unavailable")
+
+    # --- Decide allowed mode ---
+    if not leverage_active or not pf_ok or (backend_tests_passing is False) or (frontend_tests_passing is False):
+        allowed = MODE_PAPER_ONLY
+    elif cal_status == "UNCALIBRATED":
+        allowed = MODE_TINY_PROBE
+    elif score >= 7.0 and cal_status in {"CALIBRATING", "CALIBRATED"}:
+        allowed = MODE_MANUAL_READY
+    else:
+        allowed = MODE_TINY_PROBE
+
+    score = round(min(score, READINESS_MAX), 2)
+
+    if allowed == MODE_PAPER_ONLY:
+        reason = "Blocking issues present — paper trading only until resolved."
+    elif allowed == MODE_TINY_PROBE:
+        reason = (
+            "Safety and leverage governance hold, but scores are not yet "
+            "calibrated on real outcomes. Tiny manual probes only; do not size "
+            "from scores; keep reconciling to build calibration evidence."
+        )
+    else:
+        reason = (
+            "Safety, leverage governance, calibration status, and the feedback "
+            "loop all hold. Manual real-money trades are permitted with "
+            "discipline. NOT scaling-ready — this gate caps at 7.0."
+        )
+
+    payload = {
+        "report": "real_money_readiness",
+        "readiness_score": score,
+        "readiness_max": READINESS_MAX,
+        "allowed_mode": allowed,
+        "blockers": blockers,
+        "warnings": warnings,
+        "checks": checks,
+        "reason": reason,
+        "generated_at": now.isoformat(timespec="seconds").replace("+00:00", "Z"),
+    }
+    payload.update(_SAFETY_STAMPS)
+    return payload
+
+
+# ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
 
