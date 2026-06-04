@@ -56,6 +56,32 @@ EXPERIMENTAL_MODULES: frozenset[str] = frozenset({
     "pendentive_engine", "narrative_operator_wisdom_filter",
     "latent_signal_release_bull_layer", "false_negative_casino_monopoly_layer",
     "economy_of_motion_audit", "regime_translation_tester",
+    # Real-evidence sprint review (docs/UNKNOWN_MODULE_REVIEW.md): archetype/
+    # regime experiment, not load-bearing.
+    "cycle_clarity_chaos_intensity",
+})
+
+# Reviewed in docs/UNKNOWN_MODULE_REVIEW.md: previously-UNKNOWN modules
+# confirmed as SUPPORT (none imported by CORE; most have tests). KEEP_SUPPORT.
+_SUPPORT_REVIEWED: frozenset[str] = frozenset({
+    "action_doctrine_status", "anti_staleness", "backup_db", "backup_local_state",
+    "candidate_memory_decay_v2", "continuity_mode", "daily_synthesis_pipeline",
+    "diagnostics_snapshot_cache", "diagnostics_snapshot_key",
+    "diagnostics_snapshot_warmer", "diagnostics_tail_metrics", "error_contracts",
+    "expectation_divergence_signal", "extreme_state_logic", "five_model_independence",
+    "fresh_market_discovery", "governance_status", "governance_verdict",
+    "kalshi_live_smoke", "late_adoption_lockout", "live_provider_compliance_trace",
+    "live_signal_filters", "live_source_runner_phase2", "local_mvp_smoke_test",
+    "market_data_freshness", "minimum_daily_universe", "model_disagreement",
+    "moltbook_cleanup_fake_seed", "narrative_structure_divergence",
+    "operator_live_provider_refresh", "paper_execution", "paper_trade_retirement",
+    "perception_control", "performance_baseline", "persistence_global_securities",
+    "persistence_integrity", "portfolio_truth_integrity", "position_truth_resolver",
+    "prediction_market_embedding_providers", "prediction_market_semantic_pairing",
+    "promotion_downgrade", "provider_verification", "repo_operating_mode", "restore_db",
+    "restore_drill", "signal_geometry_persistence", "signal_index_query",
+    "survivorship_bias_corrector", "tail_loss_governor", "universe_coverage",
+    "why_today_enforcement",
 })
 
 # Naming families that denote SUPPORT tooling (not core, not experimental).
@@ -94,25 +120,11 @@ _SUPPORT_EXPLICIT: frozenset[str] = frozenset({
 # matched by a SUPPORT pattern nor in this baseline trips the boundary test,
 # forcing an explicit classification decision (clarity, not refactoring).
 ACCEPTED_UNKNOWN_BASELINE: frozenset[str] = frozenset({
-    "action_doctrine_status", "anti_staleness", "backup_db", "backup_local_state",
-    "belief_backtest", "branch_payload", "candidate_memory_decay_v2",
-    "continuity_mode", "cycle_clarity_chaos_intensity", "daily_synthesis_pipeline",
-    "diagnostics_snapshot_cache", "diagnostics_snapshot_key",
-    "diagnostics_snapshot_warmer", "diagnostics_tail_metrics", "error_contracts",
-    "expectation_divergence_signal", "extreme_state_logic", "five_model_independence",
-    "fresh_market_discovery", "governance_status", "governance_verdict",
-    "kalshi_live_smoke", "late_adoption_lockout", "live_provider_compliance_trace",
-    "live_signal_filters", "live_source_runner_phase2", "local_mvp_smoke_test",
-    "market_data_freshness", "minimum_daily_universe", "model_disagreement",
-    "moltbook_cleanup_fake_seed", "narrative_structure_divergence",
-    "operator_live_provider_refresh", "paper_execution", "paper_trade_retirement",
-    "perception_control", "performance_baseline", "persistence_global_securities",
-    "persistence_integrity", "portfolio_truth_integrity", "position_truth_resolver",
-    "prediction_market_embedding_providers", "prediction_market_semantic_pairing",
-    "promotion_downgrade", "provider_verification", "repo_operating_mode",
-    "restore_db", "restore_drill", "signal_geometry_persistence", "signal_index_query",
-    "survivorship_bias_corrector", "tail_loss_governor", "universe_coverage",
-    "why_today_enforcement",
+    # Reviewed (docs/UNKNOWN_MODULE_REVIEW.md): untested legacy backtest
+    # experiments, recommendation ARCHIVE_LATER. Left UNKNOWN deliberately so
+    # they stay visible as archive candidates rather than being dressed up as
+    # SUPPORT. Everything else from the prior 54 is now classified.
+    "belief_backtest", "branch_payload",
 })
 
 
@@ -135,7 +147,7 @@ def classify(stem: str) -> str:
         return CORE
     if stem in EXPERIMENTAL_MODULES:
         return EXPERIMENTAL
-    if stem in _SUPPORT_EXPLICIT:
+    if stem in _SUPPORT_EXPLICIT or stem in _SUPPORT_REVIEWED:
         return SUPPORT
     for suf in _SUPPORT_SUFFIXES:
         if stem.endswith(suf):

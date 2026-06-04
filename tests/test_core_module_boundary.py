@@ -59,3 +59,22 @@ def test_report_advisory_stamps():
     rep = b.build_report()
     assert rep["advisory_status"] == "ADVISORY_ONLY"
     assert rep["broker_api_called"] is False
+
+
+# --- Phase 7: unknown-surface reduction -------------------------------------
+
+def test_unknown_surface_is_small_after_review():
+    rep = b.build_report()
+    # The 54-module UNKNOWN backlog was reviewed (docs/UNKNOWN_MODULE_REVIEW.md);
+    # only deliberate ARCHIVE_LATER candidates remain UNKNOWN.
+    assert rep["n_unknown"] <= 5
+
+
+def test_code_hygiene_is_strong():
+    rep = b.build_report()
+    assert rep["code_hygiene_CH"] >= 9.0
+    assert rep["boundary_clarity_H"] >= 0.95
+
+
+def test_no_core_imports_experimental_after_review():
+    assert b.core_import_violations() == []
