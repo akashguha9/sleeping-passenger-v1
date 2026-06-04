@@ -203,6 +203,15 @@ APPROVED_DOMAINS: tuple[str, ...] = (
     "decision_board",      # manual_decision_board.py — advisory-only human-review
                            # classifier; emits no order/execution instruction
     "mvp_readiness",       # mvp_readiness_report.py — single advisory truth surface
+    # Daily Governance / Discovery Gate sprint — advisory-only, fail-closed
+    # governance layer (scripts/governance/) that turns the 2026-06-05 five-model
+    # synthesis failure rules into code: portfolio-truth gate, source-health gate,
+    # why-today / FCS / ERS / MRS scoring, memory decay, concentration/HHI,
+    # existing-holding + reduce/exit review, no-new-risk day, phantom quarantine,
+    # least-bad override, model reliability, moltbook entry, final decision board.
+    # Scores/gates/artifacts only; no broker execution, no order placement, no
+    # position sizing, no API trading writes. Execution gate stays LOCKED.
+    "governance",          # scripts/governance/ package (daily_gate, models, artifacts, runner)
 )
 
 # Explicit allowlist for individual files / directories whose name does

@@ -146,6 +146,62 @@ def run_daily_synthesis(
     }
 
 
+def attach_daily_governance(
+    result: dict[str, Any],
+    governance_inputs: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Run the fail-closed Daily Governance Gate and attach it to ``result``.
+
+    The governance gate is the single source of truth for the daily board:
+    whether a Manual Add Consideration is allowed, whether it is a no-new-risk
+    day, which tickers are quarantined, and which holdings require review.
+
+    ``governance_inputs`` is the five-model synthesis snapshot (see
+    ``scripts/governance/daily_governance_runner``). When it is None the gate is
+    skipped and the result is returned unchanged, so the existing four-layer
+    flow keeps working unmodified. This is additive and advisory-only.
+    """
+    if governance_inputs is None:
+        return result
+    try:
+        from scripts.governance.daily_governance_runner import run_from_inputs
+    except ModuleNotFoundError:  # pragma: no cover - script-style env
+        from governance.daily_governance_runner import run_from_inputs  # type: ignore[no-redef]
+    gov = run_from_inputs(governance_inputs)
+    result["daily_governance"] = gov.to_dict()
+    return result
+
+
+def _render_governance_labels(result: dict[str, Any]) -> list[str]:
+    """Render advisory status labels from an attached governance result."""
+    gov = result.get("daily_governance")
+    if not gov:
+        return []
+    labels: list[str] = ["EXECUTION_GATE_LOCKED"]
+    if gov.get("source_health_status") == "FAILED":
+        labels.append("SOURCE_HEALTH_FAILED")
+    if gov.get("no_new_risk_day") == "YES":
+        labels.append("NO_NEW_RISK_DAY")
+    if gov.get("final_regime") == "EXISTING_POSITION_MANAGEMENT_ONLY":
+        labels.append("EXISTING_POSITION_MANAGEMENT_ONLY")
+    elif gov.get("final_regime") == "WATCHLIST_ONLY":
+        labels.append("WATCHLIST_ONLY")
+    if gov.get("names_to_quarantine"):
+        labels.append("PHANTOM_QUARANTINE")
+    lines = ["", "------------------------------------------------------------",
+             "DAILY GOVERNANCE GATE (single source of truth — advisory only)",
+             "------------------------------------------------------------",
+             f"  status_labels: {labels}",
+             f"  no_new_risk_day: {gov.get('no_new_risk_day')}",
+             f"  new_risk_permission: {gov.get('new_risk_permission')}",
+             f"  final_regime: {gov.get('final_regime')}",
+             f"  names_to_quarantine: {gov.get('names_to_quarantine') or 'NONE'}",
+             f"  manual_add_consideration: {gov.get('top_manual_add_consideration') or 'NONE'}",
+             f"  best_watch: {gov.get('best_watch') or 'NONE'}",
+             f"  execution_gate_status: {gov.get('execution_gate_status')} (human execution required)"]
+    return lines
+
+
 def render_portfolio_truth_context(result: dict[str, Any]) -> str:
     """Render the Portfolio Truth context block injected into the five prompts.
 
@@ -219,6 +275,7 @@ def render_portfolio_truth_context(result: dict[str, Any]) -> str:
         "  Note: a weak why-today blocks EXECUTABLE but NOT discovery — such names "
         "stay BUY-CANDIDATE / NOT-EXECUTABLE."
     )
+    lines.extend(_render_governance_labels(result))
     lines.append("")
     lines.append("Reminder: advisory only. No broker action. No execution. Human review required.")
     lines.append("============================================================")
@@ -249,6 +306,11 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Daily five-model synthesis truth/discovery pipeline.")
     parser.add_argument("--json", action="store_true", help="print the JSON summary instead of the context block")
     parser.add_argument("--write", action="store_true", help="write runtime context artifacts")
+    parser.add_argument(
+        "--governance-inputs",
+        default=None,
+        help="path to a governance-inputs JSON snapshot; runs the Daily Governance Gate and writes its artifacts",
+    )
     args = parser.parse_args(argv)
 
     try:
@@ -256,6 +318,20 @@ def main(argv: list[str] | None = None) -> int:
     except Exception:
         pass
     result = run_daily_synthesis()
+    if args.governance_inputs:
+        gov_inputs = json.loads(Path(args.governance_inputs).read_text(encoding="utf-8"))
+        attach_daily_governance(result, gov_inputs)
+        if args.write:
+            try:
+                from scripts.governance.artifacts import write_governance_artifacts
+                from scripts.governance.daily_governance_runner import run_from_inputs
+            except ModuleNotFoundError:  # pragma: no cover - script-style env
+                from governance.artifacts import write_governance_artifacts  # type: ignore[no-redef]
+                from governance.daily_governance_runner import run_from_inputs  # type: ignore[no-redef]
+            gov_result = run_from_inputs(gov_inputs)
+            write_governance_artifacts(
+                gov_result, REPO_ROOT / "runtime", run_id=(gov_inputs.get("config") or {}).get("run_id")
+            )
     context_md = render_portfolio_truth_context(result)
     if args.write:
         _write_artifacts(result, context_md)

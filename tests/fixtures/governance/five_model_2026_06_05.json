@@ -1,0 +1,166 @@
+{
+  "description": "Deterministic five-model synthesis snapshot for 2026-06-05. Source health failed (static fallback + missing prices), 4x India holdings, phantom/stale tickers. Drives the EXISTING_POSITION_MANAGEMENT_ONLY regression.",
+  "run_date": "2026-06-05",
+  "config": {
+    "created_at": "2026-06-05T00:00:00+00:00",
+    "run_id": "five_model_2026_06_05",
+    "next_review_date": "2026-06-06",
+    "models": [
+      {"name": "claude"},
+      {"name": "gpt"},
+      {"name": "gemini", "contradiction_with_portfolio_truth": true},
+      {"name": "grok"},
+      {"name": "mistral", "wrong_run_date": true, "overconfident_without_data": true}
+    ]
+  },
+  "verified_current_holdings": [
+    {"ticker": "ANET", "status": "OPEN", "leverage": 1, "stop_status": "unknown", "tp_status": "unknown"},
+    {"ticker": "ASML", "status": "OPEN", "leverage": 1, "stop_status": "unknown", "tp_status": "unknown"},
+    {"ticker": "CVX", "status": "OPEN", "leverage": 1, "stop_status": "unknown", "tp_status": "unknown", "thesis_conflict": true, "model_flags_risk": true},
+    {"ticker": "HDFCBANK.NS", "status": "OPEN", "leverage": 4, "stop_status": "unknown", "tp_status": "unknown"},
+    {"ticker": "LMT", "status": "OPEN", "leverage": 1, "stop_status": "unknown", "tp_status": "unknown"},
+    {"ticker": "MSFT", "status": "OPEN", "leverage": 1, "stop_status": "unknown", "tp_status": "unknown"},
+    {"ticker": "RELIANCE.NS", "status": "OPEN", "leverage": 4, "stop_status": "unknown", "tp_status": "unknown"},
+    {"ticker": "RTX", "status": "OPEN", "leverage": 1, "stop_status": "unknown", "tp_status": "unknown"},
+    {"ticker": "TSM", "status": "OPEN", "leverage": 1, "stop_status": "unknown", "tp_status": "unknown"},
+    {"ticker": "XOM", "status": "OPEN", "leverage": 1, "stop_status": "unknown", "tp_status": "unknown"}
+  ],
+  "closed_positions": ["GLD"],
+  "sold_positions": ["GLD"],
+  "not_owned_do_not_manage": ["UNG", "TIP", "TLT", "FCG", "GLD"],
+  "current_prices": {},
+  "today_market_snapshot": {
+    "provider": "STATIC_UNIVERSE_FALLBACK",
+    "is_live": false,
+    "provider_quality": 0.0,
+    "freshness": 0.0,
+    "completeness": 0.0,
+    "records": []
+  },
+  "today_price_movers": {
+    "provider": "STATIC_UNIVERSE_FALLBACK",
+    "is_live": false,
+    "provider_quality": 0.0,
+    "freshness": 0.0,
+    "completeness": 0.0,
+    "movers": []
+  },
+  "today_news_events": {
+    "provider": "STATIC_OR_EMPTY_FALLBACK",
+    "is_live": false,
+    "provider_quality": 0.0,
+    "freshness": 0.0,
+    "completeness": 0.0,
+    "events": []
+  },
+  "today_filings_events": {
+    "provider": "EMPTY_FALLBACK",
+    "is_live": false,
+    "provider_quality": 0.0,
+    "freshness": 0.0,
+    "completeness": 0.0,
+    "events": []
+  },
+  "previous_candidates": [
+    {"ticker": "ZIM", "last_seen_date": "2026-05-24", "raw_score": 0.7, "fresh_evidence": false},
+    {"ticker": "GLD", "last_seen_date": "2026-05-20", "raw_score": 0.6, "fresh_evidence": false},
+    {"ticker": "RTX", "last_seen_date": "2026-05-28", "raw_score": 0.6, "fresh_evidence": false}
+  ],
+  "model_candidate_votes": [
+    {
+      "ticker": "RHM.DE", "name": "Rheinmetall", "country": "GERMANY",
+      "models": ["claude", "gpt", "gemini", "grok"],
+      "static_fallback_only": true,
+      "live_price_trigger": 0.0, "live_news_catalyst": 0.0, "live_filing_catalyst": 0.0, "abnormal_volume_or_move": 0.0,
+      "evidence_strength": 0.86, "model_agreement": 0.83, "catalyst_freshness": 0.36, "theme_strength": 0.96,
+      "risk_reward_clarity": 0.83, "data_freshness": 0.36, "contradiction_risk": 0.05, "chaos_risk": 0.0,
+      "concentration_penalty": 0.0, "stale_data_penalty": 0.18, "existing_exposure_penalty": 0.0,
+      "invalidation_clarity": 0.4, "liquidity_confidence": 0.5, "reconciliation_cleanliness": 0.5
+    },
+    {
+      "ticker": "AIR.PA", "name": "Airbus", "country": "FRANCE",
+      "models": ["claude", "gpt", "gemini"],
+      "static_fallback_only": true,
+      "live_price_trigger": 0.0, "live_news_catalyst": 0.0, "live_filing_catalyst": 0.0, "abnormal_volume_or_move": 0.0,
+      "evidence_strength": 0.84, "model_agreement": 0.80, "catalyst_freshness": 0.34, "theme_strength": 0.94,
+      "risk_reward_clarity": 0.81, "data_freshness": 0.34, "contradiction_risk": 0.05, "chaos_risk": 0.0,
+      "concentration_penalty": 0.0, "stale_data_penalty": 0.18, "existing_exposure_penalty": 0.0,
+      "invalidation_clarity": 0.4, "liquidity_confidence": 0.5, "reconciliation_cleanliness": 0.5
+    },
+    {
+      "ticker": "SAP.DE", "name": "SAP SE", "country": "GERMANY",
+      "models": ["claude", "gpt", "grok"],
+      "static_fallback_only": true,
+      "live_price_trigger": 0.0, "live_news_catalyst": 0.0, "live_filing_catalyst": 0.0, "abnormal_volume_or_move": 0.0,
+      "evidence_strength": 0.82, "model_agreement": 0.78, "catalyst_freshness": 0.33, "theme_strength": 0.92,
+      "risk_reward_clarity": 0.80, "data_freshness": 0.33, "contradiction_risk": 0.05, "chaos_risk": 0.0,
+      "concentration_penalty": 0.0, "stale_data_penalty": 0.18, "existing_exposure_penalty": 0.0,
+      "invalidation_clarity": 0.4, "liquidity_confidence": 0.5, "reconciliation_cleanliness": 0.5
+    },
+    {
+      "ticker": "NVDA", "name": "NVIDIA", "country": "US",
+      "models": ["claude", "gpt"],
+      "static_fallback_only": true,
+      "live_price_trigger": 0.0, "live_news_catalyst": 0.0, "live_filing_catalyst": 0.0, "abnormal_volume_or_move": 0.0,
+      "evidence_strength": 0.78, "model_agreement": 0.72, "catalyst_freshness": 0.25, "theme_strength": 0.80,
+      "risk_reward_clarity": 0.70, "data_freshness": 0.25, "contradiction_risk": 0.10, "chaos_risk": 0.10,
+      "concentration_penalty": 0.0, "stale_data_penalty": 0.20, "existing_exposure_penalty": 0.0,
+      "invalidation_clarity": 0.4, "liquidity_confidence": 0.5, "reconciliation_cleanliness": 0.5
+    },
+    {
+      "ticker": "NOC", "name": "Northrop Grumman", "country": "US",
+      "models": ["claude", "grok"],
+      "static_fallback_only": true,
+      "live_price_trigger": 0.0, "live_news_catalyst": 0.0, "live_filing_catalyst": 0.0, "abnormal_volume_or_move": 0.0,
+      "evidence_strength": 0.77, "model_agreement": 0.70, "catalyst_freshness": 0.25, "theme_strength": 0.80,
+      "risk_reward_clarity": 0.70, "data_freshness": 0.25, "contradiction_risk": 0.10, "chaos_risk": 0.05,
+      "concentration_penalty": 0.0, "stale_data_penalty": 0.20, "existing_exposure_penalty": 0.0,
+      "invalidation_clarity": 0.4, "liquidity_confidence": 0.5, "reconciliation_cleanliness": 0.5
+    },
+    {
+      "ticker": "TSLA", "name": "Tesla", "country": "US",
+      "models": ["grok"],
+      "static_fallback_only": true, "chaos_flag": true,
+      "live_price_trigger": 0.0, "live_news_catalyst": 0.0, "live_filing_catalyst": 0.0, "abnormal_volume_or_move": 0.0,
+      "evidence_strength": 0.60, "model_agreement": 0.60, "catalyst_freshness": 0.20, "theme_strength": 0.55,
+      "risk_reward_clarity": 0.50, "data_freshness": 0.20, "contradiction_risk": 0.20, "chaos_risk": 0.85,
+      "concentration_penalty": 0.10, "stale_data_penalty": 0.20, "existing_exposure_penalty": 0.10,
+      "invalidation_clarity": 0.2, "liquidity_confidence": 0.6, "reconciliation_cleanliness": 0.5
+    },
+    {
+      "ticker": "CSCO", "name": "Cisco", "country": "US",
+      "models": [], "prompt_only": true,
+      "static_fallback_only": true,
+      "live_price_trigger": 0.0, "live_news_catalyst": 0.0, "live_filing_catalyst": 0.0, "abnormal_volume_or_move": 0.0,
+      "evidence_strength": 0.50, "model_agreement": 0.20, "catalyst_freshness": 0.10, "theme_strength": 0.40,
+      "risk_reward_clarity": 0.40, "data_freshness": 0.10, "contradiction_risk": 0.10, "chaos_risk": 0.0,
+      "concentration_penalty": 0.10, "stale_data_penalty": 0.20, "existing_exposure_penalty": 0.0,
+      "invalidation_clarity": 0.3, "liquidity_confidence": 0.6, "reconciliation_cleanliness": 0.5
+    },
+    {
+      "ticker": "FXI", "name": "China Large-Cap ETF", "country": "CHINA",
+      "models": ["gemini"],
+      "static_fallback_only": true,
+      "live_price_trigger": 0.0, "live_news_catalyst": 0.0, "live_filing_catalyst": 0.0, "abnormal_volume_or_move": 0.0,
+      "evidence_strength": 0.45, "model_agreement": 0.30, "catalyst_freshness": 0.10, "theme_strength": 0.40,
+      "risk_reward_clarity": 0.35, "data_freshness": 0.10, "contradiction_risk": 0.15, "chaos_risk": 0.05,
+      "concentration_penalty": 0.10, "stale_data_penalty": 0.30, "existing_exposure_penalty": 0.0,
+      "invalidation_clarity": 0.2, "liquidity_confidence": 0.5, "reconciliation_cleanliness": 0.5
+    },
+    {
+      "ticker": "EWG", "name": "Germany ETF", "country": "GERMANY",
+      "models": ["gpt"],
+      "static_fallback_only": true,
+      "live_price_trigger": 0.0, "live_news_catalyst": 0.0, "live_filing_catalyst": 0.0, "abnormal_volume_or_move": 0.0,
+      "evidence_strength": 0.45, "model_agreement": 0.30, "catalyst_freshness": 0.10, "theme_strength": 0.45,
+      "risk_reward_clarity": 0.35, "data_freshness": 0.10, "contradiction_risk": 0.15, "chaos_risk": 0.05,
+      "concentration_penalty": 0.10, "stale_data_penalty": 0.30, "existing_exposure_penalty": 0.0,
+      "invalidation_clarity": 0.2, "liquidity_confidence": 0.5, "reconciliation_cleanliness": 0.5
+    }
+  ],
+  "model_existing_holding_reviews": [
+    {"ticker": "ZIM", "models": ["mistral"], "note": "model treated a non-current name as an open position"},
+    {"ticker": "GLD", "models": ["mistral"], "note": "model treated a sold name as an open position"}
+  ],
+  "trade_log": []
+}
