@@ -30,7 +30,12 @@ export default function DashboardPage() {
         setLiveSignals(ls);
         setLoading(false);
       },
-    );
+    ).catch(() => {
+      // The individual API helpers already swallow network/timeout errors and
+      // return mock/null, so this is defence-in-depth: it guarantees the screen
+      // leaves the loading state even if an unexpected error ever escapes.
+      setLoading(false);
+    });
   }, []);
 
   const { items, fabric_bull_state, fabric_stats, generated_at } = response;

@@ -1,4 +1,4 @@
-import { API_BASE } from './config';
+import { API_BASE, API_TIMEOUT_MS } from './config';
 import type { RealMoneyReadiness } from './realMoneyReadiness';
 import type { CalibrationMap } from './calibrationMap';
 import {
@@ -148,12 +148,48 @@ export class ApiHttpError extends Error {
   }
 }
 
+// Raised when a request exceeds API_TIMEOUT_MS.  The browser `fetch()` API
+// has no built-in timeout, so without this a reachable-but-hanging backend
+// (or a network policy that DROPs rather than REFUSEs packets) would leave
+// every dashboard screen stuck on "Loading…" indefinitely.  Callers treat
+// this exactly like any other network failure (mock / null fallback), so the
+// UI deterministically resolves to an error/empty/ready state.
+export class ApiTimeoutError extends Error {
+  timeoutMs: number;
+  constructor(timeoutMs: number) {
+    super(
+      `Request timed out after ${timeoutMs}ms. The backend did not respond in time.`,
+    );
+    this.name = 'ApiTimeoutError';
+    this.timeoutMs = timeoutMs;
+  }
+}
+
 async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const headers = buildHeaders(init);
-  const res = await fetch(`${API_BASE}${path}`, {
-    ...init,
-    headers,
-  });
+  // Bound every request with an AbortController so a hung connection cannot
+  // wedge the calling screen.  We respect a caller-supplied signal when
+  // present, otherwise we drive our own timeout-backed controller.
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE}${path}`, {
+      ...init,
+      headers,
+      signal: init?.signal ?? controller.signal,
+    });
+  } catch (err) {
+    // An AbortError here is our timeout firing (or a caller-cancelled signal).
+    // Normalise the timeout case so callers can distinguish it from a generic
+    // network error if they wish; either way it is caught by their fallbacks.
+    if (controller.signal.aborted || (err as { name?: string })?.name === 'AbortError') {
+      throw new ApiTimeoutError(API_TIMEOUT_MS);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
   if (res.status === 401 || res.status === 403) {
     throw new ApiTokenRequiredError(res.status);
   }
@@ -190,7 +226,18 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
     }
     throw new ApiHttpError(res.status, message, reason, detail);
   }
-  return res.json() as Promise<T>;
+  // Guard JSON parsing: a 2xx response with an empty or malformed body would
+  // otherwise reject with a low-level SyntaxError that callers don't expect.
+  // Surface it as a structured ApiHttpError so the same fallbacks apply.
+  try {
+    return (await res.json()) as T;
+  } catch {
+    throw new ApiHttpError(
+      res.status,
+      'Malformed or empty JSON response from server.',
+      'invalid_schema',
+    );
+  }
 }
 
 export async function checkHealth(): Promise<HealthResponse | null> {

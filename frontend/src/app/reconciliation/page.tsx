@@ -64,16 +64,25 @@ export default function ReconciliationPage() {
       // Awaiting Reconciliation list or the Reconciled column.  The
       // Manual Trade Log page still calls getManualTrades() with no
       // filter for full-history audit.
-      const [queueData, tradesData, learningData] = await Promise.all([
-        getReconciliationQueue(50),
-        getManualTrades({ origin: 'manual_trade_log' }),
-        getLearningCompleteness(20),
-      ]);
-      if (!cancelled) {
-        setQueue(queueData);
-        setManualTrades(tradesData);
-        setLearning(learningData);
-        setQueueLoading(false);
+      try {
+        const [queueData, tradesData, learningData] = await Promise.all([
+          getReconciliationQueue(50),
+          getManualTrades({ origin: 'manual_trade_log' }),
+          getLearningCompleteness(20),
+        ]);
+        if (!cancelled) {
+          setQueue(queueData);
+          setManualTrades(tradesData);
+          setLearning(learningData);
+        }
+      } finally {
+        // Always leave the loading state. The API helpers already swallow
+        // network/timeout errors and return null (rendered as the offline /
+        // empty state); the finally guards against any unexpected throw so the
+        // queue never stays stuck on "Loading awaiting reconciliation list…".
+        if (!cancelled) {
+          setQueueLoading(false);
+        }
       }
     })();
     return () => {

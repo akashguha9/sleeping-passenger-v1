@@ -28,7 +28,12 @@ export default function ManualTradeLogPage() {
         setQueue(queueData);
         setLoading(false);
       },
-    );
+    ).catch(() => {
+      // Defence-in-depth: getManualTrades/getReconciliationQueue already
+      // return null on network/timeout errors (rendered as the offline
+      // state). This guarantees we leave the loading state regardless.
+      setLoading(false);
+    });
   }, []);
 
   // Defence-in-depth: backend GET already strips fake / synthetic rows

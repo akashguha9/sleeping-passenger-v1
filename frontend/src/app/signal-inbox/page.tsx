@@ -61,7 +61,12 @@ export default function SignalInboxPage() {
         setDiagnostics(diag);
         setLoading(false);
       },
-    );
+    ).catch(() => {
+      // Defence-in-depth: the API helpers already fall back to mock/null on
+      // network/timeout errors; this guarantees we leave the loading state
+      // even if an unexpected error ever escapes.
+      setLoading(false);
+    });
   }, []);
 
   const { items, fabric_bull_state } = response;

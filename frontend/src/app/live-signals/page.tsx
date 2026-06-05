@@ -991,6 +991,12 @@ export default function LiveSignalsPage() {
       setHealth(h);
       setRefreshStatus(r);
       setLoading(false);
+    }).catch(() => {
+      // Defence-in-depth: getLiveSignals/etc already swallow network/timeout
+      // errors and return null; this guarantees the tab leaves the loading
+      // state even if an unexpected error ever escapes.
+      setBackendOffline(true);
+      setLoading(false);
     });
   }, [sourceFilter]);
 
