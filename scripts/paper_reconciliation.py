@@ -248,6 +248,12 @@ def _compute_holding_period_days(entry_time: Any, exit_time: Any) -> float | Non
     exit_dt = _parse_iso_timestamp(exit_time)
     if entry_dt is None or exit_dt is None:
         return None
+    # A negative holding period means exit precedes entry — a swapped/invalid
+    # date pair, not a real holding window.  Treat it the same as a missing
+    # date (return None) instead of emitting a misleading negative number that
+    # could silently corrupt holding-period stats.  Same-day (0.0) is valid.
+    if exit_dt < entry_dt:
+        return None
     return round((exit_dt - entry_dt).total_seconds() / 86400.0, 3)
 
 
