@@ -140,8 +140,12 @@ frontend/node_modules/
 frontend/tsconfig.tsbuildinfo
 frontend/*.tsbuildinfo
 
-# Local Claude Code project settings
-.claude/
+# Local Claude Code project settings. Ignore the directory contents, but track
+# the committed SessionStart hook + shared settings so web sessions can install
+# test/lint deps. Personal local overrides (settings.local.json) stay ignored.
+.claude/*
+!.claude/settings.json
+!.claude/hooks/
 
 google-service-account.json
 *service-account*.json
