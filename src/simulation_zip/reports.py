@@ -263,8 +263,233 @@ def _improvement_section(scores: dict, diag: dict) -> str:
     return "\n".join(lines)
 
 
+_SC_TITLES = {
+    "local_corpus_accessibility": "Local corpus accessibility",
+    "safe_ingestion_robustness": "Safe ingestion robustness",
+    "incremental_reproducibility_cache": "Incremental reproducibility/cache",
+    "dataset_family_classification": "Dataset family classification",
+    "parser_coverage": "Parser coverage",
+    "parsed_simulation_volume": "Parsed simulation volume",
+    "evidence_quality": "Evidence quality",
+    "noise_duplicate_handling": "Noise and duplicate handling",
+    "source_diversity": "Source diversity",
+    "market_data_readiness": "Market-data readiness",
+    "calibration_hardening": "Calibration hardening",
+    "abstention_overconfidence_discipline": "Abstention/overconfidence discipline",
+    "high_confidence_failure_handling": "High-confidence failure handling",
+    "delayed_outcome_handling": "Delayed outcome handling",
+    "product_mvp_clarity": "Product/MVP clarity",
+    "advisory_guardrail_preservation": "Advisory-only guardrail preservation",
+    "report_dashboard_usefulness": "Report/dashboard usefulness",
+    "test_coverage": "Test coverage",
+}
+
+_SC_ORDER = list(_SC_TITLES.keys())
+
+
+def _sc_rows(card: dict) -> list[str]:
+    segs = card.get("segments", {})
+    rows = []
+    for cat in _SC_ORDER:
+        s = segs.get(cat, {})
+        rows.append(
+            f"| {_SC_TITLES[cat]} | {s.get('before')} | {s.get('after')} "
+            f"| {s.get('delta')} | {s.get('relative_lift_pct')}% "
+            f"| weight={s.get('weight')} | {s.get('label')} |"
+        )
+    o = card.get("overall", {})
+    rows.append(
+        f"| **Overall MVP simulation-readiness** | {o.get('overall_before')} "
+        f"| {o.get('overall_after')} | {o.get('overall_delta')} "
+        f"| {o.get('overall_relative_lift_pct')}% | weighted | SIMULATION_ONLY |"
+    )
+    return rows
+
+
+def render_sprint2_scorecard_markdown(report: dict) -> str:
+    card = report.get("scorecard", {})
+    o = card.get("overall", {})
+    lines = [
+        "# Sleeping Passenger — Zip Simulation Sprint 2 Scorecard",
+        "",
+        f"_Run type: **{report.get('run_type')}** | Corpus: {report.get('corpus_label')} "
+        f"| {report.get('generated_at')}_",
+        f"_Labels: {', '.join(SIMULATION_LABELS)}_",
+        "",
+        "| Segment | Before | After | Delta | Relative Lift | Evidence Basis | Label |",
+        "|---|---:|---:|---:|---:|---|---|",
+    ]
+    lines += _sc_rows(card)
+    lines += [
+        "",
+        f"Segment caps: {o.get('segment_caps')}",
+        f"Overall caps: {o.get('overall_caps')}",
+        "",
+        "> SIMULATION_ONLY. Not live trading proof, not broker data, not "
+        "financial advice. 'Before' = Sprint-1 capability on this corpus; "
+        "'After' = Sprint-2 upgraded capability.",
+        "",
+    ]
+    return "\n".join(lines)
+
+
+def render_sprint2_integration_markdown(report: dict) -> str:
+    s = report.get("safety", {})
+    diag = report.get("diagnostics", {})
+    fb = report.get("family_breakdown", {})
+    adv = report.get("advanced_metrics", {})
+    card = report.get("scorecard", {})
+    o = card.get("overall", {})
+    cache = report.get("cache", {})
+    chess = fb.get("chess_pgn", {})
+    scraped = fb.get("scraped_text", {})
+    market = fb.get("market_or_finance_data", {})
+    cal = adv.get("calibration", {})
+    eqr = adv.get("evidence_quality", {})
+
+    out: list[str] = []
+    A = out.append
+    A("# Sleeping Passenger Zip Simulation Sprint 2 Report")
+    A("")
+    A(f"_Labels: {', '.join(SIMULATION_LABELS)}_")
+    A("")
+    A("## 1. Executive Summary")
+    A(f"- Run type: **{report.get('run_type')}**")
+    A(f"- Zip found: {report.get('run_type') not in ('BLOCKED_NO_ZIP',)}")
+    A(f"- Zip size: {s.get('zip_file_mb')} MB")
+    A(f"- Files scanned: {s.get('member_count')}")
+    A(f"- Parsed simulation records: {diag.get('usable_records')}")
+    A(f"- Dataset families detected/parsed: {diag.get('families_detected')} / "
+      f"{diag.get('families_parsed')}")
+    A(f"- Overall before -> after: {o.get('overall_before')} -> "
+      f"{o.get('overall_after')} (Δ {o.get('overall_delta')})")
+    A("- Label: SIMULATION_ONLY")
+    A("")
+    A("## 2. Local Corpus Reality Check")
+    rt = report.get("run_type")
+    if rt == "REAL_LOCAL_ZIP":
+        A("This report used the local Windows file path supplied by the user "
+          "(REAL_LOCAL_ZIP).")
+    elif rt == "BLOCKED_NO_ZIP":
+        A("BLOCKED_NO_ZIP — the supplied local zip path was not reachable in "
+          "this execution environment, so the run failed closed. Re-run the "
+          "exact command on the machine that holds the zip for real numbers.")
+    elif rt == "BLOCKED_UNSAFE":
+        A("BLOCKED_UNSAFE — the archive was present but failed safety checks "
+          "(corruption/zip-slip/zip-bomb). Failed closed.")
+    else:
+        A(f"SYNTHETIC_FIXTURE / {rt} — exercised against a generated fixture, "
+          "not the real corpus.")
+    A("")
+    A("## 3. Safety and Fail-Closed Results")
+    checks = s.get("checks", {})
+    A(f"- Archive status: {s.get('archive_status')} ({s.get('reason')})")
+    A(f"- Path-traversal / absolute-path: {'PASS' if checks.get('no_path_traversal', True) else 'BLOCKED'}")
+    A(f"- Corruption/openable: {'PASS' if checks.get('openable') else 'FAIL/NA'}")
+    A(f"- Compression ratio (CR_total): {s.get('cr_total')}")
+    A("- Streaming memory-safe read: PASS (no full-zip load)")
+    A(f"- Cache hit rate (incremental index): {cache.get('cache_hit_rate')}")
+    A("")
+    A("## 4. Dataset Family Breakdown")
+    A(f"- chess_pgn: games={chess.get('games', chess.get('games_parsed', 0))}, "
+      f"upset_rate={chess.get('upset_rate')}, hc_failure_rate={chess.get('high_conf_failure_rate')}, "
+      f"draw_rate={chess.get('draw_rate')}, long_game_rate={chess.get('long_game_rate')}, "
+      f"timeout_rate={chess.get('timeout_rate')}")
+    A(f"- hackathon_project: projects={fb.get('hackathon_project', {}).get('projects')}, "
+      f"product_corpus={fb.get('hackathon_project', {}).get('product_corpus')}")
+    A(f"- scraped_text: docs={scraped.get('documents')}, "
+      f"unique_domains={scraped.get('unique_domains')}, "
+      f"domain_diversity={scraped.get('domain_diversity')}, "
+      f"duplicate_ratio={scraped.get('duplicate_ratio')}")
+    A(f"- market_or_finance_data: valid_files={market.get('files_with_valid_market_data')}, "
+      f"fully_ready={market.get('fully_ready')} "
+      f"(MARKET_DATA_DESCRIPTIVE_ONLY unless valid signals+outcomes)")
+    A("")
+    A("## 5. Advanced Metrics")
+    if cal.get("status") == "OK":
+        ts = cal.get("tau_star") or {}
+        A(f"- Calibration (chess Elo stress): Brier={cal.get('brier')}, "
+          f"ECE={cal.get('ece')}, MCE={cal.get('mce')}")
+        A(f"- Reliability decomposition: {cal.get('reliability')}")
+        A(f"- Abstention τ* (max DQS): threshold={ts.get('threshold')}, "
+          f"coverage={ts.get('coverage')}, accuracy={ts.get('accuracy')}, "
+          f"hcfr={ts.get('hcfr')}, dqs={ts.get('dqs')}")
+        A(f"- Bootstrap CI (Brier): {cal.get('brier_bootstrap_ci')}")
+    else:
+        A("- Calibration: NO_DATA")
+    A(f"- Evidence quality: Q_corpus={eqr.get('Q_corpus')} band={eqr.get('band')}")
+    A(f"- Extra bootstrap CIs: {list(adv.get('bootstrap_cis', {}).keys()) or 'NO_DATA'}")
+    A("")
+    A("## 6. Sprint 2 Segmented Scores")
+    A("")
+    A("| Segment | Before | After | Delta | Relative Lift | Evidence Basis | Label |")
+    A("|---|---:|---:|---:|---:|---|---|")
+    out.extend(_sc_rows(card))
+    A("")
+    A(f"Overall caps: {o.get('overall_caps')} | Segment caps: {o.get('segment_caps')}")
+    A("")
+    A("## 7. What Improved")
+    A(_sc_improvement(card))
+    A("")
+    A("## 8. What Did Not Improve / Honest Limits")
+    A("- Does NOT prove live trading profitability.")
+    A("- Does NOT prove stock prediction accuracy.")
+    A("- Chess PGNs are behavioural/calibration stress data, not market data.")
+    A("- Hackathon files are product/process simulations.")
+    A("- Scraped text is noisy evidence, not ground truth.")
+    A("- Market metrics computed only if valid market-like data existed; else NO_DATA.")
+    A("- Any uplift is SIMULATION-READINESS uplift, not alpha.")
+    A("")
+    A("## 9. Mathematical Appendix")
+    A("- Compression ratio: `uncompressed/max(compressed,1)`")
+    A("- Family confidence v2: `0.20·ext+0.25·hdr+0.20·kw+0.20·schema+0.10·path+0.05·meta`")
+    A("- Cache key: `SHA256(zip_path::size::archive::csize::usize::mtime)`; "
+      "strong: `SHA256(zip_path::archive::file_sha256)`")
+    A("- Evidence quality: `Q=100·Σ w_k·c_k` (provenance .20, parser_conf .15, "
+      "schema .15, source .15, recency .10, dedup .10, safety .10, limits .05)")
+    A("- Shannon diversity: `D=H/ln(K)`; duplicate_ratio: `dups/max(n,1)`")
+    A("- Elo expected: `1/(1+10^(-ΔElo/400))`; surprise: `|A-E|`")
+    A("- Brier, LogLoss, ECE, MCE; reliability `BS=REL-RES+UNC`")
+    A("- Abstention: act iff `max(p,1-p)>=τ`; DQS=`acc·cov^0.5·(1-hcfr)^2`; τ*=argmax DQS")
+    A("- Bootstrap percentile CI (seeded); market returns/Sharpe/Sortino/MDD")
+    A("- Scorecard caps: zip_not_found<=40; safety_blocked<=50; tests_fail<=60; "
+      "guardrails_broken<=30; provenance_missing -> evidence<=50 & ingestion<=60; "
+      "no_market -> market_readiness<=60; no_outcomes -> calibration<=75; "
+      "no_records -> volume/evidence/diversity=0")
+    A("")
+    A("## 11. Commands to Reproduce")
+    A(f"`python -m src.simulation_zip.run --sprint2 --zip \"{report.get('zip_path')}\" "
+      "--bootstrap-samples 300 --seed 42`")
+    A("")
+    return "\n".join(out)
+
+
+def _sc_improvement(card: dict) -> str:
+    segs = card.get("segments", {})
+    strong, mod, slight, none_ = [], [], [], []
+    for cat, s in segs.items():
+        d = s.get("delta", 0) or 0
+        t = _SC_TITLES.get(cat, cat)
+        if d >= 60:
+            strong.append(t)
+        elif d >= 30:
+            mod.append(t)
+        elif d > 0:
+            slight.append(t)
+        else:
+            none_.append(t)
+    return "\n".join([
+        f"- Strongly improved (Δ>=60): {strong or 'none'}",
+        f"- Moderately improved (30<=Δ<60): {mod or 'none'}",
+        f"- Slightly improved (0<Δ<30): {slight or 'none'}",
+        f"- No measured change (Δ<=0): {none_ or 'none'}",
+    ])
+
+
 __all__ = [
     "write_json",
     "render_summary_markdown",
     "render_integration_markdown",
+    "render_sprint2_scorecard_markdown",
+    "render_sprint2_integration_markdown",
 ]

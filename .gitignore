@@ -96,8 +96,11 @@ data/logs/*
 # Simulation zip corpora are large local-only inputs — never commit them.
 *.zip
 !templates/*.zip
-# Local-only simulation-zip reports (also covered by runtime/ above).
+# Local-only simulation-zip reports + incremental cache (also under runtime/).
 runtime/reports/zip_simulation_*
+runtime/simulation_cache/
+runtime/raw_corpus/
+runtime/extracted_corpus/
 # Committed CSV templates (negate the blanket *.csv ignore above).
 !templates/outcome_import_template.csv
 *.sqlite

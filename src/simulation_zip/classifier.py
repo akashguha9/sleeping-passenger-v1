@@ -109,6 +109,12 @@ class ClassificationResult:
     all_scores: dict[str, float]
     content_type_guess: str
     parser_candidate: str
+    # Sprint 2 v2 enrichment (additive; core fields above are unchanged).
+    refined_family: str = "unknown"
+    refined_confidence: float = 0.0
+    refined_confidence_class: str = "UNKNOWN"
+    metadata_match: int = 0
+    v2_features: dict[str, int] = field(default_factory=dict)
 
 
 _CONTENT_TYPE_BY_EXT = {
@@ -135,6 +141,116 @@ _PARSER_BY_FAMILY = {
     DatasetFamily.MARKET_OR_FINANCE_DATA: "market_parser",
     DatasetFamily.CODE_CORPUS: "code_corpus_indexer",
     DatasetFamily.UNKNOWN: "none",
+}
+
+# --------------------------------------------------------------------------- #
+# Sprint 2 v2 classifier: 6-feature weighting + extended refined families.    #
+# Additive — the core 5-feature classify() above is preserved unchanged so    #
+# Sprint 1 behaviour/tests stay stable.  The refined family is reported       #
+# alongside the core family for richer inventory diagnostics.                 #
+# --------------------------------------------------------------------------- #
+W2_EXTENSION = 0.20
+W2_HEADER = 0.25
+W2_KEYWORD = 0.20
+W2_SCHEMA = 0.20
+W2_PATH = 0.10
+W2_METADATA = 0.05
+
+# Extended refined families -> parent core family (for diagnostics rollup).
+EXTENDED_TO_PARENT: dict[str, str] = {
+    "chess_pgn": "chess_pgn",
+    "notebook_corpus": "code_corpus",
+    "code_corpus": "code_corpus",
+    "spreadsheet_corpus": "market_or_finance_data",
+    "json_api_dump": "scraped_text",
+    "html_scrape": "scraped_text",
+    "social_media_scrape": "scraped_text",
+    "scraped_text": "scraped_text",
+    "market_or_finance_data": "market_or_finance_data",
+    "resume_or_profile_data": "hackathon_project",
+    "pitch_deck_or_business_doc": "hackathon_project",
+    "hackathon_project": "hackathon_project",
+    "image_or_media_metadata": "unknown",
+    "compressed_nested_archive": "unknown",
+    "logs_or_runtime_artifacts": "unknown",
+    "unknown": "unknown",
+}
+
+# Refined profiles: ext / header / keyword / schema / path / meta(basename).
+_EXTENDED_PROFILES: dict[str, dict[str, tuple[str, ...]]] = {
+    "chess_pgn": {
+        "ext": (".pgn",), "header": ("[event ", "[white ", "[result "),
+        "keyword": ("whiteelo", "eco", "timecontrol"), "schema": (),
+        "path": ("chess", "pgn", "lichess"), "meta": ("game", "chesscom", "lichess"),
+    },
+    "notebook_corpus": {
+        "ext": (".ipynb",), "header": ('"cells"', '"nbformat"'),
+        "keyword": ("nbformat", "cell_type", "execution_count"), "schema": (),
+        "path": ("notebook", "nb"), "meta": ("notebook",),
+    },
+    "spreadsheet_corpus": {
+        "ext": (".xlsx", ".xls", ".ods"), "header": (),
+        "keyword": ("sheet", "workbook"), "schema": (),
+        "path": ("sheet", "excel", "xls"), "meta": ("sheet", "book"),
+    },
+    "json_api_dump": {
+        "ext": (".json",), "header": ('{"', '[{'),
+        "keyword": ('"data"', '"results"', '"items"', "endpoint", "api"),
+        "schema": (), "path": ("api", "dump", "json"), "meta": ("api", "dump"),
+    },
+    "html_scrape": {
+        "ext": (".html", ".htm"), "header": ("<html", "<!doctype html", "<head"),
+        "keyword": ("<div", "<span", "href="), "schema": (),
+        "path": ("html", "scrape", "web"), "meta": ("page", "index"),
+    },
+    "social_media_scrape": {
+        "ext": (".json", ".csv", ".txt"), "header": (),
+        "keyword": ("reddit", "twitter", "tweet", "upvotes", "subreddit", "linkedin"),
+        "schema": ("author", "permalink", "subreddit", "likes"),
+        "path": ("reddit", "twitter", "social", "tweets"),
+        "meta": ("reddit", "tweet", "social"),
+    },
+    "market_or_finance_data": {
+        "ext": (".csv", ".parquet", ".json"), "header": (),
+        "keyword": ("ticker", "ohlc", "close", "pnl"),
+        "schema": ("ticker", "symbol", "close", "open", "high", "low", "volume"),
+        "path": ("market", "ohlcv", "price", "stock", "finance"),
+        "meta": ("ohlcv", "prices", "quotes"),
+    },
+    "resume_or_profile_data": {
+        "ext": (".pdf", ".docx", ".txt", ".json"), "header": (),
+        "keyword": ("experience", "education", "skills", "resume", "curriculum"),
+        "schema": (), "path": ("resume", "cv", "profile"),
+        "meta": ("resume", "cv", "profile"),
+    },
+    "pitch_deck_or_business_doc": {
+        "ext": (".md", ".pdf", ".pptx", ".txt"), "header": ("# ", "## "),
+        "keyword": ("pitch", "market size", "revenue", "business model", "go-to-market"),
+        "schema": (), "path": ("pitch", "deck", "business"),
+        "meta": ("pitch", "deck", "slides"),
+    },
+    "image_or_media_metadata": {
+        "ext": (".jpg", ".jpeg", ".png", ".gif", ".mp4", ".exif", ".webp"),
+        "header": (), "keyword": ("exif", "width", "height", "camera"),
+        "schema": (), "path": ("img", "image", "media", "photo"),
+        "meta": ("img", "photo", "thumb"),
+    },
+    "compressed_nested_archive": {
+        "ext": (".zip", ".tar", ".gz", ".7z", ".rar"), "header": (),
+        "keyword": (), "schema": (), "path": ("archive", "nested"),
+        "meta": ("backup", "archive"),
+    },
+    "logs_or_runtime_artifacts": {
+        "ext": (".log", ".out", ".err"), "header": (),
+        "keyword": ("traceback", "error", "warning", "info ", "debug "),
+        "schema": (), "path": ("log", "logs", "runtime"), "meta": ("log",),
+    },
+    "hackathon_project": {
+        "ext": (".md", ".txt"), "header": ("# ", "## ", "## inspiration"),
+        "keyword": ("hackathon", "devpost", "prototype", "demo", "judging", "submission"),
+        "schema": (), "path": ("hackathon", "submission", "project"),
+        "meta": ("readme", "submission"),
+    },
 }
 
 
@@ -187,6 +303,49 @@ class DatasetClassifier:
         )
         return FamilyScore(family, raw, min(1.0, raw), features)
 
+    def _score_refined(
+        self, fam: str, ext: str, sample_lower: str, path_lower: str,
+        header_tokens: set[str], meta_tokens: set[str],
+    ) -> tuple[float, dict[str, int]]:
+        prof = _EXTENDED_PROFILES[fam]
+        ext_m = 1 if ext in prof["ext"] else 0
+        hdr_m = 1 if any(h in sample_lower for h in prof["header"]) else 0
+        kw_m = 1 if any(k in sample_lower for k in prof["keyword"]) else 0
+        sch_m = 0
+        if prof["schema"]:
+            sch_m = 1 if len(header_tokens & set(prof["schema"])) >= 2 else 0
+        path_m = 1 if any(p in path_lower for p in prof["path"]) else 0
+        meta_m = 1 if any(m in meta_tokens for m in prof["meta"]) else 0
+        raw = (
+            W2_EXTENSION * ext_m + W2_HEADER * hdr_m + W2_KEYWORD * kw_m
+            + W2_SCHEMA * sch_m + W2_PATH * path_m + W2_METADATA * meta_m
+        )
+        return raw, {
+            "extension_match": ext_m, "header_match": hdr_m,
+            "keyword_match": kw_m, "schema_match": sch_m,
+            "path_match": path_m, "metadata_match": meta_m,
+        }
+
+    def classify_refined(
+        self, archive_path: str, sample_lower: str, header_tokens: set[str]
+    ) -> tuple[str, float, dict[str, int]]:
+        ext = os.path.splitext(archive_path)[1].lower()
+        path_lower = archive_path.replace("\\", "/").lower()
+        base = os.path.basename(path_lower)
+        import re as _re
+
+        meta_tokens = set(_re.split(r"[^a-z0-9]+", base)) - {""}
+        best_fam, best_raw, best_feat = "unknown", 0.0, {}
+        for fam in _EXTENDED_PROFILES:
+            raw, feat = self._score_refined(
+                fam, ext, sample_lower, path_lower, header_tokens, meta_tokens
+            )
+            if raw > best_raw:
+                best_fam, best_raw, best_feat = fam, raw, feat
+        if best_raw < 0.25:
+            best_fam = "unknown"
+        return best_fam, min(1.0, best_raw), best_feat
+
     def classify(self, archive_path: str, sample: bytes) -> ClassificationResult:
         ext = os.path.splitext(archive_path)[1].lower()
         path_lower = archive_path.replace("\\", "/").lower()
@@ -215,6 +374,10 @@ class DatasetClassifier:
             family = best.family
             confidence = best.confidence
             features = best.features
+
+        refined_fam, refined_conf, v2_feat = self.classify_refined(
+            archive_path, sample_lower, header_tokens
+        )
         return ClassificationResult(
             family=family,
             confidence=round(confidence, 6),
@@ -223,6 +386,11 @@ class DatasetClassifier:
             all_scores={f.value: round(s.raw_score, 6) for f, s in scores.items()},
             content_type_guess=_CONTENT_TYPE_BY_EXT.get(ext, "application/octet-stream"),
             parser_candidate=_PARSER_BY_FAMILY[family],
+            refined_family=refined_fam,
+            refined_confidence=round(refined_conf, 6),
+            refined_confidence_class=self.confidence_class(refined_conf).value,
+            metadata_match=v2_feat.get("metadata_match", 0),
+            v2_features=v2_feat,
         )
 
 
@@ -237,4 +405,11 @@ __all__ = [
     "W_KEYWORD",
     "W_SCHEMA",
     "W_PATH",
+    "W2_EXTENSION",
+    "W2_HEADER",
+    "W2_KEYWORD",
+    "W2_SCHEMA",
+    "W2_PATH",
+    "W2_METADATA",
+    "EXTENDED_TO_PARENT",
 ]

@@ -81,3 +81,45 @@ is never used in automated tests) and covers: missing/corrupt zip, zip-slip and
 absolute-path rejection, compression-ratio warning, manifest + classification,
 all four parsers, provenance + score determinism, the test-failure and
 guardrail caps, advisory-only preservation, and a CLI smoke test.
+
+## Sprint 2 upgrades
+
+Run the upgraded pipeline (incremental cache, calibration/abstention, bootstrap
+CIs, evidence quality, 18-segment scorecard):
+
+```bash
+python -m src.simulation_zip.run --sprint2 \
+  --zip "C:\Users\akash\Downloads\hackathon_scraper.zip" \
+  --bootstrap-samples 300 --seed 42
+```
+
+New modules:
+
+- `index_store.py` — SQLite incremental index at
+  `runtime/simulation_cache/zip_corpus_index.sqlite` (git-ignored). Cache key:
+  `SHA256(zip_path::size::archive::csize::usize::mtime)`; strong key uses the
+  member's `file_sha256`. Reruns on the same corpus report a `cache_hit_rate`.
+- `classifier.py` v2 — 6-feature scoring (adds a metadata feature; weights
+  `0.20/0.25/0.20/0.20/0.10/0.05`) plus refined extended families
+  (notebook/spreadsheet/json-api/html/social/resume/pitch/media/nested-archive/
+  logs) reported alongside the stable core family.
+- `parsers.py` — market fuzzy column mapping (θ=0.80) with a short-name guard,
+  outcome-leakage detection (`LOW/MEDIUM/HIGH`, blocks predictive uplift on
+  HIGH), walk-forward 70/15/15 split, `MARKET_DATA_DESCRIPTIVE_ONLY` labelling;
+  chess metadata stress aggregates; the 10-component hackathon rubric v2;
+  scraped-text HTML/URL normalization + domain diversity.
+- `metrics.py` — MCE, abstention grid + DQS + τ*, seeded percentile bootstrap
+  CI, Sortino, walk-forward split, token similarity.
+- `evidence_quality.py` — per-record/family/corpus quality `Q` with bands.
+- `scorecard_v2.py` — 18 weighted segments (spec weights normalized to a
+  simplex) with caps: zip-not-found ≤40, safety-blocked ≤50, tests-fail ≤60,
+  guardrails-broken ≤30, provenance-missing → evidence ≤50 / ingestion ≤60,
+  no-market → readiness ≤60, no-outcomes → calibration ≤75, no-records →
+  volume/evidence/diversity = 0.
+- `sprint2.py` — orchestration; `tests/test_simulation_zip_sprint2.py` covers
+  all of the above.
+
+> **Environment note (unchanged from Sprint 1).** The cloud container that
+> authored this cannot reach a local `C:\` path, so the real-corpus run is
+> `BLOCKED_NO_ZIP` there and capped at 40. Run the command on the Windows
+> machine that holds the zip to get real `REAL_LOCAL_ZIP` numbers.

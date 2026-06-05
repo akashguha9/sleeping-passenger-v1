@@ -259,6 +259,21 @@ class ScrapedDoc:
     topic_keywords: list[str]
     normalized_hash: str
     provenance_id: str
+    domain: str = "unknown"
+    token_count: int = 0
+
+
+_HTML_TAG_RE = re.compile(r"<[^>]+>")
+_DOMAIN_RE = re.compile(r"https?://(?:www\.)?([^/\s\"']+)")
+
+
+def normalize_scraped_text(text: str) -> str:
+    """Phase 9 norm(): strip HTML, collapse whitespace, lowercase, drop URL
+    schemes/paths but keep domains so duplicate detection is robust."""
+    t = _HTML_TAG_RE.sub(" ", text)
+    t = re.sub(r"https?://(?:www\.)?([^/\s\"']+)\S*", r"\1", t)  # keep domain
+    t = re.sub(r"\s+", " ", t).strip().lower()
+    return t
 
 
 class ScrapedTextParser:
@@ -286,8 +301,10 @@ class ScrapedTextParser:
         for w in words:
             freq[w] = freq.get(w, 0) + 1
         topics = [w for w, _ in sorted(freq.items(), key=lambda kv: (-kv[1], kv[0]))[:8]]
-        normalized = re.sub(r"\s+", " ", text.strip().lower())
+        normalized = normalize_scraped_text(text)
         nhash = hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+        dm = _DOMAIN_RE.search(text)
+        domain = dm.group(1).lower() if dm else "unknown"
         return ScrapedDoc(
             doc_id=provenance_id[:16],
             source=source,
@@ -297,6 +314,8 @@ class ScrapedTextParser:
             topic_keywords=topics,
             normalized_hash=nhash,
             provenance_id=provenance_id,
+            domain=domain,
+            token_count=len(words),
         )
 
 
@@ -315,15 +334,22 @@ def scraped_corpus_stats(docs: list[ScrapedDoc]) -> dict[str, object]:
             duplicates += 1
         else:
             seen.add(d.normalized_hash)
+    domain_counts: dict[str, int] = {}
+    for d in docs:
+        domain_counts[d.domain] = domain_counts.get(d.domain, 0) + 1
     div = metrics.shannon_diversity(source_counts)
+    ddiv = metrics.shannon_diversity(domain_counts)
     return {
         "documents": len(docs),
         "unique_sources": div["unique_sources"],
         "source_entropy": round(div["entropy"], 6),
         "source_diversity": round(div["normalized_diversity"], 6),
+        "unique_domains": ddiv["unique_sources"],
+        "domain_diversity": round(ddiv["normalized_diversity"], 6),
         "duplicate_ratio": round(metrics.duplicate_ratio(len(docs), duplicates), 6),
         "duplicate_count": duplicates,
         "sources": dict(sorted(source_counts.items())),
+        "domains": dict(sorted(domain_counts.items())),
     }
 
 
@@ -336,27 +362,82 @@ _MARKET_REQUIRED_ANY = (
     ("date", "datetime", "timestamp"),
 )
 
+# Sprint 2: canonical field aliases for fuzzy column mapping (θ = 0.80).
+_CANONICAL_ALIASES: dict[str, tuple[str, ...]] = {
+    "ticker": ("ticker", "symbol", "instrument", "security", "asset"),
+    "date": ("date", "datetime", "timestamp", "time"),
+    "open": ("open", "o"),
+    "high": ("high", "h"),
+    "low": ("low", "l"),
+    "price": ("close", "adj close", "adjusted_close", "adj_close", "price", "last", "c"),
+    "volume": ("volume", "vol", "v"),
+    "signal": ("signal", "prediction", "score", "rank", "recommendation", "position"),
+    "outcome": ("outcome", "result", "label", "target", "win", "success"),
+    "pnl": ("pnl", "p/l", "profit", "loss", "return"),
+    "probability": ("probability", "prob", "pred_proba", "p"),
+}
+FUZZY_THRESHOLD = 0.80
+# Column-name tokens that mark a feature as outcome leakage if used as input.
+_LEAKAGE_TOKENS = (
+    "future", "next", "target", "outcome", "label", "pnl",
+    "return_after", "tomorrow", "forward",
+)
+
 
 class MarketParser:
     version = PARSER_VERSION
 
+    def _fuzzy_map(self, header: list[str]) -> tuple[dict[str, str | None], list[str]]:
+        """Map each canonical field to the best-matching header column.
+
+        Short column names (<3 chars) require an *exact* alias match (so a
+        stray ``c`` cannot fuzzily claim ``close``).  Returns the mapping plus a
+        list of ambiguous columns that matched more than one canonical field.
+        """
+        cols = [c.strip() for c in header]
+        cols_lower = [c.lower() for c in cols]
+        mapping: dict[str, str | None] = {}
+        claims: dict[str, list[str]] = {}
+        for canonical, aliases in _CANONICAL_ALIASES.items():
+            best_col: str | None = None
+            best_sim = 0.0
+            for original, low in zip(cols, cols_lower):
+                exact = low in aliases
+                if len(low) < 3:
+                    sim = 1.0 if exact else 0.0
+                else:
+                    sim = 1.0 if exact else max(
+                        metrics.token_similarity(low, a) for a in aliases
+                    )
+                if sim >= FUZZY_THRESHOLD and sim > best_sim:
+                    best_sim, best_col = sim, low
+            mapping[canonical] = best_col
+            if best_col is not None:
+                claims.setdefault(best_col, []).append(canonical)
+        ambiguous = sorted(c for c, fields in claims.items() if len(fields) > 1)
+        return mapping, ambiguous
+
     def _detect_schema(self, header: list[str]) -> dict[str, str | None]:
-        cols = {c.strip().lower(): c for c in header}
-        def pick(*names: str) -> str | None:
-            for n in names:
-                if n in cols:
-                    return n
-            return None
+        # Backwards-compatible name; now backed by fuzzy mapping.
+        mapping, _ = self._fuzzy_map(header)
+        return mapping
+
+    def _leakage_report(self, header: list[str]) -> dict[str, object]:
+        cols = [c.strip().lower() for c in header]
+        risky = [c for c in cols if any(tok in c for tok in _LEAKAGE_TOKENS)]
+        n = max(len(cols), 1)
+        ratio = len(risky) / n
+        if ratio == 0:
+            band = "LOW"
+        elif ratio <= 0.10:
+            band = "MEDIUM"
+        else:
+            band = "HIGH"
         return {
-            "ticker": pick("ticker", "symbol"),
-            "date": pick("date", "datetime", "timestamp"),
-            "price": pick("close", "price", "adj_close", "adjclose"),
-            "volume": pick("volume", "vol"),
-            "signal": pick("signal", "position"),
-            "return": pick("return", "ret"),
-            "pnl": pick("pnl", "profit"),
-            "outcome": pick("outcome", "win", "label"),
-            "probability": pick("probability", "prob", "p", "pred_proba"),
+            "leakage_columns": risky,
+            "leakage_ratio": round(ratio, 6),
+            "leakage_band": band,
+            "predictive_uplift_allowed": band != "HIGH",
         }
 
     def parse(self, text: str, provenance_id: str, archive_path: str) -> dict[str, object]:
@@ -386,16 +467,21 @@ class MarketParser:
             result["reason"] = "too_few_rows"
             return result
         header = rows[0]
-        schema = self._detect_schema(header)
+        mapping, ambiguous = self._fuzzy_map(header)
+        schema = mapping
         result["schema"] = schema
+        result["ambiguous_columns"] = ambiguous
+        result["leakage"] = self._leakage_report(header)
         if not schema["price"] or not (schema["ticker"] and schema["date"]):
             result["reason"] = "missing_ticker_date_or_price_schema"
             return result
-        idx = {k: header.index(v) for k, v in schema.items() if v is not None}
+        header_lower = [c.strip().lower() for c in header]
+        idx = {k: header_lower.index(v) for k, v in schema.items() if v is not None}
         # Group prices per ticker preserving row order.
         per_ticker: dict[str, list[float]] = {}
         signals: dict[str, list[float]] = {}
         prob_pairs: list[tuple[float, float]] = []
+        unique_dates: set[str] = set()
         valid = 0
         for r in rows[1:]:
             if len(r) <= max(idx.values()):
@@ -405,6 +491,8 @@ class MarketParser:
                 price = float(r[idx["price"]])
             except (ValueError, IndexError):
                 continue
+            if "date" in idx and idx["date"] < len(r):
+                unique_dates.add(r[idx["date"]].strip())
             per_ticker.setdefault(tkr, []).append(price)
             if "signal" in idx:
                 try:
@@ -422,11 +510,22 @@ class MarketParser:
             valid += 1
         result["rows_parsed"] = len(rows) - 1
         result["valid_price_rows"] = valid
+        result["unique_dates"] = len(unique_dates)
+        result["unique_tickers"] = len(per_ticker)
         if valid < MIN_MARKET_ROWS:
             result["reason"] = (
                 f"valid_rows_{valid}_below_min_{MIN_MARKET_ROWS}"
             )
             return result
+        # Stricter Phase-5 readiness gates (reported, not status-gating): all
+        # must hold for a dataset to be "fully ready" for descriptive metrics.
+        thresholds = {
+            "n_rows_ge_100": valid >= MIN_MARKET_ROWS,
+            "n_unique_dates_ge_30": len(unique_dates) >= 30,
+            "n_unique_tickers_ge_1": len(per_ticker) >= 1,
+        }
+        result["thresholds_passed"] = thresholds
+        result["fully_ready"] = all(thresholds.values())
 
         # Build strategy returns: position_{t-1} * r_t per ticker.
         strat: list[float] = []
@@ -439,17 +538,13 @@ class MarketParser:
         m: dict[str, object] = {
             "cumulative_return": metrics.cumulative_return(strat),
             "sharpe": metrics.sharpe_ratio(strat),
+            "sortino": metrics.sortino_ratio(strat),
             "max_drawdown": metrics.max_drawdown(strat),
             "n_strategy_returns": len(strat),
+            "walk_forward_split": {
+                k: list(v) for k, v in metrics.walk_forward_split(valid).items()
+            },
         }
-        # Sortino with MAR=0.
-        downside = [min(0.0, x) for x in strat]
-        dd = math.sqrt(sum(x * x for x in downside) / len(downside)) if downside else 0.0
-        if dd > metrics.EPS and strat:
-            mean = sum(strat) / len(strat)
-            m["sortino"] = (mean / dd) * math.sqrt(len(strat))
-        else:
-            m["sortino"] = None
 
         calibration: dict[str, object] = {"status": "NO_DATA"}
         if len(prob_pairs) >= MIN_PROBABILITY_PREDICTIONS:
@@ -459,18 +554,149 @@ class MarketParser:
                 "brier": metrics.brier_score(prob_pairs),
                 "log_loss": metrics.log_loss(prob_pairs),
                 "ece": metrics.expected_calibration_error(prob_pairs),
+                "mce": metrics.max_calibration_error(prob_pairs),
                 "reliability": metrics.reliability_decomposition(prob_pairs),
             }
         m["calibration"] = calibration
         result["metrics"] = m
+        # Descriptive-only unless the dataset has valid historical signals AND
+        # outcomes; we never call this live alpha.
+        has_signals_and_outcomes = (
+            schema["signal"] is not None and schema["outcome"] is not None
+        )
+        result["market_label"] = (
+            "MARKET_DATA_WITH_SIGNALS"
+            if has_signals_and_outcomes
+            else "MARKET_DATA_DESCRIPTIVE_ONLY"
+        )
         result["status"] = "OK"
         result["reason"] = "ok"
         return result
 
 
+# --------------------------------------------------------------------------- #
+# Sprint 2 Phase 10 — hackathon product rubric v2 (10 weighted components)     #
+# --------------------------------------------------------------------------- #
+_RUBRIC_V2_KEYWORDS: dict[str, tuple[list[str], int]] = {
+    "problem_clarity": (["problem", "pain", "challenge", "user", "need", "why"], 6),
+    "solution_specificity": (
+        ["solution", "build", "prototype", "feature", "architecture", "workflow"], 6),
+    "user_value": (["value", "benefit", "save", "faster", "easier", "user"], 6),
+    "technical_feasibility": (
+        ["api", "database", "model", "pipeline", "deploy", "stack"], 6),
+    "evidence_depth": (
+        ["data", "result", "metric", "benchmark", "experiment", "evaluation"], 6),
+    "demo_readiness": (["demo", "screenshot", "video", "live", "deploy", "run"], 6),
+    "risk_disclosure": (
+        ["risk", "limitation", "caveat", "assumption", "tradeoff", "threat"], 6),
+    "reproducibility": (
+        ["reproduce", "install", "setup", "requirements", "readme", "command"], 6),
+    "judge_alignment": (
+        ["judging", "criteria", "score", "rubric", "evaluation", "impact"], 6),
+    "business_model_clarity": (
+        ["business", "revenue", "market", "customer", "pricing", "monetize"], 6),
+}
+RUBRIC_V2_WEIGHTS: dict[str, float] = {
+    "problem_clarity": 0.12, "solution_specificity": 0.12, "user_value": 0.10,
+    "technical_feasibility": 0.10, "evidence_depth": 0.12, "demo_readiness": 0.10,
+    "risk_disclosure": 0.08, "reproducibility": 0.10, "judge_alignment": 0.08,
+    "business_model_clarity": 0.08,
+}
+
+
+def hackathon_rubric_v2(text: str, provenance_id: str) -> dict[str, object]:
+    """Transparent 10-component product rubric. P_h in [0,100]."""
+    low = text.lower()
+    comps: dict[str, float] = {}
+    for name, (kws, k) in _RUBRIC_V2_KEYWORDS.items():
+        comps[name] = min(1.0, sum(1 for kw in kws if kw in low) / k)
+    p_h = 100.0 * sum(RUBRIC_V2_WEIGHTS[c] * comps[c] for c in RUBRIC_V2_WEIGHTS)
+    return {
+        "project_id": provenance_id[:16],
+        "provenance_id": provenance_id,
+        "components": {k: round(v, 4) for k, v in comps.items()},
+        "P_h": round(p_h, 4),
+    }
+
+
+# --------------------------------------------------------------------------- #
+# Sprint 2 Phase 11 — chess metadata-driven stress aggregates                 #
+# --------------------------------------------------------------------------- #
+def _time_control_seconds(tc: str) -> int | None:
+    """Parse a PGN TimeControl base (e.g. '300+5' -> 300)."""
+    if not tc or tc in ("-", "?"):
+        return None
+    base = tc.split("+", 1)[0].split(":", 1)[0].strip()
+    try:
+        return int(float(base))
+    except ValueError:
+        return None
+
+
+def time_control_class(seconds: int | None) -> str:
+    if seconds is None:
+        return "unknown"
+    if seconds <= 180:
+        return "bullet"
+    if seconds <= 600:
+        return "blitz"
+    if seconds <= 1800:
+        return "rapid"
+    return "classical"
+
+
+def chess_aggregate_stats(games: list) -> dict[str, object]:
+    """Aggregate behavioural/calibration stress features over parsed games.
+
+    No chess engine; metadata only.  Chess is NOT market data — these harden
+    calibration/overconfidence/operational-failure discipline by analogy.
+    """
+    n = len(games)
+    if n == 0:
+        return {"games": 0, "status": "NO_DATA"}
+    move_counts = sorted(g.moves_count for g in games)
+    p75 = move_counts[int(0.75 * (len(move_counts) - 1))]
+    with_elo = [g for g in games if g.expected_white is not None and g.actual_white is not None]
+    surprises = [g.surprise for g in games if g.surprise is not None]
+    upsets = sum(g.upset for g in games)
+    hcf = sum(
+        1 for g in with_elo
+        if (g.expected_white >= 0.75 and g.actual_white == 0)
+        or (g.expected_white <= 0.25 and g.actual_white == 1)
+    )
+    draws = sum(g.draw for g in games)
+    longs = sum(1 for g in games if g.moves_count >= p75)
+    timeouts = sum(g.timeout_flag for g in games)
+    abandoned = sum(g.abandoned_flag for g in games)
+    resign = sum(g.resignation_flag for g in games)
+    tc_classes: dict[str, int] = {}
+    for g in games:
+        cls = time_control_class(_time_control_seconds(g.time_control))
+        tc_classes[cls] = tc_classes.get(cls, 0) + 1
+    return {
+        "games": n,
+        "games_with_elo": len(with_elo),
+        "mean_surprise": round(sum(surprises) / len(surprises), 6) if surprises else None,
+        "upset_rate": round(upsets / n, 6),
+        "high_conf_failure_rate": round(hcf / len(with_elo), 6) if with_elo else None,
+        "draw_rate": round(draws / n, 6),
+        "long_game_rate": round(longs / n, 6),
+        "long_game_p75_plies": p75,
+        "timeout_rate": round(timeouts / n, 6),
+        "abandoned_rate": round(abandoned / n, 6),
+        "resignation_rate": round(resign / n, 6),
+        "time_control_classes": dict(sorted(tc_classes.items())),
+        "elo_expected_pairs": [
+            (g.expected_white, g.actual_white) for g in with_elo
+        ],
+    }
+
+
 __all__ = [
     "PgnParser", "ChessGame",
-    "HackathonParser", "HackathonProject",
+    "HackathonParser", "HackathonProject", "hackathon_rubric_v2",
+    "RUBRIC_V2_WEIGHTS",
+    "chess_aggregate_stats", "time_control_class",
     "ScrapedTextParser", "ScrapedDoc", "scraped_corpus_stats",
     "MarketParser",
     "MIN_MARKET_ROWS", "MIN_CLOSED_OUTCOMES", "MIN_PROBABILITY_PREDICTIONS",

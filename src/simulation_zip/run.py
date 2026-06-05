@@ -62,6 +62,17 @@ def build_arg_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--no-guardrails-ok", dest="guardrails_ok", action="store_false")
     p.add_argument("--max-member-mb", type=int, default=50)
+    # Sprint 2 options.
+    p.add_argument(
+        "--sprint2", action="store_true",
+        help="Run the Sprint 2 pipeline (cache, calibration, scorecard v2).",
+    )
+    p.add_argument("--bootstrap-samples", type=int, default=1000)
+    p.add_argument("--seed", type=int, default=42)
+    p.add_argument(
+        "--index-path", default=None,
+        help="SQLite cache path (default: runtime/simulation_cache/...).",
+    )
     return p
 
 
@@ -77,6 +88,9 @@ def run(argv: list[str] | None = None) -> int:
     config = SafetyConfig(
         max_member_uncompressed_bytes=args.max_member_mb * 1024 * 1024
     )
+    if args.sprint2:
+        return _run_sprint2_cli(args, config)
+
     report = run_zip_simulation(
         args.zip,
         config=config,
@@ -124,6 +138,58 @@ def run(argv: list[str] | None = None) -> int:
         print("  FAIL-CLOSED: archive blocked; no simulation records produced.")
         return 2
     return 0
+
+
+def _run_sprint2_cli(args, config) -> int:
+    from src.simulation_zip.reports import (
+        render_sprint2_integration_markdown,
+        render_sprint2_scorecard_markdown,
+    )
+    from src.simulation_zip.sprint2 import run_sprint2
+
+    report = run_sprint2(
+        args.zip,
+        config=config,
+        tests_pass=args.tests_pass,
+        guardrails_ok=args.guardrails_ok,
+        corpus_label=args.corpus_label,
+        bootstrap_samples=args.bootstrap_samples,
+        seed=args.seed,
+        index_path=args.index_path,
+    )
+    ts = _timestamp()
+    out = Path(args.out_dir)
+    inventory = {
+        "schema_version": "2.0.0",
+        "generated_at": report.get("generated_at"),
+        "labels": report.get("labels"),
+        "zip_path": report.get("zip_path"),
+        "safety": report.get("safety"),
+        "cache": report.get("cache"),
+        "manifest": report.get("manifest", {"files": []}),
+    }
+    paths = {
+        "inventory": write_json(out / f"zip_simulation_sprint2_inventory_{ts}.json", inventory),
+        "run": write_json(out / f"zip_simulation_sprint2_run_{ts}.json", report),
+        "scores": write_json(out / f"zip_simulation_sprint2_scores_{ts}.json", report.get("scorecard")),
+    }
+    out.mkdir(parents=True, exist_ok=True)
+    scorecard_path = out / f"zip_simulation_sprint2_scorecard_{ts}.md"
+    scorecard_path.write_text(render_sprint2_scorecard_markdown(report), encoding="utf-8")
+    integ_path = out / f"zip_simulation_sprint2_integration_{ts}.md"
+    integ_path.write_text(render_sprint2_integration_markdown(report), encoding="utf-8")
+
+    o = report["scorecard"]["overall"]
+    print(f"[{report['status']} / {report['run_type']}] {report['zip_path']}")
+    print(f"  usable_records = {report['diagnostics'].get('usable_records')}, "
+          f"cache_hit_rate = {report['cache'].get('cache_hit_rate')}")
+    print(f"  overall before/after = {o['overall_before']} -> {o['overall_after']} "
+          f"(Δ {o['overall_delta']}, caps {o['overall_caps']})  [SIMULATION_ONLY]")
+    for k, v in paths.items():
+        print(f"  wrote {k}: {v}")
+    print(f"  wrote scorecard: {scorecard_path}")
+    print(f"  wrote integration: {integ_path}")
+    return 2 if report["status"] == "BLOCKED" else 0
 
 
 def main() -> None:  # pragma: no cover - thin wrapper
