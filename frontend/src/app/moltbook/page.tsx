@@ -28,11 +28,21 @@ export default function MoltbookPage() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    getMoltbook().then(({ data, isMock: mock }) => {
-      setEntries(data.items);
-      setIsMock(mock);
-      setLoading(false);
-    });
+    getMoltbook()
+      .then(({ data, isMock: mock }) => {
+        setEntries(data.items);
+        setIsMock(mock);
+      })
+      .catch(() => {
+        // getMoltbook already falls back to mock data on error, but if the
+        // promise chain ever rejects we must still clear the spinner rather
+        // than leave the page stuck on "Loading moltbook…". The lifecycle
+        // contract requires loading to always resolve to a finite state.
+        setIsMock(true);
+      })
+      .finally(() => {
+        setLoading(false);
+      });
   }, []);
 
   const categoryCounts = MISTAKE_CATEGORIES.reduce<Record<string, number>>((acc, cat) => {

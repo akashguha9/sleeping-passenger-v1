@@ -167,55 +167,74 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   // Per-request abort timer. If the caller already supplied a signal we
   // still layer our own timeout on top so a hung request can never escape
   // the ceiling.
+  //
+  // The timeout MUST cover the whole request — both the response headers
+  // (fetch() resolving) AND the response body read. `fetch()` resolves as
+  // soon as the status line + headers arrive; the body is streamed
+  // afterwards. If we cleared the timer the instant fetch() resolved, a
+  // backend that sent headers and then stalled the body would leave the
+  // body read (res.json()/res.text()) pending forever — re-stranding the
+  // page on "Loading…" even though the per-call wrappers fall back on
+  // rejection. We therefore keep the timer armed until the body has been
+  // fully consumed (success or error), clearing it only in `finally`.
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-  let res: Response;
   try {
-    res = await fetch(`${API_BASE}${path}`, {
+    const res = await fetch(`${API_BASE}${path}`, {
       ...init,
       headers,
       signal: init?.signal ?? controller.signal,
     });
+    if (res.status === 401 || res.status === 403) {
+      throw new ApiTokenRequiredError(res.status);
+    }
+    if (!res.ok) {
+      // FastAPI wraps HTTPException(detail=...) under a "detail" key.  The
+      // cancel/reconcile routes now ship a structured object with
+      // `message` and `reason` — extract them when present so callers can
+      // render the actual cause.  If parsing fails we fall back to the
+      // generic "HTTP <status>" string, preserving prior behaviour.
+      let message = `HTTP ${res.status}`;
+      let reason: string | undefined;
+      let detail: unknown;
+      try {
+        const text = await res.text();
+        const body = text ? JSON.parse(text) : undefined;
+        detail = body;
+        const raw = (body && typeof body === 'object' && 'detail' in (body as Record<string, unknown>))
+          ? (body as { detail: unknown }).detail
+          : body;
+        if (raw && typeof raw === 'object') {
+          const obj = raw as { message?: unknown; reason?: unknown; error?: unknown };
+          if (typeof obj.message === 'string' && obj.message) {
+            message = obj.message;
+          } else if (typeof obj.error === 'string' && obj.error) {
+            message = obj.error;
+          }
+          if (typeof obj.reason === 'string' && obj.reason) {
+            reason = obj.reason;
+          }
+        } else if (typeof raw === 'string' && raw) {
+          message = raw;
+        }
+      } catch {
+        // Non-JSON / empty body — keep the generic message.
+      }
+      throw new ApiHttpError(res.status, message, reason, detail);
+    }
+    // Success path. Read the body as text first so an EMPTY response body
+    // (204 / Content-Length: 0) does not crash JSON parsing — return an
+    // empty object so callers normalising `.items`/`.trades`/`.entries`
+    // resolve to [] (an EMPTY state) rather than a thrown SyntaxError.
+    // A non-empty body that is invalid JSON still throws, so the wrapper
+    // falls back to its structured null/mock (an ERROR/offline state) per
+    // the lifecycle contract — never an infinite spinner.
+    const text = await res.text();
+    if (!text) return {} as T;
+    return JSON.parse(text) as T;
   } finally {
     clearTimeout(timer);
   }
-  if (res.status === 401 || res.status === 403) {
-    throw new ApiTokenRequiredError(res.status);
-  }
-  if (!res.ok) {
-    // FastAPI wraps HTTPException(detail=...) under a "detail" key.  The
-    // cancel/reconcile routes now ship a structured object with
-    // `message` and `reason` — extract them when present so callers can
-    // render the actual cause.  If parsing fails we fall back to the
-    // generic "HTTP <status>" string, preserving prior behaviour.
-    let message = `HTTP ${res.status}`;
-    let reason: string | undefined;
-    let detail: unknown;
-    try {
-      const body = await res.json();
-      detail = body;
-      const raw = (body && typeof body === 'object' && 'detail' in (body as Record<string, unknown>))
-        ? (body as { detail: unknown }).detail
-        : body;
-      if (raw && typeof raw === 'object') {
-        const obj = raw as { message?: unknown; reason?: unknown; error?: unknown };
-        if (typeof obj.message === 'string' && obj.message) {
-          message = obj.message;
-        } else if (typeof obj.error === 'string' && obj.error) {
-          message = obj.error;
-        }
-        if (typeof obj.reason === 'string' && obj.reason) {
-          reason = obj.reason;
-        }
-      } else if (typeof raw === 'string' && raw) {
-        message = raw;
-      }
-    } catch {
-      // Non-JSON body — keep the generic message.
-    }
-    throw new ApiHttpError(res.status, message, reason, detail);
-  }
-  return res.json() as Promise<T>;
 }
 
 export async function checkHealth(): Promise<HealthResponse | null> {

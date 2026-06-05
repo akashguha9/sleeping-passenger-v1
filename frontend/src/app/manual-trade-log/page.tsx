@@ -22,13 +22,23 @@ export default function ManualTradeLogPage() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    Promise.all([getManualTrades(), getReconciliationQueue(50)]).then(
-      ([tradesData, queueData]) => {
+    Promise.all([getManualTrades(), getReconciliationQueue(50)])
+      .then(([tradesData, queueData]) => {
         setResult(tradesData);
         setQueue(queueData);
+      })
+      .catch(() => {
+        // Both wrappers already swallow errors and return null, but if the
+        // chain ever rejects we must still clear the spinner so the
+        // "Previously Logged" panel resolves to its offline/empty state
+        // instead of hanging forever on "Loading…". result === null then
+        // renders the Backend Offline empty card (isOffline branch).
+        setResult(null);
+        setQueue(null);
+      })
+      .finally(() => {
         setLoading(false);
-      },
-    );
+      });
   }, []);
 
   // Defence-in-depth: backend GET already strips fake / synthetic rows
