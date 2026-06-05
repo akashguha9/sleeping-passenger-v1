@@ -234,6 +234,12 @@ EXPLICIT_IN_SCOPE: frozenset[str] = frozenset({
     # operator_permission_guard.  In-scope record-keeping maintenance — it
     # never touches signal_events, brokers, or execution.
     "reset_local_logs.py",
+    # Operational-readiness audit hardening (advisory-only, read-only). The
+    # auditable export envelope (schema_version/checksum/round-trip) and the
+    # sample-gated performance-truthfulness layer are honest record-keeping
+    # infrastructure; no broker, no execution, no order placement.
+    "export_envelope.py",
+    "performance_truthfulness.py",
 })
 
 # Modules deliberately marked OUT_OF_SCOPE inside ``scripts/``.  This

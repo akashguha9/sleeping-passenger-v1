@@ -115,6 +115,10 @@ _SUPPORT_EXPLICIT: frozenset[str] = frozenset({
     # Local operator-journal reset maintenance tool (DB + JSONL); dry-run by
     # default, --apply guarded by operator_permission_guard. SUPPORT tooling.
     "reset_local_logs",
+    # Operational-readiness hardening (advisory-only, read-only). Pure helpers
+    # for honest manual-trade validation and sample-gated performance display;
+    # not imported by CORE, fully tested. SUPPORT tooling.
+    "manual_trade_validation", "performance_truthfulness",
 })
 
 
