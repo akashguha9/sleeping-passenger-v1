@@ -120,6 +120,10 @@ CONTRACT: dict[str, str] = {
     "GDELT_LIVE_ENABLED": _SOURCE,
     "LIVE_REFRESH_MAX_TICKERS": _PLAIN,
     "LIVE_REFRESH_REQUIRE_ADVISORY_ONLY": _PLAIN,
+    # Zip simulation corpus — optional local path to a SIMULATION_ONLY zip used
+    # by scripts `python -m src.simulation_zip.run`. Grants no execution; the
+    # subsystem is advisory-only and fail-closed.
+    "SIMULATION_ZIP_PATH": _PLAIN,
 }
 
 REQUIRED_VARS = tuple(k for k, v in CONTRACT.items() if v == _REQUIRED)
