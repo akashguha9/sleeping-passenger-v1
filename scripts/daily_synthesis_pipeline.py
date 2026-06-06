@@ -32,6 +32,7 @@ try:
     from scripts.anti_staleness import build_anti_staleness
     from scripts.candidate_executable_split import build_candidate_executable_split
     from scripts.daily_payload import load_daily_payload, normalize_ticker
+    from scripts.fresh_discovery_contract import assert_no_provenance_violation
     from scripts.fresh_market_discovery import build_fresh_market_discovery
     from scripts.portfolio_truth_gate import build_portfolio_truth_gate
     from scripts.runtime_common import REPO_ROOT
@@ -41,6 +42,7 @@ except ModuleNotFoundError:  # pragma: no cover - script-style env
     from anti_staleness import build_anti_staleness
     from candidate_executable_split import build_candidate_executable_split
     from daily_payload import load_daily_payload, normalize_ticker
+    from fresh_discovery_contract import assert_no_provenance_violation
     from fresh_market_discovery import build_fresh_market_discovery
     from portfolio_truth_gate import build_portfolio_truth_gate
     from runtime_common import REPO_ROOT
@@ -138,6 +140,9 @@ def run_daily_synthesis(
         "payload": payload,
         "portfolio_truth_gate": truth_gate,
         "fresh_market_discovery": discovery,
+        # Top-level alias so callers/artifacts/tests reach the strict gate
+        # without digging through the research discovery object.
+        "fresh_discovery_contract": discovery.get("fresh_discovery", {}),
         "candidate_executable_split": split,
         "anti_staleness": anti_staleness,
         "why_today_scores": why_today_scores,
@@ -186,11 +191,53 @@ def render_portfolio_truth_context(result: dict[str, Any]) -> str:
             lines.append(f"  ! {err}")
     lines.append("")
     lines.append("------------------------------------------------------------")
-    lines.append("FRESH MARKET DISCOVERY (must run even if execution blocked)")
+    lines.append("FRESH DISCOVERY BOARD (live-verified, current-session ONLY)")
     lines.append("------------------------------------------------------------")
-    lines.append(f"discovery_universe: {discovery['discovery_universe'] or 'NONE'}")
-    lines.append(f"new_tickers_not_seen_yesterday: {discovery['new_tickers_not_seen_yesterday'] or 'NONE'}")
-    lines.append(f"discovery_underpowered: {discovery['discovery_underpowered']}")
+    contract = discovery.get("fresh_discovery", {})
+    status = contract.get("status", "NO_FRESH_DISCOVERY_GENERATED")
+    lines.append(f"fresh_discovery_status: {status}")
+    lines.append(f"current_session_date: {contract.get('current_session_date')}")
+    lines.append(f"live_candidate_count: {contract.get('live_candidate_count', 0)}")
+    lines.append(f"fresh_discovery_board: {contract.get('fresh_discovery_board') or 'NONE'}")
+    if status == "NO_FRESH_DISCOVERY_GENERATED":
+        nfd = contract.get("no_fresh_discovery") or {}
+        lines.append("  >>> NO_FRESH_DISCOVERY_GENERATED <<<")
+        lines.append(f"  reason: {nfd.get('reason')}")
+        lines.append(f"  failed_payloads: {nfd.get('failed_payloads')}")
+        lines.append(f"  source_health_by_payload: {nfd.get('source_health_by_payload')}")
+        lines.append(f"  blocked_fallback_names: {nfd.get('blocked_fallback_names') or 'NONE'}")
+        lines.append(f"  next_required_fix: {nfd.get('next_required_fix')}")
+    lines.append("")
+    lines.append("HARD DISCOVERY RULES (the five models MUST obey):")
+    lines.append(
+        "- ONLY tickers in fresh_discovery_board above may be presented as fresh "
+        "candidates / buy-candidates today."
+    )
+    lines.append(
+        "- If status is NO_FRESH_DISCOVERY_GENERATED, output NO_FRESH_DISCOVERY_GENERATED "
+        "and DO NOT invent candidates."
+    )
+    lines.append(
+        "- The names in blocked_fallback_names / the research universe below are "
+        "static/fallback/prior/Moltbook/fixture context. They are NOT fresh discovery "
+        "and MUST NOT be ranked, promoted, or treated as today's candidates."
+    )
+    lines.append(
+        f"  blocked_fallback_names (NOT fresh): {contract.get('blocked_fallback_names') or 'NONE'}"
+    )
+    lines.append(
+        f"  stale_revalidation_needed (diagnostics only): "
+        f"{contract.get('stale_revalidation_needed') or 'NONE'}"
+    )
+    if contract.get("discovery_provenance_violation"):
+        lines.append(
+            f"  ! DISCOVERY_PROVENANCE_VIOLATION: {contract.get('provenance_violations')}"
+        )
+    lines.append("")
+    lines.append("RESEARCH/DIAGNOSTIC UNIVERSE (NOT fresh discovery — do not promote):")
+    lines.append(f"  research_universe: {discovery['discovery_universe'] or 'NONE'}")
+    lines.append(f"  new_tickers_not_seen_yesterday: {discovery['new_tickers_not_seen_yesterday'] or 'NONE'}")
+    lines.append(f"  discovery_underpowered: {discovery['discovery_underpowered']}")
     for note in discovery.get("discovery_notes", []):
         lines.append(f"  * {note}")
     lines.append("")
@@ -228,10 +275,24 @@ def render_portfolio_truth_context(result: dict[str, Any]) -> str:
 def _write_artifacts(result: dict[str, Any], context_md: str) -> None:
     CONTEXT_MD_PATH.parent.mkdir(parents=True, exist_ok=True)
     CONTEXT_MD_PATH.write_text(context_md, encoding="utf-8")
+    contract = result.get("fresh_discovery_contract", {})
     summary = {
         "run_date": result["run_date"],
         "portfolio_truth_gate": result["portfolio_truth_gate"],
         "discovery_universe": result["fresh_market_discovery"]["discovery_universe"],
+        "fresh_discovery": {
+            "status": contract.get("status"),
+            "current_session_date": contract.get("current_session_date"),
+            "fresh_discovery_board": contract.get("fresh_discovery_board"),
+            "live_candidate_count": contract.get("live_candidate_count"),
+            "fallback_candidate_count": contract.get("fallback_candidate_count"),
+            "blocked_fallback_names": contract.get("blocked_fallback_names"),
+            "stale_revalidation_needed": contract.get("stale_revalidation_needed"),
+            "discovery_provenance_violation": contract.get("discovery_provenance_violation"),
+            "provenance_violations": contract.get("provenance_violations"),
+            "no_fresh_discovery": contract.get("no_fresh_discovery"),
+            "provenance_report": contract.get("provenance_report"),
+        },
         "executable_paper_buys": [r["ticker"] for r in result["candidate_executable_split"]["executable_paper_buys"]],
         "buy_candidate_not_executable": [
             r["ticker"] for r in result["candidate_executable_split"]["buy_candidate_not_executable"]
@@ -264,9 +325,18 @@ def main(argv: list[str] | None = None) -> int:
             "run_date": result["run_date"],
             "portfolio_truth_gate": result["portfolio_truth_gate"],
             "anti_staleness_warnings": result["anti_staleness"]["warnings"],
+            "fresh_discovery_status": result["fresh_discovery_contract"].get("status"),
+            "fresh_discovery_board": result["fresh_discovery_contract"].get("fresh_discovery_board"),
         }, indent=2) + "\n")
     else:
         sys.stdout.write(context_md + "\n")
+
+    # Regression guard: a contaminated Fresh Discovery Board fails the run.
+    try:
+        assert_no_provenance_violation(result["fresh_discovery_contract"])
+    except Exception as exc:  # DiscoveryProvenanceViolation
+        sys.stderr.write(f"{exc}\n")
+        return 2
     return 0
 
 

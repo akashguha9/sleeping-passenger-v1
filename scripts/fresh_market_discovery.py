@@ -24,6 +24,7 @@ try:
     from scripts.advisory_contract import advisory_safety_stamps
     from scripts.daily_discovery_config import load_discovery_thresholds
     from scripts.daily_payload import load_daily_payload, normalize_ticker
+    from scripts.fresh_discovery_contract import build_fresh_discovery_contract
     from scripts.minimum_daily_universe import minimum_universe_tickers
     from scripts.portfolio_truth_gate import build_portfolio_truth_gate, classify_ticker
     from scripts.runtime_common import SIGNAL_LEDGER_PATH, load_json_file
@@ -31,6 +32,7 @@ except ModuleNotFoundError:  # pragma: no cover - script-style env
     from advisory_contract import advisory_safety_stamps
     from daily_discovery_config import load_discovery_thresholds
     from daily_payload import load_daily_payload, normalize_ticker
+    from fresh_discovery_contract import build_fresh_discovery_contract
     from minimum_daily_universe import minimum_universe_tickers
     from portfolio_truth_gate import build_portfolio_truth_gate, classify_ticker
     from runtime_common import SIGNAL_LEDGER_PATH, load_json_file
@@ -239,7 +241,7 @@ def build_fresh_market_discovery(
             "will classify NOT_EXECUTABLE until source health clears."
         )
 
-    return {
+    result = {
         "discovery_universe": universe,
         "scored_candidates": scored,
         "buy_candidate_board": buy_candidates,
@@ -254,6 +256,19 @@ def build_fresh_market_discovery(
         "thresholds": {"cqs_min": cqs_min, "watchlist_fcs_min": watchlist_min},
         "safety": advisory_safety_stamps(),
     }
+
+    # Fresh Discovery Contract — the strict, fail-closed provenance gate. The
+    # boards above are research-grade (the static universe is always scanned);
+    # ``fresh_discovery`` is the ONLY surface allowed to present fresh
+    # candidates, and it admits a name only when backed by live, verified,
+    # current-session evidence. Static/fallback/prior/Moltbook/fixture names are
+    # quarantined here, never promoted.
+    result["fresh_discovery"] = build_fresh_discovery_contract(
+        payload, result, truth_gate,
+        model_candidates=model_candidates,
+        signal_ledger_path=signal_ledger_path,
+    )
+    return result
 
 
 __all__ = [
