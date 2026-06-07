@@ -70,6 +70,13 @@ _SUPPORT_REVIEWED: frozenset[str] = frozenset({
     "diagnostics_snapshot_warmer", "diagnostics_tail_metrics", "error_contracts",
     "expectation_divergence_signal", "extreme_state_logic", "five_model_independence",
     "fresh_market_discovery", "governance_status", "governance_verdict",
+    # Five isolated review lanes + mechanical aggregator (advisory): post-
+    # fresh-discovery model isolation. SUPPORT, not CORE; no CORE imports them.
+    "isolated_model_lanes", "model_vote_aggregator",
+    # Interpretation-defense P1 engine (advisory): IQS + MTR + ARST unified.
+    # SUPPORT, not CORE; no CORE imports them.
+    "interpretation_quality_score", "metric_regime_transfer_risk",
+    "adverse_regime_stress_test", "interpretation_defense_engine",
     "kalshi_live_smoke", "late_adoption_lockout", "live_provider_compliance_trace",
     "live_signal_filters", "live_source_runner_phase2", "local_mvp_smoke_test",
     "market_data_freshness", "minimum_daily_universe", "model_disagreement",

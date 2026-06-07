@@ -172,6 +172,19 @@ APPROVED_DOMAINS: tuple[str, ...] = (
     # trading writes.
     "ai_integration",       # ai_integration_readiness.py — AI/API readiness
     "five_model",           # five_model_independence.py — model_runs independence
+    # Five-model isolation refactor — advisory-only post-fresh-discovery review
+    # lanes + mechanical vote aggregator. Each lane sees ONLY the clean fresh
+    # discovery payload; the aggregator never invents candidates. Scores/gates
+    # only; no broker execution, no order placement, no API trading writes.
+    "isolated_model",       # isolated_model_lanes.py — five isolated review lanes
+    "model_vote",           # model_vote_aggregator.py — mechanical consensus board
+    # Interpretation-defense P1 engine — advisory-only quality/risk layer over
+    # the clean fresh-discovery payload. Scores/gates only; no broker execution,
+    # no order placement, no API trading writes; can only demote, never promote.
+    "interpretation_quality",  # interpretation_quality_score.py — IQS
+    "metric_regime",           # metric_regime_transfer_risk.py — MTR
+    "adverse_regime",          # adverse_regime_stress_test.py — ARST
+    "interpretation_defense",  # interpretation_defense_engine.py — unified IDS
     # Sprint 3 (score-upgrade) — advisory-only readiness/contract modules.
     # Scores/gates only; no broker execution, no order placement, no API
     # trading writes; no executable trade language.
