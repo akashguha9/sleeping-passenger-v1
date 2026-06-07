@@ -28,18 +28,18 @@ and stay document-only unless a concrete equity use-case appears.
 | # | Reflection concept | Professional name | Existing overlap | Status | Priority |
 |---|---|---|---|---|---|
 | 1 | Interpretation Quality Score | `interpretation_quality_score` | `scripts/interpretation_quality_score.py` (SHIPPED 2026-06-07) | **SHIPPED** — IQS over provenance/context/reliability/ambiguity/contradiction; wired into payload→lanes→aggregator→auditor→artifacts; tests in `test_interpretation_quality_score.py` | P1 (done) |
-| 2 | Narrative-Substance Gap Detector | `narrative_substance_gap` | `narrative_structure_divergence.py` (NSD = NS − SS), `expectation_divergence_signal.py` | **EXISTING** | P0 (preserve/extend) |
+| 2 | Narrative-Substance Gap Detector | `narrative_substance_gap` | `scripts/narrative_substance_gap.py` (SHIPPED 2026-06-07, P2); lineage `narrative_structure_divergence.py` | **SHIPPED** — payload-level NSG wired into expanded IDS; `test_narrative_substance_gap.py` | P0 (done) |
 | 3 | Economic Honeypot / Exit-Liquidity Detector | `economic_honeypot_detector` | none (crypto out of equity scope); closest `regime_translation_tester.py` (liquidity stressor) | **MISSING** | P3 (doc-only) |
 | 4 | Category Salience Estimator | `audience_category_salience` | none (marketing-domain) | **MISSING** | P3 (doc-only) |
 | 5 | Algorithmic Exposure Mapper | `exposure_bias_mapper` | `attention_proxy_engine.py` (spread proxy only) | **MISSING** | P3 (doc-only) |
-| 6 | Fear-ROI Conversion Layer | `claim_expected_value_audit` | none; closest `asymmetry_survival_scorer.py` | **MISSING** | P2 |
+| 6 | Fear-ROI Conversion Layer / Who-Benefits | `incentive_who_benefits_analyzer` | `scripts/incentive_who_benefits_analyzer.py` (SHIPPED 2026-06-07, P2); lineage `asymmetry_survival_scorer.py` | **SHIPPED (heuristic)** — "who profits if I believe this" firewall + exit-liquidity risk; `test_incentive_who_benefits_analyzer.py` | P2 (done; capped 6 — no ownership feed) |
 | 7 | Luck Surface Area Tracker | `opportunity_exposure_tracker` | none; closest `lpc_luck_cost_engine.py` (past luck attribution) | **MISSING** | P2/P3 |
 | 8 | Metric Transfer Risk Module | `metric_regime_transfer_risk` | `scripts/metric_regime_transfer_risk.py` (SHIPPED 2026-06-07); lineage `regime_translation_tester.py` | **SHIPPED** — payload-level regime transfer risk (comparison + self-anchor modes); tests in `test_metric_regime_transfer_risk.py` | P1 (done) |
 | 9 | Stress Test Layer | `adverse_regime_stress_test` | `scripts/adverse_regime_stress_test.py` (SHIPPED 2026-06-07); lineage `regime_translation_tester.py`, `tail_loss_governor.py` | **SHIPPED** — data-aware survival/stress with honest INSUFFICIENT_DATA; tests in `test_adverse_regime_stress_test.py` | P1 (done) |
 | 10 | Embodied Utility Layer | `consumer_sensory_utility` | none; closest `experience_mode_report.py` | **MISSING** | P3 (doc-only) |
-| 11 | Distribution Amplification Detector | `distribution_amplification_detector` | `propagation_spread_estimator.py` + `echo_risk_engine.py` | **EXISTING** | P0 (preserve/extend) |
+| 11 | Distribution Amplification Detector | `distribution_amplification_detector` | `scripts/distribution_amplification_detector.py` (SHIPPED 2026-06-07, P2); lineage `propagation_spread_estimator.py`, `echo_risk_engine.py` | **SHIPPED** — attention-vs-substance ratio + HYPE_LED; wired into expanded IDS; `test_distribution_amplification_detector.py` | P0 (done) |
 | 12 | Ecosystem Revenue Map | `ecosystem_revenue_decomposition` | none; closest `signal_field_geometry.py` | **MISSING** | P2 |
-| 13 | Audience Misinterpretation Risk Score | `audience_misinterpretation_risk` | `signal_distortion_index.py`, `narrative_distortion_index.py` (distortion, not audience heterogeneity) | **MISSING** | P2 |
+| 13 | Audience Misinterpretation Risk Score | `audience_misinterpretation_risk` | `scripts/audience_misinterpretation_risk.py` (SHIPPED 2026-06-07, P2) | **SHIPPED (heuristic)** — per-audience misread risk + operator-misread flag; wired into expanded IDS; `test_audience_misinterpretation_risk.py` | P2 (done; capped 6 — no calibration) |
 
 ## 2. Already-shipped interpretation-defense surface (context)
 

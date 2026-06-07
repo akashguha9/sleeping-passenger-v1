@@ -243,10 +243,23 @@ def compute_manual_review_score(
     ev_conf = compute_evidence_confidence(candidate, outputs)
     freshness = compute_freshness_score(candidate, provenance)
 
-    defense = candidate.get("interpretation_defense")
-    defense = defense if isinstance(defense, dict) else None
-    ids_grade = defense.get("interpretation_defense_grade") if defense else None
-    ids_score = float(defense.get("interpretation_defense_score") or 0.0) if defense else 0.0
+    # Prefer the expanded P2 grade/score when attached; fall back to P1.
+    expanded = candidate.get("expanded_interpretation_defense")
+    expanded = expanded if isinstance(expanded, dict) else None
+    p1_defense = candidate.get("interpretation_defense")
+    p1_defense = p1_defense if isinstance(p1_defense, dict) else None
+    if expanded:
+        ids_grade = expanded.get("expanded_grade")
+        ids_score = float(expanded.get("expanded_ids") or 0.0)
+        defense_present = True
+        using_expanded = True
+    elif p1_defense:
+        ids_grade = p1_defense.get("interpretation_defense_grade")
+        ids_score = float(p1_defense.get("interpretation_defense_score") or 0.0)
+        defense_present = True
+        using_expanded = False
+    else:
+        ids_grade, ids_score, defense_present, using_expanded = None, 0.0, False, False
     ids_component = ids_score / 100.0
 
     raw = (
@@ -280,22 +293,24 @@ def compute_manual_review_score(
         classification = _cap_classification(classification, CLASS_RISK_BLOCK)
         overrides.append("source_health!=VERIFIED_LIVE->max_RISK_BLOCK")
 
-    # ----- Interpretation-defense overrides -----
-    if defense is None:
+    # ----- Interpretation-defense overrides (expanded P2 grade wins) -----
+    manual_count = round(agreement["manual_support"] * len(outputs))
+    no_hard_risk = freshness == 1.0 and provenance.get("source_health") == VERIFIED_LIVE
+    caution_quorum = 5 if using_expanded else 4
+    tag = "expanded_ids" if using_expanded else "ids"
+    if not defense_present:
         classification = CLASS_RISK_BLOCK
         overrides.append("interpretation_defense_missing->RISK_BLOCK")
     elif ids_grade == "BLOCKED":
         classification = CLASS_RISK_BLOCK
-        overrides.append("ids_blocked->RISK_BLOCK")
+        overrides.append(f"{tag}_blocked->RISK_BLOCK")
     elif ids_grade == "DEFENSIVE_REVIEW":
         classification = _cap_classification(classification, CLASS_WAIT)
-        overrides.append("ids_defensive_review->max_WAIT")
+        overrides.append(f"{tag}_defensive_review->max_WAIT")
     elif ids_grade == "CAUTION":
-        manual_count = round(agreement["manual_support"] * len(outputs))
-        no_hard_risk = freshness == 1.0 and provenance.get("source_health") == VERIFIED_LIVE
-        if not (manual_count >= 4 and no_hard_risk):
+        if not (manual_count >= caution_quorum and no_hard_risk):
             classification = _cap_classification(classification, CLASS_WATCH)
-            overrides.append("ids_caution->max_WATCH")
+            overrides.append(f"{tag}_caution->max_WATCH")
 
     return {
         "ticker": normalize_ticker(candidate.get("ticker")),
@@ -313,8 +328,20 @@ def compute_manual_review_score(
         "concentration_penalty": concentration,
         "reviewing_models": agreement["reviewing_models"],
         "interpretation_defense_grade": ids_grade,
-        "interpretation_defense_score": ids_score if defense else None,
+        "interpretation_defense_score": ids_score if defense_present else None,
         "interpretation_defense_component": round(ids_component, 6),
+        "uses_expanded_defense": using_expanded,
+        "expanded_grade": (expanded.get("expanded_grade") if expanded else None),
+        "expanded_ids": (expanded.get("expanded_ids") if expanded else None),
+        "p2_grades": (
+            {
+                "distribution_amplification": expanded.get("distribution_amplification_grade"),
+                "narrative_substance_gap": expanded.get("narrative_substance_gap_grade"),
+                "incentive_risk": expanded.get("incentive_risk_grade"),
+                "audience_misinterpretation": expanded.get("audience_misinterpretation_grade"),
+            }
+            if expanded else None
+        ),
         "hard_overrides": overrides,
     }
 
@@ -365,6 +392,7 @@ def build_model_vote_matrix(
         for review in _ticker_reviews(ticker, outputs):
             votes[review["model"]] = review["classification"]
         defense = candidate.get("interpretation_defense") or {}
+        expanded = candidate.get("expanded_interpretation_defense") or {}
         matrix.append(
             {
                 "ticker": ticker,
@@ -375,6 +403,12 @@ def build_model_vote_matrix(
                 "iqs": defense.get("iqs"),
                 "mtr": defense.get("mtr"),
                 "stress_failure_risk": defense.get("stress_failure_risk"),
+                "expanded_grade": expanded.get("expanded_grade"),
+                "expanded_ids": expanded.get("expanded_ids"),
+                "distribution_amplification_grade": expanded.get("distribution_amplification_grade"),
+                "narrative_substance_gap_grade": expanded.get("narrative_substance_gap_grade"),
+                "incentive_risk_grade": expanded.get("incentive_risk_grade"),
+                "audience_misinterpretation_grade": expanded.get("audience_misinterpretation_grade"),
             }
         )
     return matrix
@@ -386,7 +420,10 @@ def build_contradiction_report(
 ) -> list[dict[str, Any]]:
     """Surface split-vote candidates (positive support AND avoid pressure)."""
     votes_by_ticker = {row["ticker"]: row["votes"] for row in matrix}
-    ids_by_ticker = {row["ticker"]: row.get("interpretation_defense_grade") for row in matrix}
+    ids_by_ticker = {
+        row["ticker"]: (row.get("expanded_grade") or row.get("interpretation_defense_grade"))
+        for row in matrix
+    }
     report: list[dict[str, Any]] = []
     for row in board:
         votes = votes_by_ticker.get(row["ticker"], {})

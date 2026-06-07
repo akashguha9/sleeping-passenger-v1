@@ -185,6 +185,12 @@ APPROVED_DOMAINS: tuple[str, ...] = (
     "metric_regime",           # metric_regime_transfer_risk.py — MTR
     "adverse_regime",          # adverse_regime_stress_test.py — ARST
     "interpretation_defense",  # interpretation_defense_engine.py — unified IDS
+    # P2 interpretation-defense expansion — advisory-only quality/risk layer;
+    # can only demote, never promote; no broker/order/sizing.
+    "distribution_amplification",  # distribution_amplification_detector.py
+    "narrative_substance",         # narrative_substance_gap.py
+    "incentive_who_benefits",      # incentive_who_benefits_analyzer.py
+    "audience_misinterpretation",  # audience_misinterpretation_risk.py
     # Sprint 3 (score-upgrade) — advisory-only readiness/contract modules.
     # Scores/gates only; no broker execution, no order placement, no API
     # trading writes; no executable trade language.

@@ -58,10 +58,42 @@ on partial data (fundamentals usually absent → `INSUFFICIENT_DATA`; regime
 comparison needs a real target-regime feed). They become 8–9 only when wired to
 live reliability/fundamentals/regime feeds.
 
-## Next best P2 modules
+## P2 expansion update (2026-06-07)
 
-1. Distribution Amplification Detector — wrap `propagation_spread_estimator` +
-   `echo_risk_engine` into an IDS sub-score.
-2. Incentive / Who-Benefits Analyzer (`claim_expected_value_audit`).
-3. Audience Misinterpretation Risk (`audience_misinterpretation_risk`).
-4. Narrative-Substance Gap — wire `narrative_structure_divergence` into IDS.
+Shipped four P2 modules + an expanded IDS, all wired through payload → lanes →
+aggregator → final auditor → Moltbook lessons → runtime artifacts, with tests.
+Test hygiene: the `scripts/external/tribev2` empty-dir leftover was removed, so
+`test_archived_code_isolation` is green (engineering reliability, NOT a trading
+capability gain).
+
+| # | Segment | Prev | New | Δ | Evidence in code | Tests | Shipped? | Why capped |
+|---|---|---:|---:|---:|---|---|---|---|
+| 6 | Interpretation quality scoring | 7 | 7 | 0 | `interpretation_quality_score.py` | existing | shipped | IQS feeds P2; it does not consume P2, so no honest increase |
+| 10 | Distribution / amplification illusion | 7 | **8** | +1 | `distribution_amplification_detector.py` wired into expanded IDS | `test_distribution_amplification_detector.py` + P2 integration | **shipped+wired** | needs real attention feed to exceed 8 |
+| 9 | Narrative-vs-substance separation | 7 | **8** | +1 | `narrative_substance_gap.py` unified into expanded IDS | `test_narrative_substance_gap.py` + integration | **shipped+wired** | needs real fundamentals feed |
+| 11 | Incentive awareness / who-benefits | 2 | **6** | +4 | `incentive_who_benefits_analyzer.py` | `test_incentive_who_benefits_analyzer.py` + integration | **shipped+wired** | ownership/insider/liquidity data absent → heuristic only; not 7 |
+| 12 | Audience-misinterpretation modeling | 2 | **6** | +4 | `audience_misinterpretation_risk.py` | `test_audience_misinterpretation_risk.py` + integration | **shipped+wired** | term-list + cross-signal heuristic; no calibration → not 7 |
+| — | Unified IDS (expanded) | 7 | **8** | +1 | `interpretation_defense_engine.evaluate_candidate_expanded` (P2 affects expanded grade + aggregator override) | `test_expanded_interpretation_defense_engine.py` + integration | **shipped+wired** | heuristic + partial data → not 9 |
+| 5 | Final auditor discipline | 8 | 8 | 0 | P2 board added but invention guard unchanged | integration | shipped | no new guard ⇒ no increase |
+| 15 | Execution safety / advisory-only | 10 | 10 | 0 | every P2 surface stamped advisory_only, LOCKED | every P2 test | canonical | preserve |
+| — | Full-suite reliability (test hygiene) | red | **green** | — | removed untracked empty-dir leftover | `test_archived_code_isolation.py` | n/a | hygiene only, not capability |
+
+### Why P2 increases are real (not doctrine)
+
+Four new modules (`distribution_amplification_detector.py`,
+`narrative_substance_gap.py`, `incentive_who_benefits_analyzer.py`,
+`audience_misinterpretation_risk.py`), an expanded IDS in
+`interpretation_defense_engine.py`, **6 new test files**, runtime artifacts
+under `runtime/<date>/interpretation_defense/p2/`, and the aggregator/auditor now
+consume the **expanded** grade (not just P1). Each P2 module can only **demote**;
+`test_expanded_interpretation_defense_engine.py::test_G` proves expanded IDS ≤ P1
+IDS. Caps at 6–8 (not 9–10) are deliberate: no live attention / ownership /
+fundamentals feeds and no historical calibration yet.
+
+### Next highest-impact upgrade (capped components → 9 only with these)
+
+1. Real live price/news/filing/**fundamentals** provider (lifts ARST, NSG, DA).
+2. Current-holdings price reconciliation (Channel B holding stress lane).
+3. Historical calibration / backtest for IDS grades (lifts every score's ceiling).
+4. Sector-specific stress priors + real ownership/short-interest feed (lifts
+   incentive/who-benefits past 6).

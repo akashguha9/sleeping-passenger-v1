@@ -23,19 +23,27 @@ try:
         GRADE_INSUFFICIENT,
         stress_test_candidate,
     )
+    from scripts.audience_misinterpretation_risk import score_audience_misinterpretation
     from scripts.daily_payload import normalize_ticker
+    from scripts.distribution_amplification_detector import score_distribution_amplification
     from scripts.fresh_discovery_contract import VERIFIED_LIVE
+    from scripts.incentive_who_benefits_analyzer import score_incentive_who_benefits
     from scripts.interpretation_quality_score import score_interpretation_quality
     from scripts.isolated_model_lanes import FRESH_DISCOVERY_OK
     from scripts.metric_regime_transfer_risk import score_metric_regime_transfer_risk
+    from scripts.narrative_substance_gap import score_narrative_substance_gap
 except ModuleNotFoundError:  # pragma: no cover - script-style env
     from advisory_contract import advisory_safety_stamps, human_only_stamp
     from adverse_regime_stress_test import GRADE_INSUFFICIENT, stress_test_candidate
+    from audience_misinterpretation_risk import score_audience_misinterpretation
     from daily_payload import normalize_ticker
+    from distribution_amplification_detector import score_distribution_amplification
     from fresh_discovery_contract import VERIFIED_LIVE
+    from incentive_who_benefits_analyzer import score_incentive_who_benefits
     from interpretation_quality_score import score_interpretation_quality
     from isolated_model_lanes import FRESH_DISCOVERY_OK
     from metric_regime_transfer_risk import score_metric_regime_transfer_risk
+    from narrative_substance_gap import score_narrative_substance_gap
 
 
 GRADE_CLEAN = "CLEAN"
@@ -227,6 +235,222 @@ def enrich_clean_payload(
     return attach_defense_to_payload(clean_payload, result)
 
 
+# ---------------------------------------------------------------------------
+# P2 — expanded interpretation defense
+# ---------------------------------------------------------------------------
+
+STATUS_P2_COMPLETED = "P2_INTERPRETATION_EXPANSION_COMPLETED"
+
+# P2 grades that force at most DEFENSIVE_REVIEW.
+_P2_DEFENSIVE_GRADES = {
+    "distribution_amplification": "HYPE_LED",
+    "narrative_substance_gap": "NARRATIVE_OVERHANG",
+    "incentive_who_benefits": "EXIT_LIQUIDITY_RISK",
+    "audience_misinterpretation": "MISREAD_LIKELY",
+}
+
+
+def evaluate_candidate_expanded(
+    candidate: dict[str, Any],
+    *,
+    p1_full: dict[str, Any] | None = None,
+    run_date: str | None = None,
+    reference_regime: dict[str, Any] | None = None,
+    fundamentals: dict[str, Any] | None = None,
+    attention: dict[str, Any] | None = None,
+    ownership: dict[str, Any] | None = None,
+    liquidity: dict[str, Any] | None = None,
+    model_outputs: list[dict[str, Any]] | None = None,
+    aggregator_row: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """P1 + four P2 modules → expanded IDS. P2 can only demote, never promote."""
+    ticker = normalize_ticker(candidate.get("ticker"))
+    if p1_full is None:
+        p1_full = evaluate_candidate(
+            candidate, run_date=run_date, reference_regime=reference_regime,
+            fundamentals=fundamentals, model_outputs=model_outputs, aggregator_row=aggregator_row,
+        )
+
+    da = score_distribution_amplification(
+        candidate, attention=attention, fundamentals=fundamentals, model_outputs=model_outputs
+    )
+    nsg = score_narrative_substance_gap(
+        candidate, distribution=da, fundamentals=fundamentals, model_outputs=model_outputs, p1=p1_full
+    )
+    inc = score_incentive_who_benefits(
+        candidate, ownership=ownership, distribution=da, narrative_gap=nsg,
+        liquidity=liquidity, model_outputs=model_outputs,
+    )
+    amr = score_audience_misinterpretation(
+        candidate, p1=p1_full, narrative_gap=nsg, distribution=da, model_outputs=model_outputs
+    )
+
+    da_score = float(da["distribution_amplification_score"])
+    nsg_pos = max(float(nsg["narrative_substance_gap"]), 0.0)
+    inc_score = float(inc["incentive_risk_score"])
+    amr_score = float(amr["audience_misinterpretation_risk"])
+
+    p2_penalty = 0.20 * da_score + 0.25 * nsg_pos + 0.30 * inc_score + 0.25 * amr_score
+    p1_ids = float(p1_full["interpretation_defense_score"])
+    expanded_ids = round(_clamp01_100(p1_ids - 0.35 * p2_penalty), 4)
+
+    grade = _base_grade(expanded_ids)
+    hard_blocks: list[str] = list(p1_full.get("hard_blocks", []))
+    warnings: list[str] = []
+
+    if p1_full["interpretation_defense_grade"] == GRADE_BLOCKED:
+        grade = GRADE_BLOCKED
+        hard_blocks.append("p1_blocked")
+    if inc["grade"] == _P2_DEFENSIVE_GRADES["incentive_who_benefits"]:
+        grade = _cap(grade, GRADE_DEFENSIVE)
+        warnings.append("exit_liquidity_risk")
+    if nsg["grade"] == _P2_DEFENSIVE_GRADES["narrative_substance_gap"]:
+        grade = _cap(grade, GRADE_DEFENSIVE)
+        warnings.append("narrative_overhang")
+    if amr["grade"] == _P2_DEFENSIVE_GRADES["audience_misinterpretation"]:
+        grade = _cap(grade, GRADE_DEFENSIVE)
+        warnings.append("misread_likely")
+    if da["grade"] == _P2_DEFENSIVE_GRADES["distribution_amplification"]:
+        grade = _cap(grade, GRADE_DEFENSIVE)
+        warnings.append("hype_led")
+
+    # Surface missing P2 data explicitly (not silently ignored).
+    for mod in (da, nsg, inc, amr):
+        for f in mod.get("missing_fields", []):
+            warnings.append(f"missing:{f}")
+
+    return {
+        "ticker": ticker,
+        "p1_interpretation_defense": p1_full,
+        "p2_interpretation_expansion": {
+            "distribution_amplification": da,
+            "narrative_substance_gap": nsg,
+            "incentive_who_benefits": inc,
+            "audience_misinterpretation": amr,
+        },
+        "expanded_interpretation_defense_score": expanded_ids,
+        "expanded_grade": grade,
+        "p2_penalty": round(p2_penalty, 4),
+        "hard_blocks": hard_blocks,
+        "warnings": sorted(set(warnings)),
+        "advisory_only": True,
+    }
+
+
+def _clamp01_100(value: float) -> float:
+    return 0.0 if value < 0.0 else 100.0 if value > 100.0 else value
+
+
+def run_expanded_interpretation_defense(
+    clean_payload: dict[str, Any],
+    *,
+    p1_result: dict[str, Any] | None = None,
+    model_outputs: list[dict[str, Any]] | None = None,
+    aggregator: dict[str, Any] | None = None,
+    fundamentals_by_ticker: dict[str, dict[str, Any]] | None = None,
+    attention_by_ticker: dict[str, dict[str, Any]] | None = None,
+    ownership_by_ticker: dict[str, dict[str, Any]] | None = None,
+    liquidity_by_ticker: dict[str, dict[str, Any]] | None = None,
+    reference_regime_by_ticker: dict[str, dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Run the four P2 modules + expanded IDS for every clean-payload candidate."""
+    status = clean_payload.get("fresh_discovery_status")
+    run_date = clean_payload.get("run_date")
+    if status != FRESH_DISCOVERY_OK:
+        return {
+            "status": STATUS_SKIPPED,
+            "run_date": run_date,
+            "reason": f"fresh_discovery_status={status}; P2 expansion not run.",
+            "board": [],
+            "completed_count": 0,
+            "blocked_count": 0,
+            "defensive_count": 0,
+            "safety": advisory_safety_stamps(),
+            "execution": human_only_stamp(),
+        }
+
+    fundamentals_by_ticker = fundamentals_by_ticker or {}
+    attention_by_ticker = attention_by_ticker or {}
+    ownership_by_ticker = ownership_by_ticker or {}
+    liquidity_by_ticker = liquidity_by_ticker or {}
+    reference_regime_by_ticker = reference_regime_by_ticker or {}
+    p1_by_ticker = {
+        normalize_ticker(b.get("ticker")): b for b in (p1_result or {}).get("board", [])
+    }
+    agg_rows = {
+        r.get("ticker"): r for r in (aggregator or {}).get("candidate_consensus", [])
+    } if aggregator else {}
+
+    board: list[dict[str, Any]] = []
+    for candidate in clean_payload.get("candidates", []):
+        ticker = normalize_ticker(candidate.get("ticker"))
+        board.append(
+            evaluate_candidate_expanded(
+                candidate,
+                p1_full=p1_by_ticker.get(ticker),
+                run_date=run_date,
+                reference_regime=reference_regime_by_ticker.get(ticker),
+                fundamentals=fundamentals_by_ticker.get(ticker),
+                attention=attention_by_ticker.get(ticker),
+                ownership=ownership_by_ticker.get(ticker),
+                liquidity=liquidity_by_ticker.get(ticker),
+                model_outputs=model_outputs,
+                aggregator_row=agg_rows.get(ticker),
+            )
+        )
+
+    blocked = [b for b in board if b["expanded_grade"] == GRADE_BLOCKED]
+    defensive = [b for b in board if b["expanded_grade"] == GRADE_DEFENSIVE]
+    return {
+        "status": STATUS_P2_COMPLETED,
+        "run_date": run_date,
+        "board": board,
+        "completed_count": len(board),
+        "blocked_count": len(blocked),
+        "defensive_count": len(defensive),
+        "blocked_tickers": [b["ticker"] for b in blocked],
+        "safety": advisory_safety_stamps(),
+        "execution": human_only_stamp(),
+    }
+
+
+def _compact_expanded(full: dict[str, Any]) -> dict[str, Any]:
+    p2 = full["p2_interpretation_expansion"]
+    return {
+        "p1_ids": full["p1_interpretation_defense"]["interpretation_defense_score"],
+        "p1_grade": full["p1_interpretation_defense"]["interpretation_defense_grade"],
+        "expanded_ids": full["expanded_interpretation_defense_score"],
+        "expanded_grade": full["expanded_grade"],
+        "distribution_amplification_grade": p2["distribution_amplification"]["grade"],
+        "narrative_substance_gap_grade": p2["narrative_substance_gap"]["grade"],
+        "incentive_risk_grade": p2["incentive_who_benefits"]["grade"],
+        "audience_misinterpretation_grade": p2["audience_misinterpretation"]["grade"],
+        "hard_blocks": full["hard_blocks"],
+        "warnings": full["warnings"],
+    }
+
+
+def attach_expanded_defense_to_payload(
+    clean_payload: dict[str, Any], expanded_result: dict[str, Any]
+) -> dict[str, Any]:
+    """Attach a compact expanded IDS onto each candidate."""
+    if expanded_result.get("status") != STATUS_P2_COMPLETED:
+        return clean_payload
+    compact_by_ticker = {
+        normalize_ticker(b["ticker"]): _compact_expanded(b) for b in expanded_result.get("board", [])
+    }
+    new_payload = dict(clean_payload)
+    new_candidates: list[dict[str, Any]] = []
+    for candidate in clean_payload.get("candidates", []):
+        c = dict(candidate)
+        compact = compact_by_ticker.get(normalize_ticker(c.get("ticker")))
+        if compact is not None:
+            c["expanded_interpretation_defense"] = compact
+        new_candidates.append(c)
+    new_payload["candidates"] = new_candidates
+    return new_payload
+
+
 __all__ = [
     "GRADE_CLEAN",
     "GRADE_CAUTION",
@@ -234,8 +458,12 @@ __all__ = [
     "GRADE_BLOCKED",
     "STATUS_COMPLETED",
     "STATUS_SKIPPED",
+    "STATUS_P2_COMPLETED",
     "evaluate_candidate",
     "run_interpretation_defense",
     "attach_defense_to_payload",
     "enrich_clean_payload",
+    "evaluate_candidate_expanded",
+    "run_expanded_interpretation_defense",
+    "attach_expanded_defense_to_payload",
 ]

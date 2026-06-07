@@ -77,6 +77,10 @@ _SUPPORT_REVIEWED: frozenset[str] = frozenset({
     # SUPPORT, not CORE; no CORE imports them.
     "interpretation_quality_score", "metric_regime_transfer_risk",
     "adverse_regime_stress_test", "interpretation_defense_engine",
+    # P2 interpretation-defense expansion (advisory): amplification / narrative-
+    # substance / incentive / audience-misread. SUPPORT, not CORE.
+    "distribution_amplification_detector", "narrative_substance_gap",
+    "incentive_who_benefits_analyzer", "audience_misinterpretation_risk",
     "kalshi_live_smoke", "late_adoption_lockout", "live_provider_compliance_trace",
     "live_signal_filters", "live_source_runner_phase2", "local_mvp_smoke_test",
     "market_data_freshness", "minimum_daily_universe", "model_disagreement",

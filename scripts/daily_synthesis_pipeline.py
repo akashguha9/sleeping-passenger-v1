@@ -43,6 +43,8 @@ try:
     )
     from scripts.interpretation_defense_engine import (
         attach_defense_to_payload,
+        attach_expanded_defense_to_payload,
+        run_expanded_interpretation_defense,
         run_interpretation_defense,
     )
     from scripts.model_vote_aggregator import aggregate_model_lane_outputs
@@ -65,6 +67,8 @@ except ModuleNotFoundError:  # pragma: no cover - script-style env
     )
     from interpretation_defense_engine import (
         attach_defense_to_payload,
+        attach_expanded_defense_to_payload,
+        run_expanded_interpretation_defense,
         run_interpretation_defense,
     )
     from model_vote_aggregator import aggregate_model_lane_outputs
@@ -217,9 +221,44 @@ def _interpretation_defense_lessons(interpretation_defense: dict[str, Any] | Non
     }
 
 
+def _p2_lessons(interpretation_expansion: dict[str, Any] | None) -> dict[str, Any]:
+    """Distil P2 findings into advisory Moltbook learning fields."""
+    board = (interpretation_expansion or {}).get("board", [])
+    amplification: list[str] = []
+    narrative: list[str] = []
+    who_benefits: list[str] = []
+    audience: list[str] = []
+    operator_warn: list[str] = []
+    for entry in board:
+        t = entry.get("ticker")
+        p2 = entry.get("p2_interpretation_expansion", {})
+        da = p2.get("distribution_amplification", {})
+        nsg = p2.get("narrative_substance_gap", {})
+        inc = p2.get("incentive_who_benefits", {})
+        amr = p2.get("audience_misinterpretation", {})
+        if da.get("grade") in ("HIGH", "HYPE_LED"):
+            amplification.append(f"{t}: {da.get('grade')} — attention vs substance {da.get('attention_growth')}/{da.get('fundamental_improvement')}")
+        if nsg.get("grade") in ("NARRATIVE_RICH", "NARRATIVE_OVERHANG"):
+            narrative.append(f"{t}: {nsg.get('grade')} (gap {nsg.get('narrative_substance_gap')})")
+        if inc.get("grade") in ("HIGH", "EXIT_LIQUIDITY_RISK"):
+            who_benefits.append(f"{t}: {inc.get('grade')} — {inc.get('exit_liquidity_flags') or inc.get('asymmetry_flags')}")
+        if amr.get("grade") in ("HIGH", "MISREAD_LIKELY"):
+            audience.append(f"{t}: {amr.get('grade')} — {amr.get('ambiguous_terms')}")
+        if "operator_misread_risk_live_but_incomplete" in (amr.get("misread_flags") or []):
+            operator_warn.append(f"{t}: live but incomplete — confirm before acting.")
+    return {
+        "amplification_lesson": amplification,
+        "narrative_substance_lesson": narrative,
+        "who_benefits_lesson": who_benefits,
+        "audience_misread_lesson": audience,
+        "operator_misread_warning": operator_warn,
+    }
+
+
 def build_moltbook_learning_review(
     truth_gate: dict[str, Any],
     interpretation_defense: dict[str, Any] | None = None,
+    interpretation_expansion: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Channel C — Moltbook / Learning-Outcome Review.
 
@@ -244,6 +283,7 @@ def build_moltbook_learning_review(
         "stale_ledger_tickers": stale_ledger,
         "learning_review_names": learning_names,
         "interpretation_defense_lessons": _interpretation_defense_lessons(interpretation_defense),
+        "p2_interpretation_lessons": _p2_lessons(interpretation_expansion),
         "note": (
             "Moltbook / outcome-review names ONLY. They may never enter fresh "
             "discovery unless revalidated today through Channel A (live discovery)."
@@ -261,6 +301,9 @@ def run_daily_synthesis(
     model_clients: dict[str, Any] | None = None,
     fundamentals_by_ticker: dict[str, dict[str, Any]] | None = None,
     reference_regime_by_ticker: dict[str, dict[str, Any]] | None = None,
+    attention_by_ticker: dict[str, dict[str, Any]] | None = None,
+    ownership_by_ticker: dict[str, dict[str, Any]] | None = None,
+    liquidity_by_ticker: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Run the corrected flow: fresh discovery -> interpretation defense ->
     isolated model lanes -> mechanical aggregator -> final auditor, with three
@@ -299,6 +342,18 @@ def run_daily_synthesis(
     )
     clean_payload = attach_defense_to_payload(clean_payload, interpretation_defense)
 
+    # ----- Stage 2a2: P2 expansion (amplification / narrative / incentive / audience) -----
+    interpretation_expansion = run_expanded_interpretation_defense(
+        clean_payload,
+        p1_result=interpretation_defense,
+        fundamentals_by_ticker=fundamentals_by_ticker,
+        attention_by_ticker=attention_by_ticker,
+        ownership_by_ticker=ownership_by_ticker,
+        liquidity_by_ticker=liquidity_by_ticker,
+        reference_regime_by_ticker=reference_regime_by_ticker,
+    )
+    clean_payload = attach_expanded_defense_to_payload(clean_payload, interpretation_expansion)
+
     # ----- Stage 2b: isolated model lanes (clean payload only) -----
     # Names that exist ONLY in research/holding/Moltbook context — a lane that
     # drags one in is flagged MODEL_CONTEXT_CONTAMINATION_VIOLATION.
@@ -313,7 +368,9 @@ def run_daily_synthesis(
     # ----- Channels B & C -----
     existing_holding_review = build_existing_holding_review(payload, truth_gate)
     moltbook_learning_review = build_moltbook_learning_review(
-        truth_gate, interpretation_defense=interpretation_defense
+        truth_gate,
+        interpretation_defense=interpretation_defense,
+        interpretation_expansion=interpretation_expansion,
     )
 
     # ----- Stage 4: final synthesis / auditor -----
@@ -325,6 +382,7 @@ def run_daily_synthesis(
         existing_holding_review=existing_holding_review,
         moltbook_learning_review=moltbook_learning_review,
         interpretation_defense=interpretation_defense,
+        interpretation_expansion=interpretation_expansion,
     )
 
     return {
@@ -337,6 +395,7 @@ def run_daily_synthesis(
         "fresh_discovery_contract": contract,
         "clean_fresh_discovery_payload": clean_payload,
         "interpretation_defense": interpretation_defense,
+        "interpretation_expansion": interpretation_expansion,
         "model_lanes": lane_result,
         "mechanical_aggregator": aggregator,
         "existing_holding_review": existing_holding_review,
@@ -401,6 +460,36 @@ def _interpretation_defense_board(interpretation_defense: dict[str, Any] | None)
     return board
 
 
+def _p2_expansion_board(interpretation_expansion: dict[str, Any] | None) -> list[dict[str, Any]]:
+    """Per-candidate auditor view of the P2 expansion."""
+    board: list[dict[str, Any]] = []
+    for entry in (interpretation_expansion or {}).get("board", []):
+        p2 = entry.get("p2_interpretation_expansion", {})
+        da = p2.get("distribution_amplification", {})
+        nsg = p2.get("narrative_substance_gap", {})
+        inc = p2.get("incentive_who_benefits", {})
+        amr = p2.get("audience_misinterpretation", {})
+        board.append(
+            {
+                "ticker": entry.get("ticker"),
+                "p1_ids": entry.get("p1_interpretation_defense", {}).get("interpretation_defense_score"),
+                "expanded_ids": entry.get("expanded_interpretation_defense_score"),
+                "expanded_grade": entry.get("expanded_grade"),
+                "distribution_amplification_grade": da.get("grade"),
+                "narrative_substance_grade": nsg.get("grade"),
+                "incentive_who_benefits_grade": inc.get("grade"),
+                "audience_misinterpretation_grade": amr.get("grade"),
+                "attention_ahead_of_substance": da.get("grade") in ("HIGH", "HYPE_LED"),
+                "narrative_ahead_of_substance": nsg.get("grade") in ("NARRATIVE_RICH", "NARRATIVE_OVERHANG"),
+                "who_benefits_if_believed": inc.get("beneficiary_map"),
+                "what_could_be_misread": amr.get("misread_flags", []),
+                "top_warnings": entry.get("warnings", [])[:6],
+                "advisory_only": True,
+            }
+        )
+    return board
+
+
 def build_final_synthesis(
     *,
     fresh_discovery_contract: dict[str, Any],
@@ -410,6 +499,7 @@ def build_final_synthesis(
     existing_holding_review: dict[str, Any],
     moltbook_learning_review: dict[str, Any],
     interpretation_defense: dict[str, Any] | None = None,
+    interpretation_expansion: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Summarize the upstream stages. Generates NO new names; promotes nothing
     that failed provenance; never mixes stale names into fresh discovery."""
@@ -417,6 +507,7 @@ def build_final_synthesis(
     fresh_tickers = sorted(clean_payload_tickers(clean_fresh_discovery_payload))
     lanes_skipped = model_lane_result.get("status") != LANES_COMPLETED
     interpretation_defense = interpretation_defense or {}
+    interpretation_expansion = interpretation_expansion or {}
 
     fresh_section = {
         "label": "FRESH_DISCOVERY",
@@ -433,6 +524,14 @@ def build_final_synthesis(
         "blocked_tickers": interpretation_defense.get("blocked_tickers", []),
         "skipped": interpretation_defense.get("status") != "INTERPRETATION_DEFENSE_COMPLETED",
     }
+    p2_section = {
+        "label": "P2_INTERPRETATION_EXPANSION_BOARD",
+        "status": interpretation_expansion.get("status", "SKIPPED_NO_FRESH_DISCOVERY"),
+        "board": _p2_expansion_board(interpretation_expansion),
+        "blocked_count": interpretation_expansion.get("blocked_count", 0),
+        "defensive_count": interpretation_expansion.get("defensive_count", 0),
+        "skipped": interpretation_expansion.get("status") != "P2_INTERPRETATION_EXPANSION_COMPLETED",
+    }
     provenance_section = {
         "current_session_date": fresh_discovery_contract.get("current_session_date"),
         "fresh_discovery_status": status,
@@ -445,6 +544,9 @@ def build_final_synthesis(
         "total_model_output_violations": model_lane_result.get("total_provenance_violations", 0),
         "interpretation_defense_status": interpretation_defense_section["status"],
         "blocked_by_interpretation_defense": interpretation_defense_section["blocked_count"],
+        "p2_expansion_status": p2_section["status"],
+        "p2_blocked": p2_section["blocked_count"],
+        "p2_defensive": p2_section["defensive_count"],
     }
     synthesis = {
         "role": "FINAL_AUDITOR",
@@ -452,6 +554,7 @@ def build_final_synthesis(
         "run_date": clean_fresh_discovery_payload.get("run_date"),
         "fresh_discovery": fresh_section,
         "interpretation_defense_board": interpretation_defense_section,
+        "p2_interpretation_expansion_board": p2_section,
         "existing_holding_review": existing_holding_review,
         "moltbook_learning_review": moltbook_learning_review,
         "provenance": provenance_section,
@@ -459,7 +562,7 @@ def build_final_synthesis(
             "Final synthesis is the FINAL AUDITOR. It does not generate candidates.",
             "Existing holdings are labelled Existing Holding Review only.",
             "Moltbook names are labelled Learning / Outcome Review only.",
-            "Interpretation defense can only demote; it never promotes a name.",
+            "Interpretation defense (P1+P2) can only demote; it never promotes a name.",
         ],
         "safety": advisory_safety_stamps(),
         "execution": human_only_stamp(),
@@ -528,6 +631,29 @@ def render_final_synthesis_markdown(synthesis: dict[str, Any]) -> str:
             if row.get("what_stress_could_break_thesis"):
                 lines.append(f"      stress_breakers: {row['what_stress_could_break_thesis']}")
     lines.append("")
+    lines.append("## P2 Interpretation Expansion Board (amplification / narrative / incentive / audience)")
+    p2b = synthesis.get("p2_interpretation_expansion_board", {})
+    lines.append(f"status: {p2b.get('status')}")
+    if p2b.get("skipped"):
+        lines.append("P2 expansion SKIPPED — no verified live candidates.")
+    else:
+        lines.append(f"p2_blocked: {p2b.get('blocked_count')}  p2_defensive: {p2b.get('defensive_count')}")
+        for row in p2b.get("board", []):
+            lines.append(
+                f"  - {row['ticker']}: expanded={row['expanded_grade']} "
+                f"(p1 {row['p1_ids']} -> expanded {row['expanded_ids']}) "
+                f"amp={row['distribution_amplification_grade']} "
+                f"narr={row['narrative_substance_grade']} "
+                f"incentive={row['incentive_who_benefits_grade']} "
+                f"audience={row['audience_misinterpretation_grade']}"
+            )
+            if row.get("attention_ahead_of_substance"):
+                lines.append("      ! attention ahead of substance")
+            if row.get("narrative_ahead_of_substance"):
+                lines.append("      ! narrative ahead of substance")
+            if row.get("what_could_be_misread"):
+                lines.append(f"      misread_risks: {row['what_could_be_misread']}")
+    lines.append("")
     lines.append("## Provenance")
     for key in (
         "current_session_date", "fresh_discovery_status", "live_candidate_count",
@@ -535,6 +661,7 @@ def render_final_synthesis_markdown(synthesis: dict[str, Any]) -> str:
         "discovery_provenance_violation", "model_lanes_status",
         "model_lanes_skipped", "total_model_output_violations",
         "interpretation_defense_status", "blocked_by_interpretation_defense",
+        "p2_expansion_status", "p2_blocked", "p2_defensive",
     ):
         lines.append(f"  {key}: {prov.get(key)}")
     lines.append("")
@@ -764,6 +891,31 @@ def write_isolated_run_artifacts(result: dict[str, Any]) -> Path:
             encoding="utf-8",
         )
 
+    # P2 expansion artifacts.
+    expansion = result.get("interpretation_expansion", {})
+    p2_dir = idef_dir / "p2"
+    p2_dir.mkdir(parents=True, exist_ok=True)
+    if expansion.get("status") != "P2_INTERPRETATION_EXPANSION_COMPLETED":
+        (p2_dir / "SKIPPED_NO_FRESH_DISCOVERY.json").write_text(
+            json.dumps({"status": expansion.get("status"), "reason": expansion.get("reason"),
+                        "run_date": expansion.get("run_date"), "board": []}, indent=2),
+            encoding="utf-8",
+        )
+    else:
+        eb = expansion.get("board", [])
+        p2_of = lambda e, k: e.get("p2_interpretation_expansion", {}).get(k)  # noqa: E731
+        (p2_dir / "distribution_amplification.json").write_text(
+            json.dumps([p2_of(e, "distribution_amplification") for e in eb], indent=2), encoding="utf-8")
+        (p2_dir / "narrative_substance_gap.json").write_text(
+            json.dumps([p2_of(e, "narrative_substance_gap") for e in eb], indent=2), encoding="utf-8")
+        (p2_dir / "incentive_who_benefits.json").write_text(
+            json.dumps([p2_of(e, "incentive_who_benefits") for e in eb], indent=2), encoding="utf-8")
+        (p2_dir / "audience_misinterpretation_risk.json").write_text(
+            json.dumps([p2_of(e, "audience_misinterpretation") for e in eb], indent=2), encoding="utf-8")
+        (p2_dir / "expanded_interpretation_defense_board.json").write_text(
+            json.dumps(result["final_synthesis"]["p2_interpretation_expansion_board"], indent=2),
+            encoding="utf-8")
+
     agg_dir = run_dir / "aggregation"
     agg_dir.mkdir(parents=True, exist_ok=True)
     (agg_dir / "model_vote_matrix.json").write_text(
@@ -807,6 +959,12 @@ def build_capability_upgrade_report(result: dict[str, Any]) -> dict[str, Any]:
     for entry in board:
         g = entry.get("interpretation_defense_grade")
         grades[g] = grades.get(g, 0) + 1
+    expansion = result.get("interpretation_expansion", {})
+    exp_board = expansion.get("board", [])
+    exp_grades: dict[str, int] = {}
+    for entry in exp_board:
+        g = entry.get("expanded_grade")
+        exp_grades[g] = exp_grades.get(g, 0) + 1
     return {
         "report": "capability_upgrade_report",
         "run_date": result.get("run_date"),
@@ -816,11 +974,23 @@ def build_capability_upgrade_report(result: dict[str, Any]) -> dict[str, Any]:
             "adverse_regime_stress_test",
             "interpretation_defense_engine",
         ],
+        "p2_modules_added": [
+            "distribution_amplification_detector",
+            "narrative_substance_gap",
+            "incentive_who_benefits_analyzer",
+            "audience_misinterpretation_risk",
+        ],
         "interpretation_defense_status": defense.get("status"),
+        "p2_expansion_status": expansion.get("status"),
+        "expanded_ids_enabled": expansion.get("status") == "P2_INTERPRETATION_EXPANSION_COMPLETED",
         "fresh_candidate_count": len(result["clean_fresh_discovery_payload"].get("candidates", [])),
         "interpretation_defense_evaluated": len(board),
         "interpretation_defense_blocked": defense.get("blocked_count", 0),
         "interpretation_defense_grade_counts": grades,
+        "p2_evaluated": len(exp_board),
+        "p2_blocked": expansion.get("blocked_count", 0),
+        "p2_defensive": expansion.get("defensive_count", 0),
+        "p2_expanded_grade_counts": exp_grades,
         "integrated_into": [
             "clean_fresh_discovery_payload",
             "isolated_model_lanes",
@@ -828,6 +998,11 @@ def build_capability_upgrade_report(result: dict[str, Any]) -> dict[str, Any]:
             "final_synthesis_auditor",
             "moltbook_learning_review",
             "runtime_artifacts",
+        ],
+        "no_live_feed_limits": [
+            "fundamentals usually absent -> ARST INSUFFICIENT_DATA",
+            "attention/ownership/liquidity feeds optional -> DA/incentive use heuristics",
+            "regime comparison needs a real target-regime feed",
         ],
         "advisory_only": True,
         "execution_gate": "LOCKED",
@@ -842,19 +1017,23 @@ def compact_status_lines(result: dict[str, Any]) -> list[str]:
     aggregator = result["mechanical_aggregator"]
     final = result["final_synthesis"]
     defense = result.get("interpretation_defense", {})
+    expansion = result.get("interpretation_expansion", {})
     status = contract.get("status")
 
     if status != "FRESH_DISCOVERY_OK":
         return [
             "NO_FRESH_DISCOVERY_GENERATED",
+            "p1_interpretation_defense: SKIPPED",
+            "p2_interpretation_expansion: SKIPPED",
             "model_lanes: SKIPPED",
-            "interpretation_defense: SKIPPED",
             "fresh_candidates: 0",
             "reason: no verified live candidates",
         ]
 
     fresh_count = contract.get("live_candidate_count", 0)
     blocked = defense.get("blocked_count", 0)
+    p1_done = defense.get("status") == "INTERPRETATION_DEFENSE_COMPLETED"
+    p2_done = expansion.get("status") == "P2_INTERPRETATION_EXPANSION_COMPLETED"
     if blocked and blocked >= fresh_count:
         return [
             "INTERPRETATION_DEFENSE_BLOCKED",
@@ -865,8 +1044,10 @@ def compact_status_lines(result: dict[str, Any]) -> list[str]:
     return [
         "FRESH_DISCOVERY_OK",
         f"fresh_candidates: {fresh_count}",
-        f"interpretation_defense: {'COMPLETED' if defense.get('status') == 'INTERPRETATION_DEFENSE_COMPLETED' else 'SKIPPED'}",
+        f"p1_interpretation_defense: {'COMPLETED' if p1_done else 'SKIPPED'}",
+        f"p2_interpretation_expansion: {'COMPLETED' if p2_done else 'SKIPPED'}",
         f"blocked_by_interpretation_defense: {blocked}",
+        f"p2_blocked: {expansion.get('blocked_count', 0)}  p2_defensive: {expansion.get('defensive_count', 0)}",
         f"model_lanes: {'COMPLETED' if lanes.get('status') == LANES_COMPLETED else lanes.get('status')}",
         f"aggregation: {'COMPLETED' if aggregator.get('status') == 'FRESH_DISCOVERY_OK' else 'SKIPPED'}",
         f"final_synthesis: {'COMPLETED' if final.get('role') == 'FINAL_AUDITOR' else 'SKIPPED'}",

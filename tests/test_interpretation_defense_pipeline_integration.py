@@ -77,7 +77,8 @@ def test_no_fresh_discovery_skips_defense(tmp_path: Path):
     assert r["interpretation_defense"]["board"] == []
     assert r["final_synthesis"]["interpretation_defense_board"]["skipped"] is True
     status = compact_status_lines(r)
-    assert "interpretation_defense: SKIPPED" in status
+    assert "p1_interpretation_defense: SKIPPED" in status
+    assert "p2_interpretation_expansion: SKIPPED" in status
 
 
 # --- Model cannot override a BLOCKED candidate -------------------------------

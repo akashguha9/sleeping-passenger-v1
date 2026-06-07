@@ -77,6 +77,7 @@ INPUT_PROVENANCE_VIOLATION = "MODEL_LANE_INPUT_PROVENANCE_VIOLATION"
 UNKNOWN_TICKER_VIOLATION = "MODEL_OUTPUT_UNKNOWN_TICKER_VIOLATION"
 CONTEXT_CONTAMINATION_VIOLATION = "MODEL_CONTEXT_CONTAMINATION_VIOLATION"
 IGNORED_DEFENSE_VIOLATION = "MODEL_IGNORED_INTERPRETATION_DEFENSE_VIOLATION"
+IGNORED_P2_DEFENSE_VIOLATION = "MODEL_IGNORED_P2_INTERPRETATION_DEFENSE_VIOLATION"
 
 VALID_CLASSIFICATIONS = (
     "MANUAL_CONSIDERATION",
@@ -296,6 +297,14 @@ def defense_grade_for(candidate: dict[str, Any]) -> str | None:
     return None
 
 
+def effective_defense_grade(candidate: dict[str, Any]) -> tuple[str | None, bool]:
+    """Return (grade, is_expanded). Expanded P2 grade wins when present."""
+    expanded = candidate.get("expanded_interpretation_defense")
+    if isinstance(expanded, dict) and expanded.get("expanded_grade"):
+        return expanded.get("expanded_grade"), True
+    return defense_grade_for(candidate), False
+
+
 def clean_payload_tickers(payload: dict[str, Any]) -> set[str]:
     return {normalize_ticker(c.get("ticker")) for c in payload.get("candidates", [])}
 
@@ -374,6 +383,24 @@ def _defense_prompt_lines(clean_payload: dict[str, Any]) -> list[str]:
     return lines or ["  (none)"]
 
 
+def _expanded_defense_prompt_lines(clean_payload: dict[str, Any]) -> list[str]:
+    lines: list[str] = []
+    for candidate in clean_payload.get("candidates", []):
+        exp = candidate.get("expanded_interpretation_defense")
+        if not isinstance(exp, dict):
+            continue
+        lines.append(
+            f"  {normalize_ticker(candidate.get('ticker'))}: "
+            f"expanded_grade={exp.get('expanded_grade')} expanded_ids={exp.get('expanded_ids')} "
+            f"amplification={exp.get('distribution_amplification_grade')} "
+            f"narrative_substance={exp.get('narrative_substance_gap_grade')} "
+            f"incentive={exp.get('incentive_risk_grade')} "
+            f"audience_misread={exp.get('audience_misinterpretation_grade')} "
+            f"warnings={exp.get('warnings') or []}"
+        )
+    return lines
+
+
 def build_model_lane_prompt(model_name: str, clean_payload: dict[str, Any]) -> str:
     """Build the deterministic, isolated prompt for one model lane.
 
@@ -407,6 +434,16 @@ def build_model_lane_prompt(model_name: str, clean_payload: dict[str, Any]) -> s
         "blocks. You may NOT promote (MANUAL_CONSIDERATION or WATCH) any candidate "
         "whose interpretation_defense_grade is BLOCKED. You must explain if you "
         "disagree with a CAUTION or DEFENSIVE_REVIEW grade, but you cannot ignore it.",
+        "",
+        "P2 INTERPRETATION EXPANSION (amplification / narrative-substance / "
+        "incentive / audience-misread):",
+        *(_expanded_defense_prompt_lines(clean_payload) or ["  (not attached)"]),
+        "For each candidate you must explicitly consider: (1) Is this signal being "
+        "amplified beyond substance? (2) Who benefits if the operator believes it? "
+        "(3) Could the operator/model/retail audience misread it? (4) Is the "
+        "narrative stronger than the underlying evidence? You may NOT promote "
+        "(MANUAL_CONSIDERATION or WATCH) a candidate whose expanded_grade is BLOCKED "
+        "or DEFENSIVE_REVIEW.",
         "",
         "CLEAN FRESH DISCOVERY PAYLOAD (JSON — your only allowed input):",
         json.dumps(clean_payload, indent=2, sort_keys=True),
@@ -491,10 +528,10 @@ def validate_model_lane_output(
     """
     allowed = clean_payload_tickers(clean_payload)
     contamination = {normalize_ticker(t) for t in (contamination_names or set())}
-    blocked_defense = {
-        normalize_ticker(c.get("ticker"))
+    # Effective interpretation-defense grade per ticker (expanded P2 wins).
+    defense_by_ticker: dict[str, tuple[str | None, bool]] = {
+        normalize_ticker(c.get("ticker")): effective_defense_grade(c)
         for c in clean_payload.get("candidates", [])
-        if defense_grade_for(c) == "BLOCKED"
     }
     output = output if isinstance(output, dict) else {}
 
@@ -532,23 +569,28 @@ def validate_model_lane_output(
             if ticker not in allowed:
                 _record(ticker, list_key)
                 continue
-            # A model may not promote a BLOCKED candidate. Quarantine the
-            # promotion into risk_blocks and record the violation.
-            if ticker in blocked_defense and classification in ("MANUAL_CONSIDERATION", "WATCH"):
-                violations.append(
-                    {
-                        "ticker": ticker,
-                        "list": list_key,
-                        "code": IGNORED_DEFENSE_VIOLATION,
-                        "model": model_name.lower(),
-                    }
-                )
-                quarantined = _clean_candidate_item(raw, "RISK_BLOCK")
-                quarantined["no_action_reason"] = (
-                    "interpretation_defense_grade=BLOCKED; promotion quarantined"
-                )
-                cleaned["risk_blocks"].append(quarantined)
-                continue
+            # A model may not promote a BLOCKED candidate (P1 or expanded), nor a
+            # candidate the expanded P2 layer capped at DEFENSIVE_REVIEW.
+            grade, is_expanded = defense_by_ticker.get(ticker, (None, False))
+            if classification in ("MANUAL_CONSIDERATION", "WATCH"):
+                if grade == "BLOCKED":
+                    violations.append({
+                        "ticker": ticker, "list": list_key, "model": model_name.lower(),
+                        "code": IGNORED_P2_DEFENSE_VIOLATION if is_expanded else IGNORED_DEFENSE_VIOLATION,
+                    })
+                    q = _clean_candidate_item(raw, "RISK_BLOCK")
+                    q["no_action_reason"] = "interpretation_defense_grade=BLOCKED; promotion quarantined"
+                    cleaned["risk_blocks"].append(q)
+                    continue
+                if is_expanded and grade == "DEFENSIVE_REVIEW":
+                    violations.append({
+                        "ticker": ticker, "list": list_key, "model": model_name.lower(),
+                        "code": IGNORED_P2_DEFENSE_VIOLATION,
+                    })
+                    q = _clean_candidate_item(raw, "WAIT")
+                    q["no_action_reason"] = "expanded_grade=DEFENSIVE_REVIEW; promotion quarantined to WAIT"
+                    cleaned["wait"].append(q)
+                    continue
             cleaned[list_key].append(_clean_candidate_item(raw, classification))
 
     # rejected_due_to_missing_evidence may name in-payload tickers only.
@@ -748,12 +790,14 @@ __all__ = [
     "UNKNOWN_TICKER_VIOLATION",
     "CONTEXT_CONTAMINATION_VIOLATION",
     "IGNORED_DEFENSE_VIOLATION",
+    "IGNORED_P2_DEFENSE_VIOLATION",
     "VALID_CLASSIFICATIONS",
     "ModelLaneInputProvenanceViolation",
     "build_clean_fresh_discovery_payload",
     "candidate_input_allowed",
     "validate_model_lane_input",
     "defense_grade_for",
+    "effective_defense_grade",
     "clean_payload_tickers",
     "build_model_lane_prompt",
     "build_all_lane_prompts",
