@@ -85,3 +85,102 @@ def test_H_advisory_only_keeps_ticker():
     r = score_signal_payoff_capture(_cand(ticker="ZIM"), fundamentals=_STRONG_MARGINS)
     assert r["ticker"] == "ZIM"
     assert r["advisory_only"] is True
+
+
+# --- Auditable diagnostic layer (2026-06-09 reflection) ---------------------
+
+def _diag(fundamentals=None, structure=None, **cand_over):
+    return score_signal_payoff_capture(
+        _cand(**cand_over), fundamentals=fundamentals, structure=structure
+    )["diagnostic"]
+
+
+def test_diag_case1_high_revenue_weak_margin():
+    d = _diag(
+        fundamentals={"operating_margin": 0.04, "ocf_to_net_income": 1.0, "fcfe_to_net_income": 0.8},
+        structure={"pricing_power": 0.8},
+    )
+    assert d["gross_to_margin_capture"] == "weak"
+    assert d["primary_value_leak"] == "weak_margin_capture"
+    assert d["explanatory_only"] is True
+    assert "margin" in d["falsification_hint"].lower()
+
+
+def test_diag_case2_high_profit_weak_cash():
+    d = _diag(
+        fundamentals={"operating_margin": 0.25, "ocf_to_net_income": 0.3, "fcfe_to_net_income": 0.8},
+        structure={"pricing_power": 0.8},
+    )
+    assert d["profit_to_cash_capture"] == "weak"
+    assert d["primary_value_leak"] == "weak_cash_conversion"
+
+
+def test_diag_case2b_working_capital_drag():
+    d = _diag(
+        fundamentals={"operating_margin": 0.25, "ocf_to_net_income": 0.3,
+                      "fcfe_to_net_income": 0.8, "receivable_days_change": 8.0},
+        structure={"pricing_power": 0.8},
+    )
+    assert d["primary_value_leak"] == "working_capital_drag"
+
+
+def test_diag_case3_strong_cash_high_capex_burden():
+    d = _diag(
+        fundamentals={"operating_margin": 0.25, "ocf_to_net_income": 1.0, "fcfe_to_net_income": 0.2},
+        structure={"pricing_power": 0.8, "capex_intensity": 0.7},
+    )
+    assert d["cash_to_owner_capture"] == "weak"
+    assert d["primary_value_leak"] == "capex_burden"
+
+
+def test_diag_case3b_debt_burden():
+    d = _diag(
+        fundamentals={"operating_margin": 0.25, "ocf_to_net_income": 1.0,
+                      "fcfe_to_net_income": 0.2, "debt_to_equity": 0.85},
+        structure={"pricing_power": 0.8},
+    )
+    assert d["primary_value_leak"] == "debt_or_interest_burden"
+
+
+def test_diag_case4_platform_toll_and_false_house():
+    d = _diag(
+        fundamentals={"operating_margin": 0.25, "ocf_to_net_income": 1.0, "fcfe_to_net_income": 0.8},
+        structure={"pricing_power": 0.3, "platform_fee_dependence": 0.7,
+                   "gmv": 0.9, "take_rate": 0.05, "incentive_intensity": 0.6},
+    )
+    assert d["bargaining_capture"] == "weak"
+    assert d["primary_value_leak"] == "platform_or_intermediary_toll"
+    assert d["false_house_risk"] == "high"
+
+
+def test_diag_case5_insufficient_evidence():
+    d = _diag()  # no fundamentals, no structure
+    assert d["primary_value_leak"] == "insufficient_evidence"
+    assert d["owner_capture_confidence"] == "low"
+    assert d["false_house_risk"] == "not_evaluated"
+
+
+def test_diag_confidence_scales_with_evidence():
+    full = _diag(
+        fundamentals={"operating_margin": 0.25, "ocf_to_net_income": 1.0, "fcfe_to_net_income": 0.8},
+        structure={"pricing_power": 0.8},
+    )
+    assert full["owner_capture_confidence"] == "high"
+
+
+def test_diag_not_live_is_insufficient():
+    r = score_signal_payoff_capture(
+        _cand(source_health="UNVERIFIED", is_live=False, evidence_type="STATIC_UNIVERSE_FALLBACK")
+    )
+    assert r["diagnostic"]["primary_value_leak"] == "insufficient_evidence"
+    assert r["diagnostic"]["explanatory_only"] is True
+
+
+def test_diag_does_not_change_risk_or_grade():
+    # Diagnostic is explanatory-only: the score/grade come from the same inputs
+    # and must be independent of the diagnostic fields' existence.
+    r = score_signal_payoff_capture(
+        _cand(), fundamentals=_STRONG_MARGINS, structure={"market_structure": "monopoly"}
+    )
+    assert r["capture_grade"] == GRADE_STRONG  # unchanged from test_A
+    assert "diagnostic" in r and r["diagnostic"]["explanatory_only"] is True

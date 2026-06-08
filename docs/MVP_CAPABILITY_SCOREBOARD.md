@@ -161,3 +161,36 @@ still holds with two P3 demoters stacked; `test_K` proves a commodity / high-deb
 Capped at 7: offline proxies, no live market-structure / capex / ownership feed.
 The reflection's role/squad/lane/portion ideas were **deliberately not shipped** —
 they are allocation/sizing, which is execution-domain and stays LOCKED.
+
+## Auditability update (2026-06-09 — "make the demoter harder to fool")
+
+Integrated the third 2026-06-08/09 reflection: a meta-upgrade to the payoff-capture
+demoter. Its own thesis — *"better explanations first, not new scoring"* — so the
+shipped change is an **explanatory-only** auditable diagnostic, NOT a sharper
+penalty. `signal_payoff_capture_estimator.payoff_capture_diagnostic` decomposes the
+demoter into four sub-captures, attributes the `primary_value_leak`, states
+`owner_capture_confidence`, flags `false_house_risk`, and emits a
+`falsification_hint`. It never changes `payoff_capture_risk`/`capture_grade`
+(`test_diag_does_not_change_risk_or_grade`). See
+[reflections/2026-06-09_auditable_payoff_capture_reflection.md](reflections/2026-06-09_auditable_payoff_capture_reflection.md).
+
+| # | Segment | Prev | New | Δ | Evidence in code | Tests | Shipped? | Why capped |
+|---|---|---:|---:|---:|---|---|---|---|
+| 18 | **Demoter auditability / evidence-attribution** | 2 | **7** | **+5** | `payoff_capture_diagnostic` (sub-captures + leak + confidence + falsification + false-house); surfaced in compact/auditor board/markdown/artifact | `test_signal_payoff_capture_estimator.py` (10 diag tests) + `test_L` | **shipped+wired** | covers payoff-capture only (not all demoters); offline proxies → not 8 |
+| 17 | Payoff capture / value-capture | 7 | 7 | 0 | diagnostic is explanatory; the score is unchanged | existing | shipped | better-explained, not stronger ⇒ no score change |
+| 6 | Incentive / who-benefits | 6 | 6 | 0 | false-house flag is adjacent; no incentive change | existing | shipped | — |
+| — | Outcome calibration of demoters | 2 | 2 | 0 | doctrine only — needs historical outcomes (corpus = INSUFFICIENT_EVIDENCE) | — | not shipped | data-gated; honest 0 delta |
+| — | Capture momentum (Δ over time) | 1 | 1 | 0 | doctrine — no per-ticker time-series feed | — | not shipped | data-gated; honest 0 delta |
+| 15 | Execution safety / advisory-only | 10 | 10 | 0 | diagnostic adds no allocation/sizing/role output; demotion not more aggressive | every diag test | canonical | preserve |
+
+### Why the auditability increase is real (not doctrine)
+
+`payoff_capture_diagnostic` is shipped code with **12 new tests** (10 diagnostic
+cases incl. the 5 representative synthetic cases from the reflection's spec, plus
+engine `test_L` and the no-change-to-grade regression), wired into the compact
+record, auditor board, final-synthesis markdown, and the existing
+`signal_payoff_capture.json` artifact. It moves segment 18 (auditability) from a
+single binary grade to evidence-attributed, confidence-rated, falsifiable output.
+Calibration (did the demoter actually improve outcomes?) and capture-momentum stay
+at their prior scores — both are **data-gated** and would be dishonest to claim
+without historical outcomes / time-series feeds the repo does not yet have.

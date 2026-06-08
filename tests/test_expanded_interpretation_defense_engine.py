@@ -131,3 +131,16 @@ def test_K_weak_payoff_capture_caps_at_defensive_or_lower():
     assert r["p3_payoff_capture"]["capture_grade"] == "WEAK_CAPTURE"
     assert r["expanded_grade"] in (GRADE_DEFENSIVE, GRADE_BLOCKED)
     assert "weak_payoff_capture" in r["warnings"]
+
+
+def test_L_payoff_capture_diagnostic_surfaced_and_explanatory():
+    r = evaluate_candidate_expanded(
+        _clean(), run_date=SESSION, fundamentals=_STRONG,
+        structure={"market_structure": "oligopoly", "operating_margin": 0.25},
+    )
+    diag = r["p3_payoff_capture"]["diagnostic"]
+    assert "primary_value_leak" in diag
+    assert diag["explanatory_only"] is True
+    # diagnostic must not push expanded above P1 (still demoter-bounded)
+    assert (r["expanded_interpretation_defense_score"]
+            <= r["p1_interpretation_defense"]["interpretation_defense_score"] + 1e-6)

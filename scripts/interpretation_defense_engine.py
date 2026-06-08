@@ -470,6 +470,9 @@ def _compact_expanded(full: dict[str, Any]) -> dict[str, Any]:
         "short_half_life_risk": hl.get("short_half_life_risk"),
         "capture_grade": pc.get("capture_grade"),
         "payoff_capture_risk": pc.get("payoff_capture_risk"),
+        "primary_value_leak": pc.get("diagnostic", {}).get("primary_value_leak"),
+        "owner_capture_confidence": pc.get("diagnostic", {}).get("owner_capture_confidence"),
+        "false_house_risk": pc.get("diagnostic", {}).get("false_house_risk"),
         "hard_blocks": full["hard_blocks"],
         "warnings": full["warnings"],
     }

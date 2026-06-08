@@ -42,6 +42,19 @@ and stay document-only unless a concrete equity use-case appears.
 | 13 | Audience Misinterpretation Risk Score | `audience_misinterpretation_risk` | `scripts/audience_misinterpretation_risk.py` (SHIPPED 2026-06-07, P2) | **SHIPPED (heuristic)** — per-audience misread risk + operator-misread flag; wired into expanded IDS; `test_audience_misinterpretation_risk.py` | P2 (done; capped 6 — no calibration) |
 | 14 | Signal Half-Life / Edge Durability Estimator | `signal_half_life_estimator` | `scripts/signal_half_life_estimator.py` (SHIPPED 2026-06-08, **P3**); lineage `asset_durability_filter.py`, `candidate_memory_decay.py`, `late_adoption_lockout.py` | **SHIPPED (heuristic)** — "snack vs signal vs asset" edge-durability + decay λ; layered into expanded IDS as a bounded demotion; `SNACK` caps at DEFENSIVE; `test_signal_half_life_estimator.py` | P3 (done; capped 7 — no live attention/fundamentals/crowding feed) |
 | 15 | Signal Payoff-Capture / Value-Capture Estimator | `signal_payoff_capture_estimator` | `scripts/signal_payoff_capture_estimator.py` (SHIPPED 2026-06-08, **P3**); lineage `incentive_who_benefits_analyzer.py`, `false_negative_casino_monopoly_layer.py`, `asymmetry_survival_scorer.py` | **SHIPPED (heuristic)** — "gross is not net": structural position + margin capture + pricing power − claimant dilution; `WEAK_CAPTURE` caps at DEFENSIVE + `gross_not_net` flag; layered into expanded IDS; `test_signal_payoff_capture_estimator.py` | P3 (done; capped 7 — no live market-structure/capex/ownership feed) |
+| 16 | Auditable Payoff-Capture Diagnostic | `payoff_capture_diagnostic` | `scripts/signal_payoff_capture_estimator.py::payoff_capture_diagnostic` (SHIPPED 2026-06-09) | **SHIPPED (explanatory-only)** — four sub-captures (gross→margin / profit→cash / cash→owner / bargaining) + `primary_value_leak` attribution + `owner_capture_confidence` + `false_house_risk` + `falsification_hint`; never changes risk/grade; `unknown`/`insufficient_evidence` when data absent | P1 of "harder-to-fool" arc (done) |
+
+### 2026-06-09 reflection #3 → repo ("harder to fool": evidence / confidence / falsification)
+
+| Reflection priority | Maps to | Status |
+|---|---|---|
+| P1 Payoff-Capture explanation card (sub-captures + leak) | `payoff_capture_diagnostic` (#16) | **SHIPPED 2026-06-09** |
+| P2 Owner-capture confidence | `payoff_capture_diagnostic.owner_capture_confidence` | **SHIPPED 2026-06-09** |
+| Layer 7 Falsification hooks | `payoff_capture_diagnostic.falsification_hint` | **SHIPPED 2026-06-09** |
+| P3 False-house detector | `payoff_capture_diagnostic.false_house_risk` (explanatory flag) | **SHIPPED 2026-06-09** (flag-only; not a new penalty) |
+| P4 Capture momentum (Δ over time) | — | doctrine (no per-ticker time-series feed; would be insufficient_evidence) |
+| P5 / Layer 6 Demoter audit table + outcome calibration | — | doctrine (data-gated; calibration corpus = INSUFFICIENT_EVIDENCE) |
+| Role / lane / research-depth labels (advisory-safe) | — | out of focus (portfolio-framing, not interpretation-defense) |
 
 ### 2026-06-08 reflection #2 concepts → repo (meal-box / casino / toll-gate / payoff capture)
 

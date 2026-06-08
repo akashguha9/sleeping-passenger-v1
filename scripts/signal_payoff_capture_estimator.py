@@ -118,6 +118,7 @@ def score_signal_payoff_capture(
             "capture_flags": ["not_live_not_scored"],
             "missing_fields": ["live_evidence"],
             "warnings": ["candidate is not live; not scored as live payoff capture"],
+            "diagnostic": payoff_capture_diagnostic(None, None, live=False),
             "advisory_only": True,
         }
 
@@ -200,6 +201,7 @@ def score_signal_payoff_capture(
         "capture_flags": flags,
         "missing_fields": missing,
         "warnings": warnings,
+        "diagnostic": payoff_capture_diagnostic(fundamentals, structure, live=True),
         "advisory_only": True,
     }
 
@@ -215,9 +217,236 @@ def _grade(risk: float) -> str:
     return GRADE_WEAK
 
 
+# ---------------------------------------------------------------------------
+# Auditable Payoff-Capture Diagnostic (2026-06-09 reflection)
+#
+# "Move from 'score says weak capture' to 'here is exactly where value leaks
+# before it reaches the owner, how confident we are, and what would falsify it.'"
+#
+# This layer is EXPLANATORY-ONLY. It never changes payoff_capture_risk or
+# capture_grade and never makes demotion more aggressive — it decomposes the
+# existing demoter into auditable sub-captures, attributes the primary value
+# leak, states evidence confidence, and emits a falsification hint. When data is
+# absent it returns unknown / insufficient_evidence rather than guessing.
+# ---------------------------------------------------------------------------
+
+BAND_STRONG = "strong"
+BAND_MEDIUM = "medium"
+BAND_WEAK = "weak"
+BAND_UNKNOWN = "unknown"
+
+LEAK_NONE = "none_detected"
+LEAK_MARGIN = "weak_margin_capture"
+LEAK_CASH = "weak_cash_conversion"
+LEAK_WORKING_CAPITAL = "working_capital_drag"
+LEAK_CAPEX = "capex_burden"
+LEAK_DEBT = "debt_or_interest_burden"
+LEAK_PLATFORM = "platform_or_intermediary_toll"
+LEAK_SUPPLIER = "supplier_power"
+LEAK_CUSTOMER = "customer_power"
+LEAK_DILUTION = "dilution_or_minority_leakage"
+LEAK_INSUFFICIENT = "insufficient_evidence"
+
+CONF_HIGH = "high"
+CONF_MEDIUM = "medium"
+CONF_LOW = "low"
+
+FALSE_HOUSE_HIGH = "high"
+FALSE_HOUSE_LOW = "low"
+FALSE_HOUSE_NOT_EVAL = "not_evaluated"
+
+_FALSIFICATION = {
+    LEAK_MARGIN: "Operating margin rises and holds for 2 consecutive periods.",
+    LEAK_CASH: "OCF/Net Income > 0.8 for 2 consecutive periods.",
+    LEAK_WORKING_CAPITAL: "Receivable days AND inventory days both decline.",
+    LEAK_CAPEX: "FCF margin turns positive while capex intensity falls.",
+    LEAK_DEBT: "Debt/EBITDA falls and interest coverage rises.",
+    LEAK_PLATFORM: "Take-rate rises without rising incentives/subsidies.",
+    LEAK_SUPPLIER: "Gross margin stays stable through an input-cost shock.",
+    LEAK_CUSTOMER: "Revenue concentration falls while gross margin holds.",
+    LEAK_DILUTION: "Share count stays flat and minority share of profit falls.",
+    LEAK_NONE: "Capture already evidenced as adequate; watch for margin/cash deterioration.",
+    LEAK_INSUFFICIENT: "Provide FCF, working-capital and margin-trend evidence to evaluate capture.",
+}
+
+
+def _num(d: dict[str, Any], key: str) -> float | None:
+    """Raw float read (NOT clamped — capture ratios legitimately exceed 1 or go negative)."""
+    v = d.get(key)
+    if v is None:
+        return None
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return None
+
+
+def _band(value: float | None, strong: float, medium: float) -> str:
+    if value is None:
+        return BAND_UNKNOWN
+    if value >= strong:
+        return BAND_STRONG
+    if value >= medium:
+        return BAND_MEDIUM
+    return BAND_WEAK
+
+
+def _cash_capture_ratio(fundamentals: dict[str, Any]) -> float | None:
+    r = _num(fundamentals, "ocf_to_net_income")
+    if r is not None:
+        return r
+    ocf = _num(fundamentals, "operating_cash_flow")
+    ni = _num(fundamentals, "net_income")
+    if ocf is not None and ni is not None and ni > 0:
+        return ocf / ni
+    return None
+
+
+def _owner_capture_ratio(fundamentals: dict[str, Any]) -> float | None:
+    r = _num(fundamentals, "fcfe_to_net_income")
+    if r is not None:
+        return r
+    fcfe = _num(fundamentals, "free_cash_flow_to_equity")
+    ni = _num(fundamentals, "net_income")
+    if fcfe is not None and ni is not None and ni > 0:
+        return fcfe / ni
+    return None
+
+
+def _bargaining_capture(structure: dict[str, Any], fundamentals: dict[str, Any]) -> tuple[str, float | None]:
+    pricing = _num(structure, "pricing_power")
+    cust = _num(structure, "customer_concentration")
+    supp = _num(structure, "supplier_power")
+    plat = _num(structure, "platform_fee_dependence")
+    if pricing is None and cust is None and supp is None and plat is None:
+        return BAND_UNKNOWN, None
+    base = pricing if pricing is not None else (_num(fundamentals, "gross_margin") or 0.4)
+    score = base - 0.5 * (cust or 0.0) - 0.5 * (supp or 0.0) - 0.5 * (plat or 0.0)
+    score = _clamp01(score)
+    return _band(score, 0.55, 0.30), score
+
+
+def payoff_capture_diagnostic(
+    fundamentals: dict[str, Any] | None,
+    structure: dict[str, Any] | None,
+    *,
+    live: bool = True,
+) -> dict[str, Any]:
+    """Auditable decomposition of the payoff-capture demoter. Explanatory-only."""
+    if not live:
+        return {
+            "gross_to_margin_capture": BAND_UNKNOWN,
+            "profit_to_cash_capture": BAND_UNKNOWN,
+            "cash_to_owner_capture": BAND_UNKNOWN,
+            "bargaining_capture": BAND_UNKNOWN,
+            "primary_value_leak": LEAK_INSUFFICIENT,
+            "owner_capture_confidence": CONF_LOW,
+            "false_house_risk": FALSE_HOUSE_NOT_EVAL,
+            "falsification_hint": _FALSIFICATION[LEAK_INSUFFICIENT],
+            "advisory_only": True,
+            "explanatory_only": True,
+        }
+
+    fundamentals = dict(fundamentals or {})
+    structure = dict(structure or {})
+
+    om = _num(fundamentals, "operating_margin")
+    margin_band = _band(om, 0.18, 0.07)
+    cash_ratio = _cash_capture_ratio(fundamentals)
+    cash_band = _band(cash_ratio, 0.90, 0.60)
+    owner_ratio = _owner_capture_ratio(fundamentals)
+    owner_band = _band(owner_ratio, 0.70, 0.40)
+    bargain_band, _bargain_score = _bargaining_capture(structure, fundamentals)
+
+    # Confidence — how many real (non-proxy) evidence points are present.
+    present = sum(
+        1 for b in (margin_band, cash_band, owner_band, bargain_band) if b != BAND_UNKNOWN
+    )
+    confidence = CONF_HIGH if present >= 3 else CONF_MEDIUM if present == 2 else CONF_LOW
+
+    # Primary value leak — upstream-to-downstream priority; first weak wins.
+    leak = LEAK_NONE
+    if present == 0:
+        leak = LEAK_INSUFFICIENT
+    elif margin_band == BAND_WEAK:
+        leak = LEAK_MARGIN
+    elif cash_band == BAND_WEAK:
+        rec = _num(fundamentals, "receivable_days_change")
+        inv = _num(fundamentals, "inventory_days_change")
+        rising_wc = (rec is not None and rec > 0) or (inv is not None and inv > 0)
+        leak = LEAK_WORKING_CAPITAL if rising_wc else LEAK_CASH
+    elif owner_band == BAND_WEAK:
+        capex = _num(structure, "capex_intensity")
+        if capex is None:
+            capex = _num(fundamentals, "capex_intensity")
+        dte = _num(fundamentals, "debt_to_equity")
+        icov = _num(fundamentals, "interest_coverage")
+        share_chg = _num(fundamentals, "share_count_change")
+        minority = _num(fundamentals, "minority_interest_share")
+        if capex is not None and capex >= 0.5:
+            leak = LEAK_CAPEX
+        elif (dte is not None and dte >= 0.6) or (icov is not None and icov < 3):
+            leak = LEAK_DEBT
+        elif (share_chg is not None and share_chg > 0) or (minority is not None and minority >= 0.2):
+            leak = LEAK_DILUTION
+        else:
+            leak = LEAK_CAPEX
+    elif bargain_band == BAND_WEAK:
+        plat = _num(structure, "platform_fee_dependence")
+        supp = _num(structure, "supplier_power")
+        cust = _num(structure, "customer_concentration")
+        if plat is not None and plat >= 0.5:
+            leak = LEAK_PLATFORM
+        elif supp is not None and supp >= 0.5:
+            leak = LEAK_SUPPLIER
+        elif cust is not None and cust >= 0.5:
+            leak = LEAK_CUSTOMER
+        else:
+            leak = LEAK_PLATFORM
+
+    return {
+        "gross_to_margin_capture": margin_band,
+        "profit_to_cash_capture": cash_band,
+        "cash_to_owner_capture": owner_band,
+        "bargaining_capture": bargain_band,
+        "primary_value_leak": leak,
+        "owner_capture_confidence": confidence,
+        "false_house_risk": _false_house_risk(fundamentals, structure, margin_band, cash_band),
+        "falsification_hint": _FALSIFICATION[leak],
+        "advisory_only": True,
+        "explanatory_only": True,
+    }
+
+
+def _false_house_risk(
+    fundamentals: dict[str, Any], structure: dict[str, Any], margin_band: str, cash_band: str
+) -> str:
+    """A 'player wearing a house costume' — big reach, weak toll economics."""
+    reach_vals = [
+        _num(structure, k) for k in ("gmv", "distribution_control", "brand_recall", "market_reach")
+    ]
+    reach = max((v for v in reach_vals if v is not None), default=None)
+    if reach is None:
+        return FALSE_HOUSE_NOT_EVAL
+    take_rate = _num(structure, "take_rate")
+    incentive = _num(structure, "incentive_intensity")
+    churn = _num(structure, "churn")
+    weak_econ = (
+        (take_rate is not None and take_rate < 0.10)
+        or margin_band == BAND_WEAK
+        or cash_band == BAND_WEAK
+        or (incentive is not None and incentive >= 0.5)
+        or (churn is not None and churn >= 0.5)
+    )
+    if reach >= 0.6 and weak_econ:
+        return FALSE_HOUSE_HIGH
+    return FALSE_HOUSE_LOW
+
+
 __all__ = [
     "GRADE_STRONG",
     "GRADE_MODERATE",
     "GRADE_WEAK",
     "score_signal_payoff_capture",
+    "payoff_capture_diagnostic",
 ]

@@ -490,6 +490,10 @@ def _p2_expansion_board(interpretation_expansion: dict[str, Any] | None) -> list
                 "estimated_half_life_days": hl.get("estimated_half_life_days"),
                 "capture_grade": pc.get("capture_grade"),
                 "payoff_capture_risk": pc.get("payoff_capture_risk"),
+                "payoff_capture_diagnostic": pc.get("diagnostic", {}),
+                "primary_value_leak": pc.get("diagnostic", {}).get("primary_value_leak"),
+                "owner_capture_confidence": pc.get("diagnostic", {}).get("owner_capture_confidence"),
+                "false_house_risk": pc.get("diagnostic", {}).get("false_house_risk"),
                 "attention_ahead_of_substance": da.get("grade") in ("HIGH", "HYPE_LED"),
                 "narrative_ahead_of_substance": nsg.get("grade") in ("NARRATIVE_RICH", "NARRATIVE_OVERHANG"),
                 "edge_is_a_snack_not_an_asset": hl.get("half_life_class") == "SNACK",
@@ -671,6 +675,13 @@ def render_final_synthesis_markdown(synthesis: dict[str, Any]) -> str:
                 lines.append(
                     f"      weak payoff capture: value diluted before owner "
                     f"(capture risk {row.get('payoff_capture_risk')})"
+                )
+            if row.get("primary_value_leak") not in (None, "none_detected"):
+                lines.append(
+                    f"      value leak: {row.get('primary_value_leak')} "
+                    f"(confidence {row.get('owner_capture_confidence')}"
+                    + (f", false_house={row.get('false_house_risk')}" if row.get('false_house_risk') == 'high' else "")
+                    + ")"
                 )
             if row.get("attention_ahead_of_substance"):
                 lines.append("      ! attention ahead of substance")
