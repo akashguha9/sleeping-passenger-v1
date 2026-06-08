@@ -128,3 +128,36 @@ final synthesis markdown → artifacts). The half-life layer **only subtracts**:
 momentum/meme candidate is graded `SNACK` and capped at `DEFENSIVE_REVIEW`.
 Capped at 7 (not 8–9) honestly: it runs on offline evidence-type proxies with no
 live attention / fundamentals / crowding feed and no historical decay calibration.
+
+## P3 expansion update #2 (2026-06-08 — meal-box / casino / toll-gate reflection)
+
+Integrated the second 2026-06-08 reflection (meal box, distribution contracts,
+casino/house, Berlin payoff stack, toll gates, Autobahn lanes, squads, sponsor
+/ad pools, market structure, Huxley). Most of its 27 components already ship
+(narrative gap, distribution/SEO, casino/who-benefits, half-life, actionability,
+perception) or are **out of advisory scope** (role/squad/lane/portion classifiers
+are allocation/sizing = execution domain, LOCKED). The one genuine gap —
+**payoff capture: "gross is not net"** — is now shipped as
+`signal_payoff_capture_estimator.py`, layered into the expanded IDS as a second
+bounded, demote-only P3 demotion (`WEAK_CAPTURE` caps the grade at DEFENSIVE).
+See [reflections/2026-06-08_payoff_capture_reflection.md](reflections/2026-06-08_payoff_capture_reflection.md).
+
+| # | Segment | Prev | New | Δ | Evidence in code | Tests | Shipped? | Why capped |
+|---|---|---:|---:|---:|---|---|---|---|
+| 17 | **Payoff capture / value-capture (gross≠net)** | 0 | **7** | **+7** | `signal_payoff_capture_estimator.py`; layered into `evaluate_candidate_expanded` (bounded demotion + WEAK_CAPTURE cap) | `test_signal_payoff_capture_estimator.py` (8) + 2 integration | **shipped+wired** | offline fundamental proxies; no live market-structure/capex/ownership feed → not 8 |
+| — | Unified IDS (expanded, P1+P2+P3×2) | 8 | 8 | 0 | payoff-capture is a 6th demoter; `test_J` (expanded ≤ P1) still holds | `test_expanded_interpretation_defense_engine.py` (J, K) | shipped+wired | one structural axis added; not a structural jump → no honest increase |
+| 6 | Incentive awareness / who-benefits | 6 | 6 | 0 | payoff-capture is adjacent but distinct (who-captures vs who-benefits); no change to incentive module | existing | shipped | doctrine-only overlap ⇒ no increase |
+| 16 | Signal half-life / edge durability | 7 | 7 | 0 | re-confirmed; payoff-capture is orthogonal (structure, not decay) | existing | shipped | no new code on this axis |
+| 15 | Execution safety / advisory-only | 10 | 10 | 0 | payoff-capture only demotes; role/squad/lane allocation explicitly kept OUT of scope (execution LOCKED) | every new test | canonical | preserve — allocation is not in the advisory surface |
+
+### Why the second P3 increase is real (not doctrine)
+
+One new module (`scripts/signal_payoff_capture_estimator.py`), **10 new tests**
+(`test_signal_payoff_capture_estimator.py` + integration `test_J`/`test_K`),
+runtime artifact `runtime/<date>/interpretation_defense/p2/signal_payoff_capture.json`,
+and the same full pipeline integration. `test_J` proves expanded IDS ≤ P1 IDS
+still holds with two P3 demoters stacked; `test_K` proves a commodity / high-debt
+/ thin-margin candidate is graded `WEAK_CAPTURE` and capped at `DEFENSIVE_REVIEW`.
+Capped at 7: offline proxies, no live market-structure / capex / ownership feed.
+The reflection's role/squad/lane/portion ideas were **deliberately not shipped** —
+they are allocation/sizing, which is execution-domain and stays LOCKED.

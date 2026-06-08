@@ -41,6 +41,20 @@ and stay document-only unless a concrete equity use-case appears.
 | 12 | Ecosystem Revenue Map | `ecosystem_revenue_decomposition` | none; closest `signal_field_geometry.py` | **MISSING** | P2 |
 | 13 | Audience Misinterpretation Risk Score | `audience_misinterpretation_risk` | `scripts/audience_misinterpretation_risk.py` (SHIPPED 2026-06-07, P2) | **SHIPPED (heuristic)** — per-audience misread risk + operator-misread flag; wired into expanded IDS; `test_audience_misinterpretation_risk.py` | P2 (done; capped 6 — no calibration) |
 | 14 | Signal Half-Life / Edge Durability Estimator | `signal_half_life_estimator` | `scripts/signal_half_life_estimator.py` (SHIPPED 2026-06-08, **P3**); lineage `asset_durability_filter.py`, `candidate_memory_decay.py`, `late_adoption_lockout.py` | **SHIPPED (heuristic)** — "snack vs signal vs asset" edge-durability + decay λ; layered into expanded IDS as a bounded demotion; `SNACK` caps at DEFENSIVE; `test_signal_half_life_estimator.py` | P3 (done; capped 7 — no live attention/fundamentals/crowding feed) |
+| 15 | Signal Payoff-Capture / Value-Capture Estimator | `signal_payoff_capture_estimator` | `scripts/signal_payoff_capture_estimator.py` (SHIPPED 2026-06-08, **P3**); lineage `incentive_who_benefits_analyzer.py`, `false_negative_casino_monopoly_layer.py`, `asymmetry_survival_scorer.py` | **SHIPPED (heuristic)** — "gross is not net": structural position + margin capture + pricing power − claimant dilution; `WEAK_CAPTURE` caps at DEFENSIVE + `gross_not_net` flag; layered into expanded IDS; `test_signal_payoff_capture_estimator.py` | P3 (done; capped 7 — no live market-structure/capex/ownership feed) |
+
+### 2026-06-08 reflection #2 concepts → repo (meal-box / casino / toll-gate / payoff capture)
+
+| Reflection component | Maps to | Status |
+|---|---|---|
+| Payoff Stack + Payoff Dilution + Toll Gate + House Edge + Market Structure (8.10–8.13, 8.25) | `signal_payoff_capture_estimator` (#15) | **SHIPPED 2026-06-08** |
+| Half-Life Clock (8.8) | `signal_half_life_estimator` (#14) | shipped (P3) |
+| Cherry-Coke / Narrative Gap (8.6) | `narrative_substance_gap` (#2) | shipped (P2) |
+| SEO Trap / Feed Risk (8.18–8.19) | `distribution_amplification_detector` (#11) | shipped (P2) |
+| Casino Role / House Edge (8.9–8.10) | `incentive_who_benefits_analyzer` + `false_negative_casino_monopoly_layer` | shipped / existing |
+| Speed-Limit / Actionability (8.14) | `candidate_executable_split` (CQS/EQS) | existing |
+| Perception Filter (8.26) | `perception_control` + the IDS stack | existing |
+| Role / Squad / Lane / Portion classifiers (8.1–8.4, 8.15, 8.20, 8.27) | — | **out of scope** (allocation/sizing = execution domain, LOCKED; doctrine-only) |
 
 ### 2026-06-08 reflection concepts → repo (game theory / half-life / casino × food-chain)
 

@@ -107,3 +107,27 @@ def test_I_short_half_life_snack_caps_at_defensive_or_lower():
     assert r["p3_signal_half_life"]["half_life_class"] == "SNACK"
     assert r["expanded_grade"] in (GRADE_DEFENSIVE, GRADE_BLOCKED)
     assert "short_half_life" in r["warnings"]
+
+
+def test_J_payoff_capture_record_attached_and_only_demotes():
+    r = evaluate_candidate_expanded(
+        _clean(), run_date=SESSION, fundamentals=_STRONG,
+        structure={"market_structure": "oligopoly"},
+    )
+    assert "capture_grade" in r["p3_payoff_capture"]
+    assert r["payoff_capture_penalty"] >= 0.0
+    # both P3 demotions only subtract -> expanded <= P1
+    assert (r["expanded_interpretation_defense_score"]
+            <= r["p1_interpretation_defense"]["interpretation_defense_score"] + 1e-6)
+
+
+def test_K_weak_payoff_capture_caps_at_defensive_or_lower():
+    r = evaluate_candidate_expanded(
+        _clean(evidence_type="LIVE_PRICE_MOVER", catalyst="contract award filed"),
+        run_date=SESSION,
+        fundamentals={"gross_margin": 0.06, "operating_margin": 0.01, "debt_to_equity": 0.95},
+        structure={"market_structure": "commodity", "supplier_power": 0.9, "capex_intensity": 0.9},
+    )
+    assert r["p3_payoff_capture"]["capture_grade"] == "WEAK_CAPTURE"
+    assert r["expanded_grade"] in (GRADE_DEFENSIVE, GRADE_BLOCKED)
+    assert "weak_payoff_capture" in r["warnings"]

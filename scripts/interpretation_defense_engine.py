@@ -33,6 +33,8 @@ try:
     from scripts.metric_regime_transfer_risk import score_metric_regime_transfer_risk
     from scripts.narrative_substance_gap import score_narrative_substance_gap
     from scripts.signal_half_life_estimator import CLASS_SNACK, score_signal_half_life
+    from scripts.signal_payoff_capture_estimator import GRADE_WEAK as PC_GRADE_WEAK
+    from scripts.signal_payoff_capture_estimator import score_signal_payoff_capture
 except ModuleNotFoundError:  # pragma: no cover - script-style env
     from advisory_contract import advisory_safety_stamps, human_only_stamp
     from adverse_regime_stress_test import GRADE_INSUFFICIENT, stress_test_candidate
@@ -46,6 +48,8 @@ except ModuleNotFoundError:  # pragma: no cover - script-style env
     from metric_regime_transfer_risk import score_metric_regime_transfer_risk
     from narrative_substance_gap import score_narrative_substance_gap
     from signal_half_life_estimator import CLASS_SNACK, score_signal_half_life
+    from signal_payoff_capture_estimator import GRADE_WEAK as PC_GRADE_WEAK
+    from signal_payoff_capture_estimator import score_signal_payoff_capture
 
 
 GRADE_CLEAN = "CLEAN"
@@ -263,10 +267,11 @@ def evaluate_candidate_expanded(
     ownership: dict[str, Any] | None = None,
     liquidity: dict[str, Any] | None = None,
     crowding: dict[str, Any] | None = None,
+    structure: dict[str, Any] | None = None,
     model_outputs: list[dict[str, Any]] | None = None,
     aggregator_row: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """P1 + four P2 modules + P3 half-life → expanded IDS. Can only demote."""
+    """P1 + four P2 + P3 half-life + payoff-capture → expanded IDS. Can only demote."""
     ticker = normalize_ticker(candidate.get("ticker"))
     if p1_full is None:
         p1_full = evaluate_candidate(
@@ -291,20 +296,26 @@ def evaluate_candidate_expanded(
         candidate, fundamentals=fundamentals, attention=attention,
         crowding=crowding, model_outputs=model_outputs,
     )
+    pc = score_signal_payoff_capture(
+        candidate, fundamentals=fundamentals, structure=structure, model_outputs=model_outputs,
+    )
 
     da_score = float(da["distribution_amplification_score"])
     nsg_pos = max(float(nsg["narrative_substance_gap"]), 0.0)
     inc_score = float(inc["incentive_risk_score"])
     amr_score = float(amr["audience_misinterpretation_risk"])
     hl_risk = float(hl["short_half_life_risk"])
+    pc_risk = float(pc["payoff_capture_risk"])
 
     p2_penalty = 0.20 * da_score + 0.25 * nsg_pos + 0.30 * inc_score + 0.25 * amr_score
     p1_ids = float(p1_full["interpretation_defense_score"])
-    # P2 penalty first (unchanged math), then layer the P3 half-life demotion so
-    # the calibrated four-module formula is untouched. Both only subtract.
+    # P2 penalty first (unchanged math), then layer the P3 demotions (half-life,
+    # payoff-capture) so the calibrated four-module formula is untouched. All
+    # terms only subtract → expanded IDS ≤ P1 IDS always holds.
     expanded_ids = _clamp01_100(p1_ids - 0.35 * p2_penalty)
     half_life_penalty = round(0.15 * hl_risk, 4)
-    expanded_ids = round(_clamp01_100(expanded_ids - half_life_penalty), 4)
+    payoff_capture_penalty = round(0.12 * pc_risk, 4)
+    expanded_ids = round(_clamp01_100(expanded_ids - half_life_penalty - payoff_capture_penalty), 4)
 
     grade = _base_grade(expanded_ids)
     hard_blocks: list[str] = list(p1_full.get("hard_blocks", []))
@@ -328,9 +339,12 @@ def evaluate_candidate_expanded(
     if hl["half_life_class"] == CLASS_SNACK:
         grade = _cap(grade, GRADE_DEFENSIVE)
         warnings.append("short_half_life")
+    if pc["capture_grade"] == PC_GRADE_WEAK:
+        grade = _cap(grade, GRADE_DEFENSIVE)
+        warnings.append("weak_payoff_capture")
 
     # Surface missing P2/P3 data explicitly (not silently ignored).
-    for mod in (da, nsg, inc, amr, hl):
+    for mod in (da, nsg, inc, amr, hl, pc):
         for f in mod.get("missing_fields", []):
             warnings.append(f"missing:{f}")
 
@@ -344,10 +358,12 @@ def evaluate_candidate_expanded(
             "audience_misinterpretation": amr,
         },
         "p3_signal_half_life": hl,
+        "p3_payoff_capture": pc,
         "expanded_interpretation_defense_score": expanded_ids,
         "expanded_grade": grade,
         "p2_penalty": round(p2_penalty, 4),
         "half_life_penalty": half_life_penalty,
+        "payoff_capture_penalty": payoff_capture_penalty,
         "hard_blocks": hard_blocks,
         "warnings": sorted(set(warnings)),
         "advisory_only": True,
@@ -369,9 +385,10 @@ def run_expanded_interpretation_defense(
     ownership_by_ticker: dict[str, dict[str, Any]] | None = None,
     liquidity_by_ticker: dict[str, dict[str, Any]] | None = None,
     crowding_by_ticker: dict[str, dict[str, Any]] | None = None,
+    structure_by_ticker: dict[str, dict[str, Any]] | None = None,
     reference_regime_by_ticker: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    """Run the four P2 modules + P3 half-life + expanded IDS for every candidate."""
+    """Run P2 modules + P3 (half-life, payoff-capture) + expanded IDS per candidate."""
     status = clean_payload.get("fresh_discovery_status")
     run_date = clean_payload.get("run_date")
     if status != FRESH_DISCOVERY_OK:
@@ -392,6 +409,7 @@ def run_expanded_interpretation_defense(
     ownership_by_ticker = ownership_by_ticker or {}
     liquidity_by_ticker = liquidity_by_ticker or {}
     crowding_by_ticker = crowding_by_ticker or {}
+    structure_by_ticker = structure_by_ticker or {}
     reference_regime_by_ticker = reference_regime_by_ticker or {}
     p1_by_ticker = {
         normalize_ticker(b.get("ticker")): b for b in (p1_result or {}).get("board", [])
@@ -414,6 +432,7 @@ def run_expanded_interpretation_defense(
                 ownership=ownership_by_ticker.get(ticker),
                 liquidity=liquidity_by_ticker.get(ticker),
                 crowding=crowding_by_ticker.get(ticker),
+                structure=structure_by_ticker.get(ticker),
                 model_outputs=model_outputs,
                 aggregator_row=agg_rows.get(ticker),
             )
@@ -437,6 +456,7 @@ def run_expanded_interpretation_defense(
 def _compact_expanded(full: dict[str, Any]) -> dict[str, Any]:
     p2 = full["p2_interpretation_expansion"]
     hl = full.get("p3_signal_half_life", {})
+    pc = full.get("p3_payoff_capture", {})
     return {
         "p1_ids": full["p1_interpretation_defense"]["interpretation_defense_score"],
         "p1_grade": full["p1_interpretation_defense"]["interpretation_defense_grade"],
@@ -448,6 +468,8 @@ def _compact_expanded(full: dict[str, Any]) -> dict[str, Any]:
         "audience_misinterpretation_grade": p2["audience_misinterpretation"]["grade"],
         "half_life_class": hl.get("half_life_class"),
         "short_half_life_risk": hl.get("short_half_life_risk"),
+        "capture_grade": pc.get("capture_grade"),
+        "payoff_capture_risk": pc.get("payoff_capture_risk"),
         "hard_blocks": full["hard_blocks"],
         "warnings": full["warnings"],
     }
