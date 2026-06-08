@@ -304,6 +304,7 @@ def run_daily_synthesis(
     attention_by_ticker: dict[str, dict[str, Any]] | None = None,
     ownership_by_ticker: dict[str, dict[str, Any]] | None = None,
     liquidity_by_ticker: dict[str, dict[str, Any]] | None = None,
+    crowding_by_ticker: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Run the corrected flow: fresh discovery -> interpretation defense ->
     isolated model lanes -> mechanical aggregator -> final auditor, with three
@@ -350,6 +351,7 @@ def run_daily_synthesis(
         attention_by_ticker=attention_by_ticker,
         ownership_by_ticker=ownership_by_ticker,
         liquidity_by_ticker=liquidity_by_ticker,
+        crowding_by_ticker=crowding_by_ticker,
         reference_regime_by_ticker=reference_regime_by_ticker,
     )
     clean_payload = attach_expanded_defense_to_payload(clean_payload, interpretation_expansion)
@@ -469,6 +471,7 @@ def _p2_expansion_board(interpretation_expansion: dict[str, Any] | None) -> list
         nsg = p2.get("narrative_substance_gap", {})
         inc = p2.get("incentive_who_benefits", {})
         amr = p2.get("audience_misinterpretation", {})
+        hl = entry.get("p3_signal_half_life", {})
         board.append(
             {
                 "ticker": entry.get("ticker"),
@@ -479,8 +482,12 @@ def _p2_expansion_board(interpretation_expansion: dict[str, Any] | None) -> list
                 "narrative_substance_grade": nsg.get("grade"),
                 "incentive_who_benefits_grade": inc.get("grade"),
                 "audience_misinterpretation_grade": amr.get("grade"),
+                "half_life_class": hl.get("half_life_class"),
+                "short_half_life_risk": hl.get("short_half_life_risk"),
+                "estimated_half_life_days": hl.get("estimated_half_life_days"),
                 "attention_ahead_of_substance": da.get("grade") in ("HIGH", "HYPE_LED"),
                 "narrative_ahead_of_substance": nsg.get("grade") in ("NARRATIVE_RICH", "NARRATIVE_OVERHANG"),
+                "edge_is_a_snack_not_an_asset": hl.get("half_life_class") == "SNACK",
                 "who_benefits_if_believed": inc.get("beneficiary_map"),
                 "what_could_be_misread": amr.get("misread_flags", []),
                 "top_warnings": entry.get("warnings", [])[:6],
@@ -631,7 +638,7 @@ def render_final_synthesis_markdown(synthesis: dict[str, Any]) -> str:
             if row.get("what_stress_could_break_thesis"):
                 lines.append(f"      stress_breakers: {row['what_stress_could_break_thesis']}")
     lines.append("")
-    lines.append("## P2 Interpretation Expansion Board (amplification / narrative / incentive / audience)")
+    lines.append("## P2/P3 Interpretation Expansion Board (amplification / narrative / incentive / audience / half-life)")
     p2b = synthesis.get("p2_interpretation_expansion_board", {})
     lines.append(f"status: {p2b.get('status')}")
     if p2b.get("skipped"):
@@ -645,8 +652,14 @@ def render_final_synthesis_markdown(synthesis: dict[str, Any]) -> str:
                 f"amp={row['distribution_amplification_grade']} "
                 f"narr={row['narrative_substance_grade']} "
                 f"incentive={row['incentive_who_benefits_grade']} "
-                f"audience={row['audience_misinterpretation_grade']}"
+                f"audience={row['audience_misinterpretation_grade']} "
+                f"half_life={row.get('half_life_class')}"
             )
+            if row.get("edge_is_a_snack_not_an_asset"):
+                lines.append(
+                    f"      short half-life: edge decays fast "
+                    f"(~{row.get('estimated_half_life_days')}d, risk {row.get('short_half_life_risk')})"
+                )
             if row.get("attention_ahead_of_substance"):
                 lines.append("      ! attention ahead of substance")
             if row.get("narrative_ahead_of_substance"):
@@ -912,6 +925,8 @@ def write_isolated_run_artifacts(result: dict[str, Any]) -> Path:
             json.dumps([p2_of(e, "incentive_who_benefits") for e in eb], indent=2), encoding="utf-8")
         (p2_dir / "audience_misinterpretation_risk.json").write_text(
             json.dumps([p2_of(e, "audience_misinterpretation") for e in eb], indent=2), encoding="utf-8")
+        (p2_dir / "signal_half_life.json").write_text(
+            json.dumps([e.get("p3_signal_half_life") for e in eb], indent=2), encoding="utf-8")
         (p2_dir / "expanded_interpretation_defense_board.json").write_text(
             json.dumps(result["final_synthesis"]["p2_interpretation_expansion_board"], indent=2),
             encoding="utf-8")
@@ -979,6 +994,9 @@ def build_capability_upgrade_report(result: dict[str, Any]) -> dict[str, Any]:
             "narrative_substance_gap",
             "incentive_who_benefits_analyzer",
             "audience_misinterpretation_risk",
+        ],
+        "p3_modules_added": [
+            "signal_half_life_estimator",
         ],
         "interpretation_defense_status": defense.get("status"),
         "p2_expansion_status": expansion.get("status"),

@@ -40,6 +40,21 @@ and stay document-only unless a concrete equity use-case appears.
 | 11 | Distribution Amplification Detector | `distribution_amplification_detector` | `scripts/distribution_amplification_detector.py` (SHIPPED 2026-06-07, P2); lineage `propagation_spread_estimator.py`, `echo_risk_engine.py` | **SHIPPED** — attention-vs-substance ratio + HYPE_LED; wired into expanded IDS; `test_distribution_amplification_detector.py` | P0 (done) |
 | 12 | Ecosystem Revenue Map | `ecosystem_revenue_decomposition` | none; closest `signal_field_geometry.py` | **MISSING** | P2 |
 | 13 | Audience Misinterpretation Risk Score | `audience_misinterpretation_risk` | `scripts/audience_misinterpretation_risk.py` (SHIPPED 2026-06-07, P2) | **SHIPPED (heuristic)** — per-audience misread risk + operator-misread flag; wired into expanded IDS; `test_audience_misinterpretation_risk.py` | P2 (done; capped 6 — no calibration) |
+| 14 | Signal Half-Life / Edge Durability Estimator | `signal_half_life_estimator` | `scripts/signal_half_life_estimator.py` (SHIPPED 2026-06-08, **P3**); lineage `asset_durability_filter.py`, `candidate_memory_decay.py`, `late_adoption_lockout.py` | **SHIPPED (heuristic)** — "snack vs signal vs asset" edge-durability + decay λ; layered into expanded IDS as a bounded demotion; `SNACK` caps at DEFENSIVE; `test_signal_half_life_estimator.py` | P3 (done; capped 7 — no live attention/fundamentals/crowding feed) |
+
+### 2026-06-08 reflection concepts → repo (game theory / half-life / casino × food-chain)
+
+| Reflection module | Maps to | Status |
+|---|---|---|
+| Half-Life Estimator (Module 3) | `signal_half_life_estimator` (#14) | **SHIPPED 2026-06-08** |
+| Incentive Cleanliness (Module 4) | `incentive_who_benefits_analyzer` (#6) | shipped (P2) |
+| Casino Pull / Hype-Decay (Modules 5, 12) | `distribution_amplification_detector` (#11) | shipped (P2) |
+| Narrative Premium (Module 11) | `narrative_substance_gap` (#2) | shipped (P2) |
+| Objective Alignment / Audience misread (Modules 14, 8) | `audience_misinterpretation_risk` (#13) | shipped (P2) |
+| Moneyball Mispricing (Module 9) | `composite_edge_score.py` + provenance lock | partial / existing |
+| Threshold Proximity + Inflection (Modules 2, plus Insight 6–7) | `activation_trigger_tracker.py`, `tension_accumulation_tracker.py` | partial lineage (backlog) |
+| Signal Value Engine (Module 1) | composite of #1–#14 IDS | conceptually the expanded IDS itself |
+| Dating Funnel / Algorithmic GNH / Food-Chain / Movie Library (Modules 6,7,10,13,15) | — | **out of equity scope** (doctrine-only) |
 
 ## 2. Already-shipped interpretation-defense surface (context)
 

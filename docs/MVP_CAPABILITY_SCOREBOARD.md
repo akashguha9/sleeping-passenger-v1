@@ -97,3 +97,34 @@ fundamentals feeds and no historical calibration yet.
 3. Historical calibration / backtest for IDS grades (lifts every score's ceiling).
 4. Sector-specific stress priors + real ownership/short-interest feed (lifts
    incentive/who-benefits past 6).
+
+## P3 expansion update (2026-06-08 — game-theory / half-life reflection)
+
+Integrated the 2026-06-08 forensic reflection (game theory, casino × food-chain,
+GNH, half-life, thresholds, incentives). Most of its 15 proposed modules already
+ship (incentive, distribution, narrative, audience) or are out of equity scope
+(dating funnel, algorithmic GNH, food-chain classifier, movie library). The one
+genuine gap — **temporal durability / half-life** — is now shipped as
+`signal_half_life_estimator.py`, layered into the expanded IDS as a bounded,
+demote-only P3 demotion (`SNACK` caps the grade at DEFENSIVE). See
+[reflections/2026-06-08_game_theory_half_life_reflection.md](reflections/2026-06-08_game_theory_half_life_reflection.md).
+
+| # | Segment | Prev | New | Δ | Evidence in code | Tests | Shipped? | Why capped |
+|---|---|---:|---:|---:|---|---|---|---|
+| 16 | Signal half-life / edge durability | 0 | **7** | +7 | `signal_half_life_estimator.py`; layered into `evaluate_candidate_expanded` (bounded demotion + SNACK cap) | `test_signal_half_life_estimator.py` (8) + 2 integration | **shipped+wired** | offline evidence-type proxies; no live attention/fundamentals/crowding feed → not 8 |
+| — | Unified IDS (expanded, P1+P2+P3) | 8 | **8** | 0 | half-life is a 5th demoter; `test_G` (expanded ≤ P1) still holds | `test_expanded_interpretation_defense_engine.py` (H, I) | shipped+wired | one durability axis added; not a structural jump → no honest increase |
+| 11 | Distribution / amplification illusion | 8 | 8 | 0 | half-life is orthogonal (decay, not amplification) | existing | shipped | reflection re-confirmed, no new code |
+| 6 | Incentive awareness / who-benefits | 6 | 6 | 0 | "who-benefits" re-confirmed by casino × food-chain doctrine | existing | shipped | doctrine-only ⇒ no increase |
+| 15 | Execution safety / advisory-only | 10 | 10 | 0 | half-life can only demote; SNACK never promotes/unlocks | every new test | canonical | preserve — the "don't become the casino house" answer |
+
+### Why the P3 increase is real (not doctrine)
+
+One new module (`scripts/signal_half_life_estimator.py`), **10 new tests**
+(`test_signal_half_life_estimator.py` + integration `test_H`/`test_I`), runtime
+artifact `runtime/<date>/interpretation_defense/p2/signal_half_life.json`, and
+pipeline integration (clean payload → expanded engine → aggregator/auditor →
+final synthesis markdown → artifacts). The half-life layer **only subtracts**:
+`test_G` proves expanded IDS ≤ P1 IDS still holds, and `test_I` proves a pure
+momentum/meme candidate is graded `SNACK` and capped at `DEFENSIVE_REVIEW`.
+Capped at 7 (not 8–9) honestly: it runs on offline evidence-type proxies with no
+live attention / fundamentals / crowding feed and no historical decay calibration.

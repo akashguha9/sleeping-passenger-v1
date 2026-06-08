@@ -87,3 +87,23 @@ def test_G_p2_cannot_promote_beyond_p1():
     r = evaluate_candidate_expanded(_clean(), run_date=SESSION, fundamentals=_STRONG)
     assert (r["expanded_interpretation_defense_score"]
             <= r["p1_interpretation_defense"]["interpretation_defense_score"] + 1e-6)
+
+
+def test_H_half_life_record_attached_and_clean_stays_durable():
+    r = evaluate_candidate_expanded(_clean(), run_date=SESSION, fundamentals=_STRONG)
+    hl = r["p3_signal_half_life"]
+    assert hl["half_life_class"] == "DURABLE"
+    assert r["expanded_grade"] == GRADE_CLEAN  # durable edge does not demote a clean filing
+    assert r["half_life_penalty"] >= 0.0
+
+
+def test_I_short_half_life_snack_caps_at_defensive_or_lower():
+    r = evaluate_candidate_expanded(
+        _clean(evidence_type="LIVE_PRICE_MOVER", catalyst="meme squeeze viral rally",
+               invalidation_condition=""),
+        run_date=SESSION,
+        attention={"social_velocity": 0.95, "price_move": 0.95, "search_spike": 0.9},
+    )
+    assert r["p3_signal_half_life"]["half_life_class"] == "SNACK"
+    assert r["expanded_grade"] in (GRADE_DEFENSIVE, GRADE_BLOCKED)
+    assert "short_half_life" in r["warnings"]
