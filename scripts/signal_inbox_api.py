@@ -1770,6 +1770,9 @@ def reconcile_trade(
     entry_price: float | None = None
     entry_quantity: float | None = None
     leverage: float = 1.0
+    # F4 fix: realized P/L is side-aware.  Default BUY (legacy semantic)
+    # only when the trade row genuinely lacks a side.
+    trade_side: str = ""
     if _DB_AVAILABLE and _persistence is not None:
         try:
             event_id = _persistence.get_event_id_for_trade(trade_id)
@@ -1780,6 +1783,7 @@ def reconcile_trade(
             if row:
                 entry_price = float(row.get("price") or 0.0)
                 entry_quantity = float(row.get("quantity") or 0.0)
+                trade_side = str(row.get("side") or "").strip().upper()
                 lev_raw = row.get("leverage")
                 if lev_raw is not None:
                     try:
@@ -1803,6 +1807,8 @@ def reconcile_trade(
                         entry_quantity = float(r.get("quantity") or 0.0)
                     except (TypeError, ValueError):
                         entry_quantity = 0.0
+                if not trade_side:
+                    trade_side = str(r.get("side") or "").strip().upper()
                 lev_raw = r.get("leverage")
                 if lev_raw is not None:
                     try:
@@ -1810,6 +1816,8 @@ def reconcile_trade(
                     except (TypeError, ValueError):
                         leverage = 1.0
                 break
+    if trade_side not in {"BUY", "SELL"}:
+        trade_side = "BUY"
     if entry_price is None:
         entry_price = 0.0
     if entry_quantity is None:
@@ -1832,6 +1840,7 @@ def reconcile_trade(
             exit_quantity=actual_quantity,
             entry_price=entry_price,
             entry_quantity=entry_quantity,
+            side=trade_side,
             leverage=leverage,
             reconciliation_status=reconciliation_status or None,
             outcome_quality=outcome_quality,

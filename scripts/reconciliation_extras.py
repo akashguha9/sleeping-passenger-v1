@@ -21,7 +21,8 @@ Public surface:
                               legacy WIN/LOSS/BREAKEVEN/UNKNOWN status.
 * split_quantity_70_30      — 70/30 default partial-TP / runner split with
                               precision-safe runner = total - tp.
-* compute_realized_pnl_long — long-side realized P/L formula.
+* compute_realized_pnl      — side-aware realized P/L formula (F4 fix).
+* compute_realized_pnl_long — backwards-compatible long-only wrapper.
 * normalize_post_trade_outcome / normalize_reconciliation_status / …
                               — enum normalizers (tolerant of bad input).
 * build_outcome_payload     — produces the structured outcome dict that
@@ -213,21 +214,29 @@ def split_quantity_70_30(
 
 
 # ---------------------------------------------------------------------------
-# Realized P/L (long-only by design — matches the current MVP scope)
+# Realized P/L (side-aware — F4 audit fix)
 # ---------------------------------------------------------------------------
 
 
-def compute_realized_pnl_long(
+def compute_realized_pnl(
     *,
     entry_price: float,
     exit_price: float,
     exit_quantity: float,
+    side: str = "BUY",
     leverage: float | None = 1.0,
     apply_leverage_multiplier: bool = False,
 ) -> float:
-    """Long-side realized P/L.
+    """Side-aware realized P/L.
 
-        realized_pnl = (exit_price - entry_price) * exit_quantity
+        BUY  (long):  realized_pnl = (exit_price - entry_price) * exit_quantity
+        SELL (short): realized_pnl = (entry_price - exit_price) * exit_quantity
+
+    F4 audit fix: the journal accepts ``side="SELL"`` at log time, but the
+    old long-only formula sign-inverted every short trade's P/L (short 100
+    @ 100 covered @ 90 recorded −1000 instead of +1000).  Unknown / missing
+    side falls through to BUY — the legacy semantic — so callers that never
+    pass a side keep their behaviour.
 
     ``apply_leverage_multiplier`` is False by default: in this MVP the
     logged ``quantity`` already represents the leveraged notional
@@ -240,11 +249,31 @@ def compute_realized_pnl_long(
     qty = _safe_float(exit_quantity)
     if qty <= 0:
         return 0.0
-    pnl = (exit_p - entry) * qty
+    direction = -1.0 if str(side or "").strip().upper() == "SELL" else 1.0
+    pnl = (exit_p - entry) * qty * direction
     if apply_leverage_multiplier:
         lev = max(1.0, _safe_float(leverage, default=1.0))
         pnl = pnl * lev
     return round(pnl, 4)
+
+
+def compute_realized_pnl_long(
+    *,
+    entry_price: float,
+    exit_price: float,
+    exit_quantity: float,
+    leverage: float | None = 1.0,
+    apply_leverage_multiplier: bool = False,
+) -> float:
+    """Backwards-compatible long-only wrapper around compute_realized_pnl."""
+    return compute_realized_pnl(
+        entry_price=entry_price,
+        exit_price=exit_price,
+        exit_quantity=exit_quantity,
+        side="BUY",
+        leverage=leverage,
+        apply_leverage_multiplier=apply_leverage_multiplier,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -260,6 +289,7 @@ def build_outcome_payload(
     exit_quantity: float,
     entry_price: float,
     entry_quantity: float,
+    side: str = "BUY",
     leverage: float | None = 1.0,
     reconciliation_status: str | None = None,
     outcome_quality: str = "",
@@ -302,10 +332,11 @@ def build_outcome_payload(
     recon_status = normalize_reconciliation_status(reconciliation_status)
 
     qty = _safe_float(exit_quantity)
-    realized = compute_realized_pnl_long(
+    realized = compute_realized_pnl(
         entry_price=entry_price,
         exit_price=actual_exit_price,
         exit_quantity=qty,
+        side=side,
         leverage=leverage,
         apply_leverage_multiplier=apply_leverage_multiplier,
     )
@@ -345,6 +376,7 @@ def build_outcome_payload(
         "remaining_quantity": remaining,
         "entry_price": round(_safe_float(entry_price), 6),
         "entry_quantity": round(entry_q, QUANTITY_PRECISION),
+        "side": "SELL" if str(side or "").strip().upper() == "SELL" else "BUY",
         "leverage": max(1.0, _safe_float(leverage, default=1.0)),
         "realized_pnl": realized,
         "partial_take_profit_price": (
