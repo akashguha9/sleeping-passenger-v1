@@ -21,7 +21,19 @@ import pytest
 from scripts import persistence
 
 
-def test_failed_alter_raises_with_details(tmp_path, monkeypatch):
+class _AlterFailsConn:
+    """Proxy that fails every ALTER TABLE with a disk-I/O-style error."""
+
+    def __init__(self, conn: sqlite3.Connection) -> None:
+        self._conn = conn
+
+    def execute(self, sql, *args, **kwargs):
+        if isinstance(sql, str) and sql.strip().upper().startswith("ALTER TABLE"):
+            raise sqlite3.OperationalError("disk I/O error")
+        return self._conn.execute(sql, *args, **kwargs)
+
+
+def test_failed_alter_raises_with_details(tmp_path):
     db = tmp_path / "mig.db"
     # Create a minimal manual_trades missing the leverage column so the
     # additive migration has work to do.
@@ -33,23 +45,11 @@ def test_failed_alter_raises_with_details(tmp_path, monkeypatch):
     )
     conn.commit()
 
-    real_execute = sqlite3.Connection.execute
-
-    class _Boom(sqlite3.OperationalError):
-        pass
-
-    def failing_execute(self, sql, *args, **kwargs):
-        if isinstance(sql, str) and sql.strip().upper().startswith("ALTER TABLE"):
-            raise _Boom("disk I/O error")
-        return real_execute(self, sql, *args, **kwargs)
-
-    monkeypatch.setattr(sqlite3.Connection, "execute", failing_execute)
     with pytest.raises(RuntimeError) as exc:
-        persistence._additive_migrations(conn)
+        persistence._additive_migrations(_AlterFailsConn(conn))
     msg = str(exc.value)
     assert "manual_trades" in msg
     assert "leverage" in msg
-    monkeypatch.undo()
     conn.close()
 
 

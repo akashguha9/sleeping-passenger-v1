@@ -42,6 +42,21 @@ except ModuleNotFoundError:  # pragma: no cover - script-style fallback
 
 _logger = logging.getLogger("scripts.persistence")
 
+# F12 audit fix: every table/column name interpolated into SQL f-strings
+# (PRAGMA table_info / ALTER TABLE / the F3 rebuild) must pass this
+# allowlist.  Today the names all come from hardcoded tuples; the assert
+# ensures a future refactor can never feed hostile identifiers in.
+import re as _re
+
+_IDENTIFIER_RE = _re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
+def _safe_identifier(name: str) -> str:
+    """Return ``name`` iff it is a bare SQL identifier; raise otherwise."""
+    if not isinstance(name, str) or not _IDENTIFIER_RE.match(name):
+        raise ValueError(f"unsafe SQL identifier: {name!r}")
+    return name
+
 DB_PATH: Path = RUNTIME_DIR / "mvp_local.db"
 
 _ADVISORY_STATUS = "ADVISORY_ONLY"
@@ -528,17 +543,35 @@ def _additive_migrations(conn: sqlite3.Connection) -> None:
         ("reconciliation_results", "mistake_tags", "TEXT NOT NULL DEFAULT ''"),
         ("reconciliation_results", "lesson", "TEXT NOT NULL DEFAULT ''"),
     )
+    # F9 audit fix: a swallowed ALTER left code assuming a column that
+    # doesn't exist ("no such column" much later, origin invisible).
+    # Collect every failure and raise with the full list; verify each
+    # successful ALTER actually took effect.
+    failed: list[tuple[str, str, str]] = []
     for table, column, ddl in migrations:
+        table_q = _safe_identifier(table)
+        column_q = _safe_identifier(column)
         try:
-            table_info = conn.execute(f"PRAGMA table_info({table})").fetchall()
+            table_info = conn.execute(f"PRAGMA table_info({table_q})").fetchall()
             if not table_info:
                 # Table absent (e.g. partial test fixture) — skip cleanly.
                 continue
             existing = {row[1] for row in table_info}
             if column not in existing:
-                conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")
-        except sqlite3.OperationalError:
-            pass
+                conn.execute(f"ALTER TABLE {table_q} ADD COLUMN {column_q} {ddl}")
+                verify = {
+                    row[1]
+                    for row in conn.execute(f"PRAGMA table_info({table_q})")
+                }
+                if column not in verify:
+                    failed.append((table, column, "ALTER did not take effect"))
+        except sqlite3.OperationalError as exc:
+            failed.append((table, column, str(exc)))
+    if failed:
+        details = "; ".join(f"{t}.{c}: {e}" for t, c, e in failed)
+        raise RuntimeError(
+            f"schema migrations FAILED (DB may be missing columns): {details}"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -623,6 +656,7 @@ def _money_text(value: Any, field: str) -> str:
 
 
 def _money_table_needs_rebuild(conn: sqlite3.Connection, table: str) -> bool:
+    table = _safe_identifier(table)
     info = conn.execute(f"PRAGMA table_info({table})").fetchall()
     if not info:
         return False
@@ -669,6 +703,7 @@ def _money_text_migration(db_path: Path) -> None:
         conn.execute("BEGIN IMMEDIATE")
         try:
             for table in tables:
+                table = _safe_identifier(table)
                 info = conn.execute(f"PRAGMA table_info({table})").fetchall()
                 money_cols = set(_MONEY_COLUMNS[table])
                 col_names = [row[1] for row in info]
