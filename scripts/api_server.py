@@ -337,17 +337,57 @@ def _reset_health_counters() -> None:
     _WRITE_FAILURE_COUNT = 0
 
 
+def _raise_if_db_write_failed(result, *, operation: str) -> None:
+    """H1: convert a service-level db_write_failed error into a stamped 500.
+
+    Only the write-failure shape is intercepted — validation refusals keep
+    their existing service-level response contract.
+    """
+    if (
+        isinstance(result, dict)
+        and result.get("status") == "error"
+        and result.get("reason") == "db_write_failed"
+    ):
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "message": str(result.get("error") or f"{operation} write failed"),
+                "reason": "db_write_failed",
+                "db_persisted": False,
+                "broker_api_called": False,
+                "ai_execution_count": _AI_EXECUTION_COUNT,
+                "execution_gate": "LOCKED",
+                "execution_permission": False,
+                "can_execute": False,
+                "record_keeping_only": True,
+            },
+        )
+
+
 def _journal_write_failure_count() -> int:
-    """F1/F2: journal hot-path DB write failures (signal_inbox_api)."""
+    """F1/F2 + H1: journal DB write failures (signal_inbox_api + moltbook)."""
+    total = 0
     try:
         try:
             from scripts.signal_inbox_api import db_write_failure_count
         except ModuleNotFoundError:  # pragma: no cover - script-style fallback
             from signal_inbox_api import db_write_failure_count  # type: ignore
-        return int(db_write_failure_count())
+        total += int(db_write_failure_count())
     except Exception:  # pragma: no cover - health must never 500 on this
         _logger.error("could not read journal write-failure counter")
-        return 0
+    try:
+        try:
+            from scripts.moltbook_api import (
+                db_write_failure_count as _moltbook_failures,
+            )
+        except ModuleNotFoundError:  # pragma: no cover - script-style fallback
+            from moltbook_api import (  # type: ignore
+                db_write_failure_count as _moltbook_failures,
+            )
+        total += int(_moltbook_failures())
+    except Exception:  # pragma: no cover - health must never 500 on this
+        _logger.error("could not read moltbook write-failure counter")
+    return total
 
 
 def _ignored_insert_count() -> int:
@@ -1310,12 +1350,14 @@ def post_reflection(
     body: ReflectionBody,
     _auth: None = Depends(require_api_token),
 ) -> dict:
-    return add_user_reflection(
+    result = add_user_reflection(
         event_id,
         body.reflection_text,
         author=body.author,
         conviction_level=body.conviction_level,
     )
+    _raise_if_db_write_failed(result, operation="add_user_reflection")
+    return result
 
 
 @app.post("/signals/{event_id}/ai-summary")
@@ -1324,11 +1366,13 @@ def post_ai_summary(
     body: AISummaryBody,
     _auth: None = Depends(require_api_token),
 ) -> dict:
-    return add_ai_discussion_summary(
+    result = add_ai_discussion_summary(
         event_id,
         body.summary_text,
         model_label=body.model_label,
     )
+    _raise_if_db_write_failed(result, operation="add_ai_discussion_summary")
+    return result
 
 
 @app.post("/signals/{event_id}/decision")
@@ -1337,7 +1381,9 @@ def post_decision(
     body: DecisionBody,
     _auth: None = Depends(require_api_token),
 ) -> dict:
-    return mark_signal(event_id, body.status)
+    result = mark_signal(event_id, body.status)
+    _raise_if_db_write_failed(result, operation="mark_signal")
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -2968,7 +3014,7 @@ def post_moltbook(
     body: MoltbookEntryBody,
     _auth: None = Depends(require_api_token),
 ) -> dict:
-    return log_moltbook_entry(
+    result = log_moltbook_entry(
         event_id=body.event_id,
         ticker=body.ticker,
         original_signal_thesis=body.original_signal_thesis,
@@ -2983,6 +3029,8 @@ def post_moltbook(
         recalibration_note=body.recalibration_note,
         future_rule_update=body.future_rule_update,
     )
+    _raise_if_db_write_failed(result, operation="log_moltbook_entry")
+    return result
 
 
 # ---------------------------------------------------------------------------

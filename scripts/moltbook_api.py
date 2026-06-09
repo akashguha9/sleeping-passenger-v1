@@ -29,6 +29,7 @@ ai_execution_count is always 0.
 from __future__ import annotations
 
 import json
+import logging
 import uuid
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -155,6 +156,22 @@ def _load_jsonl(path: Path) -> list[dict[str, Any]]:
     return rows
 
 
+_logger = logging.getLogger("scripts.moltbook_api")
+
+_DB_WRITE_FAILURES = 0
+
+
+def db_write_failure_count() -> int:
+    """H1: moltbook DB write failures since process start."""
+    return _DB_WRITE_FAILURES
+
+
+def _reset_db_write_failures() -> None:
+    """Test helper: zero the H1 write-failure counter."""
+    global _DB_WRITE_FAILURES
+    _DB_WRITE_FAILURES = 0
+
+
 def _error_response(operation: str, message: str) -> dict[str, Any]:
     return {
         "operation": operation,
@@ -245,8 +262,32 @@ def log_moltbook_entry(
                 entry.bias_detected, entry.recalibration_note,
                 entry.future_rule_update, entry.logged_at,
             )
-        except Exception:
-            pass
+        except Exception as exc:
+            # H1 fix: SQLite is canonical for Moltbook — losing the row
+            # while returning "logged" silently drops a lesson from the
+            # self-correction dataset.  Fail loud with the same contract
+            # as the manual-trade path.
+            global _DB_WRITE_FAILURES
+            _DB_WRITE_FAILURES += 1
+            _logger.exception(
+                "db write failure in log_moltbook_entry: %s (cumulative=%d)",
+                type(exc).__name__,
+                _DB_WRITE_FAILURES,
+            )
+            resp = _error_response(
+                "log_moltbook_entry",
+                (
+                    "journal database write failed; this Moltbook entry was "
+                    "NOT persisted to the canonical store (a JSONL fallback "
+                    f"row was appended). Cause: {type(exc).__name__}. "
+                    "Retry once the database is healthy."
+                ),
+            )
+            resp["status"] = "error"
+            resp["reason"] = "db_write_failed"
+            resp["db_persisted"] = False
+            resp["broker_api_called"] = False
+            return resp
 
     return {
         "operation": "log_moltbook_entry",
@@ -274,7 +315,7 @@ def list_moltbook_entries(
         try:
             rows = _persistence.get_moltbook_entries(ticker=ticker, mistake_type=mistake_type)
         except Exception:
-            pass
+            _logger.warning("moltbook DB read failed; using JSONL fallback")
     if not rows:
         rows = _load_jsonl(MOLTBOOK_LOG)
         if ticker:

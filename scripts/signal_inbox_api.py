@@ -344,7 +344,9 @@ def _build_inbox_overlay() -> dict[str, dict[str, Any]]:
             if decisions:
                 return {eid: {"user_status": status} for eid, status in decisions.items()}
         except Exception:
-            pass
+            # H1 triage: read path with a JSONL fallback below — kept, but
+            # a DB read failure is never silent any more.
+            _logger.warning("inbox overlay DB read failed; using JSONL fallback")
     overlay: dict[str, dict[str, Any]] = {}
     for row in _load_jsonl(INBOX_STATES_LOG):
         eid = str(row.get("event_id", ""))
@@ -358,7 +360,7 @@ def _has_reflection(event_id: str) -> bool:
         try:
             return _persistence.has_reflection(event_id)
         except Exception:
-            pass
+            _logger.warning("has_reflection DB read failed; using JSONL fallback")
     return any(r.get("event_id") == event_id for r in _load_jsonl(REFLECTIONS_LOG))
 
 
@@ -367,7 +369,7 @@ def _has_ai_summary(event_id: str) -> bool:
         try:
             return _persistence.has_ai_summary(event_id)
         except Exception:
-            pass
+            _logger.warning("has_ai_summary DB read failed; using JSONL fallback")
     return any(r.get("event_id") == event_id for r in _load_jsonl(AI_SUMMARIES_LOG))
 
 
@@ -879,7 +881,10 @@ def get_signal_detail(event_id: str) -> dict[str, Any]:
             ai_summaries = _persistence.get_ai_summaries_for_event(event_id)
             manual_trades = _persistence.get_trades_for_event(event_id)
         except Exception:
-            pass
+            _logger.warning(
+                "signal detail DB reads failed for %s; using JSONL fallback",
+                event_id,
+            )
     if not reflections:
         reflections = [r for r in _load_jsonl(REFLECTIONS_LOG) if r.get("event_id") == event_id]
     if not ai_summaries:
@@ -1002,8 +1007,10 @@ def add_user_reflection(
                 str(conviction_level).upper(), str(reflection_text),
                 entry["reflected_at"],
             )
-        except Exception:
-            pass
+        except Exception as exc:
+            # H1 fix: a lost reflection corrupts the calibration dataset
+            # exactly like a lost trade — fail loud, never silent.
+            return _db_write_failed("add_user_reflection", exc)
 
     return {
         "operation": "add_user_reflection",
@@ -1112,8 +1119,9 @@ def add_ai_discussion_summary(
                 entry["summary_id"], event_id, entry["model_label"],
                 clean_summary, entry["summarized_at"],
             )
-        except Exception:
-            pass
+        except Exception as exc:
+            # H1 fix: see add_user_reflection.
+            return _db_write_failed("add_ai_discussion_summary", exc)
 
     return {
         "operation": "add_ai_discussion_summary",
@@ -1155,8 +1163,10 @@ def mark_signal(event_id: str, status: str) -> dict[str, Any]:
     if _DB_AVAILABLE and _persistence is not None:
         try:
             _persistence.insert_signal_decision(event_id, normalized, entry["marked_at"])
-        except Exception:
-            pass
+        except Exception as exc:
+            # H1 fix: a dropped acted/passed decision silently skews the
+            # acted-vs-passed calibration split — fail loud.
+            return _db_write_failed("mark_signal", exc)
 
     return {
         "operation": "mark_signal",
@@ -1861,7 +1871,7 @@ def reconcile_trade(
         try:
             event_id = _persistence.get_event_id_for_trade(trade_id)
         except Exception:
-            pass
+            _logger.warning("reconcile: event lookup failed for %s", trade_id)
         try:
             row = _persistence.get_manual_trade(trade_id)
             if row:
@@ -1871,7 +1881,9 @@ def reconcile_trade(
                 if row.get("leverage") is not None:
                     leverage = _dec_or(row.get("leverage"), "1")
         except Exception:
-            pass
+            # H1 triage: kept (JSONL fallback below), but a failed entry-
+            # price lookup degrades realized-P/L inputs — warn loudly.
+            _logger.warning("reconcile: trade-row DB read failed for %s", trade_id)
     if not event_id or entry_price is None:
         for r in _load_jsonl(MANUAL_TRADE_LOG):
             if r.get("trade_id") == trade_id:
