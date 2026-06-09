@@ -28,8 +28,24 @@ import json
 import logging
 import uuid
 from dataclasses import asdict, dataclass
+from decimal import Decimal as _Decimal
 from pathlib import Path
 from typing import Any
+
+try:
+    from scripts.money import (
+        MoneyError as _MoneyError,
+        money_to_str as _money_to_str,
+        parse_money as _parse_money,
+        parse_money_opt as _parse_money_opt,
+    )
+except ModuleNotFoundError:  # pragma: no cover - script-style fallback
+    from money import (  # type: ignore[no-redef]
+        MoneyError as _MoneyError,
+        money_to_str as _money_to_str,
+        parse_money as _parse_money,
+        parse_money_opt as _parse_money_opt,
+    )
 
 _logger = logging.getLogger("scripts.signal_inbox_api")
 
@@ -187,13 +203,15 @@ class ManualTradeLog:
     event_id: str
     ticker: str
     side: str
-    quantity: float
-    price: float
+    # F3: money fields hold the canonical Decimal string (scripts.money
+    # money_to_str) — exact, JSON-safe, never a binary float.
+    quantity: str
+    price: str
     executed_at: str
     thesis: str
     notes: str
     logged_by: str
-    leverage: float = 1.0
+    leverage: str = "1"
     execution_mode: str = _EXECUTION_MODE
     ai_execution_count: int = _AI_EXECUTION_COUNT
     advisory_status: str = _ADVISORY_STATUS
@@ -276,10 +294,11 @@ class TradeReconciliation:
     trade_id: str
     event_id: str
     reconciled_at: str
-    actual_fill_price: float
-    actual_quantity: float
+    # F3: canonical Decimal strings — see ManualTradeLog.
+    actual_fill_price: str
+    actual_quantity: str
     outcome_notes: str
-    pnl_estimate: float
+    pnl_estimate: str
     outcome_status: str
     execution_mode: str = _EXECUTION_MODE
     ai_execution_count: int = _AI_EXECUTION_COUNT
@@ -376,6 +395,19 @@ def _build_item_from_event(
         has_reflection=_has_reflection(event_id),
         has_ai_summary=_has_ai_summary(event_id),
     )
+
+
+def _dec_or(value: Any, default: str = "0") -> _Decimal:
+    """F3: tolerant money parse — garbage / None falls back to ``default``.
+
+    Stays in Decimal end-to-end; never converts through float.
+    """
+    if value is None:
+        return _Decimal(default)
+    try:
+        return _parse_money(value)
+    except _MoneyError:
+        return _Decimal(default)
 
 
 def _error_response(operation: str, message: str) -> dict[str, Any]:
@@ -1316,19 +1348,30 @@ def log_manual_trade(
         return _error_response("log_manual_trade", "ticker must be a non-empty string")
     if str(side).upper() not in {"BUY", "SELL"}:
         return _error_response("log_manual_trade", "side must be BUY or SELL")
-    if isinstance(quantity, bool) or not isinstance(quantity, (int, float)) or quantity <= 0:
+    # F3: money values become Decimal at this boundary and stay Decimal —
+    # parse_money rejects bool / NaN / Inf / non-numeric input.
+    try:
+        qty_dec = _parse_money(quantity)
+    except _MoneyError:
         return _error_response("log_manual_trade", "quantity must be a positive number")
-    if isinstance(price, bool) or not isinstance(price, (int, float)) or price <= 0:
+    if qty_dec <= 0:
+        return _error_response("log_manual_trade", "quantity must be a positive number")
+    try:
+        price_dec = _parse_money(price)
+    except _MoneyError:
+        return _error_response("log_manual_trade", "price must be a positive number")
+    if price_dec <= 0:
         return _error_response("log_manual_trade", "price must be a positive number")
 
     if leverage is None:
-        leverage_val = 1.0
-    elif isinstance(leverage, bool) or not isinstance(leverage, (int, float)):
-        return _error_response(
-            "log_manual_trade", "leverage must be a number (e.g. 1.0, 2.5)"
-        )
+        leverage_val = _Decimal(1)
     else:
-        leverage_val = float(leverage)
+        try:
+            leverage_val = _parse_money(leverage)
+        except _MoneyError:
+            return _error_response(
+                "log_manual_trade", "leverage must be a number (e.g. 1.0, 2.5)"
+            )
     if leverage_val < _LEVERAGE_MIN or leverage_val > _LEVERAGE_MAX:
         return _error_response(
             "log_manual_trade",
@@ -1552,13 +1595,13 @@ def log_manual_trade(
         event_id=str(event_id),
         ticker=str(ticker).upper(),
         side=str(side).upper(),
-        quantity=float(quantity),
-        price=float(price),
+        quantity=_money_to_str(qty_dec),
+        price=_money_to_str(price_dec),
         executed_at=utc_timestamp(),
         thesis=str(thesis),
         notes=str(notes),
         logged_by=str(logged_by),
-        leverage=leverage_val,
+        leverage=_money_to_str(leverage_val),
         invalidation_level=_safe_journal_text(invalidation_level),
         expected_horizon=_safe_journal_text(expected_horizon),
         risk_reason=_safe_journal_text(risk_reason),
@@ -1707,10 +1750,10 @@ def log_manual_trade(
 def reconcile_trade(
     trade_id: str,
     *,
-    actual_fill_price: float,
-    actual_quantity: float,
+    actual_fill_price: Any,  # F3: Decimal | str | int | float
+    actual_quantity: Any,  # F3: Decimal | str | int | float
     outcome_notes: str = "",
-    pnl_estimate: float = 0.0,
+    pnl_estimate: Any = 0,  # F3: Decimal | str | int | float
     outcome_status: str = "UNKNOWN",
     outcome_quality: str = "",
     process_error: str = "",
@@ -1723,12 +1766,12 @@ def reconcile_trade(
     # execution_gate stays LOCKED.  See scripts/reconciliation_extras.py.
     post_trade_outcome: str = "",
     reconciliation_status: str = "",
-    runner_quantity: float | None = None,
+    runner_quantity: Any = None,  # F3: Decimal | str | int | float | None
     runner_status: str = "",
-    partial_take_profit_price: float | None = None,
-    partial_take_profit_quantity: float | None = None,
+    partial_take_profit_price: Any = None,  # F3
+    partial_take_profit_quantity: Any = None,  # F3
     take_profit_plan: str = "",
-    stop_loss_price: float | None = None,
+    stop_loss_price: Any = None,  # F3
     stop_loss_hit: bool = False,
     exit_reason: str = "",
     invalidation_level: str = "",
@@ -1767,9 +1810,11 @@ def reconcile_trade(
         serialize_outcome_for_notes = None  # type: ignore[assignment]
 
     event_id = ""
-    entry_price: float | None = None
-    entry_quantity: float | None = None
-    leverage: float = 1.0
+    # F3: entry values stay Decimal — parsed from the TEXT-stored canonical
+    # strings (or legacy floats via their shortest decimal repr).
+    entry_price: _Decimal | None = None
+    entry_quantity: _Decimal | None = None
+    leverage: _Decimal = _Decimal(1)
     # F4 fix: realized P/L is side-aware.  Default BUY (legacy semantic)
     # only when the trade row genuinely lacks a side.
     trade_side: str = ""
@@ -1781,15 +1826,11 @@ def reconcile_trade(
         try:
             row = _persistence.get_manual_trade(trade_id)
             if row:
-                entry_price = float(row.get("price") or 0.0)
-                entry_quantity = float(row.get("quantity") or 0.0)
+                entry_price = _dec_or(row.get("price"))
+                entry_quantity = _dec_or(row.get("quantity"))
                 trade_side = str(row.get("side") or "").strip().upper()
-                lev_raw = row.get("leverage")
-                if lev_raw is not None:
-                    try:
-                        leverage = float(lev_raw)
-                    except (TypeError, ValueError):
-                        leverage = 1.0
+                if row.get("leverage") is not None:
+                    leverage = _dec_or(row.get("leverage"), "1")
         except Exception:
             pass
     if not event_id or entry_price is None:
@@ -1798,30 +1839,20 @@ def reconcile_trade(
                 if not event_id:
                     event_id = str(r.get("event_id", ""))
                 if entry_price is None:
-                    try:
-                        entry_price = float(r.get("price") or 0.0)
-                    except (TypeError, ValueError):
-                        entry_price = 0.0
+                    entry_price = _dec_or(r.get("price"))
                 if entry_quantity is None:
-                    try:
-                        entry_quantity = float(r.get("quantity") or 0.0)
-                    except (TypeError, ValueError):
-                        entry_quantity = 0.0
+                    entry_quantity = _dec_or(r.get("quantity"))
                 if not trade_side:
                     trade_side = str(r.get("side") or "").strip().upper()
-                lev_raw = r.get("leverage")
-                if lev_raw is not None:
-                    try:
-                        leverage = float(lev_raw)
-                    except (TypeError, ValueError):
-                        leverage = 1.0
+                if r.get("leverage") is not None:
+                    leverage = _dec_or(r.get("leverage"), "1")
                 break
     if trade_side not in {"BUY", "SELL"}:
         trade_side = "BUY"
     if entry_price is None:
-        entry_price = 0.0
+        entry_price = _Decimal(0)
     if entry_quantity is None:
-        entry_quantity = 0.0
+        entry_quantity = _Decimal(0)
 
     # If the caller supplied a richer post_trade_outcome, derive the legacy
     # WIN/LOSS/BREAKEVEN/UNKNOWN status from it (so the existing schema +
@@ -1884,10 +1915,11 @@ def reconcile_trade(
 
     # Pick the final pnl_estimate.  When the structured outcome computed a
     # realized P/L locally, prefer that — it is the canonical local value.
-    final_pnl = (
-        structured_outcome["realized_pnl"]
+    # F3: both branches yield the canonical Decimal string; no float.
+    final_pnl_text = (
+        str(structured_outcome["realized_pnl"])
         if structured_outcome is not None
-        else float(pnl_estimate)
+        else _money_to_str(_dec_or(pnl_estimate))
     )
 
     rec = TradeReconciliation(
@@ -1895,10 +1927,10 @@ def reconcile_trade(
         trade_id=trade_id,
         event_id=event_id,
         reconciled_at=utc_timestamp(),
-        actual_fill_price=float(actual_fill_price),
-        actual_quantity=float(actual_quantity),
+        actual_fill_price=_money_to_str(_dec_or(actual_fill_price)),
+        actual_quantity=_money_to_str(_dec_or(actual_quantity)),
         outcome_notes=notes_to_persist,
-        pnl_estimate=float(final_pnl),
+        pnl_estimate=final_pnl_text,
         outcome_status=legacy_status,
         outcome_quality=_safe_journal_text(outcome_quality),
         process_error=_safe_journal_text(process_error),

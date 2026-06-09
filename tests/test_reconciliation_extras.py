@@ -30,6 +30,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from decimal import Decimal
 
 REPO = Path(__file__).resolve().parents[1]
 if str(REPO) not in sys.path:
@@ -121,9 +122,9 @@ def test_build_outcome_payload_partial_tp_routes_runner_open():
     assert out["reconciliation_status"] == "PARTIAL_RECONCILED"
     assert out["runner_status"] == "RUNNER_OPEN"
     # runner_quantity = entry_quantity - exit_quantity (default behaviour)
-    assert out["runner_quantity"] == 1.1672
+    assert Decimal(out["runner_quantity"]) == Decimal("1.1672")
     # P/L on the partial: (42.00 - 40.72) * 2.7236
-    assert out["realized_pnl"] == round((42.0 - 40.72) * 2.7236, 4)
+    assert Decimal(out["realized_pnl"]) == Decimal("3.486208")
     # Safety stamps survive.
     assert out["broker_api_called"] is False
     assert out["ai_execution_count"] == 0
@@ -143,7 +144,7 @@ def test_build_outcome_payload_closed_win_routes_reconciled():
     )
     assert out["reconciliation_status"] == "RECONCILED"
     assert out["runner_status"] == "NO_RUNNER"
-    assert out["remaining_quantity"] == 0.0
+    assert Decimal(out["remaining_quantity"]) == 0
 
 
 def test_build_outcome_payload_stopped_out_with_runner_stopped():
@@ -162,7 +163,8 @@ def test_build_outcome_payload_stopped_out_with_runner_stopped():
     assert out["reconciliation_status"] == "RECONCILED"
     assert out["runner_status"] == "RUNNER_STOPPED"
     assert out["stop_loss_hit"] is True
-    assert out["realized_pnl"] == round((38.0 - 40.72) * 1.1672, 4)
+    # F3: exact Decimal — the old float path rounded -3.174784 to -3.1748.
+    assert Decimal(out["realized_pnl"]) == Decimal("-3.174784")
 
 
 def test_serialize_and_parse_outcome_round_trips():
@@ -294,8 +296,8 @@ def test_reconcile_partial_tp_persists_partial_reconciled(isolated_db):
     assert resp["reconciliation_status"] == "PARTIAL_RECONCILED"
     assert resp["post_trade_outcome"] == "PARTIAL_TP"
     assert resp["runner_status"] == "RUNNER_OPEN"
-    assert resp["runner_quantity"] == 1.1672
-    assert resp["realized_pnl"] == round((42.0 - 40.72) * 2.7236, 4)
+    assert Decimal(resp["runner_quantity"]) == Decimal("1.1672")
+    assert Decimal(resp["realized_pnl"]) == Decimal("3.486208")
     # Safety stamps survive.
     assert resp["broker_api_called"] is False
     assert resp["ai_execution_count"] == 0
@@ -320,8 +322,8 @@ def test_reconcile_close_trade_sets_reconciled_and_wins(isolated_db):
     )
     assert resp["reconciliation_status"] == "RECONCILED"
     assert resp["outcome_status"] == "WIN"
-    assert resp["realized_pnl"] == 100.0
-    assert resp["remaining_quantity"] == 0.0
+    assert Decimal(resp["realized_pnl"]) == 100
+    assert Decimal(resp["remaining_quantity"]) == 0
     assert resp["broker_api_called"] is False
     assert resp["ai_execution_count"] == 0
 
@@ -344,7 +346,7 @@ def test_reconcile_stop_hit_sets_reconciled_and_loss(isolated_db):
     assert resp["reconciliation_status"] == "RECONCILED"
     assert resp["outcome_status"] == "LOSS"
     assert resp["stop_loss_hit"] is True
-    assert resp["realized_pnl"] == -50.0
+    assert Decimal(resp["realized_pnl"]) == -50
     assert resp["broker_api_called"] is False
     assert resp["ai_execution_count"] == 0
 

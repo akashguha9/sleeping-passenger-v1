@@ -245,6 +245,25 @@ export async function checkHealth(): Promise<HealthResponse | null> {
   }
 }
 
+// F8: detailed posture incl. the write-failure degraded flag.  Token-gated
+// on the backend when MVP_API_TOKEN is set; open on loopback otherwise.
+export interface FullHealthResponse extends HealthResponse {
+  db_write_failures_total?: number;
+  degraded?: boolean;
+  loopback_bind?: boolean;
+  unauth_override_active?: boolean;
+}
+
+export async function checkFullHealth(): Promise<FullHealthResponse | null> {
+  try {
+    return await apiFetch<FullHealthResponse>('/health/full');
+  } catch {
+    // Unauthorized / offline — the banner treats null as "unknown", never
+    // as healthy-green.
+    return null;
+  }
+}
+
 export async function getSignals(
   limit = 50,
   hours = 72,

@@ -156,14 +156,26 @@ def _reconciliation_summary(conn: sqlite3.Connection) -> dict[str, Any]:
     }
     if _table_exists(conn, "reconciliation_results"):
         try:
-            row = conn.execute(
-                "SELECT COALESCE(SUM(pnl_estimate), 0) AS s,"
-                " COUNT(pnl_estimate) AS n"
-                " FROM reconciliation_results"
-            ).fetchone()
-            if row:
-                summary["operator_entered_pnl_sum"] = float(row["s"] or 0.0)
-                summary["operator_entered_pnl_count"] = int(row["n"] or 0)
+            # F3: SUM() over the TEXT money column would coerce through
+            # float inside SQLite — aggregate exactly in Decimal instead.
+            from decimal import Decimal, InvalidOperation
+
+            rows = conn.execute(
+                "SELECT pnl_estimate FROM reconciliation_results"
+            ).fetchall()
+            total = Decimal(0)
+            n = 0
+            for r in rows:
+                raw = r["pnl_estimate"]
+                if raw is None:
+                    continue
+                try:
+                    total += Decimal(str(raw))
+                    n += 1
+                except (InvalidOperation, ValueError, TypeError):
+                    continue
+            summary["operator_entered_pnl_sum"] = str(total)
+            summary["operator_entered_pnl_count"] = n
         except sqlite3.Error:
             pass
     return summary

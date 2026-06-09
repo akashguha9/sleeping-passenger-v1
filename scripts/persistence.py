@@ -2,7 +2,17 @@
 SQLite persistence layer for the local advisory MVP.
 
 DB: runtime/mvp_local.db  (auto-created; runtime/ is gitignored)
-Schema: additive CREATE TABLE IF NOT EXISTS — safe to call at any time.
+Schema: additive CREATE TABLE IF NOT EXISTS — safe to call at any time —
+plus a single one-shot F3 rebuild migration that converts the journal
+money columns (manual_trades.quantity/price/leverage,
+reconciliation_results.actual_fill_price/actual_quantity/pnl_estimate)
+from REAL to TEXT-stored canonical Decimal strings.  The rebuild is
+fail-loud, runs only when a legacy REAL column is detected, and takes an
+automatic backup (sqlite3 native backup API) before touching anything.
+
+Money contract (F3): journal money columns store the canonical Decimal
+string from scripts.money.money_to_str.  No float is ever bound into
+these columns; arithmetic on them happens in Decimal.
 
 Advisory invariants enforced on every write and read:
   advisory_status    = "ADVISORY_ONLY"
@@ -14,7 +24,9 @@ Advisory invariants enforced on every write and read:
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
@@ -22,6 +34,13 @@ try:
     from scripts.runtime_common import RUNTIME_DIR, utc_timestamp
 except ModuleNotFoundError:
     from runtime_common import RUNTIME_DIR, utc_timestamp  # type: ignore[no-redef]
+
+try:
+    from scripts.money import MoneyError, money_to_str, parse_money
+except ModuleNotFoundError:  # pragma: no cover - script-style fallback
+    from money import MoneyError, money_to_str, parse_money  # type: ignore[no-redef]
+
+_logger = logging.getLogger("scripts.persistence")
 
 DB_PATH: Path = RUNTIME_DIR / "mvp_local.db"
 
@@ -69,13 +88,13 @@ CREATE TABLE IF NOT EXISTS manual_trades (
     event_id TEXT NOT NULL,
     ticker TEXT NOT NULL,
     side TEXT NOT NULL,
-    quantity REAL NOT NULL,
-    price REAL NOT NULL,
+    quantity TEXT NOT NULL,
+    price TEXT NOT NULL,
     executed_at TEXT NOT NULL,
     thesis TEXT NOT NULL DEFAULT '',
     notes TEXT NOT NULL DEFAULT '',
     logged_by TEXT NOT NULL DEFAULT 'human',
-    leverage REAL NOT NULL DEFAULT 1.0,
+    leverage TEXT NOT NULL DEFAULT '1',
     execution_mode TEXT NOT NULL DEFAULT 'HUMAN_ONLY',
     ai_execution_count INTEGER NOT NULL DEFAULT 0,
     advisory_status TEXT NOT NULL DEFAULT 'ADVISORY_ONLY',
@@ -99,10 +118,10 @@ CREATE TABLE IF NOT EXISTS reconciliation_results (
     trade_id TEXT NOT NULL,
     event_id TEXT NOT NULL,
     reconciled_at TEXT NOT NULL,
-    actual_fill_price REAL NOT NULL,
-    actual_quantity REAL NOT NULL,
+    actual_fill_price TEXT NOT NULL,
+    actual_quantity TEXT NOT NULL,
     outcome_notes TEXT NOT NULL DEFAULT '',
-    pnl_estimate REAL NOT NULL DEFAULT 0.0,
+    pnl_estimate TEXT NOT NULL DEFAULT '0',
     outcome_status TEXT NOT NULL DEFAULT 'UNKNOWN',
     execution_mode TEXT NOT NULL DEFAULT 'HUMAN_ONLY',
     ai_execution_count INTEGER NOT NULL DEFAULT 0,
@@ -518,6 +537,183 @@ def _additive_migrations(conn: sqlite3.Connection) -> None:
             pass
 
 
+# ---------------------------------------------------------------------------
+# F3 money migration: REAL → TEXT-stored canonical Decimal strings
+# ---------------------------------------------------------------------------
+
+# Journal money columns per table.  These are the ONLY columns the F3
+# rebuild retypes; everything else keeps its declared type verbatim.
+_MONEY_COLUMNS: dict[str, tuple[str, ...]] = {
+    "manual_trades": ("quantity", "price", "leverage"),
+    "reconciliation_results": (
+        "actual_fill_price",
+        "actual_quantity",
+        "pnl_estimate",
+    ),
+}
+
+# Money-column defaults change representation in the rebuilt table.
+_MONEY_DEFAULTS: dict[str, str] = {"leverage": "'1'", "pnl_estimate": "'0'"}
+
+_REBUILD_INDEXES: dict[str, tuple[str, ...]] = {
+    "manual_trades": (
+        "CREATE INDEX IF NOT EXISTS idx_mt_event_id ON manual_trades(event_id)",
+    ),
+    "reconciliation_results": (
+        "CREATE INDEX IF NOT EXISTS idx_rr_trade_id ON reconciliation_results(trade_id)",
+    ),
+}
+
+
+def _money_text(value: Any, field: str) -> str:
+    """Normalise any money-like input to the canonical Decimal string.
+
+    Raises :class:`scripts.money.MoneyError` (a ValueError) on NaN / Inf /
+    non-numeric input — the persistence boundary refuses garbage instead
+    of silently storing it.
+    """
+    try:
+        return money_to_str(parse_money(value))  # type: ignore[return-value]
+    except MoneyError as exc:
+        raise MoneyError(f"invalid money value for {field}: {value!r}") from exc
+
+
+def _money_table_needs_rebuild(conn: sqlite3.Connection, table: str) -> bool:
+    info = conn.execute(f"PRAGMA table_info({table})").fetchall()
+    if not info:
+        return False
+    declared = {row[1]: str(row[2] or "").strip().upper() for row in info}
+    return any(
+        declared.get(col) not in (None, "", "TEXT")
+        for col in _MONEY_COLUMNS[table]
+        if col in declared
+    )
+
+
+def _money_text_migration(db_path: Path) -> None:
+    """One-shot F3 rebuild: convert journal money columns REAL → TEXT.
+
+    Fail-loud by design (audit F9 rules): any failure rolls back the
+    rebuild transaction and raises RuntimeError — a half-migrated journal
+    must never look healthy.  The source DB is backed up first via the
+    native sqlite3 backup API; every converted value that carries float-
+    repr noise beyond 8 fractional digits is listed in a JSON report next
+    to the DB.
+    """
+    conn = sqlite3.connect(str(db_path))
+    conn.row_factory = sqlite3.Row
+    try:
+        tables = [
+            t for t in _MONEY_COLUMNS if _money_table_needs_rebuild(conn, t)
+        ]
+        if not tables:
+            return
+
+        # Automatic backup BEFORE any rewrite (native backup API).
+        stamp = utc_timestamp().replace(":", "").replace("-", "")
+        backup_dir = db_path.parent / "backups"
+        backup_dir.mkdir(parents=True, exist_ok=True)
+        backup_path = backup_dir / f"{db_path.stem}.pre-f3-money.{stamp}.db"
+        dst = sqlite3.connect(str(backup_path))
+        try:
+            conn.backup(dst)
+        finally:
+            dst.close()
+
+        ambiguous: list[dict[str, Any]] = []
+        converted_rows = 0
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            for table in tables:
+                info = conn.execute(f"PRAGMA table_info({table})").fetchall()
+                money_cols = set(_MONEY_COLUMNS[table])
+                col_names = [row[1] for row in info]
+                defs: list[str] = []
+                for row in info:
+                    name, decl_type = row[1], str(row[2] or "")
+                    notnull, dflt, pk = row[3], row[4], row[5]
+                    if name in money_cols:
+                        decl_type = "TEXT"
+                        dflt = _MONEY_DEFAULTS.get(name, dflt)
+                        if dflt is not None and not str(dflt).startswith("'"):
+                            dflt = f"'{dflt}'"
+                    d = f"{name} {decl_type}"
+                    if pk:
+                        d += " PRIMARY KEY"
+                    if notnull:
+                        d += " NOT NULL"
+                    if dflt is not None:
+                        d += f" DEFAULT {dflt}"
+                    defs.append(d)
+                tmp = f"{table}__f3_rebuild"
+                conn.execute(f"DROP TABLE IF EXISTS {tmp}")
+                conn.execute(f"CREATE TABLE {tmp} ({', '.join(defs)})")
+
+                rows = conn.execute(f"SELECT * FROM {table}").fetchall()
+                placeholders = ", ".join(["?"] * len(col_names))
+                insert_sql = (
+                    f"INSERT INTO {tmp} ({', '.join(col_names)})"
+                    f" VALUES ({placeholders})"
+                )
+                for r in rows:
+                    vals: list[Any] = []
+                    for name in col_names:
+                        v = r[name]
+                        if name in money_cols and v is not None:
+                            dec = Decimal(str(v))
+                            text = money_to_str(dec)
+                            exponent = dec.as_tuple().exponent
+                            if isinstance(exponent, int) and exponent < -8:
+                                ambiguous.append(
+                                    {
+                                        "table": table,
+                                        "column": name,
+                                        "raw_repr": str(v),
+                                        "stored_as": text,
+                                    }
+                                )
+                            v = text
+                        vals.append(v)
+                    conn.execute(insert_sql, vals)
+                    converted_rows += 1
+                conn.execute(f"DROP TABLE {table}")
+                conn.execute(f"ALTER TABLE {tmp} RENAME TO {table}")
+                for idx_sql in _REBUILD_INDEXES.get(table, ()):
+                    conn.execute(idx_sql)
+            conn.commit()
+        except Exception as exc:
+            conn.rollback()
+            raise RuntimeError(
+                f"F3 money migration FAILED for {db_path} (rolled back; "
+                f"backup at {backup_path}): {type(exc).__name__}: {exc}"
+            ) from exc
+
+        report = {
+            "migration": "f3_money_real_to_text",
+            "db_path": str(db_path),
+            "backup_path": str(backup_path),
+            "tables_rebuilt": tables,
+            "rows_converted": converted_rows,
+            "ambiguous_float_values": ambiguous,
+            "generated_at": utc_timestamp(),
+        }
+        # Lives in backups/ (not the runtime root) so artifact-coherence
+        # scans of runtime/*.json don't classify it as a legacy artifact.
+        report_path = backup_dir / f"f3_money_migration_report_{stamp}.json"
+        report_path.write_text(json.dumps(report, indent=2))
+        _logger.warning(
+            "F3 money migration rebuilt %s (%d rows, %d ambiguous float "
+            "values). Backup: %s Report: %s",
+            ", ".join(tables),
+            converted_rows,
+            len(ambiguous),
+            backup_path,
+            report_path,
+        )
+    finally:
+        conn.close()
+
+
 def init_schema(db_path: Path = DB_PATH) -> None:
     """Create runtime dir and initialize all tables. Idempotent."""
     db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -529,6 +725,10 @@ def init_schema(db_path: Path = DB_PATH) -> None:
         conn.commit()
     finally:
         conn.close()
+    # F3: one-shot rebuild of legacy REAL money columns to TEXT-stored
+    # Decimal strings.  No-op on already-migrated / fresh DBs.  Fail-loud
+    # on error (raises) — see _money_text_migration.
+    _money_text_migration(db_path)
     _initialized.add(str(db_path.resolve()))
 
 
@@ -558,11 +758,15 @@ def _to_dict(row: sqlite3.Row) -> dict[str, Any]:
     if "human_review_required" in d and isinstance(d["human_review_required"], int):
         d["human_review_required"] = bool(d["human_review_required"])
     if "leverage" in d:
+        # F3: leverage is TEXT-stored Decimal.  Clamp to >= 1 without ever
+        # converting through float; emit the canonical string.
         try:
-            lev = float(d["leverage"]) if d["leverage"] is not None else 1.0
-        except (TypeError, ValueError):
-            lev = 1.0
-        d["leverage"] = lev if lev >= 1.0 else 1.0
+            lev_dec = parse_money(d["leverage"] if d["leverage"] is not None else "1")
+        except MoneyError:
+            lev_dec = Decimal(1)
+        if lev_dec < 1:
+            lev_dec = Decimal(1)
+        d["leverage"] = money_to_str(lev_dec)
     # Currency: legacy rows wrote '' or NULL; both should read back as
     # the explicit UNKNOWN sentinel so the frontend can render it
     # without a hardcoded $ fallback.
@@ -852,15 +1056,15 @@ def insert_manual_trade(
     event_id: str,
     ticker: str,
     side: str,
-    quantity: float,
-    price: float,
+    quantity: Any,  # F3: Decimal | str | int | float → stored as Decimal TEXT
+    price: Any,  # F3: Decimal | str | int | float → stored as Decimal TEXT
     executed_at: str,
     thesis: str,
     notes: str,
     logged_by: str,
     db_path: Path = DB_PATH,
     *,
-    leverage: float = 1.0,
+    leverage: Any = 1,  # F3: Decimal | str | int | float → Decimal TEXT
     invalidation_level: str = "",
     expected_horizon: str = "",
     risk_reason: str = "",
@@ -910,12 +1114,17 @@ def insert_manual_trade(
     later calibration can ask "did the reactor warn correctly?".  Storing
     them never authorises trades; the safety stamps below are unchanged.
     """
+    # F3: money values are normalised to canonical Decimal strings at this
+    # boundary; no float ever reaches the money columns.
+    qty_text = _money_text(quantity, "quantity")
+    price_text = _money_text(price, "price")
     try:
-        lev = float(leverage) if leverage is not None else 1.0
-    except (TypeError, ValueError):
-        lev = 1.0
-    if lev < 1.0:
-        lev = 1.0
+        lev_dec = parse_money(leverage if leverage is not None else "1")
+    except MoneyError:
+        lev_dec = Decimal(1)
+    if lev_dec < 1:
+        lev_dec = Decimal(1)
+    lev = money_to_str(lev_dec)
     conf = _normalize_confidence_before(confidence_before)
     dge = _normalize_unit_score(decision_grade_energy_at_decision)
     echo = _normalize_unit_score(echo_risk_score_at_decision)
@@ -997,7 +1206,7 @@ def insert_manual_trade(
             " exit_plan, confidence_before, emotional_state, mistake_tags, lesson"
         )
         base_vals: tuple[Any, ...] = (
-            trade_id, event_id, ticker, side, quantity, price, executed_at,
+            trade_id, event_id, ticker, side, qty_text, price_text, executed_at,
             thesis, notes, logged_by, lev,
             _EXECUTION_MODE, _AI_EXECUTION_COUNT,
             _ADVISORY_STATUS, 1, "NONE", 0,
@@ -1206,10 +1415,10 @@ def insert_reconciliation(
     trade_id: str,
     event_id: str,
     reconciled_at: str,
-    actual_fill_price: float,
-    actual_quantity: float,
+    actual_fill_price: Any,  # F3: Decimal | str | int | float → Decimal TEXT
+    actual_quantity: Any,  # F3: Decimal | str | int | float → Decimal TEXT
     outcome_notes: str,
-    pnl_estimate: float,
+    pnl_estimate: Any,  # F3: Decimal | str | int | float → Decimal TEXT
     outcome_status: str,
     db_path: Path = DB_PATH,
     *,
@@ -1226,6 +1435,12 @@ def insert_reconciliation(
     attribution.  None of them grant execution permission; this is
     record-keeping only.
     """
+    # F3: normalise money to canonical Decimal strings; refuse NaN/Inf.
+    fill_text = _money_text(actual_fill_price, "actual_fill_price")
+    qty_text = _money_text(actual_quantity, "actual_quantity")
+    pnl_text = _money_text(
+        pnl_estimate if pnl_estimate is not None else "0", "pnl_estimate"
+    )
     conn = _get_conn(db_path)
     try:
         conn.execute(
@@ -1239,8 +1454,8 @@ def insert_reconciliation(
             " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 reconciliation_id, trade_id, event_id, reconciled_at,
-                actual_fill_price, actual_quantity, outcome_notes,
-                pnl_estimate, outcome_status,
+                fill_text, qty_text, outcome_notes,
+                pnl_text, outcome_status,
                 _EXECUTION_MODE, _AI_EXECUTION_COUNT,
                 _ADVISORY_STATUS, 1,
                 str(outcome_quality or ""),

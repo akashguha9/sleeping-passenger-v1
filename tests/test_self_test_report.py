@@ -236,7 +236,11 @@ def test_pnl_is_labelled_manual_not_broker_verified(tmp_path):
     r = report.build_report(db_path)
     assert r["reconciliation"]["pnl_source"] == "operator_entered_manual_only"
     assert r["reconciliation"]["operator_entered_pnl_count"] == 1
-    assert r["reconciliation"]["operator_entered_pnl_sum"] == 50.0
+    # F3: money sums are aggregated in Decimal and reported as the exact
+    # decimal string, never a float.
+    from decimal import Decimal
+
+    assert Decimal(r["reconciliation"]["operator_entered_pnl_sum"]) == 50
     assert "pnl_unverified_by_broker" in r["limitations"]
 
 

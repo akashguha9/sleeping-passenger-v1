@@ -8,6 +8,7 @@ import {
   type CockpitResponse,
 } from '@/lib/apiClient';
 import { AdvisoryOnlyBadge } from '@/components/AdvisoryOnlyBadge';
+import { DegradedHealthBanner } from '@/components/DegradedHealthBanner';
 import { ReadinessModeBadge } from '@/components/ReadinessModeBadge';
 import { ReliabilityBadge } from '@/components/ReliabilityBadge';
 import type { RealMoneyReadiness } from '@/lib/realMoneyReadiness';
@@ -151,6 +152,8 @@ export default function CockpitPage() {
 
   return (
     <div className="max-w-5xl mx-auto space-y-5">
+      {/* F8: red strip whenever the backend reports lost DB writes. */}
+      <DegradedHealthBanner />
       <div className="flex items-start justify-between">
         <div>
           <h1 className="text-xl font-bold text-white">Operator Cockpit</h1>

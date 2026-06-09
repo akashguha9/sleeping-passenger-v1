@@ -31,6 +31,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -131,7 +132,8 @@ def compute_score_calibration(
     ``false_positive_rate`` = fraction of acted-on signals that lost.
     """
     wins = losses = breakeven = 0
-    pnl_total = 0.0
+    # F3: P/L aggregation in Decimal — float summation of money drifts.
+    pnl_total = Decimal(0)
     pnl_count = 0
     for row in reconciliations:
         status = str(row.get("outcome_status", "") or "").strip().upper()
@@ -144,15 +146,16 @@ def compute_score_calibration(
         else:
             continue  # UNKNOWN / unresolved — excluded from rates
         try:
-            pnl_total += float(row.get("pnl_estimate", 0.0) or 0.0)
+            pnl_total += Decimal(str(row.get("pnl_estimate", 0) or 0))
             pnl_count += 1
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, InvalidOperation):
             pass
 
     resolved = wins + losses + breakeven
     win_rate = (wins / resolved) if resolved else None
     false_positive_rate = (losses / resolved) if resolved else None
-    avg_return = (pnl_total / pnl_count) if pnl_count else None
+    # Exact Decimal division; single float rounding only at report egress.
+    avg_return = float(pnl_total / pnl_count) if pnl_count else None
 
     status = classify_calibration_status(resolved)
     summary = {

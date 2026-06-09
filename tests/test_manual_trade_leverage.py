@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from decimal import Decimal
 from pathlib import Path
 
 
@@ -52,7 +53,7 @@ def test_log_manual_trade_accepts_leverage(tmp_path, monkeypatch):
         leverage=3.5,
     )
     assert result["status"] == "logged"
-    assert result["leverage"] == 3.5
+    assert Decimal(result["leverage"]) == Decimal("3.5")
     assert result["advisory_status"] == "ADVISORY_ONLY"
     assert result["execution_mode"] == "HUMAN_ONLY"
     assert result["broker_api_called"] is False
@@ -61,7 +62,7 @@ def test_log_manual_trade_accepts_leverage(tmp_path, monkeypatch):
 
     rows = [json.loads(line) for line in (tmp_path / "trades.jsonl").read_text().splitlines()]
     assert len(rows) == 1
-    assert rows[0]["leverage"] == 3.5
+    assert Decimal(rows[0]["leverage"]) == Decimal("3.5")
 
 
 # ---------------------------------------------------------------------------
@@ -83,7 +84,7 @@ def test_log_manual_trade_default_leverage(tmp_path, monkeypatch):
         price=200.0,
         thesis="no explicit leverage",
     )
-    assert result["leverage"] == 1.0
+    assert Decimal(result["leverage"]) == 1
 
     # Explicit None coerces to 1.0
     result = api.log_manual_trade(
@@ -95,7 +96,7 @@ def test_log_manual_trade_default_leverage(tmp_path, monkeypatch):
         thesis="None leverage",
         leverage=None,  # type: ignore[arg-type]
     )
-    assert result["leverage"] == 1.0
+    assert Decimal(result["leverage"]) == 1
 
 
 # ---------------------------------------------------------------------------
@@ -155,7 +156,7 @@ def test_persistence_stores_and_reads_leverage(tmp_path):
     rows = p.get_all_manual_trades(db_path=db)
     assert len(rows) == 1
     t = rows[0]
-    assert t["leverage"] == 4.0
+    assert Decimal(t["leverage"]) == 4
     assert t["advisory_status"] == "ADVISORY_ONLY"
     assert t["execution_mode"] == "HUMAN_ONLY"
     assert t["broker_api_called"] is False
@@ -220,8 +221,8 @@ def test_persistence_additive_migration_for_legacy_db(tmp_path):
     rows = p.get_all_manual_trades(db_path=db)
     assert len(rows) == 1
     assert rows[0]["trade_id"] == "MT_legacy"
-    # legacy row had no leverage value — read-back must coerce to 1.0
-    assert rows[0]["leverage"] == 1.0
+    # legacy row had no leverage value — read-back must coerce to 1
+    assert Decimal(rows[0]["leverage"]) == 1
 
 
 # ---------------------------------------------------------------------------

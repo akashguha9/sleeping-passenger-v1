@@ -77,8 +77,10 @@ def test_l1_opt_accepts_none_and_empty():
 
 
 def test_l1_money_to_str_stable():
-    assert money_mod.money_to_str(Decimal("100.00")) == "100.000000000000"
-    assert money_mod.money_to_str(Decimal("-0.5")) == "-0.500000000000"
+    # F3: canonical form strips redundant trailing zeros, never exponents.
+    assert money_mod.money_to_str(Decimal("100.00")) == "100"
+    assert money_mod.money_to_str(Decimal("-0.5")) == "-0.5"
+    assert money_mod.money_to_str(Decimal("0.020")) == "0.02"
     assert money_mod.money_to_str(None) is None
 
 

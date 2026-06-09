@@ -653,6 +653,7 @@ if _FASTAPI_AVAILABLE:
         return JSONResponse(status_code=500, content=payload)
 
 
+
     def _check_bearer_token(authorization: str | None) -> None:
         """Constant-time bearer-token verification.
 
@@ -757,14 +758,12 @@ try:
         MoneyError as _MoneyError,
         parse_money as _parse_money,
         parse_money_opt as _parse_money_opt,
-        money_to_legacy_float as _money_to_float,
     )
 except ModuleNotFoundError:  # pragma: no cover
     from money import (  # type: ignore[no-redef]
         MoneyError as _MoneyError,
         parse_money as _parse_money,
         parse_money_opt as _parse_money_opt,
-        money_to_legacy_float as _money_to_float,
     )
 
 if _FASTAPI_AVAILABLE:
@@ -779,13 +778,13 @@ else:  # pragma: no cover
 
 
 class ManualTradeBody(BaseModel):
-    """L1 fix: money fields accept Decimal | int | float | str on the wire.
+    """L1/F3 fix: money fields accept Decimal | int | float | str on the wire.
 
-    The validator (see ``_money_validator`` below) coerces every incoming
-    money value to a quantised Decimal at the boundary.  Internal callers
-    that still take ``float`` get the value via ``money_to_legacy_float``
-    — every such call is a marked TODO for the schema migration that
-    will swap SQLite ``REAL`` columns for TEXT-stored Decimals.
+    The validator coerces every incoming money value to a quantised
+    Decimal at the boundary.  Post-F3 the value STAYS Decimal through the
+    service layer, persistence stores the canonical Decimal string in
+    TEXT columns, and responses render money as that string — no float
+    ever touches the money path.
     """
     event_id: str
     ticker: str
@@ -1308,21 +1307,19 @@ def post_manual_trade(
         body.logged_by = "operator@loopback"
     else:
         body.logged_by = "operator@unauth-override"
-    # L1 bridge: persistence layer still types money as float.  Convert at
-    # the boundary so the wire-validated Decimal does not become a float
-    # until the very last possible moment, preserving the operator's exact
-    # input through pydantic and through this handler.  Each _money_to_float
-    # call is a TODO marker for the schema migration.
+    # F3: the wire-validated Decimal flows through unchanged — the service
+    # layer and persistence are Decimal-native (TEXT-stored canonical
+    # strings).  No float conversion happens anywhere on this path.
     result = log_manual_trade(
         event_id=body.event_id,
         ticker=body.ticker,
         side=body.side,
-        quantity=_money_to_float(body.quantity),
-        price=_money_to_float(body.price),
+        quantity=body.quantity,
+        price=body.price,
         thesis=body.thesis,
         notes=body.notes,
         logged_by=body.logged_by,
-        leverage=_money_to_float(body.leverage),
+        leverage=body.leverage,
         invalidation_level=body.invalidation_level,
         expected_horizon=body.expected_horizon,
         risk_reason=body.risk_reason,
@@ -1448,14 +1445,13 @@ def post_reconcile(
     body: ReconcileBody,
     _auth: None = Depends(require_api_token),
 ) -> dict:
-    # L1 bridge: Decimal → float at the persistence boundary (see comment in
-    # post_manual_trade above).
+    # F3: Decimal end-to-end — no float conversion at this boundary.
     result = reconcile_trade(
         trade_id,
-        actual_fill_price=_money_to_float(body.actual_fill_price),
-        actual_quantity=_money_to_float(body.actual_quantity),
+        actual_fill_price=body.actual_fill_price,
+        actual_quantity=body.actual_quantity,
         outcome_notes=body.outcome_notes,
-        pnl_estimate=_money_to_float(body.pnl_estimate),
+        pnl_estimate=body.pnl_estimate,
         outcome_status=body.outcome_status,
         outcome_quality=body.outcome_quality,
         process_error=body.process_error,
@@ -1464,12 +1460,12 @@ def post_reconcile(
         lesson=body.lesson,
         post_trade_outcome=body.post_trade_outcome,
         reconciliation_status=body.reconciliation_status,
-        runner_quantity=_money_to_float(body.runner_quantity),
+        runner_quantity=body.runner_quantity,
         runner_status=body.runner_status,
-        partial_take_profit_price=_money_to_float(body.partial_take_profit_price),
-        partial_take_profit_quantity=_money_to_float(body.partial_take_profit_quantity),
+        partial_take_profit_price=body.partial_take_profit_price,
+        partial_take_profit_quantity=body.partial_take_profit_quantity,
         take_profit_plan=body.take_profit_plan,
-        stop_loss_price=_money_to_float(body.stop_loss_price),
+        stop_loss_price=body.stop_loss_price,
         stop_loss_hit=body.stop_loss_hit,
         exit_reason=body.exit_reason,
         invalidation_level=body.invalidation_level,

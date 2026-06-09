@@ -235,7 +235,9 @@ def test_reconciliations_persist(tmp_path):
     r = rows[0]
     assert r["reconciliation_id"] == "REC_t001"
     assert r["outcome_status"] == "WIN"
-    assert r["pnl_estimate"] == 10.0
+    from decimal import Decimal
+
+    assert Decimal(r["pnl_estimate"]) == 10
     assert r["advisory_status"] == "ADVISORY_ONLY"
     assert r["ai_execution_count"] == 0
     assert r["execution_mode"] == "HUMAN_ONLY"

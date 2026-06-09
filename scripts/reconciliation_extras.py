@@ -35,7 +35,13 @@ unit tests can run without any framework available.
 from __future__ import annotations
 
 import json
+from decimal import Decimal
 from typing import Any
+
+try:
+    from scripts.money import money_to_str, parse_money, MoneyError
+except ModuleNotFoundError:  # pragma: no cover - script-style fallback
+    from money import money_to_str, parse_money, MoneyError  # type: ignore[no-redef]
 
 # ---------------------------------------------------------------------------
 # Status / outcome enums (kept as frozensets so callers can do `in` checks).
@@ -149,6 +155,21 @@ def _safe_float(value: Any, default: float = 0.0) -> float:
     return out
 
 
+def _money_dec(value: Any, default: Decimal = Decimal(0)) -> Decimal:
+    """F3: tolerant money parser — Decimal in, garbage → default.
+
+    Mirrors ``_safe_float`` semantics (None / bool / NaN / Inf / junk fall
+    back to the default) but stays in Decimal so no binary-float error is
+    ever introduced into P/L arithmetic.
+    """
+    if value is None or isinstance(value, bool):
+        return default
+    try:
+        return parse_money(value)
+    except MoneyError:
+        return default
+
+
 # ---------------------------------------------------------------------------
 # Enum normalisers
 # ---------------------------------------------------------------------------
@@ -220,14 +241,14 @@ def split_quantity_70_30(
 
 def compute_realized_pnl(
     *,
-    entry_price: float,
-    exit_price: float,
-    exit_quantity: float,
+    entry_price: Any,
+    exit_price: Any,
+    exit_quantity: Any,
     side: str = "BUY",
-    leverage: float | None = 1.0,
+    leverage: Any = 1,
     apply_leverage_multiplier: bool = False,
-) -> float:
-    """Side-aware realized P/L.
+) -> Decimal:
+    """Side-aware realized P/L, computed entirely in Decimal (F3).
 
         BUY  (long):  realized_pnl = (exit_price - entry_price) * exit_quantity
         SELL (short): realized_pnl = (entry_price - exit_price) * exit_quantity
@@ -238,33 +259,40 @@ def compute_realized_pnl(
     side falls through to BUY — the legacy semantic — so callers that never
     pass a side keep their behaviour.
 
+    F3 audit fix: inputs are parsed with :func:`scripts.money.parse_money`
+    (so floats are converted via their shortest decimal repr, strings are
+    decimal-faithful) and the arithmetic is exact Decimal.  The result is
+    quantised to the 12-dp money quantum with ROUND_HALF_EVEN — see
+    scripts/money.py for the rounding-mode rationale.
+
     ``apply_leverage_multiplier`` is False by default: in this MVP the
     logged ``quantity`` already represents the leveraged notional
     exposure, so applying leverage again would double-count.  The flag
     exists only so callers that store base (un-leveraged) quantity can
     opt in explicitly.
     """
-    entry = _safe_float(entry_price)
-    exit_p = _safe_float(exit_price)
-    qty = _safe_float(exit_quantity)
+    entry = _money_dec(entry_price)
+    exit_p = _money_dec(exit_price)
+    qty = _money_dec(exit_quantity)
     if qty <= 0:
-        return 0.0
-    direction = -1.0 if str(side or "").strip().upper() == "SELL" else 1.0
+        return Decimal(0)
+    direction = Decimal(-1) if str(side or "").strip().upper() == "SELL" else Decimal(1)
     pnl = (exit_p - entry) * qty * direction
     if apply_leverage_multiplier:
-        lev = max(1.0, _safe_float(leverage, default=1.0))
+        lev = max(Decimal(1), _money_dec(leverage, default=Decimal(1)))
         pnl = pnl * lev
-    return round(pnl, 4)
+    # Re-quantise the product back to the canonical money quantum.
+    return parse_money(pnl)
 
 
 def compute_realized_pnl_long(
     *,
-    entry_price: float,
-    exit_price: float,
-    exit_quantity: float,
-    leverage: float | None = 1.0,
+    entry_price: Any,
+    exit_price: Any,
+    exit_quantity: Any,
+    leverage: Any = 1,
     apply_leverage_multiplier: bool = False,
-) -> float:
+) -> Decimal:
     """Backwards-compatible long-only wrapper around compute_realized_pnl."""
     return compute_realized_pnl(
         entry_price=entry_price,
@@ -285,24 +313,24 @@ def build_outcome_payload(
     *,
     trade_id: str,
     post_trade_outcome: str,
-    actual_exit_price: float,
-    exit_quantity: float,
-    entry_price: float,
-    entry_quantity: float,
+    actual_exit_price: Any,
+    exit_quantity: Any,
+    entry_price: Any,
+    entry_quantity: Any,
     side: str = "BUY",
-    leverage: float | None = 1.0,
+    leverage: Any = 1,
     reconciliation_status: str | None = None,
     outcome_quality: str = "",
     mistake_tags: str = "",
     lesson_takeaway: str = "",
     notes: str = "",
     invalidation_level: str = "",
-    stop_loss_price: float | None = None,
+    stop_loss_price: Any = None,
     stop_loss_hit: bool = False,
     exit_reason: str = "",
-    partial_take_profit_price: float | None = None,
-    partial_take_profit_quantity: float | None = None,
-    runner_quantity: float | None = None,
+    partial_take_profit_price: Any = None,
+    partial_take_profit_quantity: Any = None,
+    runner_quantity: Any = None,
     runner_status: str | None = None,
     take_profit_plan: str = DEFAULT_TAKE_PROFIT_PLAN,
     apply_leverage_multiplier: bool = False,
@@ -331,7 +359,8 @@ def build_outcome_payload(
             reconciliation_status = "AWAITING_RECONCILIATION"
     recon_status = normalize_reconciliation_status(reconciliation_status)
 
-    qty = _safe_float(exit_quantity)
+    # F3: all quantity / price / P/L arithmetic below is exact Decimal.
+    qty = _money_dec(exit_quantity)
     realized = compute_realized_pnl(
         entry_price=entry_price,
         exit_price=actual_exit_price,
@@ -341,17 +370,17 @@ def build_outcome_payload(
         apply_leverage_multiplier=apply_leverage_multiplier,
     )
 
-    entry_q = max(0.0, _safe_float(entry_quantity))
-    remaining = max(0.0, round(entry_q - qty, QUANTITY_PRECISION))
+    entry_q = max(Decimal(0), _money_dec(entry_quantity))
+    remaining = max(Decimal(0), entry_q - qty)
 
-    runner_q: float
+    runner_q: Decimal
     if runner_quantity is None:
         if outcome == "PARTIAL_TP" and qty > 0 and entry_q > 0:
-            runner_q = max(0.0, round(entry_q - qty, QUANTITY_PRECISION))
+            runner_q = max(Decimal(0), entry_q - qty)
         else:
-            runner_q = 0.0
+            runner_q = Decimal(0)
     else:
-        runner_q = max(0.0, round(_safe_float(runner_quantity), QUANTITY_PRECISION))
+        runner_q = max(Decimal(0), _money_dec(runner_quantity))
 
     if runner_status is None:
         if outcome == "PARTIAL_TP" and runner_q > 0:
@@ -365,34 +394,39 @@ def build_outcome_payload(
     else:
         normalized_runner_status = normalize_runner_status(runner_status)
 
+    # F3 egress contract: every money field below is the canonical Decimal
+    # string from money_to_str — JSON-safe, lossless via Decimal(value),
+    # and never converted through float anywhere in the pipeline.
     payload: dict[str, Any] = {
         "trade_id": trade_id,
         "post_trade_outcome": outcome,
         "reconciliation_status": recon_status,
         "outcome_quality": normalize_outcome_quality(outcome_quality),
-        "actual_exit_price": round(_safe_float(actual_exit_price), 6),
-        "fill_price": round(_safe_float(actual_exit_price), 6),
-        "exit_quantity": round(qty, QUANTITY_PRECISION),
-        "remaining_quantity": remaining,
-        "entry_price": round(_safe_float(entry_price), 6),
-        "entry_quantity": round(entry_q, QUANTITY_PRECISION),
+        "actual_exit_price": money_to_str(_money_dec(actual_exit_price)),
+        "fill_price": money_to_str(_money_dec(actual_exit_price)),
+        "exit_quantity": money_to_str(qty),
+        "remaining_quantity": money_to_str(remaining),
+        "entry_price": money_to_str(_money_dec(entry_price)),
+        "entry_quantity": money_to_str(entry_q),
         "side": "SELL" if str(side or "").strip().upper() == "SELL" else "BUY",
-        "leverage": max(1.0, _safe_float(leverage, default=1.0)),
-        "realized_pnl": realized,
+        "leverage": money_to_str(
+            max(Decimal(1), _money_dec(leverage, default=Decimal(1)))
+        ),
+        "realized_pnl": money_to_str(realized),
         "partial_take_profit_price": (
             None if partial_take_profit_price is None
-            else round(_safe_float(partial_take_profit_price), 6)
+            else money_to_str(_money_dec(partial_take_profit_price))
         ),
         "partial_take_profit_quantity": (
             None if partial_take_profit_quantity is None
-            else round(_safe_float(partial_take_profit_quantity), QUANTITY_PRECISION)
+            else money_to_str(_money_dec(partial_take_profit_quantity))
         ),
-        "runner_quantity": runner_q,
+        "runner_quantity": money_to_str(runner_q),
         "runner_status": normalized_runner_status,
         "take_profit_plan": str(take_profit_plan or DEFAULT_TAKE_PROFIT_PLAN),
         "stop_loss_price": (
             None if stop_loss_price is None
-            else round(_safe_float(stop_loss_price), 6)
+            else money_to_str(_money_dec(stop_loss_price))
         ),
         "stop_loss_hit": bool(stop_loss_hit),
         "exit_reason": str(exit_reason or ""),
@@ -456,6 +490,7 @@ __all__ = [
     "QUANTITY_PRECISION",
     "SAFETY_STAMPS",
     "split_quantity_70_30",
+    "compute_realized_pnl",
     "compute_realized_pnl_long",
     "normalize_post_trade_outcome",
     "normalize_reconciliation_status",
