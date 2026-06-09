@@ -228,6 +228,16 @@ CREATE TABLE IF NOT EXISTS export_logs (
     row_count INTEGER NOT NULL DEFAULT 0,
     advisory_status TEXT NOT NULL DEFAULT 'ADVISORY_ONLY'
 );
+CREATE TABLE IF NOT EXISTS audit_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    table_name TEXT NOT NULL,
+    row_id TEXT NOT NULL,
+    operation TEXT NOT NULL,
+    old_state_json TEXT NOT NULL DEFAULT '{}',
+    changed_at TEXT NOT NULL,
+    advisory_status TEXT NOT NULL DEFAULT 'ADVISORY_ONLY'
+);
+CREATE INDEX IF NOT EXISTS idx_audit_table_row ON audit_log(table_name, row_id);
 CREATE TABLE IF NOT EXISTS signal_events (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     event_id TEXT NOT NULL UNIQUE,
@@ -642,6 +652,33 @@ def _track_ignored(cur: sqlite3.Cursor, table: str, key: str) -> bool:
     return False
 
 
+def _write_audit_row(
+    conn: sqlite3.Connection,
+    table_name: str,
+    row_id: str,
+    operation: str,
+    old_state: dict[str, Any],
+) -> None:
+    """F13: record the pre-mutation state of an UPDATE/DELETE.
+
+    Written on the caller's connection WITHOUT committing, so the audit
+    row and the mutation land in the same transaction — either both
+    persist or neither does.
+    """
+    conn.execute(
+        "INSERT INTO audit_log"
+        " (table_name, row_id, operation, old_state_json, changed_at)"
+        " VALUES (?, ?, ?, ?, ?)",
+        (
+            table_name,
+            row_id,
+            operation,
+            json.dumps(old_state, default=str, sort_keys=True),
+            utc_timestamp(),
+        ),
+    )
+
+
 def _money_text(value: Any, field: str) -> str:
     """Normalise any money-like input to the canonical Decimal string.
 
@@ -957,7 +994,7 @@ def soft_delete_reflection(
     conn = _get_conn(db_path)
     try:
         before = conn.execute(
-            "SELECT 1 FROM user_reflections WHERE reflection_id=?",
+            "SELECT * FROM user_reflections WHERE reflection_id=?",
             (reflection_id,),
         ).fetchone()
         if not before:
@@ -966,6 +1003,11 @@ def soft_delete_reflection(
                 "reflection_id": reflection_id,
                 "reason": "not_found",
             }
+        # F13 audit fix: the deletion and its audit row commit atomically —
+        # a deleted reflection can never be unaccounted for.
+        _write_audit_row(
+            conn, "user_reflections", reflection_id, "DELETE", dict(before)
+        )
         conn.execute(
             "DELETE FROM user_reflections WHERE reflection_id=?",
             (reflection_id,),
@@ -1488,6 +1530,18 @@ def cancel_manual_trade(
         cols = {row[1] for row in conn.execute("PRAGMA table_info(manual_trades)")}
         if "reconciliation_status" not in cols:
             return False
+        # F13 audit fix: capture the pre-mutation state and commit it
+        # atomically with the UPDATE so a bad cancellation is auditable.
+        before = conn.execute(
+            "SELECT trade_id, reconciliation_status, cancel_reason,"
+            " cancelled_at FROM manual_trades WHERE trade_id=?",
+            (str(trade_id or ""),),
+        ).fetchone()
+        if before is None:
+            return False
+        _write_audit_row(
+            conn, "manual_trades", str(trade_id or ""), "UPDATE", dict(before)
+        )
         cur = conn.execute(
             "UPDATE manual_trades"
             " SET reconciliation_status=?, cancel_reason=?, cancelled_at=?"
