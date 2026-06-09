@@ -518,6 +518,26 @@ if _FASTAPI_AVAILABLE:
         allow_headers=["Content-Type", "Accept", "Origin", "Authorization"],
     )
 
+    # H2: structural advisory-stamp backstop.  Every outgoing JSON object
+    # response gains any MISSING stamp; handlers stay authoritative
+    # (existing keys are never overwritten).  Registered before (= runs
+    # outside) the security middleware so even synthetic 413/429 bodies
+    # pass through it.
+    try:
+        from scripts.advisory_stamp_middleware import AdvisoryStampMiddleware
+    except ModuleNotFoundError:  # pragma: no cover - script-style fallback
+        from advisory_stamp_middleware import AdvisoryStampMiddleware  # type: ignore[no-redef]
+    app.add_middleware(AdvisoryStampMiddleware)
+
+    # H2: runtime broker-import guard.  Static AST tests prove this repo
+    # defines no broker code; this proves nothing LOADED one either.
+    # Checked at import time and re-checked at startup.
+    try:
+        from scripts.broker_import_guard import assert_no_broker_modules
+    except ModuleNotFoundError:  # pragma: no cover - script-style fallback
+        from broker_import_guard import assert_no_broker_modules  # type: ignore[no-redef]
+    assert_no_broker_modules()
+
     # Lazily built once on first request -- env vars are read inside the
     # middleware itself so tests can monkeypatch without re-importing.
     try:
@@ -673,6 +693,9 @@ if _FASTAPI_AVAILABLE:
         # S1: refuse to start on non-loopback bind without a token unless
         # MVP_ALLOW_UNAUTH=1 is set explicitly.  Raises StartupSecurityError.
         preflight_auth_or_die()
+        # H2: re-assert broker absence at startup (a module imported between
+        # app construction and serve time must also trip the guard).
+        assert_no_broker_modules()
         if not api_token_required():
             if is_loopback_bind():
                 _logger.warning(
