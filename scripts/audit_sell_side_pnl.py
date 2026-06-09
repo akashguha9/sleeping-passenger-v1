@@ -39,6 +39,7 @@ import json
 import sqlite3
 import sys
 from datetime import datetime, timezone
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
@@ -48,11 +49,30 @@ if str(_SCRIPTS_DIR) not in sys.path:
 
 import persistence  # noqa: E402
 from backup_db import perform_backup  # noqa: E402
+from money import money_to_str  # noqa: E402
 from reconciliation_extras import compute_realized_pnl  # noqa: E402
+
+try:
+    from scripts import operator_permission_guard as _guard  # noqa: E402
+except ModuleNotFoundError:  # pragma: no cover - script-style fallback
+    import operator_permission_guard as _guard  # type: ignore[no-redef]  # noqa: E402
+
+# Central permission-guard identity: rewriting stored P/L rows is a
+# destructive-but-record-keeping REPAIR_WRITE (OPERATOR+), same class as
+# reset_local_logs.  Report-only mode is open to any role.
+OPERATION_NAME = "audit_sell_side_pnl"
+OPERATION_CLASS = _guard.OperationClass.REPAIR_WRITE
 
 # Stored vs corrected differences below one basis point of a cent are
 # float-repr noise, not a sign inversion.
-_TOLERANCE = 1e-6
+_TOLERANCE = Decimal("0.000001")
+
+
+def _dec(value: Any) -> Decimal:
+    try:
+        return Decimal(str(value))
+    except Exception:
+        return Decimal(0)
 
 
 def _utc_stamp() -> str:
@@ -78,11 +98,11 @@ def collect_sell_side_rows(db_path: Path) -> list[dict[str, Any]]:
 
     findings: list[dict[str, Any]] = []
     for r in rows:
-        stored = float(r["pnl_estimate"] or 0.0)
+        stored = _dec(r["pnl_estimate"] or 0)
         corrected = compute_realized_pnl(
-            entry_price=float(r["entry_price"] or 0.0),
-            exit_price=float(r["actual_fill_price"] or 0.0),
-            exit_quantity=float(r["actual_quantity"] or 0.0),
+            entry_price=_dec(r["entry_price"] or 0),
+            exit_price=_dec(r["actual_fill_price"] or 0),
+            exit_quantity=_dec(r["actual_quantity"] or 0),
             side="SELL",
         )
         findings.append(
@@ -91,21 +111,35 @@ def collect_sell_side_rows(db_path: Path) -> list[dict[str, Any]]:
                 "trade_id": r["trade_id"],
                 "ticker": r["ticker"],
                 "outcome_status": r["outcome_status"],
-                "entry_price": float(r["entry_price"] or 0.0),
-                "actual_fill_price": float(r["actual_fill_price"] or 0.0),
-                "actual_quantity": float(r["actual_quantity"] or 0.0),
-                "stored_pnl": stored,
-                "corrected_pnl": corrected,
+                "entry_price": money_to_str(_dec(r["entry_price"] or 0)),
+                "actual_fill_price": money_to_str(_dec(r["actual_fill_price"] or 0)),
+                "actual_quantity": money_to_str(_dec(r["actual_quantity"] or 0)),
+                "stored_pnl": money_to_str(stored),
+                "corrected_pnl": money_to_str(corrected),
                 "consistent": abs(stored - corrected) <= _TOLERANCE,
             }
         )
     return findings
 
 
+@_guard.guarded_mutation(
+    operation_name=OPERATION_NAME,
+    operation_class=OPERATION_CLASS,
+    expected_role_floor=_guard.OperatorRole.OPERATOR,
+    require_dry_run=True,
+)
 def apply_corrections(
-    db_path: Path, flagged: list[dict[str, Any]]
+    db_path: Path,
+    flagged: list[dict[str, Any]],
+    *,
+    permission_decision: "_guard.PermissionDecision | None" = None,
 ) -> dict[str, Any]:
-    """Backup the DB, then rewrite pnl_estimate for the flagged rows."""
+    """Backup the DB, then rewrite pnl_estimate for the flagged rows.
+
+    Write-boundary guarded (audit F4 + Kanté write doctrine): callers must
+    supply a guard-validated OPERATOR+ REPAIR_WRITE decision with a recent
+    dry-run receipt; the decorator raises PermissionError otherwise.
+    """
     backup = perform_backup(
         db_path, db_path.parent / "backups", label="pre-f4-pnl-repair"
     )
@@ -141,8 +175,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--apply",
         action="store_true",
-        help="Rewrite flagged rows (requires a successful automatic backup). "
-        "Default is report-only.",
+        help="Rewrite flagged rows (requires OPERATOR/ADMIN role, a recent "
+        "dry-run receipt, and a successful automatic backup). Default is "
+        "report-only.",
+    )
+    parser.add_argument(
+        "--operator-role",
+        default=None,
+        help="VIEWER|OPERATOR|ADMIN (default: MVP_OPERATOR_ROLE env, else "
+        "VIEWER). --apply requires OPERATOR or ADMIN.",
     )
     args = parser.parse_args(argv)
 
@@ -174,16 +215,41 @@ def main(argv: list[str] | None = None) -> int:
     for f in flagged:
         print(
             f"  {f['reconciliation_id']} {f['ticker']:>8} "
-            f"stored={f['stored_pnl']:+.4f} corrected={f['corrected_pnl']:+.4f}"
+            f"stored={f['stored_pnl']} corrected={f['corrected_pnl']}"
         )
 
     if not flagged:
         return 0
     if not args.apply:
+        # Record a dry-run receipt so a later --apply (OPERATOR+) can prove
+        # a dry-run happened — same contract as reset_local_logs.
+        try:
+            receipt = _guard.write_dry_run_receipt(
+                OPERATION_NAME, target_count=len(flagged), db_path=str(args.db)
+            )
+            print(f"[audit_sell_side_pnl] dry-run receipt written: {receipt.name}")
+        except Exception:  # pragma: no cover - receipt is best-effort
+            pass
         print("[audit_sell_side_pnl] DRY-RUN — nothing rewritten. Use --apply.")
         return 0
 
-    result = apply_corrections(args.db, flagged)
+    # --apply: central permission guard (fails closed; audits allow/deny).
+    try:
+        decision = _guard.build_apply_decision(
+            OPERATION_NAME, OPERATION_CLASS, str(args.db),
+            operator_role=args.operator_role,
+        )
+    except PermissionError as exc:
+        print(f"[audit_sell_side_pnl] [DENY] {exc}", file=sys.stderr)
+        return 2
+
+    try:
+        result = apply_corrections(
+            args.db, flagged, permission_decision=decision
+        )
+    except PermissionError as exc:  # defence-in-depth boundary refusal
+        print(f"[audit_sell_side_pnl] [DENY] {exc}", file=sys.stderr)
+        return 2
     if result.get("error"):
         print(f"[audit_sell_side_pnl] REFUSED: {result['error']}")
         return 2

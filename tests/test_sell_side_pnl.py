@@ -8,6 +8,7 @@ win-rate / calibration aggregates.
 from __future__ import annotations
 
 import sqlite3
+from decimal import Decimal
 from pathlib import Path
 
 import pytest
@@ -77,7 +78,8 @@ def test_build_outcome_payload_sell_side():
         side="SELL",
         leverage=1.0,
     )
-    assert p["realized_pnl"] == 1000.0
+    # F3: payload money fields are canonical Decimal strings.
+    assert Decimal(p["realized_pnl"]) == 1000
     assert p["side"] == "SELL"
 
 
@@ -90,7 +92,7 @@ def test_build_outcome_payload_defaults_to_buy():
         entry_price=100.0,
         entry_quantity=100.0,
     )
-    assert p["realized_pnl"] == 1000.0
+    assert Decimal(p["realized_pnl"]) == 1000
     assert p["side"] == "BUY"
 
 
@@ -167,8 +169,8 @@ def test_reconcile_trade_uses_sell_side_from_trade_row(tmp_db):
         post_trade_outcome="CLOSED_WIN",
     )
     assert rec["status"] == "logged"
-    assert rec["realized_pnl"] == 1000.0
-    assert rec["pnl_estimate"] == 1000.0
+    assert Decimal(rec["realized_pnl"]) == 1000
+    assert Decimal(rec["pnl_estimate"]) == 1000
 
 
 # ---------------------------------------------------------------------------
@@ -176,10 +178,7 @@ def test_reconcile_trade_uses_sell_side_from_trade_row(tmp_db):
 # ---------------------------------------------------------------------------
 
 
-def test_audit_script_flags_inverted_rows_and_apply_fixes(tmp_path):
-    from scripts.audit_sell_side_pnl import apply_corrections, collect_sell_side_rows
-
-    db = tmp_path / "hist.db"
+def _seed_inverted_short(db: Path) -> None:
     persistence.init_schema(db)
     persistence.insert_manual_trade(
         "MT_SHORT1", "EVT1", "TSLA", "SELL", 100.0, 100.0,
@@ -191,15 +190,36 @@ def test_audit_script_flags_inverted_rows_and_apply_fixes(tmp_path):
         90.0, 100.0, "", -1000.0, "WIN", db_path=db,
     )
 
+
+def test_audit_script_flags_inverted_rows_and_apply_fixes(
+    tmp_path, monkeypatch
+):
+    from scripts import operator_permission_guard as guard
+    from scripts.audit_sell_side_pnl import (
+        OPERATION_CLASS,
+        OPERATION_NAME,
+        apply_corrections,
+        collect_sell_side_rows,
+    )
+
+    db = tmp_path / "hist.db"
+    _seed_inverted_short(db)
+
     findings = collect_sell_side_rows(db)
     assert len(findings) == 1
     f = findings[0]
-    assert f["stored_pnl"] == -1000.0
-    assert f["corrected_pnl"] == 1000.0
+    assert Decimal(f["stored_pnl"]) == -1000
+    assert Decimal(f["corrected_pnl"]) == 1000
     assert f["consistent"] is False
 
-    # --apply path: backup then rewrite.
-    result = apply_corrections(db, [f])
+    # --apply path: dry-run receipt + OPERATOR role + backup, then rewrite.
+    monkeypatch.setenv(guard.RECEIPT_DIR_ENV_VAR, str(tmp_path / "receipts"))
+    monkeypatch.setenv("MVP_OPERATOR_ROLE", "OPERATOR")
+    guard.write_dry_run_receipt(OPERATION_NAME, 1, str(db))
+    decision = guard.build_apply_decision(
+        OPERATION_NAME, OPERATION_CLASS, str(db), operator_role="OPERATOR"
+    )
+    result = apply_corrections(db, [f], permission_decision=decision)
     assert result["applied"] == 1
     assert result.get("backup_path")
     assert Path(result["backup_path"]).exists()
@@ -211,4 +231,14 @@ def test_audit_script_flags_inverted_rows_and_apply_fixes(tmp_path):
         ).fetchone()[0]
     finally:
         conn.close()
-    assert float(val) == 1000.0
+    assert Decimal(str(val)) == 1000
+
+
+def test_audit_script_apply_is_permission_guarded(tmp_path):
+    """Direct-call bypass: apply_corrections without a decision must raise."""
+    from scripts.audit_sell_side_pnl import apply_corrections
+
+    db = tmp_path / "guarded.db"
+    _seed_inverted_short(db)
+    with pytest.raises(PermissionError):
+        apply_corrections(db, [], permission_decision=None)
