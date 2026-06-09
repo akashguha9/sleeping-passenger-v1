@@ -228,8 +228,13 @@ def main(argv: list[str] | None = None) -> int:
                 OPERATION_NAME, target_count=len(flagged), db_path=str(args.db)
             )
             print(f"[audit_sell_side_pnl] dry-run receipt written: {receipt.name}")
-        except Exception:  # pragma: no cover - receipt is best-effort
-            pass
+        except Exception as exc:  # pragma: no cover - receipt is best-effort
+            # Failure here is fail-CLOSED (a later --apply is refused
+            # without a receipt), but it must still be visible.
+            print(
+                f"[audit_sell_side_pnl] WARNING: dry-run receipt not "
+                f"written ({type(exc).__name__}); --apply will be refused"
+            )
         print("[audit_sell_side_pnl] DRY-RUN — nothing rewritten. Use --apply.")
         return 0
 
