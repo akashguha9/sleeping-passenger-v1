@@ -364,8 +364,9 @@ def _apply_pragmas(conn: sqlite3.Connection) -> None:
 
     Pragmas are read on every connect rather than at module import so test
     code can monkeypatch the env vars and observe the change.  All pragmas
-    are best-effort: failures are silently ignored so a hostile filesystem
-    (e.g. read-only mount during diagnostics) still allows reads.
+    are best-effort so a hostile filesystem (e.g. read-only mount during
+    diagnostics) still allows reads — but failures are logged at ERROR
+    (F7b audit fix), never silently dropped.
 
     Reasons each pragma is here:
       * ``busy_timeout`` -- two MVP processes (api_server + a runner)
@@ -392,17 +393,20 @@ def _apply_pragmas(conn: sqlite3.Connection) -> None:
             sqlite_journal_mode,
         )
 
+    # F7b: pragma failures are tolerated (reads must still work on a
+    # hostile filesystem) but NEVER silent — an unenforced foreign_keys or
+    # missing busy_timeout is invisible data-integrity loss otherwise.
     try:
         conn.execute(f"PRAGMA busy_timeout = {int(sqlite_busy_timeout_ms())}")
-    except sqlite3.Error:
-        pass
+    except sqlite3.Error as exc:
+        _logger.error("pragma busy_timeout failed: %s", exc)
 
     mode = sqlite_journal_mode()
     if mode and mode != "DEFAULT":
         try:
             conn.execute(f"PRAGMA journal_mode = {mode}")
-        except sqlite3.Error:
-            pass
+        except sqlite3.Error as exc:
+            _logger.error("pragma journal_mode=%s failed: %s", mode, exc)
 
     for pragma in (
         "PRAGMA synchronous = NORMAL",
@@ -411,8 +415,8 @@ def _apply_pragmas(conn: sqlite3.Connection) -> None:
     ):
         try:
             conn.execute(pragma)
-        except sqlite3.Error:
-            pass
+        except sqlite3.Error as exc:
+            _logger.error("%s failed: %s", pragma, exc)
 
 
 def _read_pragma(conn: sqlite3.Connection, name: str) -> str | int | None:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 from pathlib import Path
 from typing import Any
@@ -13,6 +14,20 @@ from src.models.signal import AttentionCluster, SignalScore
 
 DEFAULT_DB_PATH = Path("data/processed/signal_refinery.sqlite")
 
+_logger = logging.getLogger("src.storage.sqlite_store")
+
+# F7 audit fix: same hardening set as scripts/persistence._apply_pragmas.
+# Without these the Streamlit dashboard's long-lived connection had no
+# busy_timeout (instant "database is locked" under a concurrent API
+# writer), no WAL (readers blocked the writer), and no FK enforcement.
+_PRAGMAS: tuple[str, ...] = (
+    "PRAGMA busy_timeout = 5000",
+    "PRAGMA journal_mode = WAL",
+    "PRAGMA synchronous = NORMAL",
+    "PRAGMA foreign_keys = ON",
+    "PRAGMA temp_store = MEMORY",
+)
+
 
 class SQLiteStore:
     """Simple SQLite persistence layer built on the standard library."""
@@ -22,7 +37,16 @@ class SQLiteStore:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.connection = sqlite3.connect(self.db_path)
         self.connection.row_factory = sqlite3.Row
+        self._apply_pragmas()
         self._init_schema()
+
+    def _apply_pragmas(self) -> None:
+        """F7: hardening pragmas; failures log at ERROR, never silently."""
+        for pragma in _PRAGMAS:
+            try:
+                self.connection.execute(pragma)
+            except sqlite3.Error as exc:
+                _logger.error("%s failed: %s", pragma, exc)
 
     def _init_schema(self) -> None:
         cursor = self.connection.cursor()
