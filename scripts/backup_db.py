@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import re
 import sqlite3
 import sys
@@ -50,6 +51,8 @@ except ModuleNotFoundError:  # running as a loose script
     except ModuleNotFoundError:
         get_db_path = None  # type: ignore[assignment]
 
+
+_logger = logging.getLogger("scripts.backup_db")
 
 _DEFAULT_BACKUP_DIRNAME = "backups"
 _LABEL_RE = re.compile(r"^[A-Za-z0-9._-]{1,32}$")
@@ -240,8 +243,8 @@ def perform_restore(backup_path: Path, target_path: Path) -> dict[str, Any]:
             if conn is not None:
                 try:
                     conn.close()
-                except sqlite3.Error:
-                    pass
+                except sqlite3.Error as exc:
+                    _logger.warning("restore cleanup close failed: %s", exc)
     result["ok"] = True
     return result
 
