@@ -565,6 +565,46 @@ _REBUILD_INDEXES: dict[str, tuple[str, ...]] = {
 }
 
 
+# ---------------------------------------------------------------------------
+# F6: INSERT OR IGNORE visibility — silent constraint drops are counted,
+# logged at WARNING, and surfaced on /health/full.
+# ---------------------------------------------------------------------------
+
+_IGNORED_INSERT_COUNT = 0
+
+
+def ignored_insert_count() -> int:
+    """Total INSERT OR IGNORE rows silently dropped since process start."""
+    return _IGNORED_INSERT_COUNT
+
+
+def _reset_ignored_insert_count() -> None:
+    """Test helper: zero the F6 ignored-insert counter."""
+    global _IGNORED_INSERT_COUNT
+    _IGNORED_INSERT_COUNT = 0
+
+
+def _track_ignored(cur: sqlite3.Cursor, table: str, key: str) -> bool:
+    """F6: detect an INSERT OR IGNORE that wrote nothing.
+
+    Returns True when the row was actually inserted.  A zero rowcount
+    means a constraint (usually the primary key) silently dropped the
+    row — count it and log a WARNING naming the table and key so the
+    operator can distinguish intended-duplicate retries from data loss.
+    """
+    global _IGNORED_INSERT_COUNT
+    if cur.rowcount and cur.rowcount > 0:
+        return True
+    _IGNORED_INSERT_COUNT += 1
+    _logger.warning(
+        "persistence: ignored duplicate insert into %s (key=%s, cumulative=%d)",
+        table,
+        key,
+        _IGNORED_INSERT_COUNT,
+    )
+    return False
+
+
 def _money_text(value: Any, field: str) -> str:
     """Normalise any money-like input to the canonical Decimal string.
 
@@ -844,7 +884,7 @@ def insert_reflection(
 ) -> None:
     conn = _get_conn(db_path)
     try:
-        conn.execute(
+        cur = conn.execute(
             "INSERT OR IGNORE INTO user_reflections"
             " (reflection_id, event_id, author, conviction_level, reflection_text,"
             "  reflected_at, advisory_status, human_review_required,"
@@ -856,6 +896,7 @@ def insert_reflection(
                 _ADVISORY_STATUS, 1, _EXECUTION_MODE, _AI_EXECUTION_COUNT,
             ),
         )
+        _track_ignored(cur, "user_reflections", reflection_id)
         conn.commit()
     finally:
         conn.close()
@@ -948,7 +989,7 @@ def insert_ai_summary(
 ) -> None:
     conn = _get_conn(db_path)
     try:
-        conn.execute(
+        cur = conn.execute(
             "INSERT OR IGNORE INTO ai_discussion_summaries"
             " (summary_id, event_id, model_label, summary_text, summarized_at,"
             "  advisory_status, human_review_required, execution_mode, ai_execution_count)"
@@ -958,6 +999,7 @@ def insert_ai_summary(
                 _ADVISORY_STATUS, 1, _EXECUTION_MODE, _AI_EXECUTION_COUNT,
             ),
         )
+        _track_ignored(cur, "ai_discussion_summaries", summary_id)
         conn.commit()
     finally:
         conn.close()
@@ -1273,11 +1315,30 @@ def insert_manual_trade(
             cols_sql = cols_sql + ", jurisdiction_resolution_source"
             vals = vals + (jur_src_norm,)
         placeholders = ", ".join(["?"] * len(vals))
-        conn.execute(
+        cur = conn.execute(
             f"INSERT OR IGNORE INTO manual_trades ({cols_sql}) VALUES ({placeholders})",
             vals,
         )
+        _track_ignored(cur, "manual_trades", trade_id)
         conn.commit()
+    finally:
+        conn.close()
+
+
+def count_manual_trades_by_provenance(
+    created_via: str, db_path: Path = DB_PATH
+) -> int:
+    """F10: count manual_trades rows with the given created_via stamp."""
+    conn = _get_conn(db_path)
+    try:
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(manual_trades)")}
+        if "created_via" not in cols:
+            return 0
+        row = conn.execute(
+            "SELECT COUNT(*) FROM manual_trades WHERE COALESCE(created_via,'')=?",
+            (created_via,),
+        ).fetchone()
+        return int(row[0]) if row else 0
     finally:
         conn.close()
 
@@ -1443,7 +1504,7 @@ def insert_reconciliation(
     )
     conn = _get_conn(db_path)
     try:
-        conn.execute(
+        cur = conn.execute(
             "INSERT OR IGNORE INTO reconciliation_results"
             " (reconciliation_id, trade_id, event_id, reconciled_at,"
             "  actual_fill_price, actual_quantity, outcome_notes,"
@@ -1465,6 +1526,7 @@ def insert_reconciliation(
                 str(lesson or ""),
             ),
         )
+        _track_ignored(cur, "reconciliation_results", reconciliation_id)
         conn.commit()
     finally:
         conn.close()
@@ -1543,6 +1605,17 @@ def insert_ohlcv_bars(bars: list[dict[str, Any]], db_path: Path = DB_PATH) -> in
         conn.commit()
     finally:
         conn.close()
+    # F6: batch imports are idempotent by design, but the caller and the
+    # health surface must still see how many rows were dropped.
+    skipped = len(bars) - written
+    if skipped > 0:
+        global _IGNORED_INSERT_COUNT
+        _IGNORED_INSERT_COUNT += skipped
+        _logger.warning(
+            "persistence: ignored duplicate insert into ohlcv_bars"
+            " (%d of %d rows skipped, cumulative=%d)",
+            skipped, len(bars), _IGNORED_INSERT_COUNT,
+        )
     return written
 
 
@@ -1637,6 +1710,16 @@ def insert_imported_outcomes(rows: list[dict[str, Any]], db_path: Path = DB_PATH
         conn.commit()
     finally:
         conn.close()
+    # F6: surface dropped rows (idempotent re-imports included).
+    skipped = len(rows) - written
+    if skipped > 0:
+        global _IGNORED_INSERT_COUNT
+        _IGNORED_INSERT_COUNT += skipped
+        _logger.warning(
+            "persistence: ignored duplicate insert into imported_outcomes"
+            " (%d of %d rows skipped, cumulative=%d)",
+            skipped, len(rows), _IGNORED_INSERT_COUNT,
+        )
     return written
 
 
@@ -1689,7 +1772,7 @@ def insert_moltbook_entry(
     target = db_path if db_path is not None else DB_PATH
     conn = _get_conn(target)
     try:
-        conn.execute(
+        cur = conn.execute(
             "INSERT OR IGNORE INTO moltbook_entries"
             " (entry_id, event_id, ticker, original_signal_thesis, ai_interpretation,"
             "  user_reflection, final_human_decision, manual_trade_log_id, outcome,"
@@ -1705,6 +1788,7 @@ def insert_moltbook_entry(
                 _ADVISORY_STATUS, 1, _EXECUTION_MODE, _AI_EXECUTION_COUNT,
             ),
         )
+        _track_ignored(cur, "moltbook_entries", entry_id)
         conn.commit()
     finally:
         conn.close()
@@ -1774,33 +1858,42 @@ def upsert_duplicate_fingerprint(
     now = utc_timestamp()
     conn = _get_conn(target)
     try:
-        existing = conn.execute(
-            "SELECT seen_count FROM duplicate_fingerprints WHERE fingerprint=?",
-            (fingerprint,),
-        ).fetchone()
-        if existing is None:
+        # F6: SELECT-then-INSERT is check-then-act — without an immediate
+        # write lock two concurrent callers both see "not found", one
+        # INSERT is silently dropped, and seen_count undercounts.
+        # BEGIN IMMEDIATE serialises the whole upsert.
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            existing = conn.execute(
+                "SELECT seen_count FROM duplicate_fingerprints WHERE fingerprint=?",
+                (fingerprint,),
+            ).fetchone()
+            if existing is None:
+                conn.execute(
+                    "INSERT INTO duplicate_fingerprints"
+                    " (fingerprint, source_type, event_type, ticker, event_id,"
+                    "  observed_date, thesis_excerpt, first_seen_at, last_seen_at,"
+                    "  seen_count, advisory_status, human_review_required, advisory_only)"
+                    " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, 1, 1)",
+                    (
+                        fingerprint, source_type, event_type, str(ticker).upper(),
+                        event_id, observed_date, thesis_excerpt[:280], now, now,
+                        _ADVISORY_STATUS,
+                    ),
+                )
+                conn.commit()
+                return {"is_new": True, "seen_count": 1}
+            new_count = int(existing["seen_count"]) + 1
             conn.execute(
-                "INSERT INTO duplicate_fingerprints"
-                " (fingerprint, source_type, event_type, ticker, event_id,"
-                "  observed_date, thesis_excerpt, first_seen_at, last_seen_at,"
-                "  seen_count, advisory_status, human_review_required, advisory_only)"
-                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, 1, 1)",
-                (
-                    fingerprint, source_type, event_type, str(ticker).upper(),
-                    event_id, observed_date, thesis_excerpt[:280], now, now,
-                    _ADVISORY_STATUS,
-                ),
+                "UPDATE duplicate_fingerprints SET seen_count=?, last_seen_at=?"
+                " WHERE fingerprint=?",
+                (new_count, now, fingerprint),
             )
             conn.commit()
-            return {"is_new": True, "seen_count": 1}
-        new_count = int(existing["seen_count"]) + 1
-        conn.execute(
-            "UPDATE duplicate_fingerprints SET seen_count=?, last_seen_at=?"
-            " WHERE fingerprint=?",
-            (new_count, now, fingerprint),
-        )
-        conn.commit()
-        return {"is_new": False, "seen_count": new_count}
+            return {"is_new": False, "seen_count": new_count}
+        except Exception:
+            conn.rollback()
+            raise
     finally:
         conn.close()
 

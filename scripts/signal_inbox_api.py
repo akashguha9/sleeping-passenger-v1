@@ -439,6 +439,45 @@ def _reset_db_write_failures() -> None:
     _DB_WRITE_FAILURES = 0
 
 
+def journal_divergence() -> dict[str, Any]:
+    """F10: detect JSONL/DB split-brain in the manual trade journal.
+
+    The JSONL append and the SQLite insert are two writes; a crash (or a
+    pre-F1 swallowed failure) between them leaves more JSONL lines than DB
+    rows — operator trades that silently never reached the canonical
+    store.  This compares the provenance-stamped populations on both sides
+    and flags the loss direction (jsonl > db).
+
+    Chosen over the full JSONL-as-WAL redesign for this sprint: the
+    comparison makes the failure mode VISIBLE on /health/full, which is
+    the operational requirement; replay/reconcile stays a manual step
+    using the JSONL rows.
+    """
+    jsonl_lines = 0
+    try:
+        for r in _load_jsonl(MANUAL_TRADE_LOG):
+            if str(r.get("created_via") or "") == "manual_trade_log":
+                jsonl_lines += 1
+    except Exception:
+        _logger.exception("journal_divergence: could not read JSONL log")
+    db_rows = 0
+    if _DB_AVAILABLE and _persistence is not None:
+        try:
+            db_rows = int(
+                _persistence.count_manual_trades_by_provenance(
+                    "manual_trade_log"
+                )
+            )
+        except Exception:
+            _logger.exception("journal_divergence: could not count DB rows")
+    return {
+        "manual_trades_jsonl_lines": jsonl_lines,
+        "manual_trades_db_rows": db_rows,
+        # Loss direction only: JSONL rows that never reached the DB.
+        "journal_divergence_detected": jsonl_lines > db_rows,
+    }
+
+
 def _db_write_failed(operation: str, exc: Exception) -> dict[str, Any]:
     """F1/F2 fix: a journal DB write raised — fail LOUD, never silent.
 

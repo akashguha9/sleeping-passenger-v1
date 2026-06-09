@@ -321,6 +321,37 @@ def _journal_write_failure_count() -> int:
         return 0
 
 
+def _ignored_insert_count() -> int:
+    """F6: INSERT OR IGNORE rows silently dropped (persistence counter)."""
+    try:
+        try:
+            from scripts.persistence import ignored_insert_count
+        except ModuleNotFoundError:  # pragma: no cover - script-style fallback
+            from persistence import ignored_insert_count  # type: ignore
+        return int(ignored_insert_count())
+    except Exception:  # pragma: no cover - health must never 500 on this
+        _logger.error("could not read ignored-insert counter")
+        return 0
+
+
+def _journal_divergence_fields() -> dict:
+    """F10: JSONL line count vs DB row count for the manual trade journal."""
+    try:
+        try:
+            from scripts.signal_inbox_api import journal_divergence
+        except ModuleNotFoundError:  # pragma: no cover - script-style fallback
+            from signal_inbox_api import journal_divergence  # type: ignore
+        return journal_divergence()
+    except Exception:  # pragma: no cover - health must never 500 on this
+        _logger.error("could not compute journal divergence")
+        return {
+            "manual_trades_jsonl_lines": -1,
+            "manual_trades_db_rows": -1,
+            "journal_divergence_detected": False,
+            "journal_divergence_error": "unavailable",
+        }
+
+
 def _log_source_health(stats: dict, bull_state: str) -> None:
     global _WRITE_FAILURE_COUNT
     try:
@@ -1132,6 +1163,12 @@ def health_full(_auth: None = Depends(require_api_token_for_reads)) -> dict:
         "db_write_failures_total": _WRITE_FAILURE_COUNT
         + _journal_write_failure_count(),
         "degraded": (_WRITE_FAILURE_COUNT + _journal_write_failure_count()) > 0,
+        # F6: INSERT OR IGNORE rows silently dropped by a constraint.
+        # Informational (idempotent re-imports legitimately bump this);
+        # a climbing count without imports means duplicate-key data loss.
+        "db_ignored_duplicate_inserts_total": _ignored_insert_count(),
+        # F10: JSONL-vs-DB journal divergence (split-brain detector).
+        **_journal_divergence_fields(),
         "generated_at": datetime.now(timezone.utc)
         .replace(microsecond=0)
         .isoformat(),
