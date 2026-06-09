@@ -25,10 +25,13 @@ Public API (8 operations)
 from __future__ import annotations
 
 import json
+import logging
 import uuid
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
+
+_logger = logging.getLogger("scripts.signal_inbox_api")
 
 try:
     from scripts.runtime_common import LOG_DIR, append_jsonl, utc_timestamp
@@ -385,6 +388,57 @@ def _error_response(operation: str, message: str) -> dict[str, Any]:
         "ai_execution_count": _AI_EXECUTION_COUNT,
         "generated_at": utc_timestamp(),
     }
+
+
+# F1/F2 fix: count DB write failures on the journal hot paths so
+# /health/full can flag a degraded server.  Mirrors api_server's R2
+# counter; api_server sums both for db_write_failures_total.
+_DB_WRITE_FAILURES = 0
+
+
+def db_write_failure_count() -> int:
+    """Total journal-path DB write failures since process start."""
+    return _DB_WRITE_FAILURES
+
+
+def _reset_db_write_failures() -> None:
+    """Test helper: zero the F1/F2 write-failure counter."""
+    global _DB_WRITE_FAILURES
+    _DB_WRITE_FAILURES = 0
+
+
+def _db_write_failed(operation: str, exc: Exception) -> dict[str, Any]:
+    """F1/F2 fix: a journal DB write raised — fail LOUD, never silent.
+
+    Logs the full exception, bumps the degraded-state counter, and returns
+    a structured error dict (``status="error"``, ``reason="db_write_failed"``)
+    that the API layer converts into a stamped HTTP 500.  The JSONL fallback
+    row (written before the DB attempt) is preserved as an audit artifact;
+    the message says so explicitly so the operator knows recovery is
+    possible.  Advisory invariants unchanged: no broker call, gate LOCKED.
+    """
+    global _DB_WRITE_FAILURES
+    _DB_WRITE_FAILURES += 1
+    _logger.exception(
+        "db write failure in %s: %s (cumulative=%d)",
+        operation,
+        type(exc).__name__,
+        _DB_WRITE_FAILURES,
+    )
+    resp = _error_response(
+        operation,
+        (
+            "journal database write failed; this record was NOT persisted to "
+            "the canonical store (a JSONL fallback row was appended). "
+            f"Cause: {type(exc).__name__}. Retry once the database is healthy."
+        ),
+    )
+    resp["status"] = "error"
+    resp["reason"] = "db_write_failed"
+    resp["db_persisted"] = False
+    resp["execution_gate"] = _EXECUTION_GATE
+    resp["broker_api_called"] = False
+    return resp
 
 
 _REACTOR_DEFAULT_FIELDS: dict[str, Any] = {
@@ -1583,8 +1637,10 @@ def log_manual_trade(
                 jurisdiction_group=trade.jurisdiction_group,
                 jurisdiction_resolution_source=trade.jurisdiction_resolution_source,
             )
-        except Exception:
-            pass
+        except Exception as exc:
+            # F1 fix: the trade did NOT reach the canonical store.  Returning
+            # success here is how real operator trades used to vanish.
+            return _db_write_failed("log_manual_trade", exc)
 
     return {
         "operation": "log_manual_trade",
@@ -1854,8 +1910,11 @@ def reconcile_trade(
                 mistake_tags=rec.mistake_tags,
                 lesson=rec.lesson,
             )
-        except Exception:
-            pass
+        except Exception as exc:
+            # F2 fix: the outcome never reached the DB — the trade would
+            # vanish from the queue while the WIN/LOSS never entered the
+            # calibration dataset.  Fail loud instead.
+            return _db_write_failed("reconcile_trade", exc)
 
     response: dict[str, Any] = {
         "operation": "reconcile_trade",
@@ -2074,8 +2133,11 @@ def cancel_manual_trade_log(
                 cancel_reason=cancel_reason,
                 status=normalized_status,
             )
-        except Exception:
-            sqlite_updated = False
+        except Exception as exc:
+            # F2 fix: SQLite is canonical for the queue — if the UPDATE
+            # raised, the "cancelled" duplicate would reappear on the next
+            # refresh while the operator saw success.  Fail loud.
+            return _db_write_failed("cancel_manual_trade_log", exc)
 
     audit_record = {
         "trade_id": trade_id,

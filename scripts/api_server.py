@@ -308,6 +308,19 @@ def _reset_health_counters() -> None:
     _WRITE_FAILURE_COUNT = 0
 
 
+def _journal_write_failure_count() -> int:
+    """F1/F2: journal hot-path DB write failures (signal_inbox_api)."""
+    try:
+        try:
+            from scripts.signal_inbox_api import db_write_failure_count
+        except ModuleNotFoundError:  # pragma: no cover - script-style fallback
+            from signal_inbox_api import db_write_failure_count  # type: ignore
+        return int(db_write_failure_count())
+    except Exception:  # pragma: no cover - health must never 500 on this
+        _logger.error("could not read journal write-failure counter")
+        return 0
+
+
 def _log_source_health(stats: dict, bull_state: str) -> None:
     global _WRITE_FAILURE_COUNT
     try:
@@ -1051,10 +1064,13 @@ def health_full(_auth: None = Depends(require_api_token_for_reads)) -> dict:
         "rate_limit_enabled": _rate_limit_active,
         "max_request_bytes": _max_bytes,
         "security_headers_enabled": bool(security_headers()),
-        # R2: write-failure counter — non-zero means the server has been
-        # silently dropping writes; operator should check the logs.
-        "db_write_failures_total": _WRITE_FAILURE_COUNT,
-        "degraded": _WRITE_FAILURE_COUNT > 0,
+        # R2 + F1/F2: write-failure counters — non-zero means DB writes
+        # have been failing; operator should check logs/api_server.log.
+        # Sums the source-health counter with the journal hot-path counter
+        # (manual trade log / reconcile / cancel) from signal_inbox_api.
+        "db_write_failures_total": _WRITE_FAILURE_COUNT
+        + _journal_write_failure_count(),
+        "degraded": (_WRITE_FAILURE_COUNT + _journal_write_failure_count()) > 0,
         "generated_at": datetime.now(timezone.utc)
         .replace(microsecond=0)
         .isoformat(),
@@ -1345,11 +1361,15 @@ def post_manual_trade(
     ):
         # L3: do NOT cache validation-refusal responses — operator may
         # resubmit a corrected payload under the same key.
+        # F1 fix: a DB write failure is a server fault (500), not a client
+        # validation error (400) — the operator must retry, not "fix" input.
+        _is_write_failure = result.get("reason") == "db_write_failed"
         raise HTTPException(
-            status_code=400,
+            status_code=500 if _is_write_failure else 400,
             detail={
                 "message": str(result.get("error") or "manual trade refused"),
                 "reason": str(result.get("reason") or "manual_trade_refused"),
+                "db_persisted": bool(result.get("db_persisted", True)),
                 "broker_api_called": False,
                 "ai_execution_count": _AI_EXECUTION_COUNT,
                 "execution_gate": "LOCKED",
@@ -1430,7 +1450,7 @@ def post_reconcile(
 ) -> dict:
     # L1 bridge: Decimal → float at the persistence boundary (see comment in
     # post_manual_trade above).
-    return reconcile_trade(
+    result = reconcile_trade(
         trade_id,
         actual_fill_price=_money_to_float(body.actual_fill_price),
         actual_quantity=_money_to_float(body.actual_quantity),
@@ -1456,6 +1476,32 @@ def post_reconcile(
         lesson_takeaway=body.lesson_takeaway,
         operator_notes_extra=body.notes,
     )
+    # F2 fix: reconcile_trade returns a structured error dict when the DB
+    # write fails (or validation refuses).  Surface it as a stamped HTTP
+    # error instead of a success-shaped 200 — a lost WIN/LOSS outcome must
+    # be visible to the operator.
+    if (
+        isinstance(result, dict)
+        and "error" in result
+        and result.get("status") != "logged"
+    ):
+        _is_write_failure = result.get("reason") == "db_write_failed"
+        raise HTTPException(
+            status_code=500 if _is_write_failure else 400,
+            detail={
+                "message": str(result.get("error") or "reconciliation refused"),
+                "reason": str(result.get("reason") or "reconciliation_refused"),
+                "trade_id": trade_id,
+                "db_persisted": bool(result.get("db_persisted", True)),
+                "broker_api_called": False,
+                "ai_execution_count": _AI_EXECUTION_COUNT,
+                "execution_gate": "LOCKED",
+                "execution_permission": False,
+                "can_execute": False,
+                "record_keeping_only": True,
+            },
+        )
+    return result
 
 
 @app.post("/manual-trades/{trade_id}/cancel")
@@ -1489,6 +1535,22 @@ def post_cancel_manual_trade_log(
                 "trade_id": trade_id,
                 "broker_api_called": False,
                 "ai_execution_count": _AI_EXECUTION_COUNT,
+                "record_keeping_only": True,
+            },
+        )
+    if isinstance(result, dict) and result.get("status") == "error":
+        # F2 fix: the cancel UPDATE raised in SQLite — surface a stamped
+        # 500 so the operator knows the duplicate row was NOT cancelled.
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "message": str(result.get("error") or "cancel write failed"),
+                "reason": str(result.get("reason") or "db_write_failed"),
+                "trade_id": trade_id,
+                "db_persisted": False,
+                "broker_api_called": False,
+                "ai_execution_count": _AI_EXECUTION_COUNT,
+                "execution_gate": "LOCKED",
                 "record_keeping_only": True,
             },
         )
