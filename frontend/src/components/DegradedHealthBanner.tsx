@@ -24,8 +24,14 @@ export function DegradedHealthBanner() {
   useEffect(() => {
     let cancelled = false;
     const poll = async () => {
-      const h = await checkFullHealth();
-      if (!cancelled) setHealth(h);
+      try {
+        const h = await checkFullHealth();
+        if (!cancelled) setHealth(h);
+      } catch {
+        // checkFullHealth already maps failures to null; this guard only
+        // protects against partial test mocks / unexpected throw paths.
+        if (!cancelled) setHealth(null);
+      }
     };
     poll();
     const timer = setInterval(poll, POLL_INTERVAL_MS);
