@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import json
 import logging
+import logging.handlers
 
 # FastAPI is an OPTIONAL dependency at import time.
 #
@@ -198,8 +199,36 @@ if not _logger.handlers:
         logging.Formatter("[%(asctime)s] %(levelname)s %(name)s: %(message)s")
     )
     _logger.addHandler(_handler)
+    # F8 audit fix: stdout is discarded by the silent PowerShell startup
+    # scripts — also persist to logs/api_server.log (rotating 5MB x 3) so
+    # write failures and unhandled exceptions are auditable after the fact.
+    try:
+        from src.utils.logging_utils import _build_file_handler
+
+        _file_handler = _build_file_handler()
+        if _file_handler is not None:
+            _logger.addHandler(_file_handler)
+    except Exception:  # pragma: no cover — logging must never block boot
+        _logger.error("F8: rotating file handler unavailable; stdout only")
     _logger.setLevel(logging.INFO)
     _logger.propagate = False
+
+# F8: the journal-write-failure and persistence loggers must also reach the
+# file sink — they log the F1/F2/F6 failures the operator audits later.
+try:
+    from src.utils.logging_utils import _build_file_handler as _fh_factory
+
+    for _name in ("scripts.signal_inbox_api", "scripts.persistence"):
+        _aux = logging.getLogger(_name)
+        if not any(
+            isinstance(h, logging.handlers.RotatingFileHandler)
+            for h in _aux.handlers
+        ):
+            _aux_fh = _fh_factory()
+            if _aux_fh is not None:
+                _aux.addHandler(_aux_fh)
+except Exception:  # pragma: no cover — logging must never block boot
+    _logger.error("F8: could not attach file sink to journal loggers")
 
 
 def _get_live_signals(source_name: str | None = None, limit: int = 100) -> dict:
