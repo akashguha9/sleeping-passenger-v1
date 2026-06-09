@@ -51,6 +51,12 @@ jobs:
   secrets:
     # D3 fix: scan the repo for committed secrets on every push.
     runs-on: ubuntu-latest
+    # gitleaks-action lists PR commits via the API on pull_request runs,
+    # which needs pull-requests:read on top of the workflow-level
+    # contents:read.  Scoped to this job only to keep least privilege.
+    permissions:
+      contents: read
+      pull-requests: read
     steps:
       - uses: actions/checkout@v4
         with:

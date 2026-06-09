@@ -1,0 +1,39 @@
+# gitleaks configuration for sleeping-passenger-v1
+#
+# Why this file exists
+# --------------------
+# The scheduled dep-audit workflow (.github/workflows/dep_audit.yml) runs
+# `gitleaks/gitleaks-action@v2` with `fetch-depth: 0`, so gitleaks scans the
+# FULL git history. Several *historical* commits contain intentional synthetic
+# / redacted secret PLACEHOLDERS inside test fixtures — literal values such as
+# "REDACTED", `fake_secret = "REDACTED"`, `NEWS_API_KEY: "REDACTED"`. These are
+# not, and never were, real credentials; they exist so the redaction and
+# provider-secret tests have something to assert against.
+#
+# Policy (least privilege)
+# ------------------------
+# 1. Keep the full upstream default ruleset ACTIVE everywhere — generic-api-key
+#    included. We do NOT redefine, weaken, or remove any rule, and we add no
+#    [[rules]] of our own.
+# 2. Suppress ONLY the exact, known, historical false positives — by
+#    fingerprint (commit:file:rule:line) — in `.gitleaksignore`. That is the
+#    narrowest allowlist gitleaks offers: it pins one finding, at one line, in
+#    one commit, and suppresses nothing else.
+# 3. There are deliberately NO path globs, value regexes, or commit-wide
+#    allowlists here. A *new* secret (real or fake) anywhere — including in
+#    those same test files, or on a new line of an old file — is still detected
+#    and still fails CI until a human reviews it and adds a new, specific
+#    fingerprint.
+#
+# Rationale and the full fingerprint list: see docs/SECURITY_GITLEAKS.md.
+# Note: gitleaks is pinned to v8.18.4 in .pre-commit-config.yaml; the
+# fingerprint mechanism (`.gitleaksignore`) is supported in all gitleaks 8.x,
+# unlike the `[[allowlists]]` array / `condition = "AND"` syntax (8.19+).
+
+title = "sleeping-passenger gitleaks config"
+
+[extend]
+# Inherit the upstream default ruleset verbatim (AWS, GCP, generic-api-key,
+# private keys, OAuth tokens, high-entropy strings, etc.). This keeps detection
+# of REAL secrets fully active across the whole repo and its entire history.
+useDefault = true

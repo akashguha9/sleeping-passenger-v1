@@ -1,0 +1,66 @@
+# gitleaks fingerprint allowlist (.gitleaksignore)
+#
+# Each line is ONE exact gitleaks finding fingerprint:
+#   <commit-sha>:<file>:<rule-id>:<line>
+# suppressed because it is an INTENTIONAL synthetic placeholder in a test
+# fixture (redacted, non-credential values), NOT a real secret. Suppression is
+# per-finding: a new secret on any other line, file, or commit — including
+# these same files — is still detected and still fails CI.
+#
+# Keep entries as exact gitleaks fingerprints only, with non-secret-shaped
+# comments. Do NOT describe the example values here (no provider-shaped
+# prefixes, no quoted key assignments) — that is what made this file flag
+# itself. Do NOT add production-code fingerprints; every path below is tests/.
+#
+# Source: scheduled dep-audit run #42 — gitleaks generic-api-key, 16 findings,
+# plus 3 more of the identical synthetic-fixture class surfaced by the full
+# git-history scan on this branch (see the trailing block). 19 total.
+
+# tests/test_five_model_synthesis_workflow.py — synthetic model-env key fixtures
+9f960f95d2a6a69690059c4f7d6319b7eb3a7f33:tests/test_five_model_synthesis_workflow.py:generic-api-key:93
+9f960f95d2a6a69690059c4f7d6319b7eb3a7f33:tests/test_five_model_synthesis_workflow.py:generic-api-key:107
+
+# tests/test_news_provider_fallback_chain.py — synthetic news-provider key fixture
+f04e06f5086486cb46687a059ef584b1a4e8a868:tests/test_news_provider_fallback_chain.py:generic-api-key:132
+
+# tests/test_runtime_artifact_hygiene.py — redacted-secret hygiene fixture
+2f54f16f2f62dad19f156c847c13bcec8270d2db:tests/test_runtime_artifact_hygiene.py:generic-api-key:68
+
+# tests/test_external_evidence_reliability_api.py — synthetic provider key fixture
+43981b4d7d7be256e771c5269bdc2d254114665b:tests/test_external_evidence_reliability_api.py:generic-api-key:60
+
+# tests/test_kante_real_provider_canary.py — synthetic canary provider key fixture
+6c3fb4c20c62ecc2a9a4c66460fdf2e152c48b14:tests/test_kante_real_provider_canary.py:generic-api-key:175
+
+# tests/test_provider_secret_redaction.py — redaction unit-test placeholders
+deae24c28e7f9e1ec2ce2f9df7507a4a9a91d6ee:tests/test_provider_secret_redaction.py:generic-api-key:30
+deae24c28e7f9e1ec2ce2f9df7507a4a9a91d6ee:tests/test_provider_secret_redaction.py:generic-api-key:39
+
+# tests/test_compliance_preflight.py — synthetic env-secret fixture
+b4f40fb3825f3cdee0d38f5ef83c3df0119814e0:tests/test_compliance_preflight.py:generic-api-key:60
+
+# tests/test_local_security_audit.py — synthetic token used by audit tests
+4af7b802677e57b128151b466b9ebcb1eabb8b61:tests/test_local_security_audit.py:generic-api-key:68
+
+# tests/test_ai_schema_integration.py — synthetic schema-fixture key
+52a5179576ee896f5152943ba592639322cdaea4:tests/test_ai_schema_integration.py:generic-api-key:213
+
+# tests/test_source_health_truth.py — synthetic source-health key fixture
+52a5179576ee896f5152943ba592639322cdaea4:tests/test_source_health_truth.py:generic-api-key:210
+
+# tests/test_ai_output_schema.py — synthetic schema-fixture keys
+4a1a8d44d8acbb99747ba71f95f5180e7f673165:tests/test_ai_output_schema.py:generic-api-key:279
+4a1a8d44d8acbb99747ba71f95f5180e7f673165:tests/test_ai_output_schema.py:generic-api-key:288
+
+# tests/test_source_health_summary.py — synthetic source-health summary keys
+de86e22b5969fdfd9aa9e0ec1bfc2b9d550704cd:tests/test_source_health_summary.py:generic-api-key:103
+cbc8450f7010c526e154c1420b6e0a56a462cc32:tests/test_source_health_summary.py:generic-api-key:85
+
+# Additional findings surfaced by the full-history gitleaks scan on this branch,
+# beyond the 16 in the dep-audit #42 description. Verified by hand as the SAME
+# synthetic test-fixture class as above: provider-shaped example strings inside
+# the secret-scanner's own unit tests, never real credentials. Entries are exact
+# fingerprints only; the example values are intentionally not reproduced here.
+8a578d78c185c0041c646d09c3f2f8ce98b76079:tests/test_five_model_synthesis_workflow.py:generic-api-key:120
+8a578d78c185c0041c646d09c3f2f8ce98b76079:tests/test_five_model_synthesis_workflow.py:generic-api-key:148
+9f960f95d2a6a69690059c4f7d6319b7eb3a7f33:tests/test_five_model_synthesis_workflow.py:generic-api-key:148
