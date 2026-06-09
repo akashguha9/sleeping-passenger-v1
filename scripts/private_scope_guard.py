@@ -234,6 +234,14 @@ EXPLICIT_IN_SCOPE: frozenset[str] = frozenset({
     # operator_permission_guard.  In-scope record-keeping maintenance — it
     # never touches signal_events, brokers, or execution.
     "reset_local_logs.py",
+    # H2 runtime no-broker invariant: raises at API startup if any broker
+    # SDK is loaded into the process.  Pure safety enforcement — performs
+    # no imports of those SDKs itself, no network, no execution.
+    "broker_import_guard.py",
+    # H5 JSONL->DB journal divergence replay.  Report-only by default;
+    # --apply is guarded by operator_permission_guard with an automatic
+    # backup.  In-scope record-keeping repair — never touches brokers.
+    "replay_jsonl_divergence.py",
 })
 
 # Modules deliberately marked OUT_OF_SCOPE inside ``scripts/``.  This
