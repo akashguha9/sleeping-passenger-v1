@@ -652,6 +652,68 @@ if _FASTAPI_AVAILABLE:
         }
         return JSONResponse(status_code=500, content=payload)
 
+    # F5 audit fix: FastAPI's default RequestValidationError handler (422)
+    # and Starlette's router-raised HTTPException (404 unknown route, 405
+    # method-not-allowed) bypassed the custom handler above, returning bare
+    # {"detail": ...} bodies WITHOUT the advisory stamps — violating the
+    # "every response and every error path" invariant.  Register explicit
+    # handlers so those paths carry the same stamp block.
+    from fastapi.encoders import jsonable_encoder as _jsonable_encoder
+    from fastapi.exceptions import RequestValidationError as _RequestValidationError
+    from starlette.exceptions import HTTPException as _StarletteHTTPException
+
+    @app.exception_handler(_RequestValidationError)
+    async def _validation_exception_handler(
+        request: "Request", exc: "_RequestValidationError"
+    ) -> "JSONResponse":
+        """Stamp 422 validation errors; preserve FastAPI's structured detail."""
+        payload = {
+            "status_code": 422,
+            "error": "validation_failed",
+            # FastAPI convention: structured per-field errors under `detail`
+            # so frontends keep rendering the specific field messages.
+            # custom_encoder: pydantic v2 puts the raw exception object in
+            # ctx; stringify it instead of crashing the handler.
+            "detail": _jsonable_encoder(
+                exc.errors(), custom_encoder={Exception: str}
+            ),
+            "advisory_status": _ADVISORY_STATUS,
+            "execution_mode": _EXECUTION_MODE,
+            "execution_gate": "LOCKED",
+            "ai_execution_count": _AI_EXECUTION_COUNT,
+            "broker_api_called": False,
+            "broker_order_id": "NONE",
+            "human_review_required": True,
+        }
+        return JSONResponse(status_code=422, content=payload)
+
+    @app.exception_handler(_StarletteHTTPException)
+    async def _starlette_exception_handler(
+        request: "Request", exc: "_StarletteHTTPException"
+    ) -> "JSONResponse":
+        """Stamp router-level 404/405 (and any other Starlette HTTPException).
+
+        FastAPI's own HTTPException subclasses Starlette's, but the more
+        specific handler above wins for it — this one catches the router-
+        raised base class that previously fell through to Starlette's
+        default plain-text-style response.
+        """
+        detail = exc.detail
+        payload: dict = {
+            "status_code": exc.status_code,
+            "error": str(detail) if detail else "request failed",
+            "advisory_status": _ADVISORY_STATUS,
+            "execution_mode": _EXECUTION_MODE,
+            "execution_gate": "LOCKED",
+            "ai_execution_count": _AI_EXECUTION_COUNT,
+            "broker_api_called": False,
+            "broker_order_id": "NONE",
+            "human_review_required": True,
+        }
+        if isinstance(detail, dict):
+            payload["detail"] = detail
+        return JSONResponse(status_code=exc.status_code, content=payload)
+
 
 
     def _check_bearer_token(authorization: str | None) -> None:
