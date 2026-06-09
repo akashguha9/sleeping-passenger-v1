@@ -118,6 +118,9 @@ _SUPPORT_EXPLICIT: frozenset[str] = frozenset({
     # F4 one-off P/L sign-inversion audit/repair tool; report-only by
     # default, --apply takes an automatic backup first. SUPPORT tooling.
     "audit_sell_side_pnl",
+    # H5 JSONL->DB divergence replay; report-only by default, --apply is
+    # permission-guarded with automatic backup. SUPPORT tooling.
+    "replay_jsonl_divergence",
 })
 
 
