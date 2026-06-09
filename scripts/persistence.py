@@ -429,7 +429,20 @@ def _apply_pragmas(conn: sqlite3.Connection) -> None:
     mode = sqlite_journal_mode()
     if mode and mode != "DEFAULT":
         try:
-            conn.execute(f"PRAGMA journal_mode = {mode}")
+            row = conn.execute(f"PRAGMA journal_mode = {mode}").fetchone()
+            # H4: verify the pragma actually took effect — SQLite returns
+            # the RESULTING mode, which can silently differ (e.g. WAL
+            # refused on a network/odd filesystem).
+            applied = str(row[0]).upper() if row else ""
+            if mode.upper() == "WAL" and applied != "WAL":
+                global _WAL_VERIFY_FAILURES
+                _WAL_VERIFY_FAILURES += 1
+                _logger.error(
+                    "journal_mode=WAL requested but got %r (cumulative=%d) — "
+                    "reader/writer concurrency is degraded",
+                    applied,
+                    _WAL_VERIFY_FAILURES,
+                )
         except sqlite3.Error as exc:
             _logger.error("pragma journal_mode=%s failed: %s", mode, exc)
 
@@ -618,6 +631,20 @@ _REBUILD_INDEXES: dict[str, tuple[str, ...]] = {
 # ---------------------------------------------------------------------------
 
 _IGNORED_INSERT_COUNT = 0
+
+# H4: WAL post-set verification.  Non-zero means a connection asked for
+# WAL and got something else — concurrency assumptions are void; the
+# health surface flags it.
+_WAL_VERIFY_FAILURES = 0
+
+
+def wal_verify_failure_count() -> int:
+    return _WAL_VERIFY_FAILURES
+
+
+def _reset_wal_verify_failures() -> None:
+    global _WAL_VERIFY_FAILURES
+    _WAL_VERIFY_FAILURES = 0
 
 
 def ignored_insert_count() -> int:

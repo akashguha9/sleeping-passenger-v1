@@ -390,6 +390,19 @@ def _journal_write_failure_count() -> int:
     return total
 
 
+def _wal_verify_failure_count() -> int:
+    """H4: WAL-verification failures (persistence counter)."""
+    try:
+        try:
+            from scripts.persistence import wal_verify_failure_count
+        except ModuleNotFoundError:  # pragma: no cover - script-style fallback
+            from persistence import wal_verify_failure_count  # type: ignore
+        return int(wal_verify_failure_count())
+    except Exception:  # pragma: no cover - health must never 500 on this
+        _logger.error("could not read WAL verification counter")
+        return 0
+
+
 def _ignored_insert_count() -> int:
     """F6: INSERT OR IGNORE rows silently dropped (persistence counter)."""
     try:
@@ -696,6 +709,18 @@ if _FASTAPI_AVAILABLE:
         # H2: re-assert broker absence at startup (a module imported between
         # app construction and serve time must also trip the guard).
         assert_no_broker_modules()
+        # H4: daily scheduled backups with retention (no-op under pytest /
+        # when disabled by env).  Failures inside the loop log at ERROR.
+        try:
+            try:
+                from scripts.backup_scheduler import start_backup_scheduler
+                from scripts.persistence import DB_PATH as _db_path_for_backups
+            except ModuleNotFoundError:  # pragma: no cover - script fallback
+                from backup_scheduler import start_backup_scheduler  # type: ignore
+                from persistence import DB_PATH as _db_path_for_backups  # type: ignore
+            start_backup_scheduler(_db_path_for_backups)
+        except Exception:
+            _logger.exception("could not start the backup scheduler")
         if not api_token_required():
             if is_loopback_bind():
                 _logger.warning(
@@ -1254,7 +1279,15 @@ def health_full(_auth: None = Depends(require_api_token_for_reads)) -> dict:
         # (manual trade log / reconcile / cancel) from signal_inbox_api.
         "db_write_failures_total": _WRITE_FAILURE_COUNT
         + _journal_write_failure_count(),
-        "degraded": (_WRITE_FAILURE_COUNT + _journal_write_failure_count()) > 0,
+        "degraded": (
+            _WRITE_FAILURE_COUNT
+            + _journal_write_failure_count()
+            + _wal_verify_failure_count()
+        )
+        > 0,
+        # H4: WAL post-set verification failures — non-zero means a
+        # connection asked for WAL and got something else.
+        "wal_verification_failures": _wal_verify_failure_count(),
         # F6: INSERT OR IGNORE rows silently dropped by a constraint.
         # Informational (idempotent re-imports legitimately bump this);
         # a climbing count without imports means duplicate-key data loss.
@@ -1264,6 +1297,61 @@ def health_full(_auth: None = Depends(require_api_token_for_reads)) -> dict:
         "generated_at": datetime.now(timezone.utc)
         .replace(microsecond=0)
         .isoformat(),
+    }
+
+
+@app.post("/admin/backup")
+def post_admin_backup(_auth: None = Depends(require_api_token)) -> dict:
+    """H4: operator-triggered DB backup (token-gated, record-keeping only).
+
+    Backups are non-destructive reads — no dry-run-receipt doctrine
+    required.  Runs the same native-API backup + retention pass as the
+    daily scheduler.  Never calls a broker; never grants execution.
+    """
+    try:
+        try:
+            from scripts.backup_scheduler import run_scheduled_backup
+            from scripts.persistence import DB_PATH as _db_path
+        except ModuleNotFoundError:  # pragma: no cover - script fallback
+            from backup_scheduler import run_scheduled_backup  # type: ignore
+            from persistence import DB_PATH as _db_path  # type: ignore
+        result = run_scheduled_backup(_db_path)
+    except Exception as exc:
+        _logger.exception("manual backup failed")
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "message": "backup_failed",
+                "reason": _safe_exc_summary(exc),
+                "broker_api_called": False,
+                "ai_execution_count": _AI_EXECUTION_COUNT,
+                "execution_gate": "LOCKED",
+                "record_keeping_only": True,
+            },
+        )
+    if not result.get("ok"):
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "message": "backup_failed",
+                "reason": str(result.get("error") or "unknown"),
+                "broker_api_called": False,
+                "ai_execution_count": _AI_EXECUTION_COUNT,
+                "execution_gate": "LOCKED",
+                "record_keeping_only": True,
+            },
+        )
+    return {
+        **result,
+        "operation": "admin_backup",
+        "advisory_status": _ADVISORY_STATUS,
+        "execution_mode": _EXECUTION_MODE,
+        "execution_gate": "LOCKED",
+        "broker_api_called": False,
+        "broker_order_id": "NONE",
+        "ai_execution_count": _AI_EXECUTION_COUNT,
+        "human_review_required": True,
+        "record_keeping_only": True,
     }
 
 

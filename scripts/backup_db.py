@@ -195,6 +195,57 @@ def perform_backup(
     return result
 
 
+def perform_restore(backup_path: Path, target_path: Path) -> dict[str, Any]:
+    """H4: restore a backup to ``target_path`` via the native backup API.
+
+    Never overwrites an existing target (restores go to a NEW path; the
+    operator swaps files deliberately).  Runs ``PRAGMA integrity_check``
+    on the restored copy — an unverified restore is reported as failed.
+    Never raises; failures are reported via result["ok"] = False.
+    """
+    result: dict[str, Any] = {
+        "ok": False,
+        "backup_path": str(backup_path),
+        "target_path": str(target_path),
+        "integrity_check": None,
+        "error": None,
+        "advisory_status": "ADVISORY_ONLY",
+        "execution_gate": "LOCKED",
+        "broker_api_called": False,
+        "ai_execution_count": 0,
+    }
+    if not backup_path.exists() or not _is_sqlite_file(backup_path):
+        result["error"] = f"backup is missing or not SQLite: {backup_path}"
+        return result
+    if target_path.exists():
+        result["error"] = f"refusing to overwrite existing target: {target_path}"
+        return result
+    src: sqlite3.Connection | None = None
+    dst: sqlite3.Connection | None = None
+    try:
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        src = sqlite3.connect(f"file:{backup_path}?mode=ro", uri=True)
+        dst = sqlite3.connect(str(target_path))
+        src.backup(dst)
+        row = dst.execute("PRAGMA integrity_check").fetchone()
+        result["integrity_check"] = str(row[0]) if row else "no result"
+        if result["integrity_check"] != "ok":
+            result["error"] = f"integrity_check failed: {result['integrity_check']}"
+            return result
+    except sqlite3.Error as exc:
+        result["error"] = f"sqlite restore failed: {exc}"
+        return result
+    finally:
+        for conn in (dst, src):
+            if conn is not None:
+                try:
+                    conn.close()
+                except sqlite3.Error:
+                    pass
+    result["ok"] = True
+    return result
+
+
 def _emit_text(result: dict[str, Any]) -> None:
     print(f"Sleeping Passenger DB Backup")
     print(f"source : {result['db_path']}")

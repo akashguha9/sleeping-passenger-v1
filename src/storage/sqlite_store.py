@@ -47,6 +47,20 @@ class SQLiteStore:
                 self.connection.execute(pragma)
             except sqlite3.Error as exc:
                 _logger.error("%s failed: %s", pragma, exc)
+        # H4: verify WAL actually took effect (skip pure in-memory DBs,
+        # which legitimately report 'memory').
+        if str(self.db_path) != ":memory:":
+            try:
+                row = self.connection.execute("PRAGMA journal_mode").fetchone()
+                applied = str(row[0]).upper() if row else ""
+                if applied != "WAL":
+                    _logger.error(
+                        "journal_mode=WAL requested but store got %r — "
+                        "dashboard reads may block API writes",
+                        applied,
+                    )
+            except sqlite3.Error as exc:
+                _logger.error("journal_mode verification failed: %s", exc)
 
     def _init_schema(self) -> None:
         cursor = self.connection.cursor()
