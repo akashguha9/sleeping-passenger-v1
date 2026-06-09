@@ -191,6 +191,10 @@ APPROVED_DOMAINS: tuple[str, ...] = (
     "narrative_substance",         # narrative_substance_gap.py
     "incentive_who_benefits",      # incentive_who_benefits_analyzer.py
     "audience_misinterpretation",  # audience_misinterpretation_risk.py
+    # Wrapper-Premium / Value-Layer scorer — advisory-only pre/post/delta company
+    # scoring layer (2026-06-09 reflection). Scores/explains only; no broker
+    # execution, no order placement, no API trading writes; never auto-trades.
+    "wrapper_premium",  # wrapper_premium_value_scorer.py
     # Sprint 3 (score-upgrade) — advisory-only readiness/contract modules.
     # Scores/gates only; no broker execution, no order placement, no API
     # trading writes; no executable trade language.

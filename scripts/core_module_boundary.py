@@ -84,6 +84,10 @@ _SUPPORT_REVIEWED: frozenset[str] = frozenset({
     # P3 interpretation-defense (advisory): signal half-life / edge durability +
     # payoff-capture (gross-not-net value capture). SUPPORT, not CORE.
     "signal_half_life_estimator", "signal_payoff_capture_estimator",
+    # Wrapper-Premium / Value-Layer company scorer (advisory): the 2026-06-09
+    # "core utility is cheap; the wrapper creates the premium" reflection as a
+    # pre/post/delta scoring layer. SUPPORT, not CORE; no CORE imports it.
+    "wrapper_premium_value_scorer",
     "kalshi_live_smoke", "late_adoption_lockout", "live_provider_compliance_trace",
     "live_signal_filters", "live_source_runner_phase2", "local_mvp_smoke_test",
     "market_data_freshness", "minimum_daily_universe", "model_disagreement",
