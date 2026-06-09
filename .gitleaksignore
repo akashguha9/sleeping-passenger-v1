@@ -1,0 +1,21 @@
+# Gitleaks per-finding allowlist (H3 CI gate).
+#
+# Every fingerprint below is a SYNTHETIC fixture key inside a test that
+# exercises this repo's own secret-redaction / secret-detection code
+# (e.g. test_secret_redaction_redacts_xai_key_pattern asserts that
+# 'xai-abcdef...' gets scrubbed). None is a real credential. Fingerprints
+# are commit-scoped, so a future REAL leak — even in these same files —
+# still fails the gate.
+91b33d9fccfa4afcbe253db176534468d591fca6:tests/test_ai_output_schema.py:generic-api-key:279
+91b33d9fccfa4afcbe253db176534468d591fca6:tests/test_ai_output_schema.py:generic-api-key:288
+91b33d9fccfa4afcbe253db176534468d591fca6:tests/test_ai_schema_integration.py:generic-api-key:213
+91b33d9fccfa4afcbe253db176534468d591fca6:tests/test_compliance_preflight.py:generic-api-key:60
+91b33d9fccfa4afcbe253db176534468d591fca6:tests/test_local_security_audit.py:generic-api-key:68
+91b33d9fccfa4afcbe253db176534468d591fca6:tests/test_source_health_truth.py:generic-api-key:213
+91b33d9fccfa4afcbe253db176534468d591fca6:tests/test_source_health_summary.py:generic-api-key:103
+021269538f184c99a62df3353f478234af23c57b:tests/test_ai_schema_integration.py:generic-api-key:213
+021269538f184c99a62df3353f478234af23c57b:tests/test_ai_output_schema.py:generic-api-key:279
+021269538f184c99a62df3353f478234af23c57b:tests/test_ai_output_schema.py:generic-api-key:288
+021269538f184c99a62df3353f478234af23c57b:tests/test_local_security_audit.py:generic-api-key:68
+021269538f184c99a62df3353f478234af23c57b:tests/test_source_health_truth.py:generic-api-key:213
+021269538f184c99a62df3353f478234af23c57b:tests/test_source_health_summary.py:generic-api-key:103

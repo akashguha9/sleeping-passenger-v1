@@ -1,0 +1,102 @@
+name: gate
+
+# H3 — consolidated merge gate (Sprint 2 hardening).
+#
+# Safety doctrine — every job:
+#   * Must NOT reference broker execution, order placement, or trading.
+#   * Must NOT require .env, repo secrets, or live network refresh.
+#   * Runs read-only checks on a clean checkout with no local DB.
+#
+# Jobs (ALL must pass to merge):
+#   secrets   — gitleaks FULL-HISTORY scan. Synthetic fixture keys used by
+#               the repo's own redaction tests are allowlisted per-finding
+#               (commit-scoped fingerprints) in .gitleaksignore; any new
+#               finding fails the gate.
+#   pyaudit   — pip-audit against the pinned requirements.lock (--strict:
+#               fails on any vulnerability with an available fix).
+#   npmaudit  — npm audit at --audit-level=high. The 4 accepted MODERATE
+#               advisories (postcss/next pair + esbuild/vite dev-server
+#               transitives; loopback-only dev tooling) are deliberately
+#               below the threshold and MUST NOT fail this gate.
+#   backend   — full pytest suite (Python 3.13, ubuntu-latest; the suite
+#               is OS-neutral — it runs on Linux in development too).
+#   frontend  — full vitest suite (Playwright e2e excluded: browser
+#               downloads are not available on the gate runner).
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  secrets:
+    name: gitleaks full-history
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # full history — the scan covers every commit
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  pyaudit:
+    name: pip-audit (requirements.lock)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install pip-audit
+        run: pip install --no-cache-dir pip-audit
+      - name: Audit pinned lockfile
+        run: pip-audit -r requirements.lock --strict
+
+  npmaudit:
+    name: npm audit (high+)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Audit (high and critical only)
+        working-directory: frontend
+        # Accepted moderates (rule 5) stay below this threshold by design.
+        run: npm audit --audit-level=high
+
+  backend:
+    name: backend pytest
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+      - name: Run full suite
+        run: python -m pytest tests -q
+
+  frontend:
+    name: frontend vitest
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+      - name: Run vitest suite
+        working-directory: frontend
+        run: npx vitest run
