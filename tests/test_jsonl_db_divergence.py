@@ -40,7 +40,8 @@ def isolated(tmp_path, monkeypatch):
     persistence.init_schema(db)
     originals: dict = {}
     for name in ("init_schema", "_get_conn", "insert_manual_trade",
-                 "get_manual_trade", "get_event_id_for_trade"):
+                 "get_manual_trade", "get_event_id_for_trade",
+                 "count_manual_trades_by_provenance"):
         fn = getattr(persistence, name)
         originals[name] = (fn.__defaults__, dict(fn.__kwdefaults__ or {}))
         _rebind_defaults(fn, db)
