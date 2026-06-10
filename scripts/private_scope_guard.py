@@ -268,6 +268,8 @@ EXPLICIT_IN_SCOPE: frozenset[str] = frozenset({
     # VIEWER/OPERATOR/ADMIN floors, revoke/rotate. Auth only — no broker.
     "token_registry.py",
     "manage_tokens.py",
+    # S4-A5 venv isolation checker (boot gate + health posture). No broker.
+    "runtime_isolation.py",
 })
 
 # Modules deliberately marked OUT_OF_SCOPE inside ``scripts/``.  This

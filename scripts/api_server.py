@@ -390,6 +390,27 @@ def _journal_write_failure_count() -> int:
     return total
 
 
+def _runtime_isolation_fields() -> dict:
+    try:
+        try:
+            from scripts.runtime_isolation import check_runtime_isolation
+        except ModuleNotFoundError:  # pragma: no cover - script fallback
+            from runtime_isolation import check_runtime_isolation  # type: ignore
+        st = check_runtime_isolation()
+        return {
+            "runtime_isolated": st["runtime_isolated"],
+            "global_site_packages_enabled": st["global_site_packages_enabled"],
+            "python_executable": st["python_executable"],
+            "dependency_lock_hash": st["dependency_lock_hash"],
+            "global_python_override_active": st["global_python_override_active"],
+        }
+    except Exception:  # pragma: no cover - health must never 500 on this
+        _logger.error("could not read runtime isolation status")
+        return {"runtime_isolated": False, "global_site_packages_enabled": True,
+                "python_executable": None, "dependency_lock_hash": None,
+                "global_python_override_active": False}
+
+
 def _registry_token_count_safe() -> int:
     try:
         try:
@@ -1495,6 +1516,8 @@ def health_full(_auth: None = Depends(require_api_token_for_reads)) -> dict:
         # S4-A2: alerting observability.
         "alert_delivery_failures_total": _alert_delivery_failures(),
         "last_alert_at": _last_alert_at(),
+        # S4-A5: runtime isolation posture.
+        **_runtime_isolation_fields(),
         # F6: INSERT OR IGNORE rows silently dropped by a constraint.
         # Informational (idempotent re-imports legitimately bump this);
         # a climbing count without imports means duplicate-key data loss.
@@ -3686,6 +3709,17 @@ if __name__ == "__main__":  # pragma: no cover
             "Then re-run:      python scripts/api_server.py"
         )
         sys.exit(1)
+    # S4-A5: server boots only from an isolated venv interpreter unless
+    # MVP_ALLOW_GLOBAL_PYTHON=1 (health then shows degraded isolation).
+    try:
+        try:
+            from scripts.runtime_isolation import enforce_isolation_or_die
+        except ModuleNotFoundError:
+            from runtime_isolation import enforce_isolation_or_die  # type: ignore
+        enforce_isolation_or_die()
+    except Exception as _iso_exc:
+        print(f"REFUSED: {_iso_exc}")
+        sys.exit(3)
     try:
         import uvicorn
 
