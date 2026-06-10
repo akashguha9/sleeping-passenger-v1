@@ -141,6 +141,11 @@ def prune_backups(
     }
 
 
+def encryption_enabled() -> bool:
+    """S4-A4: opt-in encrypted backups (MVP_BACKUP_ENCRYPTION=1)."""
+    return os.environ.get("MVP_BACKUP_ENCRYPTION", "").strip() == "1"
+
+
 def run_scheduled_backup(
     db_path: Path, backup_dir: Path | None = None
 ) -> dict[str, Any]:
@@ -152,6 +157,28 @@ def run_scheduled_backup(
         _logger.error("scheduled backup FAILED: %s", result.get("error"))
         result["retention"] = None
         return result
+    if encryption_enabled():
+        # S4-A4: encrypt-at-rest, then remove the plaintext copy.  An
+        # encryption failure keeps the plaintext backup and reports it —
+        # a failed encrypt must never cost the operator the backup itself.
+        try:
+            try:
+                from scripts.backup_crypto import ENCRYPTED_SUFFIX, encrypt_file
+            except ModuleNotFoundError:  # pragma: no cover - script fallback
+                from backup_crypto import ENCRYPTED_SUFFIX, encrypt_file  # type: ignore
+            plain = Path(result["backup_path"])
+            encrypted = plain.with_suffix(plain.suffix + ENCRYPTED_SUFFIX)
+            encrypt_file(plain, encrypted)
+            plain.unlink()
+            result["backup_path"] = str(encrypted)
+            result["encrypted"] = True
+        except Exception as exc:
+            _logger.error(
+                "backup encryption FAILED (%s) — plaintext backup retained",
+                type(exc).__name__,
+            )
+            result["encrypted"] = False
+            result["encryption_error"] = type(exc).__name__
     retention = prune_backups(target_dir)
     result["retention"] = retention
     _logger.info(

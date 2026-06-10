@@ -270,6 +270,10 @@ EXPLICIT_IN_SCOPE: frozenset[str] = frozenset({
     "manage_tokens.py",
     # S4-A5 venv isolation checker (boot gate + health posture). No broker.
     "runtime_isolation.py",
+    # S4-A4 encrypted backups (AES-256-GCM) + staged restore with guarded
+    # promote-to-live. Record-keeping maintenance — no broker.
+    "backup_crypto.py",
+    "restore_to_live.py",
 })
 
 # Modules deliberately marked OUT_OF_SCOPE inside ``scripts/``.  This

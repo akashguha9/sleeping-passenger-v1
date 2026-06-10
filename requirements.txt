@@ -9,3 +9,7 @@ beautifulsoup4>=4.12,<5
 # Lazy-imported so unit tests and unrelated tooling work without them.
 gspread>=6,<7
 google-auth>=2.29,<3
+# S4-A4 encrypted backups (AES-256-GCM). Already pinned in
+# requirements.lock as a transitive dep (via google-auth) — promoting it
+# to a direct requirement so the backup crypto can rely on it explicitly.
+cryptography>=48,<49

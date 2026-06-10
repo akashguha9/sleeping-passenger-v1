@@ -136,6 +136,9 @@ _SUPPORT_EXPLICIT: frozenset[str] = frozenset({
     # S4-A2/A3 alerting + token management CLI. No broker, no execution.
     "alerting",
     "manage_tokens",
+    # S4-A4 backup encryption + staged restore promotion. No broker.
+    "backup_crypto",
+    "restore_to_live",
 })
 
 
