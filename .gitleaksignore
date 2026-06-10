@@ -19,3 +19,8 @@
 021269538f184c99a62df3353f478234af23c57b:tests/test_local_security_audit.py:generic-api-key:68
 021269538f184c99a62df3353f478234af23c57b:tests/test_source_health_truth.py:generic-api-key:213
 021269538f184c99a62df3353f478234af23c57b:tests/test_source_health_summary.py:generic-api-key:103
+# Synthetic redaction-test placeholder from historical commit a93a4ca
+# (tests/test_alerting.py exercised alerting.redact with a fake sk- key);
+# verified from source — not a real secret. The current source builds the
+# fixture dynamically so this cannot recur in new commits.
+a93a4ca12811fd1ea08f6d38d00d6d651846b712:tests/test_alerting.py:generic-api-key:105

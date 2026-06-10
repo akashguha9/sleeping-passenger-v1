@@ -57,8 +57,22 @@ def global_python_override_active() -> bool:
 
 
 def check_runtime_isolation() -> dict[str, Any]:
-    """Pure inspection of the current interpreter's isolation posture."""
-    in_venv = sys.prefix != getattr(sys, "base_prefix", sys.prefix)
+    """Pure inspection of the current interpreter's isolation posture.
+
+    Reports FACTS, never desired state.  Venv detection uses three
+    independent signals (CI fix: a GitHub Actions toolcache interpreter
+    has ``sys.prefix == sys.base_prefix`` and is honestly NOT a venv —
+    the checker must say so and the tests must not assume otherwise):
+
+    * ``sys.prefix != sys.base_prefix`` — PEP 405 venvs;
+    * ``sys.real_prefix`` — legacy ``virtualenv``;
+    * ``VIRTUAL_ENV`` env var — an activated environment.
+    """
+    in_venv = (
+        sys.prefix != getattr(sys, "base_prefix", sys.prefix)
+        or hasattr(sys, "real_prefix")
+        or bool(os.environ.get("VIRTUAL_ENV"))
+    )
     # In a venv created without --system-site-packages, ENABLE_USER_SITE is
     # False and global site dirs are not on the path.
     user_site_enabled = bool(getattr(site, "ENABLE_USER_SITE", False))
@@ -68,6 +82,9 @@ def check_runtime_isolation() -> dict[str, Any]:
         "in_venv": in_venv,
         "global_site_packages_enabled": (not in_venv) or user_site_enabled,
         "python_executable": sys.executable,
+        "python_prefix": sys.prefix,
+        "python_base_prefix": getattr(sys, "base_prefix", sys.prefix),
+        "virtual_env": os.environ.get("VIRTUAL_ENV") or None,
         "python_version": sys.version.split()[0],
         "dependency_lock_hash": dependency_lock_hash(),
         "global_python_override_active": global_python_override_active(),

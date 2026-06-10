@@ -17,15 +17,54 @@ from scripts import runtime_isolation as ri
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_venv_interpreter_passes_for_real():
-    # This suite runs inside a venv (.auditvenv / CI venv); the checker
-    # must recognise it.
+def test_checker_reports_factual_venv_state():
+    """The checker must mirror what the interpreter/environment actually
+    indicate — true in a local venv AND on a GitHub Actions toolcache
+    interpreter that is honestly not a venv.  (CI escape: the old test
+    asserted in_venv is True unconditionally.)"""
+    import os
+
+    expected_in_venv = (
+        sys.prefix != getattr(sys, "base_prefix", sys.prefix)
+        or hasattr(sys, "real_prefix")
+        or bool(os.environ.get("VIRTUAL_ENV"))
+    )
     status = ri.check_runtime_isolation()
-    assert status["in_venv"] is True
-    assert status["runtime_isolated"] is True
+    assert status["in_venv"] is expected_in_venv
     assert status["python_executable"] == sys.executable
+    assert status["python_prefix"] == sys.prefix
     assert status["execution_gate"] == "LOCKED"
     assert status["broker_api_called"] is False
+
+
+def test_checker_detects_venv_when_prefix_differs(monkeypatch):
+    """Hermetic positive case: PEP 405 prefix split ⇒ in_venv True."""
+    monkeypatch.setattr(ri.sys, "prefix", "/tmp/project/.venv", raising=False)
+    monkeypatch.setattr(ri.sys, "base_prefix", "/usr", raising=False)
+    monkeypatch.delenv("VIRTUAL_ENV", raising=False)
+    status = ri.check_runtime_isolation()
+    assert status["in_venv"] is True
+
+
+def test_checker_detects_venv_via_virtual_env_var(monkeypatch):
+    """Hermetic positive case: activated env signalled only by VIRTUAL_ENV."""
+    monkeypatch.setattr(ri.sys, "prefix", "/usr", raising=False)
+    monkeypatch.setattr(ri.sys, "base_prefix", "/usr", raising=False)
+    monkeypatch.setenv("VIRTUAL_ENV", "/tmp/project/.venv")
+    status = ri.check_runtime_isolation()
+    assert status["in_venv"] is True
+
+
+def test_checker_detects_non_venv_when_prefixes_match(monkeypatch):
+    """Hermetic negative case: toolcache-style interpreter ⇒ in_venv False."""
+    monkeypatch.setattr(ri.sys, "prefix", "/usr", raising=False)
+    monkeypatch.setattr(ri.sys, "base_prefix", "/usr", raising=False)
+    monkeypatch.delenv("VIRTUAL_ENV", raising=False)
+    if hasattr(ri.sys, "real_prefix"):  # pragma: no cover - legacy virtualenv
+        monkeypatch.delattr(ri.sys, "real_prefix", raising=False)
+    status = ri.check_runtime_isolation()
+    assert status["in_venv"] is False
+    assert status["global_site_packages_enabled"] is True
 
 
 def test_dependency_lock_hash_present_and_stable():
@@ -37,6 +76,7 @@ def test_dependency_lock_hash_present_and_stable():
 
 def test_global_interpreter_fails_closed(monkeypatch):
     monkeypatch.setattr(sys, "base_prefix", sys.prefix, raising=False)
+    monkeypatch.delenv("VIRTUAL_ENV", raising=False)
     monkeypatch.delenv("MVP_ALLOW_GLOBAL_PYTHON", raising=False)
     status = ri.check_runtime_isolation()
     assert status["runtime_isolated"] is False
@@ -48,6 +88,7 @@ def test_global_interpreter_fails_closed(monkeypatch):
 
 def test_global_interpreter_override_runs_degraded(monkeypatch):
     monkeypatch.setattr(sys, "base_prefix", sys.prefix, raising=False)
+    monkeypatch.delenv("VIRTUAL_ENV", raising=False)
     monkeypatch.setenv("MVP_ALLOW_GLOBAL_PYTHON", "1")
     status = ri.enforce_isolation_or_die()  # must NOT raise
     assert status["runtime_isolated"] is False

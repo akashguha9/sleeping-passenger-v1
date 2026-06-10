@@ -1,0 +1,9 @@
+# sleeping-passenger-v1 gitleaks configuration.
+#
+# Keeps the FULL default ruleset (no rules removed, no broad allowlists).
+# Per-finding suppressions live in .gitleaksignore as commit-scoped
+# fingerprints only — a real leak, even in the same files, still fails.
+title = "sleeping-passenger-v1 gitleaks configuration"
+
+[extend]
+useDefault = true
