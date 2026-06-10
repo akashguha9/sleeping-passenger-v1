@@ -96,9 +96,13 @@ protection:
 - `scripts/audit_local_data_protection.py` (CI-enforced) fails if a
   secret, DB, or backup ever becomes git-tracked or world-readable.
 
-At-rest DB encryption (SQLCipher or application-level) is **future
-work**: the repo has no key-management model today, and bolting one on
-without it would be security theater. Tracked in the register below.
+Provider API keys can now live in **Windows Credential Manager**
+instead of plaintext `.env` (`SECRET_PROVIDER=windows-credential-manager`;
+`scripts/manage_secrets.py`; docs/SECRET_CUSTODY.md). Encrypted backups
+(scrypt + AES-256-GCM, optional `cryptography` package) cover the DB:
+docs/BACKUP_RESTORE.md, including the owner recovery pack. Full at-rest
+DB encryption (SQLCipher) remains future work — BitLocker is the at-rest
+baseline.
 
 ## LAN / public exposure hard stop
 
@@ -109,6 +113,31 @@ front), `MVP_TRUSTED_PROXIES=<ips>` (declared reverse proxy),
 `MVP_PUBLISHED_BIND=127.0.0.1` (container port mapped to host loopback),
 or the deliberately ugly last resort
 `MVP_UNSAFE_LAN_HTTP=I_UNDERSTAND_THIS_EXPOSES_MY_TOKEN`.
+
+## Tamper-evident audit log
+
+Sensitive actions (journal writes/deletes, exports, reconciliation,
+backup/restore, auth-failure bursts, unsafe-override boots, lockdown
+blocks) are recorded in a hash-chained append-only JSONL at
+`logs/audit_log.jsonl` (gitignored): each event commits to everything
+before it, so edits/deletions/insertions are detected by
+`python scripts/verify_audit_log.py`. Metadata is aggressively redacted —
+the chain records THAT something happened, never tokens, secrets, or
+journal payloads.
+
+## Emergency lockdown
+
+`MVP_LOCKDOWN_MODE=1` freezes the MVP read-only: every mutating route
+returns 423 Locked (audit-logged), reads stay token-gated, the frontend
+and Streamlit show lockdown banners, and restore is refused. Engage on
+suspected compromise; full runbook: docs/INCIDENT_LOCKDOWN.md.
+
+## Release provenance
+
+`scripts/build_release_manifest.py` + `scripts/generate_checksums.py`
+record commit, dirty state, toolchain versions, lockfile and
+safety-module hashes; `--verify` recomputes and fails on tamper
+(docs/RELEASE_PROVENANCE.md).
 
 ## Dependency advisory register
 

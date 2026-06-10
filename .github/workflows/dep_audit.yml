@@ -81,3 +81,7 @@ jobs:
         run: python scripts/audit_dependency_advisory_register.py
       - name: Local data-protection audit (tracked secrets/DBs/backups)
         run: python scripts/audit_local_data_protection.py
+      - name: GitHub owner-controls audit (read-only; fails only on VERIFIED-unsafe)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python scripts/audit_github_owner_controls.py

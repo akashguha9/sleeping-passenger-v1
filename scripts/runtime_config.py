@@ -58,7 +58,26 @@ def _load_local_dotenv() -> None:
         os.environ.setdefault(key, value.strip().strip('"').strip("'"))
 
 
+def _hydrate_provider_secrets() -> None:
+    """Pass-3 secret custody: when ``SECRET_PROVIDER=windows-credential-manager``,
+    copy known provider keys from OS custody into os.environ (setdefault —
+    real env and .env values win). Never raises: unavailable custody just
+    leaves keys unset and the loaders skip cleanly. Inert under pytest for
+    the same reason the dotenv loader is."""
+    if "pytest" in sys.modules:
+        return
+    try:
+        try:
+            from scripts.secret_provider import hydrate_environment
+        except ModuleNotFoundError:  # pragma: no cover - script-style env
+            from secret_provider import hydrate_environment  # type: ignore[no-redef]
+        hydrate_environment()
+    except Exception:  # pragma: no cover - custody must never block boot
+        pass
+
+
 _load_local_dotenv()
+_hydrate_provider_secrets()
 
 # Advisory constants — duplicated in api_server.py / persistence.py /
 # signal_inbox_api.py for historical reasons.  Importing them from here is
@@ -210,6 +229,16 @@ class StartupSecurityError(RuntimeError):
 
 
 _UNSAFE_LAN_ACK = "I_UNDERSTAND_THIS_EXPOSES_MY_TOKEN"
+
+
+def lockdown_mode_active() -> bool:
+    """Emergency read-only mode (Pass 3): ``MVP_LOCKDOWN_MODE=1``.
+
+    When active, every mutating route returns 423 Locked; reads stay
+    token-gated as usual. Use during suspected compromise, token leak,
+    dependency incident, or shared-machine situations
+    (docs/INCIDENT_LOCKDOWN.md)."""
+    return _bool_env("MVP_LOCKDOWN_MODE", False)
 
 
 def public_mode_requested() -> bool:

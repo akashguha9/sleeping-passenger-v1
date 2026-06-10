@@ -98,6 +98,12 @@ def render_dashboard(db_path: str | Path = DEFAULT_DB_PATH) -> None:
             "env var)."
         )
         return
+    if os.environ.get("MVP_LOCKDOWN_MODE", "").strip().lower() in ("1", "true", "yes"):
+        st.warning(
+            "EMERGENCY LOCKDOWN MODE is active (MVP_LOCKDOWN_MODE=1): the "
+            "API refuses all mutations and this dashboard should be "
+            "treated as read-only forensics. See docs/INCIDENT_LOCKDOWN.md."
+        )
     if _dashboard_requires_token():
         candidate = st.text_input(
             "Owner API token (required beyond loopback)",

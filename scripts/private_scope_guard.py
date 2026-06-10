@@ -238,6 +238,13 @@ EXPLICIT_IN_SCOPE: frozenset[str] = frozenset({
     # logs / backups. Dry-run by default (-Apply to change ACLs), never
     # deletes data, never touches signal_events, brokers, or execution.
     "harden_local_owner_files.ps1",
+    # Pass-3 E2E helper: runs the route-mocked Playwright suite, optional
+    # throwaway-token live probe. No broker, no execution, no .env writes.
+    "run_e2e_owner_auth.ps1",
+    # Pass-3 owner hardening modules (custody / backup / audit / provenance).
+    "secret_provider.py", "manage_secrets.py",
+    "backup_private_data.py", "restore_private_data.py",
+    "audit_log.py", "generate_checksums.py",
 })
 
 # Modules deliberately marked OUT_OF_SCOPE inside ``scripts/``.  This

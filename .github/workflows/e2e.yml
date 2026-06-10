@@ -4,8 +4,9 @@ name: e2e
 #
 # Safety doctrine — this workflow:
 #   * Must NOT reference broker execution, order placement, or trading.
-#   * Must NOT require .env, secrets, or a live backend — every spec stubs
-#     the API via page.route.
+#   * Must NOT require .env, GitHub Secrets, or a live backend — every
+#     spec stubs the API via page.route, and any token used is a
+#     synthetic per-run fixture generated inside the job.
 #   * Runs on manual dispatch + a weekly schedule (browser download makes
 #     it too heavy for every push; the vitest/typecheck/build job in
 #     pytest.yml stays the per-push frontend gate).
@@ -38,7 +39,15 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
       - name: Install dependencies
         run: npm ci
-      - name: Install Chromium
+      - name: Resolve Playwright version (cache key)
+        id: pw
+        run: echo "version=$(node -p "require('@playwright/test/package.json').version")" >> "$GITHUB_OUTPUT"
+      - name: Cache Playwright browsers
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.pw.outputs.version }}
+      - name: Install Chromium (cached across runs)
         run: npx playwright install --with-deps chromium
       - name: Build production frontend
         env:
@@ -47,4 +56,5 @@ jobs:
       - name: Run Playwright specs
         env:
           NEXT_TELEMETRY_DISABLED: "1"
+          CI: "true"
         run: npm run test:e2e

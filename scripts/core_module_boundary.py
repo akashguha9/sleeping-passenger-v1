@@ -120,6 +120,11 @@ _SUPPORT_EXPLICIT: frozenset[str] = frozenset({
     # First-run owner setup: generates MVP_API_TOKEN for the fail-closed
     # startup preflight and writes it to the gitignored .env. SUPPORT tooling.
     "generate_api_token",
+    # Pass-3 hardening tooling: OS key custody, encrypted backup/restore,
+    # release checksums. All local-only, advisory-safe SUPPORT scripts.
+    "secret_provider", "manage_secrets",
+    "backup_private_data", "restore_private_data",
+    "generate_checksums",
 })
 
 
