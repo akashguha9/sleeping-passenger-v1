@@ -48,6 +48,7 @@ if str(_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_DIR))
 
 import persistence  # noqa: E402
+from runtime_common import restrict_file_permissions  # noqa: E402
 from backup_db import perform_backup  # noqa: E402
 from money import money_to_str  # noqa: E402
 from reconciliation_extras import compute_realized_pnl  # noqa: E402
@@ -207,6 +208,7 @@ def main(argv: list[str] | None = None) -> int:
     }
     report_path = args.db.parent / f"sell_side_pnl_audit_{_utc_stamp()}.json"
     report_path.write_text(json.dumps(report, indent=2))
+    restrict_file_permissions(report_path)
 
     print(
         f"[audit_sell_side_pnl] {len(findings)} SELL reconciliation(s); "

@@ -39,6 +39,15 @@ def _build_file_handler() -> logging.Handler | None:
         handler.setFormatter(
             logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s")
         )
+        # SEC-S5: logs can carry failure context from the trade journal —
+        # owner-only.  (Windows note: chmod toggles read-only; use
+        # icacls for real ACLs on shared machines.)
+        try:
+            os.chmod(handler.baseFilename, 0o600)
+        except OSError:
+            logging.getLogger(__name__).warning(
+                "could not restrict log file permissions"
+            )
         return handler
     except OSError:
         # A read-only filesystem must not break logging entirely — the

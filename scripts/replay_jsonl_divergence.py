@@ -43,6 +43,7 @@ if str(_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_DIR))
 
 import persistence  # noqa: E402
+from runtime_common import restrict_file_permissions  # noqa: E402
 from backup_db import perform_backup  # noqa: E402
 
 try:
@@ -273,6 +274,7 @@ def main(argv: list[str] | None = None) -> int:
     report_dir.mkdir(parents=True, exist_ok=True)
     report_path = report_dir / f"jsonl_divergence_report_{_utc_stamp()}.json"
     report_path.write_text(json.dumps(report, indent=2, default=str))
+    restrict_file_permissions(report_path)
 
     print(
         f"[replay_jsonl_divergence] jsonl={report['jsonl_rows']} "

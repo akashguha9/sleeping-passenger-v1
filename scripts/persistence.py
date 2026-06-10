@@ -36,6 +36,11 @@ except ModuleNotFoundError:
     from runtime_common import RUNTIME_DIR, utc_timestamp  # type: ignore[no-redef]
 
 try:
+    from scripts.runtime_common import restrict_file_permissions as _restrict_perms
+except ModuleNotFoundError:  # pragma: no cover - script-style fallback
+    from runtime_common import restrict_file_permissions as _restrict_perms  # type: ignore[no-redef]
+
+try:
     from scripts.money import MoneyError, money_to_str, parse_money
 except ModuleNotFoundError:  # pragma: no cover - script-style fallback
     from money import MoneyError, money_to_str, parse_money  # type: ignore[no-redef]
@@ -761,6 +766,7 @@ def _money_text_migration(db_path: Path) -> None:
             conn.backup(dst)
         finally:
             dst.close()
+        _restrict_perms(backup_path)
 
         ambiguous: list[dict[str, Any]] = []
         converted_rows = 0
@@ -844,6 +850,7 @@ def _money_text_migration(db_path: Path) -> None:
         # scans of runtime/*.json don't classify it as a legacy artifact.
         report_path = backup_dir / f"f3_money_migration_report_{stamp}.json"
         report_path.write_text(json.dumps(report, indent=2))
+        _restrict_perms(report_path)
         _logger.warning(
             "F3 money migration rebuilt %s (%d rows, %d ambiguous float "
             "values). Backup: %s Report: %s",
@@ -860,6 +867,7 @@ def _money_text_migration(db_path: Path) -> None:
 def init_schema(db_path: Path = DB_PATH) -> None:
     """Create runtime dir and initialize all tables. Idempotent."""
     db_path.parent.mkdir(parents=True, exist_ok=True)
+    _was_new = not db_path.exists()
     conn = sqlite3.connect(str(db_path))
     try:
         _apply_pragmas(conn)
@@ -872,6 +880,9 @@ def init_schema(db_path: Path = DB_PATH) -> None:
     # Decimal strings.  No-op on already-migrated / fresh DBs.  Fail-loud
     # on error (raises) — see _money_text_migration.
     _money_text_migration(db_path)
+    if _was_new:
+        # SEC-S5: the journal DB is owner-only from creation.
+        _restrict_perms(db_path)
     _initialized.add(str(db_path.resolve()))
 
 

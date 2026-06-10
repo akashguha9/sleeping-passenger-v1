@@ -689,6 +689,34 @@ def write_runtime_artifact(path: Path, payload: dict[str, Any]) -> None:
     write_json_atomic(path, payload, stamp=True)
 
 
+_PERM_WARNED: set[str] = set()
+
+
+def restrict_file_permissions(path: Path) -> bool:
+    """SEC-S5: make *path* owner-only (chmod 0o600 equivalent).
+
+    Journal JSONL, DB backups, reports, and logs carry trade data; the
+    default umask leaves them world-readable.  POSIX: chmod 0o600.
+    Windows/NTFS: Python's chmod only toggles the read-only attribute —
+    on a shared Windows machine run the documented ACL equivalent once:
+        icacls <file> /inheritance:r /grant:r "%USERNAME%":F
+    Failures log once per path at WARNING and never break the write.
+    """
+    try:
+        os.chmod(path, 0o600)
+        return True
+    except OSError as exc:
+        key = str(path)
+        if key not in _PERM_WARNED:
+            _PERM_WARNED.add(key)
+            print(
+                f"[runtime_common] WARNING: could not restrict permissions "
+                f"on {path}: {exc}",
+                file=sys.stderr,
+            )
+        return False
+
+
 def append_jsonl(path: Path, row: dict[str, Any], stamp: bool = True) -> None:
     """Append one JSON row to a .jsonl file.
 
@@ -696,9 +724,13 @@ def append_jsonl(path: Path, row: dict[str, Any], stamp: bool = True) -> None:
     the row so snapshot/log streams are coherent with other runtime artifacts.
     """
     ensure_directory(path.parent)
+    is_new = not path.exists()
     effective_row = stamp_payload(row) if stamp and isinstance(row, dict) else row
     with path.open("a", encoding="utf-8", newline="\n") as handle:
         handle.write(json.dumps(effective_row, separators=(",", ":")) + "\n")
+    if is_new:
+        # SEC-S5: journal artifacts are owner-only from first write.
+        restrict_file_permissions(path)
 
 
 def _coerce_number(value: Any, default: float = 0.0) -> float:

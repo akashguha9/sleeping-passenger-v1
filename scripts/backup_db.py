@@ -41,6 +41,11 @@ from pathlib import Path
 from typing import Any
 
 try:
+    from scripts.runtime_common import restrict_file_permissions
+except ModuleNotFoundError:  # pragma: no cover - script-style fallback
+    from runtime_common import restrict_file_permissions  # type: ignore[no-redef]
+
+try:
     from scripts.runtime_config import get_db_path  # type: ignore
 except ModuleNotFoundError:  # running as a loose script
     REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -193,6 +198,8 @@ def perform_backup(
     except OSError:
         result["bytes"] = 0
 
+    # SEC-S5: backups contain the full trade journal — owner-only.
+    restrict_file_permissions(backup_path)
     result["backup_path"] = str(backup_path)
     result["ok"] = True
     return result
@@ -245,6 +252,7 @@ def perform_restore(backup_path: Path, target_path: Path) -> dict[str, Any]:
                     conn.close()
                 except sqlite3.Error as exc:
                     _logger.warning("restore cleanup close failed: %s", exc)
+    restrict_file_permissions(target_path)
     result["ok"] = True
     return result
 
