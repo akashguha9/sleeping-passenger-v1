@@ -274,6 +274,11 @@ EXPLICIT_IN_SCOPE: frozenset[str] = frozenset({
     # promote-to-live. Record-keeping maintenance — no broker.
     "backup_crypto.py",
     "restore_to_live.py",
+    # S4-E1/E2 forward paper-trade evidence ledger + gated report.
+    # Paper records only — no broker, no execution; edge moves ONLY when
+    # the T>=30 + CI gates pass on real closed forward trades.
+    "forward_evidence_ledger.py",
+    "forward_evidence_report.py",
 })
 
 # Modules deliberately marked OUT_OF_SCOPE inside ``scripts/``.  This

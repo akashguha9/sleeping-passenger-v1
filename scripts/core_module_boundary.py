@@ -139,6 +139,9 @@ _SUPPORT_EXPLICIT: frozenset[str] = frozenset({
     # S4-A4 backup encryption + staged restore promotion. No broker.
     "backup_crypto",
     "restore_to_live",
+    # S4-E1/E2 forward evidence ledger + gated report. No broker.
+    "forward_evidence_ledger",
+    "forward_evidence_report",
 })
 
 
