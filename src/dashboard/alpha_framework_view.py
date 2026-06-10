@@ -8,7 +8,7 @@ here writes state or touches a broker surface.
 from __future__ import annotations
 
 from src.alpha import ADVISORY_DISCLAIMER
-from src.alpha.plumbing_case_study import build_plumbing_case_study
+from src.alpha.plumbing_case_study import build_plumbing_case_study_v3
 
 _FRAMEWORK_SUMMARY = (
     "Markets are casinos sitting on top of real-world food chains. "
@@ -26,7 +26,7 @@ def render_alpha_framework_section(st) -> None:
     ``st`` is passed in (rather than imported) so the module stays
     importable and testable without Streamlit installed.
     """
-    case_study = build_plumbing_case_study()
+    case_study = build_plumbing_case_study_v3()
     st.subheader("Alpha Framework / Plumbing Case Study")
     st.caption(ADVISORY_DISCLAIMER)
     st.write(_FRAMEWORK_SUMMARY)
@@ -112,6 +112,61 @@ def render_alpha_framework_section(st) -> None:
                 "classification"
             ],
             "data_provenance": case_study["data_provenance"],
+        }
+    )
+
+    st.markdown("**Node profiles (full intelligence stack per node)**")
+    st.dataframe(
+        [
+            {
+                "node": profile["node_id"],
+                "casino": round(float(profile["casino_score"]), 1),
+                "food_chain": round(float(profile["food_chain_score"]), 1),
+                "residual_class": profile["residual_utility_class"],
+                "proof_class": profile["embedded_proof_class"],
+                "triangulation": profile["triangulation_class"],
+                "opportunity": round(float(profile["opportunity_score"]), 1),
+                "verdict": profile["advisory_verdict"],
+                "container": profile["advisory_container"],
+            }
+            for profile in case_study.get("node_profiles", {}).values()
+        ]
+    )
+
+    st.markdown("**Calibration / Journal Replay Bridge**")
+    from src.alpha.journal_replay_bridge import journal_replay_report
+
+    journal = journal_replay_report()
+    replay_section = journal["replay"]
+    st.write(
+        {
+            "records_discovered": journal["bridge"]["discovered_records"],
+            "records_usable": journal["bridge"]["usable_records"],
+            "records_skipped": journal["bridge"]["skipped_records"],
+            "skip_reasons": journal["bridge"]["skip_reasons"],
+            "outcome_coverage": round(float(journal["outcome_coverage"]), 2),
+            "calibration_support": round(float(journal["calibration_support"]), 1),
+            "precision_at_k": replay_section["precision_at_k"],
+            "brier_score": replay_section["brier_score"],
+            "hit_rate_by_verdict": replay_section["hit_rate_by_verdict"],
+            "trap_flag_false_positive_rate": replay_section[
+                "trap_flag_false_positive_rate"
+            ],
+        }
+    )
+    st.caption(journal["disclaimer"])
+
+    st.markdown("**Alpha Autopsy (the system explaining itself to an auditor)**")
+    autopsy = case_study.get("autopsy", {})
+    st.write(
+        {
+            "summary": autopsy.get("summary"),
+            "what_survives_blind_test": autopsy.get("what_survives_blind_test"),
+            "what_was_only_casino": autopsy.get("what_was_only_casino") or ["nothing material"],
+            "missing_proof": autopsy.get("missing_proof"),
+            "trap_flags": autopsy.get("trap_flags") or ["none raised"],
+            "calibration_state": autopsy.get("calibration_state"),
+            "next_evidence_to_collect": autopsy.get("next_evidence_to_collect"),
         }
     )
 

@@ -3215,6 +3215,26 @@ class AlphaReplayEvaluateRequest(BaseModel):
     use_demo_fixture: bool = False
 
 
+class AlphaReplayFromJournalRequest(BaseModel):
+    """Run the journal-to-replay bridge against the local journal DB."""
+
+    k: int = Field(default=5, ge=1, le=100)
+
+
+class AlphaAutopsyRequest(BaseModel):
+    """Inputs for the alpha autopsy diagnostic (all scoring inputs of
+    /alpha/score plus a signal name)."""
+
+    signal_name: str = Field(max_length=300)
+    components: dict[str, float] = Field(default_factory=dict)
+    half_life_days: float | None = None
+    filing_text: str | None = Field(default=None, max_length=100_000)
+    filing_source_type: str = "manual_excerpt"
+    narrative_claims: list[str] = Field(default_factory=list)
+    calibration_support: float | None = Field(default=None, ge=0.0, le=100.0)
+    value_chain_node: str | None = None
+
+
 class AlphaValueChainRequest(BaseModel):
     """A theme plus value-chain nodes to score and rank."""
 
@@ -3238,11 +3258,12 @@ class AlphaDecayRequest(BaseModel):
 def get_alpha_plumbing_case_study(
     _auth: None = Depends(require_api_token_for_reads),
 ) -> dict:
-    """Deterministic offline Plumbing Alpha case study (advisory-only)."""
+    """Deterministic offline Plumbing Alpha case study, v3 full stack:
+    graph, node profiles, triangulation, calibration state, autopsy."""
     _import_alpha()
-    from src.alpha.plumbing_case_study import build_plumbing_case_study
+    from src.alpha.plumbing_case_study import build_plumbing_case_study_v3
 
-    return {**_alpha_advisory_stamp(), **build_plumbing_case_study()}
+    return {**_alpha_advisory_stamp(), **build_plumbing_case_study_v3()}
 
 
 @app.post("/alpha/score")
@@ -3474,6 +3495,82 @@ def post_alpha_replay_evaluate(
         records = demo_replay_dataset()
     result = evaluate_replay(records, k=body.k)
     return {**_alpha_advisory_stamp(), **result}
+
+
+@app.post("/alpha/replay/from-journal")
+def post_alpha_replay_from_journal(
+    body: AlphaReplayFromJournalRequest,
+    _auth: None = Depends(require_api_token),
+) -> dict:
+    """Journal-to-replay bridge: reconciled outcomes -> calibration report.
+
+    Read-only over the local journal DB (no writes, no network).  Absent
+    DB or empty journal degrades to an empty dataset with explicit
+    missing_inputs.
+    """
+    _import_alpha()
+    from src.alpha.journal_replay_bridge import journal_replay_report
+
+    return {**_alpha_advisory_stamp(), **journal_replay_report(k=body.k)}
+
+
+@app.post("/alpha/autopsy")
+def post_alpha_autopsy(
+    body: AlphaAutopsyRequest,
+    _auth: None = Depends(require_api_token),
+) -> dict:
+    """Alpha autopsy: the framework explaining a signal to a hostile
+    auditor — blind-test survival, missing proof, next evidence."""
+    _import_alpha()
+    from src.alpha.autopsy import build_alpha_autopsy
+    from src.alpha.filing_parser import parse_filing_text
+    from src.alpha.opportunity import (
+        POSITIVE_COMPONENTS,
+        RISK_COMPONENTS,
+        aggregate_opportunity_score_v2,
+    )
+
+    known = set(POSITIVE_COMPONENTS) | set(RISK_COMPONENTS)
+    components = {
+        key: float(value)
+        for key, value in (body.components or {}).items()
+        if key in known
+    }
+    filing_parsed = None
+    filing_risk = None
+    evidence_quality = None
+    if body.filing_text is not None:
+        filing_parsed = parse_filing_text(
+            body.filing_text,
+            source_type=body.filing_source_type,
+            narrative_claims=body.narrative_claims or None,
+        )
+        filing_risk = float(filing_parsed["filing_risk_disclosure_score"])
+        evidence_quality = float(filing_parsed["embedded_proof_score"])
+        if "embedded_proof" not in components:
+            components["embedded_proof"] = float(
+                filing_parsed["embedded_proof_score"]
+            )
+    calibration = float(body.calibration_support or 0.0)
+    opportunity = aggregate_opportunity_score_v2(
+        components,
+        half_life_days=body.half_life_days,
+        filing_risk_disclosure_score=filing_risk,
+        evidence_quality=evidence_quality,
+        calibration_support=calibration,
+    )
+    autopsy = build_alpha_autopsy(
+        signal_name=body.signal_name,
+        components=components,
+        opportunity=opportunity,
+        filing_parse=filing_parsed,
+        value_chain_node=body.value_chain_node,
+        calibration_support=calibration,
+        half_life_days=body.half_life_days,
+        filing_risk_disclosure_score=filing_risk,
+        evidence_quality=evidence_quality,
+    )
+    return {**_alpha_advisory_stamp(), **autopsy}
 
 
 if __name__ == "__main__":  # pragma: no cover

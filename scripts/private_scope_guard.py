@@ -87,6 +87,7 @@ APPROVED_DOMAINS: tuple[str, ...] = (
     "leverage",
     "hygiene",
     "complex_systems",  # advisory-only complex-systems signal doctrine layer
+    "alpha_replay",   # build_alpha_replay_from_journal.py — read-only journal->replay calibration bridge
     # Kanté defensive sprint — advisory-only safety / deploy / compliance layer.
     "advisory",       # advisory_contract.py — shared safety stamp
     "deploy",         # local_deploy_preflight.py

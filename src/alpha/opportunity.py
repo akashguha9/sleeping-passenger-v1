@@ -169,6 +169,13 @@ _VERDICT_LADDER = (
     "core_candidate",
 )
 
+# Trap flags severe enough to override any calibration level.
+SEVERE_TRAP_FLAGS = (
+    "high_casino_low_food_chain",
+    "high_narrative_low_proof",
+    "filing_claim_without_hard_evidence",
+)
+
 
 def _cap_verdict(verdict: str, ceiling: str) -> str:
     if verdict not in _VERDICT_LADDER or ceiling not in _VERDICT_LADDER:
@@ -176,6 +183,87 @@ def _cap_verdict(verdict: str, ceiling: str) -> str:
     if _VERDICT_LADDER.index(verdict) > _VERDICT_LADDER.index(ceiling):
         return ceiling
     return verdict
+
+
+def apply_calibration_gate(
+    verdict: str,
+    opportunity_score: float,
+    confidence: float,
+    calibration_support: float,
+    *,
+    outcome_coverage: float | None = None,
+    evidence_quality: float | None = None,
+    trap_flags: list[str] | None = None,
+) -> dict[str, object]:
+    """Gate advisory verdicts by outcome-backed calibration evidence.
+
+    Tiers (advisory containers only — no tier ever permits execution):
+      support < 10   : cap at deep_research (uncalibrated engines research)
+      10 ≤ s < 30    : small_position_candidate only with strong score,
+                       confidence, and evidence; never core_candidate
+      30 ≤ s < 60    : full ladder with an explicit calibration-limited warning
+      s ≥ 60         : full advisory ladder
+
+    Severe trap flags override every tier and cap at watchlist.
+    """
+    support = clip(calibration_support, 0.0, 100.0)
+    flags = list(trap_flags or [])
+    warnings: list[str] = []
+    severe = [flag for flag in flags if flag in SEVERE_TRAP_FLAGS]
+
+    if support < 10.0:
+        tier = "uncalibrated"
+        gated = _cap_verdict(verdict, "deep_research")
+        warnings.append(
+            "calibration_support below 10: position-candidate verdicts locked"
+        )
+    elif support < 30.0:
+        tier = "early_calibration"
+        unlock = (
+            opportunity_score >= 45.0
+            and confidence >= 60.0
+            and (evidence_quality is None or evidence_quality >= 60.0)
+            and not severe
+        )
+        gated = _cap_verdict(
+            verdict, "small_position_candidate" if unlock else "deep_research"
+        )
+        warnings.append(
+            "early calibration: small_position_candidate is the ceiling and "
+            "requires strong score, confidence, and evidence"
+        )
+    elif support < 60.0:
+        tier = "partial_calibration"
+        gated = verdict
+        warnings.append(
+            "calibration limited: outcome history is thin; verdicts remain "
+            "advisory hypotheses"
+        )
+    else:
+        tier = "calibrated"
+        gated = verdict
+
+    if severe:
+        gated = _cap_verdict(gated, "watchlist")
+        warnings.append(
+            f"severe trap flag(s) {severe} override calibration tier"
+        )
+    if outcome_coverage is not None and outcome_coverage < 0.5 and tier != "uncalibrated":
+        warnings.append(
+            f"outcome coverage {outcome_coverage:.2f} below 0.5: many journal "
+            "records were unusable; treat calibration as provisional"
+        )
+    return {
+        "verdict": gated,
+        "calibration_tier": tier,
+        "calibration_support": support,
+        "warnings": warnings,
+        "explanation": (
+            f"Tier '{tier}' (support {support:.0f}/100): verdict "
+            f"'{verdict}' -> '{gated}'. Advisory container only; no tier "
+            "permits execution."
+        ),
+    }
 
 
 def aggregate_opportunity_score_v2(
@@ -190,6 +278,8 @@ def aggregate_opportunity_score_v2(
     liquidity_score: float | None = None,
     portfolio_overlap_risk: float | None = None,
     filing_claims_present: bool = False,
+    outcome_coverage: float | None = None,
+    triangulation: dict[str, object] | None = None,
 ) -> dict[str, object]:
     """Evidence-weighted opportunity aggregation.
 
@@ -300,6 +390,30 @@ def aggregate_opportunity_score_v2(
         100.0,
     )
 
+    # ----- triangulation adjustments (Phase 3) -----
+    triangulation_summary: dict[str, object] | None = None
+    if triangulation is not None:
+        t_score = clip(float(triangulation.get("triangulation_score", 50.0)), 0.0, 100.0)
+        contradiction = clip(
+            float(triangulation.get("contradiction_score", 0.0)), 0.0, 100.0
+        )
+        independent_sources = int(triangulation.get("independent_source_count", 0))
+        # Contradicted evidence stacks penalize the score itself.
+        opportunity_score = clip(
+            opportunity_score * (1.0 - 0.3 * contradiction / 100.0), 0.0, 100.0
+        )
+        # Agreement across INDEPENDENT sources is the only confidence boost;
+        # one loud source agreeing with itself moves nothing.
+        if independent_sources >= 2:
+            confidence = clip(confidence + 10.0 * (t_score - 50.0) / 50.0, 0.0, 100.0)
+        triangulation_summary = {
+            "triangulation_score": t_score,
+            "contradiction_score": contradiction,
+            "independent_source_count": independent_sources,
+            "triangulation_class": triangulation.get("triangulation_class"),
+            "weakest_link": triangulation.get("weakest_link"),
+        }
+
     # ----- verdict -----
     if "high_casino_low_food_chain" in trap_flags or (
         "high_narrative_low_proof" in trap_flags
@@ -326,8 +440,16 @@ def aggregate_opportunity_score_v2(
         verdict = _cap_verdict(verdict, "deep_research")
     # Position-candidate verdicts require outcome-backed calibration from
     # the replay harness; an uncalibrated engine may research, not size.
-    if confidence_terms["calibration_support"] < 10.0:
-        verdict = _cap_verdict(verdict, "deep_research")
+    gate = apply_calibration_gate(
+        verdict,
+        opportunity_score,
+        confidence,
+        confidence_terms["calibration_support"],
+        outcome_coverage=outcome_coverage,
+        evidence_quality=evidence_quality_score,
+        trap_flags=trap_flags,
+    )
+    verdict = str(gate["verdict"])
     if input_completeness < 50.0:
         verdict = _cap_verdict(verdict, "watchlist")
 
@@ -345,6 +467,10 @@ def aggregate_opportunity_score_v2(
     if confidence_terms["calibration_support"] == 0.0:
         why_not_higher.append(
             "no outcome-backed calibration support yet (replay harness has no history)"
+        )
+    if triangulation_summary is not None and triangulation_summary["weakest_link"]:
+        why_not_higher.append(
+            f"weakest triangulation link: {triangulation_summary['weakest_link']}"
         )
     for key in POSITIVE_COMPONENTS:
         if resolved[key] >= 70.0:
@@ -375,6 +501,8 @@ def aggregate_opportunity_score_v2(
         "score_components": resolved,
         "penalty_components": penalty_terms,
         "confidence_components": confidence_terms,
+        "calibration_gate": gate,
+        "triangulation": triangulation_summary,
         "trap_flags": trap_flags,
         "why_not_higher": why_not_higher,
         "why_not_lower": why_not_lower,

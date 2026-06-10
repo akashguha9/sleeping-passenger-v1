@@ -69,8 +69,9 @@ _POSITIVE_CATEGORY_RULES: dict[str, tuple[str, tuple[str, ...]]] = {
     ),
     "customer_contract": (
         "contract_or_backlog",
-        ("signed a contract", "entered into a contract", "master agreement",
-         "supply agreement", "long-term contract", "customer contract"),
+        ("signed a contract", "entered into a contract", "enter into a contract",
+         "master agreement", "supply agreement", "long-term contract",
+         "customer contract"),
     ),
     "order_backlog": (
         "contract_or_backlog",
@@ -172,6 +173,34 @@ _CLAIM_CUES = (
     "leading provider", "cutting-edge", "transformative", "industry leader",
 )
 
+# Negation/risk guard: deterministic token-window checks so "we do not
+# generate revenue from AI" never counts as AI revenue proof and "no
+# material customer concentration" reduces rather than raises risk.
+_NEGATION_TOKENS = frozenset(
+    {"not", "no", "never", "without", "neither", "nor", "none"}
+)
+_MODAL_TOKENS = frozenset({"may", "could", "might", "would", "if"})
+_NEGATION_WINDOW_TOKENS = 8
+
+
+def _window_before(lowered_line: str, cue: str) -> list[str]:
+    """Tokens (max window size) immediately preceding the cue match."""
+    index = lowered_line.find(cue)
+    if index < 0:
+        return []
+    prefix = lowered_line[:index]
+    # Strip punctuation so "No," still reads as a negation token.
+    tokens = [token.strip(".,;:()\"'") for token in prefix.split()]
+    return tokens[-_NEGATION_WINDOW_TOKENS:]
+
+
+def _is_negated(lowered_line: str, cue: str) -> bool:
+    return any(token in _NEGATION_TOKENS for token in _window_before(lowered_line, cue))
+
+
+def _is_modal(lowered_line: str, cue: str) -> bool:
+    return any(token in _MODAL_TOKENS for token in _window_before(lowered_line, cue))
+
 
 def _evidence_item(
     *,
@@ -223,6 +252,9 @@ def parse_filing_text(
     evidence: list[dict[str, object]] = []
     risks: list[dict[str, object]] = []
     marketing_claims: list[str] = []
+    negated_statements: list[dict[str, object]] = []
+    forward_looking_claims: list[str] = []
+    risk_mitigations: list[dict[str, object]] = []
 
     for index, raw_line in enumerate(lines, start=1):
         line = raw_line.strip()
@@ -231,42 +263,65 @@ def parse_filing_text(
         lowered = line.lower()
         matched_positive = False
         for category, (hardness_key, cues) in _POSITIVE_CATEGORY_RULES.items():
-            if any(cue in lowered for cue in cues):
-                hardness = EVIDENCE_HARDNESS_WEIGHTS[hardness_key] * multiplier
-                evidence.append(
-                    _evidence_item(
-                        category=category,
-                        claim=category.replace("_", " "),
-                        evidence_text=line,
-                        source_type=source,
-                        hardness_weight=hardness,
-                        confidence=100.0 * hardness,
-                        line_number=index,
-                        source_date=source_date,
-                    )
+            matched_cue = next((cue for cue in cues if cue in lowered), None)
+            if matched_cue is None:
+                continue
+            if _is_negated(lowered, matched_cue):
+                # "we do not generate revenue from AI" is the opposite of
+                # proof — record it so the auditor sees what was rejected.
+                negated_statements.append(
+                    {"category": category, "line_number": index, "text": line}
                 )
-                matched_positive = True
+                continue
+            if _is_modal(lowered, matched_cue):
+                # "we may enter into a contract" is forward-looking talk,
+                # not evidence; count it on the claim side of density.
+                forward_looking_claims.append(line)
+                continue
+            hardness = EVIDENCE_HARDNESS_WEIGHTS[hardness_key] * multiplier
+            evidence.append(
+                _evidence_item(
+                    category=category,
+                    claim=category.replace("_", " "),
+                    evidence_text=line,
+                    source_type=source,
+                    hardness_weight=hardness,
+                    confidence=100.0 * hardness,
+                    line_number=index,
+                    source_date=source_date,
+                )
+            )
+            matched_positive = True
         for category, (severity, cues) in _RISK_CATEGORY_RULES.items():
-            if any(cue in lowered for cue in cues):
-                risks.append(
-                    _evidence_item(
-                        category=category,
-                        claim=category.replace("_", " "),
-                        evidence_text=line,
-                        source_type=source,
-                        hardness_weight=EVIDENCE_HARDNESS_WEIGHTS["risk_disclosure"]
-                        * multiplier,
-                        confidence=100.0 * severity,
-                        line_number=index,
-                        source_date=source_date,
-                    )
+            matched_cue = next((cue for cue in cues if cue in lowered), None)
+            if matched_cue is None:
+                continue
+            if _is_negated(lowered, matched_cue):
+                # "no material customer concentration" mitigates risk
+                # rather than raising it.
+                risk_mitigations.append(
+                    {"category": category, "line_number": index, "text": line}
                 )
+                continue
+            risks.append(
+                _evidence_item(
+                    category=category,
+                    claim=category.replace("_", " "),
+                    evidence_text=line,
+                    source_type=source,
+                    hardness_weight=EVIDENCE_HARDNESS_WEIGHTS["risk_disclosure"]
+                    * multiplier,
+                    confidence=100.0 * severity,
+                    line_number=index,
+                    source_date=source_date,
+                )
+            )
         if not matched_positive and any(cue in lowered for cue in _CLAIM_CUES):
             marketing_claims.append(line)
 
     claims = list(narrative_claims or [])
     if not claims:
-        claims = marketing_claims
+        claims = marketing_claims + forward_looking_claims
         if not claims and evidence:
             # Evidence with no claim under test: density measured against
             # one implicit claim so the score stays defined and bounded.
@@ -286,8 +341,11 @@ def parse_filing_text(
             substrate_fraction += _SUBSTRATE_CONTRIBUTIONS[category] * multiplier
     substrate_score = clip(100.0 * min(1.0, substrate_fraction), 0.0, 100.0)
 
-    # Risk disclosures: severity-weighted, two max-severity findings saturate.
+    # Risk disclosures: severity-weighted, two max-severity findings
+    # saturate; each explicit "no material ..." mitigation offsets a
+    # quarter-point of risk load (floor 0).
     risk_load = sum(float(item["confidence"]) / 100.0 for item in risks)
+    risk_load = max(0.0, risk_load - 0.25 * len(risk_mitigations))
     filing_risk_disclosure_score = clip(100.0 * min(1.0, risk_load / 2.0), 0.0, 100.0)
 
     if not evidence and not claims:
@@ -306,6 +364,9 @@ def parse_filing_text(
         "evidence": evidence,
         "risk_disclosures": risks,
         "marketing_claims": marketing_claims,
+        "forward_looking_claims": forward_looking_claims,
+        "negated_statements": negated_statements,
+        "risk_mitigations": risk_mitigations,
         "proof_density": proof_density,
         "embedded_proof_score": embedded_proof_score,
         "substrate_score": substrate_score,

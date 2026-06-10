@@ -146,10 +146,12 @@ def test_no_execution_route_added_under_alpha_prefix(client) -> None:
         route.path for route in srv.app.routes if route.path.startswith("/alpha")
     ]
     assert sorted(alpha_paths) == [
+        "/alpha/autopsy",
         "/alpha/case-studies/plumbing",
         "/alpha/filing/parse",
         "/alpha/prediction-market/normalize",
         "/alpha/replay/evaluate",
+        "/alpha/replay/from-journal",
         "/alpha/score",
         "/alpha/signal/decay",
         "/alpha/value-chain/map",

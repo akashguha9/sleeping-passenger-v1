@@ -92,6 +92,25 @@ Produced by `build_plumbing_case_study()` and served at
    insurance monetizes failure cost (95/100), plumbers monetize urgency
    and labour scarcity, raw materials stay commodity-priced.
 
+## v3: the full intelligence stack
+
+`build_plumbing_case_study_v3()` (served by the API and dashboard) runs
+the complete pipeline — narrative snapshot fixture → prediction-market
+stub → filing excerpt with negation-guarded parsing → triangulation →
+journal-replay calibration state → evidence-weighted opportunity v2 →
+alpha autopsy — and profiles three candidate nodes:
+
+| Node | Residual class | Shape |
+|---|---|---|
+| Plumbers/contractors | apex_necessity | urgency + failure cost; fragmented local labour limits scalability |
+| Valves | apex_necessity | bottleneck with industrial scalability; low-end commoditization pressure |
+| Smart leak sensors | durable_utility | stronger narrative/catalyst and optionality; adoption and proof risk |
+
+Under the isolated test journal, calibration_support is 0 and every
+profile verdict honestly caps at research grade — position-candidate
+verdicts unlock only when real reconciled outcomes flow through the
+journal-to-replay bridge.
+
 ## What this case study is for
 
 It exercises every framework module end-to-end with zero network

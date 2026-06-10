@@ -176,14 +176,20 @@ lineage.
 ## API surface (read-only, advisory-only)
 
 ```text
-GET  /alpha/case-studies/plumbing
+GET  /alpha/case-studies/plumbing          (v3 full stack)
 POST /alpha/score                          (evidence-weighted v2)
 POST /alpha/value-chain/map
 POST /alpha/signal/decay
-POST /alpha/filing/parse                   (Phase 2)
+POST /alpha/filing/parse                   (Phase 2; negation guard in Phase 3)
 POST /alpha/prediction-market/normalize    (Phase 2)
 POST /alpha/replay/evaluate                (Phase 2)
+POST /alpha/replay/from-journal            (Phase 3)
+POST /alpha/autopsy                        (Phase 3)
 ```
+
+Phase 3 ("final boss") documentation: `docs/alpha_framework_final_boss.md`,
+`docs/alpha_journal_replay_bridge.md`,
+`docs/alpha_triangulation_and_autopsy.md`.
 
 All routes are pure deterministic computations over caller-supplied (or
 hardcoded case-study) inputs: no DB writes, no network calls, the same
