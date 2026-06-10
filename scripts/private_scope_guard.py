@@ -261,6 +261,9 @@ EXPLICIT_IN_SCOPE: frozenset[str] = frozenset({
     # registry. Record-keeping integrity only — no broker, no execution.
     "write_journal.py",
     "write_journal_registry.py",
+    # S4-A2 degraded-state push alerting (log/Telegram/SMTP/toast sinks,
+    # cooldown, secret redaction). Notification only — no broker.
+    "alerting.py",
 })
 
 # Modules deliberately marked OUT_OF_SCOPE inside ``scripts/``.  This

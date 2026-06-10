@@ -390,6 +390,70 @@ def _journal_write_failure_count() -> int:
     return total
 
 
+def _alert_delivery_failures() -> int:
+    try:
+        try:
+            from scripts.alerting import alert_delivery_failure_count
+        except ModuleNotFoundError:  # pragma: no cover - script fallback
+            from alerting import alert_delivery_failure_count  # type: ignore
+        return int(alert_delivery_failure_count())
+    except Exception:  # pragma: no cover - health must never 500 on this
+        _logger.error("could not read alert delivery counter")
+        return 0
+
+
+def _last_alert_at() -> str | None:
+    try:
+        try:
+            from scripts.alerting import last_alert_at
+        except ModuleNotFoundError:  # pragma: no cover - script fallback
+            from alerting import last_alert_at  # type: ignore
+        return last_alert_at()
+    except Exception:  # pragma: no cover - health must never 500 on this
+        return None
+
+
+def _degraded_health_snapshot() -> dict:
+    """S4-A2: the minimal health view the alerting loop evaluates."""
+    snapshot = {
+        "db_write_failures_total": _WRITE_FAILURE_COUNT
+        + _journal_write_failure_count(),
+        "wal_verification_failures": _wal_verify_failure_count(),
+        **_write_journal_counters(),
+    }
+    snapshot["degraded"] = (
+        snapshot["db_write_failures_total"] > 0
+        or snapshot["wal_verification_failures"] > 0
+        or bool(snapshot.get("write_journal_degraded"))
+    )
+    return snapshot
+
+
+def _alerting_enabled() -> bool:
+    raw = os.environ.get("MVP_ALERTING_ENABLED", "").strip().lower()
+    if raw in {"1", "true", "yes", "on"}:
+        return True
+    if raw in {"0", "false", "no", "off"}:
+        return False
+    return not bool(os.environ.get("PYTEST_CURRENT_TEST"))
+
+
+async def _alert_loop() -> None:  # pragma: no cover - timing loop
+    import asyncio
+
+    try:
+        from scripts.alerting import evaluate_and_alert
+    except ModuleNotFoundError:
+        from alerting import evaluate_and_alert  # type: ignore
+    interval = 60
+    while True:
+        try:
+            evaluate_and_alert(_degraded_health_snapshot())
+        except Exception:
+            _logger.exception("alert loop iteration failed")
+        await asyncio.sleep(interval)
+
+
 def _write_journal_counters() -> dict:
     """S4-A1: event-WAL counters (pending/recoverable/failed + mode)."""
     try:
@@ -741,6 +805,19 @@ if _FASTAPI_AVAILABLE:
             startup_reconcile(exists_checks())
         except Exception:
             _logger.exception("write_journal startup reconcile failed")
+        # S4-A2: degraded-state alert loop (cooldown-limited; sink
+        # failures are counted, never crash the server).  Auto-off under
+        # pytest, env-toggle MVP_ALERTING_ENABLED.
+        if _alerting_enabled():
+            try:
+                import asyncio as _asyncio
+
+                _asyncio.get_running_loop().create_task(
+                    _alert_loop(), name="mvp-alert-loop"
+                )
+                _logger.info("degraded-state alerting started")
+            except Exception:
+                _logger.exception("could not start alert loop")
         # H4: daily scheduled backups with retention (no-op under pytest /
         # when disabled by env).  Failures inside the loop log at ERROR.
         try:
@@ -1326,6 +1403,9 @@ def health_full(_auth: None = Depends(require_api_token_for_reads)) -> dict:
         # S4-A1: event write-ahead journal counters.  Any pending or
         # recoverable event means a journal write did not reach APPLIED.
         **_write_journal_counters(),
+        # S4-A2: alerting observability.
+        "alert_delivery_failures_total": _alert_delivery_failures(),
+        "last_alert_at": _last_alert_at(),
         # F6: INSERT OR IGNORE rows silently dropped by a constraint.
         # Informational (idempotent re-imports legitimately bump this);
         # a climbing count without imports means duplicate-key data loss.
