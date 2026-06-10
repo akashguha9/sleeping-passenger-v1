@@ -65,6 +65,23 @@ except ModuleNotFoundError:
 SOURCE_NAME = "grok_xai"
 SOURCE_TYPE = "external_llm_intelligence"
 DEFAULT_ENDPOINT_PATH = "/v1/chat/completions"
+import logging
+
+_LOGGER = logging.getLogger("scripts.grok_xai_adapter")
+
+try:
+    from scripts.untrusted_text_guard import (
+        UNTRUSTED_PREAMBLE as _UNTRUSTED_PREAMBLE,
+        scan_for_injection as _scan_for_injection,
+        wrap_untrusted_block as _wrap_untrusted_block,
+    )
+except ModuleNotFoundError:  # pragma: no cover - script-style fallback
+    from untrusted_text_guard import (  # type: ignore[no-redef]
+        UNTRUSTED_PREAMBLE as _UNTRUSTED_PREAMBLE,
+        scan_for_injection as _scan_for_injection,
+        wrap_untrusted_block as _wrap_untrusted_block,
+    )
+
 DEFAULT_TIMEOUT_SECONDS = 20.0
 DEFAULT_USER_AGENT = "pipeline-v5.7-core/grok-xai"
 DEFAULT_USE_CASE = "signal_ranking_interpreter"
@@ -694,11 +711,15 @@ def _user_prompt_for_use_case(use_case: str, payload: Any) -> str:
             "to inspect next, why it ranks first, the main risks of misreading it, and the focus "
             "the operator should keep."
         )
+    # SEC-S4: the payload is EXTERNAL, attacker-reachable text (news
+    # titles, market fragments).  Fence it so embedded instructions are
+    # framed as data, and neutralise any fake fence markers inside it.
+    fenced = _wrap_untrusted_block(json.dumps(payload, indent=2, sort_keys=True))
     return (
         f"{instruction}\n"
         "Return only valid JSON matching the requested schema.\n"
-        "Payload:\n"
-        f"{json.dumps(payload, indent=2, sort_keys=True)}"
+        "Payload (untrusted external data, fenced):\n"
+        f"{fenced}"
     )
 
 
@@ -719,7 +740,13 @@ def _build_request_body(
     payload: dict[str, Any] = {
         "model": model_name,
         "messages": [
-            {"role": "system", "content": _system_prompt_for_use_case(use_case)},
+            # SEC-S4: standing instruction that the fenced region is data.
+            {
+                "role": "system",
+                "content": _system_prompt_for_use_case(use_case)
+                + " "
+                + _UNTRUSTED_PREAMBLE,
+            },
             {"role": "user", "content": _user_prompt_for_use_case(use_case, input_payload)},
         ],
         "temperature": float(request_defaults.get("temperature", 0.0)),
@@ -1074,6 +1101,19 @@ def build_grok_xai_report(
         payload["read_only_contract"] = read_only_contract
         return payload
 
+    # SEC-S4: scan the external payload for injection-shaped phrasing.
+    # Flags never auto-reject (public market text legitimately says
+    # buy/sell); they are stamped onto the artifact so the operator and
+    # downstream quarantine layers see the attempt.
+    injection_scan = _scan_for_injection(input_context.get("payload"))
+    if injection_scan["flagged"]:
+        _LOGGER.warning(
+            "SEC-S4 injection patterns flagged in %s payload: %s (fields: %s)",
+            canonical_use_case,
+            injection_scan["patterns"],
+            sorted(injection_scan["flagged_fields"]),
+        )
+
     request_body = _build_request_body(
         use_case=canonical_use_case,
         input_payload=input_context.get("payload"),
@@ -1209,6 +1249,11 @@ def build_grok_xai_report(
             "input_limitations": list(input_context.get("limitations", [])),
             "response_sample": response.get("sample"),
             "extracted_output": validated_output,
+            # SEC-S4: injection-detection verdict travels with the artifact
+            # so review surfaces can quarantine flagged interpretations.
+            "injection_flagged": injection_scan["flagged"],
+            "injection_patterns": injection_scan["patterns"],
+            "injection_flagged_fields": injection_scan["flagged_fields"],
             "read_only_contract": read_only_contract,
             "limitations": list(input_context.get("limitations", [])),
             "note": (

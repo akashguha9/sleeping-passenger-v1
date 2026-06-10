@@ -242,6 +242,10 @@ EXPLICIT_IN_SCOPE: frozenset[str] = frozenset({
     # --apply is guarded by operator_permission_guard with an automatic
     # backup.  In-scope record-keeping repair — never touches brokers.
     "replay_jsonl_divergence.py",
+    # SEC-S4 untrusted-text guard: pure functions that fence/flag
+    # ingested external text before it reaches the LLM layer.  Safety
+    # enforcement — no network, no broker, no execution.
+    "untrusted_text_guard.py",
 })
 
 # Modules deliberately marked OUT_OF_SCOPE inside ``scripts/``.  This

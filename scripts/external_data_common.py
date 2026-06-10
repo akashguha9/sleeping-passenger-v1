@@ -1,13 +1,15 @@
 from __future__ import annotations
 
+import ipaddress
 import json
 import os
+import socket
 import sys
 from pathlib import Path
 from typing import Any, Callable
 from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
-from urllib.request import Request, urlopen
+from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
@@ -209,6 +211,96 @@ def sanitize_request_url(url: str) -> str:
     return urlunparse(parsed._replace(query=urlencode(redacted_pairs, doseq=True)))
 
 
+# ---------------------------------------------------------------------------
+# SEC-S4: SSRF hardening for every outbound fetch in this module.
+#
+# Base URLs are operator-configured today, but redirects were followed
+# blindly and nothing rejected file:// or loopback/link-local targets —
+# meaning a compromised or malicious upstream could bounce a fetch into
+# http://127.0.0.1:8000 (this app's own API), cloud metadata addresses,
+# or private ranges.  Every request URL AND every redirect hop must pass
+# this validator.
+# ---------------------------------------------------------------------------
+
+_ALLOWED_FETCH_SCHEMES = frozenset({"http", "https"})
+_MAX_REDIRECTS = 3
+
+
+class FetchTargetRefused(RuntimeError):
+    """Raised when a fetch target fails the SSRF allowlist."""
+
+
+def _host_is_forbidden(hostname: str) -> str | None:
+    """Return a refusal reason when *hostname* points somewhere internal."""
+    name = (hostname or "").strip().lower().rstrip(".")
+    if not name:
+        return "empty host"
+    if name in {"localhost", "localhost.localdomain"}:
+        return "loopback host"
+    # Literal IPs (v4/v6) are checked directly; DNS names are resolved so
+    # an attacker cannot hide a loopback target behind a hostname.
+    addresses: list[str] = []
+    try:
+        ipaddress.ip_address(name)
+        addresses = [name]
+    except ValueError:
+        try:
+            infos = socket.getaddrinfo(name, None)
+            addresses = sorted({info[4][0] for info in infos})
+        except socket.gaierror:
+            # Unresolvable: let the actual fetch fail loudly on its own.
+            return None
+    for addr in addresses:
+        try:
+            ip = ipaddress.ip_address(addr)
+        except ValueError:
+            continue
+        if (
+            ip.is_loopback
+            or ip.is_private
+            or ip.is_link_local
+            or ip.is_reserved
+            or ip.is_multicast
+            or ip.is_unspecified
+        ):
+            return f"internal address {addr}"
+    return None
+
+
+def validate_fetch_url(url: str) -> str:
+    """SEC-S4: allow only http(s) to public hosts.  Returns url or raises."""
+    parsed = urlparse(str(url))
+    if parsed.scheme.lower() not in _ALLOWED_FETCH_SCHEMES:
+        raise FetchTargetRefused(
+            f"refusing fetch: scheme {parsed.scheme!r} not in "
+            f"{sorted(_ALLOWED_FETCH_SCHEMES)} (url={sanitize_request_url(url)})"
+        )
+    reason = _host_is_forbidden(parsed.hostname or "")
+    if reason:
+        raise FetchTargetRefused(
+            f"refusing fetch to {reason} (url={sanitize_request_url(url)})"
+        )
+    return url
+
+
+class _ValidatingRedirectHandler(HTTPRedirectHandler):
+    """Re-validate every redirect hop and cap the hop count."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: N802
+        hops = getattr(req, "_ssrf_hops", 0) + 1
+        if hops > _MAX_REDIRECTS:
+            raise FetchTargetRefused(
+                f"refusing fetch: more than {_MAX_REDIRECTS} redirects"
+            )
+        validate_fetch_url(newurl)
+        new_req = super().redirect_request(req, fp, code, msg, headers, newurl)
+        if new_req is not None:
+            new_req._ssrf_hops = hops  # type: ignore[attr-defined]
+        return new_req
+
+
+_SSRF_OPENER = build_opener(_ValidatingRedirectHandler())
+
 def _default_transport(
     url: str,
     params: dict[str, Any] | None,
@@ -216,9 +308,12 @@ def _default_transport(
     timeout_seconds: float,
 ) -> tuple[int | None, str]:
     request_url = build_request_url(url, "", params=params)
+    # SEC-S4: validate the target (scheme + public host) and use the
+    # redirect-revalidating opener so a hop cannot escape the allowlist.
+    validate_fetch_url(request_url)
     request = Request(request_url, headers=headers or {}, method="GET")
     try:
-        with urlopen(request, timeout=timeout_seconds) as response:
+        with _SSRF_OPENER.open(request, timeout=timeout_seconds) as response:
             body = response.read().decode("utf-8", errors="replace")
             return int(response.getcode()), body
     except HTTPError as exc:
@@ -411,6 +506,8 @@ def request_with_retry(
     except ImportError as exc:  # pragma: no cover
         raise RuntimeError("requests is required for request_with_retry") from exc
 
+    # SEC-S4: same allowlist as the urllib transport.
+    validate_fetch_url(url)
     last_exc: Exception | None = None
     for attempt in range(max(1, int(retries) + 1)):
         try:
