@@ -83,3 +83,6 @@ def render_dashboard(db_path: str | Path = DEFAULT_DB_PATH) -> None:
     st.dataframe(trades)
     st.subheader("System Health")
     st.write({"database_path": str(Path(db_path)), "threshold_config_loaded": True})
+    from src.dashboard.alpha_framework_view import render_alpha_framework_section
+
+    render_alpha_framework_section(st)

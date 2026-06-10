@@ -3124,6 +3124,170 @@ def post_live_refresh_run(
     )
 
 
+# ---------------------------------------------------------------------------
+# Alpha framework — reflection-derived reality-first scoring (read-only)
+# ---------------------------------------------------------------------------
+# All four routes are pure deterministic computations over caller-supplied
+# (or hardcoded case-study) inputs: no DB writes, no network calls, no
+# broker surface.  POST is used only because the inputs are structured
+# bodies; nothing is persisted.
+
+
+def _alpha_advisory_stamp() -> dict:
+    from datetime import datetime, timezone
+
+    return {
+        "advisory_status": _ADVISORY_STATUS,
+        "execution_mode": _EXECUTION_MODE,
+        "execution_gate": "LOCKED",
+        "ai_execution_count": _AI_EXECUTION_COUNT,
+        "broker_api_called": False,
+        "human_review_required": True,
+        "generated_at": datetime.now(timezone.utc)
+        .replace(microsecond=0)
+        .isoformat(),
+    }
+
+
+def _import_alpha():
+    """Import src.alpha lazily, tolerating script-style execution."""
+    try:
+        import src.alpha  # noqa: F401
+    except ModuleNotFoundError:  # pragma: no cover - script-style env
+        import sys as _sys
+        from pathlib import Path as _Path
+
+        _repo_root = str(_Path(__file__).resolve().parents[1])
+        if _repo_root not in _sys.path:
+            _sys.path.insert(0, _repo_root)
+
+
+class AlphaScoreRequest(BaseModel):
+    """Component scores (0-100) for the opportunity aggregator.
+
+    Unknown keys are ignored; missing keys default to neutral 50 and are
+    echoed back in ``missing_inputs``.
+    """
+
+    components: dict[str, float] = Field(default_factory=dict)
+    half_life_days: float | None = None
+
+
+class AlphaValueChainRequest(BaseModel):
+    """A theme plus value-chain nodes to score and rank."""
+
+    theme: str
+    nodes: list[dict] = Field(default_factory=list)
+
+
+class AlphaDecayRequest(BaseModel):
+    """Inputs for S(t) = S0·e^(−λt) signal decay."""
+
+    initial_strength: float = 1.0
+    elapsed_days: float = 0.0
+    half_life_days: float | None = None
+    signal_type: str = "newspaper_article"
+    source_quality: float = 0.5
+    proof_strength: float = 0.5
+    recurrence: float = 0.5
+
+
+@app.get("/alpha/case-studies/plumbing")
+def get_alpha_plumbing_case_study(
+    _auth: None = Depends(require_api_token_for_reads),
+) -> dict:
+    """Deterministic offline Plumbing Alpha case study (advisory-only)."""
+    _import_alpha()
+    from src.alpha.plumbing_case_study import build_plumbing_case_study
+
+    return {**_alpha_advisory_stamp(), **build_plumbing_case_study()}
+
+
+@app.post("/alpha/score")
+def post_alpha_opportunity_score(
+    body: AlphaScoreRequest,
+    _auth: None = Depends(require_api_token),
+) -> dict:
+    """Aggregate framework component scores into one advisory verdict."""
+    _import_alpha()
+    from src.alpha.opportunity import POSITIVE_COMPONENTS, RISK_COMPONENTS, aggregate_opportunity_score
+
+    known = set(POSITIVE_COMPONENTS) | set(RISK_COMPONENTS)
+    components = {
+        key: float(value)
+        for key, value in (body.components or {}).items()
+        if key in known
+    }
+    result = aggregate_opportunity_score(
+        components, half_life_days=body.half_life_days
+    )
+    return {**_alpha_advisory_stamp(), **result}
+
+
+@app.post("/alpha/value-chain/map")
+def post_alpha_value_chain_map(
+    body: AlphaValueChainRequest,
+    _auth: None = Depends(require_api_token),
+) -> dict:
+    """Map a theme into scored, ranked Porter value-chain nodes."""
+    _import_alpha()
+    from src.alpha.value_chain import ValueChainNode, map_value_chain
+    from src.alpha import ADVISORY_DISCLAIMER
+
+    nodes = []
+    allowed = set(ValueChainNode.__dataclass_fields__)
+    for raw in body.nodes or []:
+        filtered = {k: v for k, v in raw.items() if k in allowed}
+        if "name" not in filtered:
+            raise HTTPException(status_code=422, detail="every node needs a 'name'")
+        nodes.append(ValueChainNode(**filtered))
+    result = map_value_chain(body.theme, nodes)
+    return {
+        **_alpha_advisory_stamp(),
+        **result,
+        "disclaimer": ADVISORY_DISCLAIMER,
+    }
+
+
+@app.post("/alpha/signal/decay")
+def post_alpha_signal_decay(
+    body: AlphaDecayRequest,
+    _auth: None = Depends(require_api_token),
+) -> dict:
+    """Decay a signal with S(t) = S0·e^(−λt).
+
+    If ``half_life_days`` is omitted, it is estimated from
+    ``signal_type`` + source quality / proof strength / recurrence.
+    """
+    _import_alpha()
+    from src.alpha.half_life import decay_signal_strength, estimate_half_life
+
+    estimate: dict | None = None
+    half_life_days = body.half_life_days
+    if half_life_days is None:
+        estimate = estimate_half_life(
+            body.signal_type,
+            source_quality=body.source_quality,
+            proof_strength=body.proof_strength,
+            recurrence=body.recurrence,
+        )
+        half_life_days = float(estimate["half_life_days"])
+    if half_life_days <= 0 or body.elapsed_days < 0:
+        raise HTTPException(
+            status_code=422,
+            detail="half_life_days must be > 0 and elapsed_days >= 0",
+        )
+    result = decay_signal_strength(
+        body.initial_strength,
+        body.elapsed_days,
+        half_life_days,
+        signal_type=body.signal_type,
+    )
+    if estimate is not None:
+        result["half_life_estimate"] = estimate
+    return {**_alpha_advisory_stamp(), **result}
+
+
 if __name__ == "__main__":  # pragma: no cover
     import sys
 
