@@ -121,6 +121,10 @@ _SUPPORT_EXPLICIT: frozenset[str] = frozenset({
     # H5 JSONL->DB divergence replay; report-only by default, --apply is
     # permission-guarded with automatic backup. SUPPORT tooling.
     "replay_jsonl_divergence",
+    # SEC-S4/S7 safety modules: untrusted-text fencing/flagging and the
+    # paid-LLM call budget. Pure guards — no broker, no execution.
+    "untrusted_text_guard",
+    "llm_call_budget",
 })
 
 

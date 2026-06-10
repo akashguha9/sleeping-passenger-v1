@@ -246,6 +246,9 @@ EXPLICIT_IN_SCOPE: frozenset[str] = frozenset({
     # ingested external text before it reaches the LLM layer.  Safety
     # enforcement — no network, no broker, no execution.
     "untrusted_text_guard.py",
+    # SEC-S7 paid-LLM call budget: per-run + daily ceilings, fail closed.
+    # Cost-control guard — no broker, no execution.
+    "llm_call_budget.py",
 })
 
 # Modules deliberately marked OUT_OF_SCOPE inside ``scripts/``.  This

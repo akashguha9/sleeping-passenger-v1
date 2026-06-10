@@ -70,6 +70,17 @@ import logging
 _LOGGER = logging.getLogger("scripts.grok_xai_adapter")
 
 try:
+    from scripts.llm_call_budget import (
+        LLMBudgetExceeded as _LLMBudgetExceeded,
+        acquire_llm_call as _acquire_llm_call,
+    )
+except ModuleNotFoundError:  # pragma: no cover - script-style fallback
+    from llm_call_budget import (  # type: ignore[no-redef]
+        LLMBudgetExceeded as _LLMBudgetExceeded,
+        acquire_llm_call as _acquire_llm_call,
+    )
+
+try:
     from scripts.untrusted_text_guard import (
         UNTRUSTED_PREAMBLE as _UNTRUSTED_PREAMBLE,
         scan_for_injection as _scan_for_injection,
@@ -1121,6 +1132,36 @@ def build_grok_xai_report(
         config=config,
     )
     request_url = build_request_url(str(base_url), endpoint_path)
+    # SEC-S7: paid call — reserve budget first; fail CLOSED when exhausted.
+    try:
+        _acquire_llm_call("grok_xai")
+    except _LLMBudgetExceeded as exc:
+        payload = _failure_payload(
+            runtime_state=stamping_state,
+            fetched_at=fetch_timestamp,
+            use_case=canonical_use_case,
+            config=config,
+            input_context=input_context,
+            model_requested=str(model_name),
+            request_url=None,
+            request_attempted=False,
+            request_success=False,
+            status_code=None,
+            error_kind="llm_budget_exceeded",
+            error=str(exc),
+        )
+        payload["budget_detail"] = exc.detail
+        # Sprint contract: every new error path carries the locked stamps.
+        payload["advisory_status"] = "ADVISORY_ONLY"
+        payload["execution_gate"] = "LOCKED"
+        payload["broker_api_called"] = False
+        payload["ai_execution_count"] = 0
+        payload["limitations"] = list(input_context.get("limitations", [])) + [
+            "llm_budget_exceeded"
+        ]
+        payload["read_only_contract"] = read_only_contract
+        return payload
+
     response = _post_json(
         request_url,
         headers={

@@ -57,6 +57,17 @@ _DEPRECATED_MODELS: frozenset[str] = frozenset({"grok-beta", "grok-1"})
 # Ordered fallback list (tried in sequence on 400 / 404)
 _MODEL_FALLBACK_ORDER: list[str] = ["grok-3-mini", "grok-3", "grok-2-latest"]
 
+try:
+    from scripts.llm_call_budget import LLMBudgetExceeded, acquire_llm_call
+except ModuleNotFoundError:  # pragma: no cover - script-style fallback
+    import sys as _sys
+    from pathlib import Path as _Path
+
+    _scripts = str(_Path(__file__).resolve().parents[1])
+    if _scripts not in _sys.path:
+        _sys.path.insert(0, _scripts)
+    from llm_call_budget import LLMBudgetExceeded, acquire_llm_call  # type: ignore[no-redef]
+
 _ADVISORY_SYSTEM_PROMPT = (
     "You are a read-only market observation assistant. "
     "Provide factual, observational summaries only. "
@@ -155,6 +166,12 @@ class GrokInterpreter(BaseSourceLoader):
         error_tag in: "400_model", "auth", "not_found", "rate_limited",
                        "timeout", "network", "http_error", "bad_json".
         """
+        # SEC-S7: paid call — reserve budget first; fail CLOSED.
+        try:
+            acquire_llm_call("grok_interpreter")
+        except LLMBudgetExceeded as exc:
+            return None, "budget_exceeded", str(exc)
+
         payload: dict[str, Any] = {
             "model": model,
             "messages": [
