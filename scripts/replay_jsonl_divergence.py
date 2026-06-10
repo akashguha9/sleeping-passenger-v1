@@ -166,7 +166,32 @@ def collect_divergence(db_path: Path, jsonl_path: Path) -> dict[str, Any]:
 
 
 def _replay_one(db_path: Path, row: dict[str, Any]) -> None:
-    """Replay one JSONL row through the CANONICAL insert path + audit it."""
+    """Replay one JSONL row through the CANONICAL event-WAL path + audit it.
+
+    S4-A1: routes through write_journal.append_then_apply_event (the same
+    lifecycle the live API uses) so the replayed write gets a durable
+    event row; the JSONL intent already exists, so that step is a no-op.
+    """
+    try:
+        from scripts.write_journal import append_then_apply_event
+    except ModuleNotFoundError:  # pragma: no cover - script-style fallback
+        from write_journal import append_then_apply_event  # type: ignore
+
+    def _apply() -> None:
+        _insert_manual_trade_from_row(db_path, row)
+
+    append_then_apply_event(
+        event_type="manual_trade",
+        idempotency_key=str(row["trade_id"]),
+        payload=row,
+        jsonl_append=lambda: None,  # the JSONL row is the replay SOURCE
+        apply=_apply,
+        db_path=db_path,
+    )
+    _write_replay_audit(db_path, row)
+
+
+def _insert_manual_trade_from_row(db_path: Path, row: dict[str, Any]) -> None:
     persistence.insert_manual_trade(
         str(row["trade_id"]),
         str(row.get("event_id") or ""),
@@ -194,6 +219,9 @@ def _replay_one(db_path: Path, row: dict[str, Any]) -> None:
         currency=str(row.get("currency") or ""),
         ai_model_used=str(row.get("ai_model_used") or ""),
     )
+
+
+def _write_replay_audit(db_path: Path, row: dict[str, Any]) -> None:
     # F13-style audit trail for the replay itself: the "old state" is the
     # JSONL source the row was reconstructed from.
     conn = persistence._get_conn(db_path)

@@ -129,6 +129,10 @@ _SUPPORT_EXPLICIT: frozenset[str] = frozenset({
     # backtest bias guards. Pure, no network. Results firewalled from edge.
     "discovery_symbol_map",
     "discovery_bias_guards",
+    # S4-A1 write-ahead event journal + canonical replay registry.
+    # Integrity infrastructure — no broker, no execution.
+    "write_journal",
+    "write_journal_registry",
 })
 
 

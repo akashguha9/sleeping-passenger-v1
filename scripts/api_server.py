@@ -390,6 +390,25 @@ def _journal_write_failure_count() -> int:
     return total
 
 
+def _write_journal_counters() -> dict:
+    """S4-A1: event-WAL counters (pending/recoverable/failed + mode)."""
+    try:
+        try:
+            from scripts.write_journal import journal_counters
+        except ModuleNotFoundError:  # pragma: no cover - script-style fallback
+            from write_journal import journal_counters  # type: ignore
+        return journal_counters()
+    except Exception:  # pragma: no cover - health must never 500 on this
+        _logger.error("could not read write_journal counters")
+        return {
+            "journal_atomicity_mode": "event_wal",
+            "write_journal_pending_total": -1,
+            "write_journal_recoverable_total": -1,
+            "write_journal_failed_total": -1,
+            "write_journal_degraded": True,
+        }
+
+
 def _wal_verify_failure_count() -> int:
     """H4: WAL-verification failures (persistence counter)."""
     try:
@@ -709,6 +728,19 @@ if _FASTAPI_AVAILABLE:
         # H2: re-assert broker absence at startup (a module imported between
         # app construction and serve time must also trip the guard).
         assert_no_broker_modules()
+        # S4-A1: boot-time WAL reconciliation — safe operations only
+        # (DB_COMMITTED rows verified-then-marked APPLIED; interrupted
+        # intents flagged RECOVERABLE for the guarded replay path).
+        try:
+            try:
+                from scripts.write_journal import startup_reconcile
+                from scripts.write_journal_registry import exists_checks
+            except ModuleNotFoundError:  # pragma: no cover - script fallback
+                from write_journal import startup_reconcile  # type: ignore
+                from write_journal_registry import exists_checks  # type: ignore
+            startup_reconcile(exists_checks())
+        except Exception:
+            _logger.exception("write_journal startup reconcile failed")
         # H4: daily scheduled backups with retention (no-op under pytest /
         # when disabled by env).  Failures inside the loop log at ERROR.
         try:
@@ -1280,14 +1312,20 @@ def health_full(_auth: None = Depends(require_api_token_for_reads)) -> dict:
         "db_write_failures_total": _WRITE_FAILURE_COUNT
         + _journal_write_failure_count(),
         "degraded": (
-            _WRITE_FAILURE_COUNT
-            + _journal_write_failure_count()
-            + _wal_verify_failure_count()
+            (
+                _WRITE_FAILURE_COUNT
+                + _journal_write_failure_count()
+                + _wal_verify_failure_count()
+            )
+            > 0
         )
-        > 0,
+        or bool(_write_journal_counters().get("write_journal_degraded")),
         # H4: WAL post-set verification failures — non-zero means a
         # connection asked for WAL and got something else.
         "wal_verification_failures": _wal_verify_failure_count(),
+        # S4-A1: event write-ahead journal counters.  Any pending or
+        # recoverable event means a journal write did not reach APPLIED.
+        **_write_journal_counters(),
         # F6: INSERT OR IGNORE rows silently dropped by a constraint.
         # Informational (idempotent re-imports legitimately bump this);
         # a climbing count without imports means duplicate-key data loss.

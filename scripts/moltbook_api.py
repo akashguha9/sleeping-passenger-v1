@@ -158,6 +158,17 @@ def _load_jsonl(path: Path) -> list[dict[str, Any]]:
 
 _logger = logging.getLogger("scripts.moltbook_api")
 
+try:
+    from scripts.write_journal import (
+        WriteJournalError as _WriteJournalError,
+        append_then_apply_event as _wal_append_then_apply,
+    )
+except ModuleNotFoundError:  # pragma: no cover - script-style fallback
+    from write_journal import (  # type: ignore[no-redef]
+        WriteJournalError as _WriteJournalError,
+        append_then_apply_event as _wal_append_then_apply,
+    )
+
 _DB_WRITE_FAILURES = 0
 
 
@@ -238,7 +249,13 @@ def log_moltbook_entry(
         future_rule_update=str(future_rule_update),
         logged_at=utc_timestamp(),
     )
-    append_jsonl(MOLTBOOK_LOG, entry.to_dict(), stamp=False)
+    _db_branch = (
+        _DB_AVAILABLE
+        and _persistence is not None
+        and MOLTBOOK_LOG == _MOLTBOOK_LOG_ORIG
+    )
+    if not _db_branch:
+        append_jsonl(MOLTBOOK_LOG, entry.to_dict(), stamp=False)
     # SQLite is canonical, but ONLY for real runtime writes.  When a test
     # monkeypatches MOLTBOOK_LOG to a tmp path the JSONL write is isolated;
     # we must NOT then leak the row into the canonical runtime DB.  The
@@ -247,20 +264,24 @@ def log_moltbook_entry(
     # where test/demo entries (FABRIC_SPY, "Persistence above 0.8",
     # Thesis A …) accumulated in runtime/mvp_local.db because only the
     # JSONL path was isolated.
-    if (
-        _DB_AVAILABLE
-        and _persistence is not None
-        and MOLTBOOK_LOG == _MOLTBOOK_LOG_ORIG
-    ):
+    if _db_branch:
         try:
-            _persistence.insert_moltbook_entry(
-                entry.entry_id, entry.event_id, entry.ticker,
-                entry.original_signal_thesis, entry.ai_interpretation,
-                entry.user_reflection, entry.final_human_decision,
-                entry.manual_trade_log_id, entry.outcome,
-                entry.mistake_type, entry.lesson_learned,
-                entry.bias_detected, entry.recalibration_note,
-                entry.future_rule_update, entry.logged_at,
+            _wal_append_then_apply(
+                event_type="moltbook_entry",
+                idempotency_key=entry.entry_id,
+                payload=entry.to_dict(),
+                jsonl_append=lambda: append_jsonl(
+                    MOLTBOOK_LOG, entry.to_dict(), stamp=False
+                ),
+                apply=lambda: _persistence.insert_moltbook_entry(
+                    entry.entry_id, entry.event_id, entry.ticker,
+                    entry.original_signal_thesis, entry.ai_interpretation,
+                    entry.user_reflection, entry.final_human_decision,
+                    entry.manual_trade_log_id, entry.outcome,
+                    entry.mistake_type, entry.lesson_learned,
+                    entry.bias_detected, entry.recalibration_note,
+                    entry.future_rule_update, entry.logged_at,
+                ),
             )
         except Exception as exc:
             # H1 fix: SQLite is canonical for Moltbook — losing the row

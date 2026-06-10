@@ -50,6 +50,17 @@ except ModuleNotFoundError:  # pragma: no cover - script-style fallback
 _logger = logging.getLogger("scripts.signal_inbox_api")
 
 try:
+    from scripts.write_journal import (
+        WriteJournalError as _WriteJournalError,
+        append_then_apply_event as _wal_append_then_apply,
+    )
+except ModuleNotFoundError:  # pragma: no cover - script-style fallback
+    from write_journal import (  # type: ignore[no-redef]
+        WriteJournalError as _WriteJournalError,
+        append_then_apply_event as _wal_append_then_apply,
+    )
+
+try:
     from scripts.runtime_common import LOG_DIR, append_jsonl, utc_timestamp
     from scripts.global_signal_fabric import build_global_signal_fabric_report
     from scripts.signal_inbox_bridge import (
@@ -999,13 +1010,20 @@ def add_user_reflection(
         "execution_mode": _EXECUTION_MODE,
         "ai_execution_count": _AI_EXECUTION_COUNT,
     }
-    append_jsonl(REFLECTIONS_LOG, entry, stamp=False)
+    if not (_DB_AVAILABLE and _persistence is not None):
+        append_jsonl(REFLECTIONS_LOG, entry, stamp=False)
     if _DB_AVAILABLE and _persistence is not None:
         try:
-            _persistence.insert_reflection(
-                entry["reflection_id"], event_id, str(author),
-                str(conviction_level).upper(), str(reflection_text),
-                entry["reflected_at"],
+            _wal_append_then_apply(
+                event_type="reflection",
+                idempotency_key=entry["reflection_id"],
+                payload=dict(entry),
+                jsonl_append=lambda: append_jsonl(REFLECTIONS_LOG, entry, stamp=False),
+                apply=lambda: _persistence.insert_reflection(
+                    entry["reflection_id"], event_id, str(author),
+                    str(conviction_level).upper(), str(reflection_text),
+                    entry["reflected_at"],
+                ),
             )
         except Exception as exc:
             # H1 fix: a lost reflection corrupts the calibration dataset
@@ -1112,12 +1130,19 @@ def add_ai_discussion_summary(
             "and does not authorize any execution."
         ),
     }
-    append_jsonl(AI_SUMMARIES_LOG, entry, stamp=False)
+    if not (_DB_AVAILABLE and _persistence is not None):
+        append_jsonl(AI_SUMMARIES_LOG, entry, stamp=False)
     if _DB_AVAILABLE and _persistence is not None:
         try:
-            _persistence.insert_ai_summary(
-                entry["summary_id"], event_id, entry["model_label"],
-                clean_summary, entry["summarized_at"],
+            _wal_append_then_apply(
+                event_type="ai_summary",
+                idempotency_key=entry["summary_id"],
+                payload=dict(entry),
+                jsonl_append=lambda: append_jsonl(AI_SUMMARIES_LOG, entry, stamp=False),
+                apply=lambda: _persistence.insert_ai_summary(
+                    entry["summary_id"], event_id, entry["model_label"],
+                    clean_summary, entry["summarized_at"],
+                ),
             )
         except Exception as exc:
             # H1 fix: see add_user_reflection.
@@ -1159,10 +1184,20 @@ def mark_signal(event_id: str, status: str) -> dict[str, Any]:
         "advisory_status": _ADVISORY_STATUS,
         "human_review_required": True,
     }
-    append_jsonl(INBOX_STATES_LOG, entry, stamp=False)
+    if not (_DB_AVAILABLE and _persistence is not None):
+        append_jsonl(INBOX_STATES_LOG, entry, stamp=False)
     if _DB_AVAILABLE and _persistence is not None:
         try:
-            _persistence.insert_signal_decision(event_id, normalized, entry["marked_at"])
+            _wal_append_then_apply(
+                event_type="signal_decision",
+                idempotency_key=f"{event_id}:{entry['marked_at']}",
+                payload={"event_id": event_id, "user_status": normalized,
+                         "marked_at": entry["marked_at"]},
+                jsonl_append=lambda: append_jsonl(INBOX_STATES_LOG, entry, stamp=False),
+                apply=lambda: _persistence.insert_signal_decision(
+                    event_id, normalized, entry["marked_at"]
+                ),
+            )
         except Exception as exc:
             # H1 fix: a dropped acted/passed decision silently skews the
             # acted-vs-passed calibration split — fail loud.
@@ -1692,10 +1727,22 @@ def log_manual_trade(
             _lev_policy.get("jurisdiction_resolution_source", "UNKNOWN_FAIL_CLOSED")
         ),
     )
-    append_jsonl(MANUAL_TRADE_LOG, trade.to_dict(), stamp=False)
+    if not (_DB_AVAILABLE and _persistence is not None):
+        # Legacy degraded mode (no DB): JSONL only, as before.
+        append_jsonl(MANUAL_TRADE_LOG, trade.to_dict(), stamp=False)
     if _DB_AVAILABLE and _persistence is not None:
         try:
-            _persistence.insert_manual_trade(
+            # S4-A1: durable event lifecycle — JSONL intent, then the
+            # canonical DB mutation, then the APPLIED marker.  Success is
+            # reported only from the APPLIED state.
+            _wal_append_then_apply(
+                event_type="manual_trade",
+                idempotency_key=trade.trade_id,
+                payload=trade.to_dict(),
+                jsonl_append=lambda: append_jsonl(
+                    MANUAL_TRADE_LOG, trade.to_dict(), stamp=False
+                ),
+                apply=lambda: _persistence.insert_manual_trade(
                 trade.trade_id, trade.event_id, trade.ticker, trade.side,
                 trade.quantity, trade.price, trade.executed_at,
                 trade.thesis, trade.notes, trade.logged_by,
@@ -1728,6 +1775,7 @@ def log_manual_trade(
                 leverage_policy_reason=trade.leverage_policy_reason,
                 jurisdiction_group=trade.jurisdiction_group,
                 jurisdiction_resolution_source=trade.jurisdiction_resolution_source,
+                ),
             )
         except Exception as exc:
             # F1 fix: the trade did NOT reach the canonical store.  Returning
@@ -1989,18 +2037,27 @@ def reconcile_trade(
         mistake_tags=_safe_journal_text(mistake_tags),
         lesson=_safe_journal_text(lesson_takeaway or lesson),
     )
-    append_jsonl(RECONCILIATIONS_LOG, rec.to_dict(), stamp=False)
+    if not (_DB_AVAILABLE and _persistence is not None):
+        append_jsonl(RECONCILIATIONS_LOG, rec.to_dict(), stamp=False)
     if _DB_AVAILABLE and _persistence is not None:
         try:
-            _persistence.insert_reconciliation(
-                rec.reconciliation_id, rec.trade_id, rec.event_id,
-                rec.reconciled_at, rec.actual_fill_price, rec.actual_quantity,
-                rec.outcome_notes, rec.pnl_estimate, rec.outcome_status,
-                outcome_quality=rec.outcome_quality,
-                process_error=rec.process_error,
-                process_error_notes=rec.process_error_notes,
-                mistake_tags=rec.mistake_tags,
-                lesson=rec.lesson,
+            _wal_append_then_apply(
+                event_type="reconciliation",
+                idempotency_key=rec.reconciliation_id,
+                payload=rec.to_dict(),
+                jsonl_append=lambda: append_jsonl(
+                    RECONCILIATIONS_LOG, rec.to_dict(), stamp=False
+                ),
+                apply=lambda: _persistence.insert_reconciliation(
+                    rec.reconciliation_id, rec.trade_id, rec.event_id,
+                    rec.reconciled_at, rec.actual_fill_price, rec.actual_quantity,
+                    rec.outcome_notes, rec.pnl_estimate, rec.outcome_status,
+                    outcome_quality=rec.outcome_quality,
+                    process_error=rec.process_error,
+                    process_error_notes=rec.process_error_notes,
+                    mistake_tags=rec.mistake_tags,
+                    lesson=rec.lesson,
+                ),
             )
         except Exception as exc:
             # F2 fix: the outcome never reached the DB — the trade would
@@ -2219,12 +2276,35 @@ def cancel_manual_trade_log(
     sqlite_updated = False
     if _DB_AVAILABLE and _persistence is not None:
         try:
-            sqlite_updated = _persistence.cancel_manual_trade(
-                trade_id,
-                cancelled_at,
-                cancel_reason=cancel_reason,
-                status=normalized_status,
+            _updated_cell: list[bool] = []
+
+            def _apply_cancel() -> None:
+                _updated_cell.append(
+                    _persistence.cancel_manual_trade(
+                        trade_id,
+                        cancelled_at,
+                        cancel_reason=cancel_reason,
+                        status=normalized_status,
+                    )
+                )
+
+            # S4-A1: WAL row is the durable intent; the cancellations JSONL
+            # stays a POST-success audit record (appended below), so the
+            # jsonl step here is a no-op — an audit row must never claim a
+            # cancellation that did not commit.
+            _wal_append_then_apply(
+                event_type="manual_trade_cancel",
+                idempotency_key=trade_id,
+                payload={
+                    "trade_id": trade_id,
+                    "cancelled_at": cancelled_at,
+                    "cancel_reason": cancel_reason,
+                    "reconciliation_status": normalized_status,
+                },
+                jsonl_append=lambda: None,
+                apply=_apply_cancel,
             )
+            sqlite_updated = bool(_updated_cell and _updated_cell[0])
         except Exception as exc:
             # F2 fix: SQLite is canonical for the queue — if the UPDATE
             # raised, the "cancelled" duplicate would reappear on the next

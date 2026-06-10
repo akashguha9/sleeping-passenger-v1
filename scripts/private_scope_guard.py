@@ -256,6 +256,11 @@ EXPLICIT_IN_SCOPE: frozenset[str] = frozenset({
     "discovery_bias_guards.py",
     "fetch_discovery_snapshot.py",
     "run_discovery_backtest.py",
+    # S4-A1 atomic write-ahead journal: event lifecycle for journal writes
+    # (NEW->JSONL_APPENDED->DB_COMMITTED->APPLIED) + canonical replay
+    # registry. Record-keeping integrity only — no broker, no execution.
+    "write_journal.py",
+    "write_journal_registry.py",
 })
 
 # Modules deliberately marked OUT_OF_SCOPE inside ``scripts/``.  This
