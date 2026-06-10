@@ -161,3 +161,8 @@ Prompt_*.txt
 
 # Local audit/tooling virtualenvs (any name starting with .venv)
 .venv*/
+
+# Pass-4 generated model-quality artifacts (timestamped; local only).
+reports/calibration_report_*.md
+reports/model_scorecard_*.md
+reports/decision_memos/

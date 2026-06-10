@@ -1,0 +1,849 @@
+{
+  "registry_version": 1,
+  "owner": "Akash Guha",
+  "advisory_only": true,
+  "execution_capable_models_allowed": false,
+  "models": [
+    {
+      "name": "candidate_quality_scorer_cqs",
+      "version": "1.0",
+      "owner": "Akash Guha",
+      "purpose": "advisory-only signal evaluation: rank fresh tickers for daily review",
+      "inputs": [
+        "signal_strength",
+        "narrative_velocity",
+        "price_momentum",
+        "filing_materiality",
+        "liquidity_quality",
+        "freshness",
+        "data_quality",
+        "chaos_risk",
+        "crowding_risk"
+      ],
+      "outputs": [
+        "cqs in [0,1]"
+      ],
+      "uses_llm": false,
+      "uses_market_data": true,
+      "uses_future_data": false,
+      "execution_capable": false,
+      "human_required": true,
+      "tests": [
+        "tests/test_fresh_market_discovery_gate.py"
+      ],
+      "known_limits": [
+        "hardcoded weights in config/thresholds.yaml",
+        "data_quality inferred when fields missing"
+      ]
+    },
+    {
+      "name": "memory_decay_adjuster_acqs",
+      "version": "1.0",
+      "owner": "Akash Guha",
+      "purpose": "advisory-only signal evaluation: decay stale candidates exponentially",
+      "inputs": [
+        "cqs",
+        "days_without_fresh_signal"
+      ],
+      "outputs": [
+        "acqs = cqs*exp(-0.25*d)"
+      ],
+      "uses_llm": false,
+      "uses_market_data": true,
+      "uses_future_data": false,
+      "execution_capable": false,
+      "human_required": true,
+      "tests": [
+        "tests/test_candidate_memory_decay.py"
+      ],
+      "known_limits": [
+        "lambda=0.25 hardcoded"
+      ]
+    },
+    {
+      "name": "evidence_quality_scorer_eqs",
+      "version": "1.0",
+      "owner": "Akash Guha",
+      "purpose": "advisory-only signal evaluation: score source credibility and confirmation",
+      "inputs": [
+        "primary_source_weight",
+        "confirmation_count",
+        "recency",
+        "cross_source_diversity",
+        "contradiction_penalty"
+      ],
+      "outputs": [
+        "eqs in [0,1]"
+      ],
+      "uses_llm": false,
+      "uses_market_data": true,
+      "uses_future_data": false,
+      "execution_capable": false,
+      "human_required": true,
+      "tests": [
+        "tests/test_core_engine_behavior.py"
+      ],
+      "known_limits": []
+    },
+    {
+      "name": "durability_validator_ds",
+      "version": "1.0",
+      "owner": "Akash Guha",
+      "purpose": "advisory-only signal evaluation: score signal persistence under stress",
+      "inputs": [
+        "persistence",
+        "stress_survival",
+        "cross_source_confirmation",
+        "time_stability",
+        "contradiction_resistance"
+      ],
+      "outputs": [
+        "ds in [0,1]"
+      ],
+      "uses_llm": false,
+      "uses_market_data": true,
+      "uses_future_data": false,
+      "execution_capable": false,
+      "human_required": true,
+      "tests": [
+        "tests/test_core_engine_behavior.py"
+      ],
+      "known_limits": []
+    },
+    {
+      "name": "liquidity_scorer_ls",
+      "version": "1.0",
+      "owner": "Akash Guha",
+      "purpose": "advisory-only signal evaluation: score tradability of the underlying",
+      "inputs": [
+        "volume",
+        "spread",
+        "depth"
+      ],
+      "outputs": [
+        "ls in [0,1]"
+      ],
+      "uses_llm": false,
+      "uses_market_data": true,
+      "uses_future_data": false,
+      "execution_capable": false,
+      "human_required": true,
+      "tests": [
+        "tests/test_core_engine_behavior.py"
+      ],
+      "known_limits": []
+    },
+    {
+      "name": "engagement_manipulation_scorer_ems",
+      "version": "1.0",
+      "owner": "Akash Guha",
+      "purpose": "advisory-only signal evaluation: detect hype/viral mechanics",
+      "inputs": [
+        "emotional_intensity",
+        "headline_extremity",
+        "narrative_recycling",
+        "virality_spike",
+        "curiosity_gap"
+      ],
+      "outputs": [
+        "ems in [0,1]"
+      ],
+      "uses_llm": false,
+      "uses_market_data": true,
+      "uses_future_data": false,
+      "execution_capable": false,
+      "human_required": true,
+      "tests": [
+        "tests/test_core_engine_behavior.py"
+      ],
+      "known_limits": []
+    },
+    {
+      "name": "execution_friction_scorer_efs",
+      "version": "1.0",
+      "owner": "Akash Guha",
+      "purpose": "advisory-only signal evaluation: model assumed costs/slippage for journaling",
+      "inputs": [
+        "commission_bps",
+        "volatility_expansion",
+        "tick_size_ratio",
+        "order_impact"
+      ],
+      "outputs": [
+        "efs in [0,1]"
+      ],
+      "uses_llm": false,
+      "uses_market_data": true,
+      "uses_future_data": false,
+      "execution_capable": false,
+      "human_required": true,
+      "tests": [
+        "tests/test_core_engine_behavior.py"
+      ],
+      "known_limits": [
+        "friction is an assumption, not a fill model"
+      ]
+    },
+    {
+      "name": "model_probability_estimator",
+      "version": "1.0",
+      "owner": "Akash Guha",
+      "purpose": "advisory-only signal evaluation: combine component scores into probability",
+      "inputs": [
+        "eqs",
+        "ds",
+        "ems",
+        "efs"
+      ],
+      "outputs": [
+        "model_prob in [0.01,0.99]"
+      ],
+      "uses_llm": false,
+      "uses_market_data": true,
+      "uses_future_data": false,
+      "execution_capable": false,
+      "human_required": true,
+      "tests": [
+        "tests/test_core_engine_behavior.py"
+      ],
+      "known_limits": [
+        "linear formula with hardcoded coefficients; calibrate before trusting"
+      ]
+    },
+    {
+      "name": "net_signal_value_nsv",
+      "version": "1.0",
+      "owner": "Akash Guha",
+      "purpose": "advisory-only signal evaluation: estimate advisory edge from mispricing",
+      "inputs": [
+        "model_prob",
+        "market_implied_prob",
+        "eqs",
+        "ds",
+        "ls",
+        "ems",
+        "efs"
+      ],
+      "outputs": [
+        "nsv in [-1,1]"
+      ],
+      "uses_llm": false,
+      "uses_market_data": true,
+      "uses_future_data": false,
+      "execution_capable": false,
+      "human_required": true,
+      "tests": [
+        "tests/test_core_engine_behavior.py"
+      ],
+      "known_limits": []
+    },
+    {
+      "name": "admission_priority_scorer_aps",
+      "version": "1.0",
+      "owner": "Akash Guha",
+      "purpose": "advisory-only signal evaluation: rank signals for the review queue",
+      "inputs": [
+        "eqs",
+        "ds",
+        "ls",
+        "mispricing",
+        "ems",
+        "efs"
+      ],
+      "outputs": [
+        "aps in [0,1]"
+      ],
+      "uses_llm": false,
+      "uses_market_data": true,
+      "uses_future_data": false,
+      "execution_capable": false,
+      "human_required": true,
+      "tests": [
+        "tests/test_core_engine_behavior.py"
+      ],
+      "known_limits": []
+    },
+    {
+      "name": "final_candidate_scorer_fcs",
+      "version": "1.0",
+      "owner": "Akash Guha",
+      "purpose": "advisory-only signal evaluation: rank candidates for human review tiering",
+      "inputs": [
+        "acqs",
+        "mean_model_score",
+        "cross_model_agreement",
+        "why_today_score",
+        "data_quality",
+        "freshness",
+        "liquidity_quality",
+        "chaos_risk",
+        "disagreement",
+        "portfolio_contamination"
+      ],
+      "outputs": [
+        "fcs in [0,1]",
+        "tier EXECUTABLE|WATCHLIST|NOT_EXECUTABLE|BLOCKED"
+      ],
+      "uses_llm": false,
+      "uses_market_data": true,
+      "uses_future_data": false,
+      "execution_capable": false,
+      "human_required": true,
+      "tests": [
+        "tests/test_candidate_promotion_contract.py"
+      ],
+      "known_limits": [
+        "'EXECUTABLE' is a journal tier label; nothing executes"
+      ]
+    },
+    {
+      "name": "execution_readiness_scorer_ers",
+      "version": "1.0",
+      "owner": "Akash Guha",
+      "purpose": "advisory-only signal evaluation: gate journal-tier promotion on process readiness",
+      "inputs": [
+        "data_quality",
+        "source_health",
+        "invalidation_defined",
+        "position_sizing_defined",
+        "portfolio_truth_clean",
+        "why_today_score",
+        "human_review_ready"
+      ],
+      "outputs": [
+        "ers in [0,1]"
+      ],
+      "uses_llm": false,
+      "uses_market_data": true,
+      "uses_future_data": false,
+      "execution_capable": false,
+      "human_required": true,
+      "tests": [
+        "tests/test_candidate_promotion_contract.py"
+      ],
+      "known_limits": []
+    },
+    {
+      "name": "signal_reactor",
+      "version": "1.0",
+      "owner": "Akash Guha",
+      "purpose": "advisory-only signal evaluation: orchestrate diagnostics into one criticality state",
+      "inputs": [
+        "field_geometry",
+        "lead_trace",
+        "echo_risk",
+        "waste_state",
+        "meltdown_risk",
+        "operator_block"
+      ],
+      "outputs": [
+        "reactor_state"
+      ],
+      "uses_llm": false,
+      "uses_market_data": true,
+      "uses_future_data": false,
+      "execution_capable": false,
+      "human_required": true,
+      "tests": [
+        "tests/test_signal_reactor.py"
+      ],
+      "known_limits": []
+    },
+    {
+      "name": "adaptive_signal_router",
+      "version": "1.0",
+      "owner": "Akash Guha",
+      "purpose": "advisory-only signal evaluation: weight evidence routes; prune weak ones",
+      "inputs": [
+        "reliability",
+        "relevance",
+        "freshness",
+        "independence",
+        "predictive_history",
+        "contradiction",
+        "echo_risk"
+      ],
+      "outputs": [
+        "nutrient_value",
+        "terrain_penalty",
+        "route_weight"
+      ],
+      "uses_llm": false,
+      "uses_market_data": true,
+      "uses_future_data": false,
+      "execution_capable": false,
+      "human_required": true,
+      "tests": [
+        "tests/test_adaptive_signal_router.py"
+      ],
+      "known_limits": []
+    },
+    {
+      "name": "trend_engine",
+      "version": "1.0",
+      "owner": "Akash Guha",
+      "purpose": "advisory-only signal evaluation: classify trend over snapshot history",
+      "inputs": [
+        "snapshot log rows"
+      ],
+      "outputs": [
+        "slope",
+        "FLAT|IMPROVING|DETERIORATING"
+      ],
+      "uses_llm": false,
+      "uses_market_data": false,
+      "uses_future_data": false,
+      "execution_capable": false,
+      "human_required": true,
+      "tests": [
+        "tests/test_trend_engine.py"
+      ],
+      "known_limits": []
+    },
+    {
+      "name": "event_prior_detector",
+      "version": "1.0",
+      "owner": "Akash Guha",
+      "purpose": "advisory-only signal evaluation: find observation clustering windows",
+      "inputs": [
+        "chronology DB observations"
+      ],
+      "outputs": [
+        "windows {start,end,count,source}"
+      ],
+      "uses_llm": false,
+      "uses_market_data": false,
+      "uses_future_data": false,
+      "execution_capable": false,
+      "human_required": true,
+      "tests": [
+        "tests/test_event_prior_detector.py"
+      ],
+      "known_limits": []
+    },
+    {
+      "name": "leverage_governance",
+      "version": "1.0",
+      "owner": "Akash Guha",
+      "purpose": "advisory-only signal evaluation: journal-validation leverage ceiling by jurisdiction",
+      "inputs": [
+        "ticker",
+        "jurisdiction",
+        "exchange"
+      ],
+      "outputs": [
+        "ceiling 1.0|4.0",
+        "jurisdiction_group"
+      ],
+      "uses_llm": false,
+      "uses_market_data": true,
+      "uses_future_data": false,
+      "execution_capable": false,
+      "human_required": true,
+      "tests": [
+        "tests/test_leverage_governance.py"
+      ],
+      "known_limits": [
+        "ticker-suffix heuristic can misclassify dual-listed stocks"
+      ]
+    },
+    {
+      "name": "outcome_evidence_builder",
+      "version": "1.0",
+      "owner": "Akash Guha",
+      "purpose": "advisory-only signal evaluation: canonical resolved-outcome records with provenance",
+      "inputs": [
+        "trade",
+        "reconciliation",
+        "moltbook",
+        "score_at_entry"
+      ],
+      "outputs": [
+        "OutcomeEvidence"
+      ],
+      "uses_llm": false,
+      "uses_market_data": true,
+      "uses_future_data": false,
+      "execution_capable": false,
+      "human_required": true,
+      "tests": [
+        "tests/test_outcome_evidence.py"
+      ],
+      "known_limits": [
+        "SYNTHETIC_FIXTURE never calibration-eligible (by design)"
+      ]
+    },
+    {
+      "name": "score_calibration_analyzer",
+      "version": "1.0",
+      "owner": "Akash Guha",
+      "purpose": "advisory-only signal evaluation: honest calibration summary with sample-size ladder",
+      "inputs": [
+        "resolved outcomes",
+        "score_at_entry"
+      ],
+      "outputs": [
+        "win_rate",
+        "ECE",
+        "Brier",
+        "LogLoss",
+        "Wilson CI",
+        "status ladder"
+      ],
+      "uses_llm": false,
+      "uses_market_data": true,
+      "uses_future_data": false,
+      "execution_capable": false,
+      "human_required": true,
+      "tests": [
+        "tests/test_calibration_metrics.py",
+        "tests/test_calibration_gate.py"
+      ],
+      "known_limits": []
+    },
+    {
+      "name": "calibration_map_isotonic_platt",
+      "version": "1.0",
+      "owner": "Akash Guha",
+      "purpose": "advisory-only signal evaluation: OOS-validated score recalibration",
+      "inputs": [
+        "train/test splits of (score,outcome)"
+      ],
+      "outputs": [
+        "isotonic or platt map, only if it beats raw OOS"
+      ],
+      "uses_llm": false,
+      "uses_market_data": true,
+      "uses_future_data": false,
+      "execution_capable": false,
+      "human_required": true,
+      "tests": [
+        "tests/test_calibration_map.py"
+      ],
+      "known_limits": []
+    },
+    {
+      "name": "backtest_signal_filter",
+      "version": "1.0",
+      "owner": "Akash Guha",
+      "purpose": "advisory-only signal evaluation: horizon-gated paper signal evaluation",
+      "inputs": [
+        "signals",
+        "future_return columns"
+      ],
+      "outputs": [
+        "per-horizon hit_rate/mean_ret/Sharpe"
+      ],
+      "uses_llm": false,
+      "uses_market_data": true,
+      "uses_future_data": false,
+      "execution_capable": false,
+      "human_required": true,
+      "tests": [
+        "tests/test_backtest_signals.py"
+      ],
+      "known_limits": []
+    },
+    {
+      "name": "walk_forward_backtest_calibration",
+      "version": "1.0",
+      "owner": "Akash Guha",
+      "purpose": "advisory-only signal evaluation: no-lookahead outcome evidence from imported bars",
+      "inputs": [
+        "OHLCV bars",
+        "score_fn",
+        "horizon"
+      ],
+      "outputs": [
+        "OutcomeEvidence (IMPORTED_BACKTEST)"
+      ],
+      "uses_llm": false,
+      "uses_market_data": true,
+      "uses_future_data": false,
+      "execution_capable": false,
+      "human_required": true,
+      "tests": [
+        "tests/test_backtest_calibration.py"
+      ],
+      "known_limits": []
+    },
+    {
+      "name": "ai_report_normalizer",
+      "version": "1.0",
+      "owner": "Akash Guha",
+      "purpose": "advisory-only signal evaluation: normalize external five-model LLM reports",
+      "inputs": [
+        "model stances",
+        "confidence",
+        "claims",
+        "raw text"
+      ],
+      "outputs": [
+        "AIReportSignal",
+        "consensus",
+        "hard_veto"
+      ],
+      "uses_llm": true,
+      "uses_market_data": true,
+      "uses_future_data": false,
+      "execution_capable": false,
+      "human_required": true,
+      "tests": [
+        "tests/test_ai_report_ingestion.py"
+      ],
+      "known_limits": [
+        "ingests claims without fact-checking \u2014 grounding guard now gates scoring weight"
+      ]
+    },
+    {
+      "name": "model_reliability_ledger",
+      "version": "1.0",
+      "owner": "Akash Guha",
+      "purpose": "advisory-only signal evaluation: score each LLM's historical reliability",
+      "inputs": [
+        "per-model outcome records"
+      ],
+      "outputs": [
+        "reliability in [0,1]",
+        "calibrated confidence"
+      ],
+      "uses_llm": true,
+      "uses_market_data": true,
+      "uses_future_data": false,
+      "execution_capable": false,
+      "human_required": true,
+      "tests": [
+        "tests/test_model_reliability_ledger.py"
+      ],
+      "known_limits": [
+        "neutral prior 0.5 with zero history is a prior, not evidence"
+      ]
+    },
+    {
+      "name": "five_model_independence",
+      "version": "1.0",
+      "owner": "Akash Guha",
+      "purpose": "advisory-only signal evaluation: detect cross-model contamination",
+      "inputs": [
+        "ModelRun records"
+      ],
+      "outputs": [
+        "independence score [0,10]"
+      ],
+      "uses_llm": true,
+      "uses_market_data": true,
+      "uses_future_data": false,
+      "execution_capable": false,
+      "human_required": true,
+      "tests": [
+        "tests/test_five_model_independence.py"
+      ],
+      "known_limits": []
+    },
+    {
+      "name": "evidence_ledger",
+      "version": "1.0-pass4",
+      "owner": "Akash Guha",
+      "purpose": "advisory-only signal evaluation: typed, hashed, redacted evidence items",
+      "inputs": [
+        "any ingested data point"
+      ],
+      "outputs": [
+        "EvidenceItem JSONL"
+      ],
+      "uses_llm": false,
+      "uses_market_data": false,
+      "uses_future_data": false,
+      "execution_capable": false,
+      "human_required": true,
+      "tests": [
+        "tests/test_data_quality_evidence.py"
+      ],
+      "known_limits": []
+    },
+    {
+      "name": "temporal_guard",
+      "version": "1.0-pass4",
+      "owner": "Akash Guha",
+      "purpose": "advisory-only signal evaluation: lookahead/leakage validation t_pub<=t_obs<=t_dec<t_out",
+      "inputs": [
+        "sample timestamps"
+      ],
+      "outputs": [
+        "valid|invalid|overridden verdicts"
+      ],
+      "uses_llm": false,
+      "uses_market_data": false,
+      "uses_future_data": false,
+      "execution_capable": false,
+      "human_required": true,
+      "tests": [
+        "tests/test_temporal_guard.py"
+      ],
+      "known_limits": []
+    },
+    {
+      "name": "backtest_advisory_signals",
+      "version": "1.0-pass4",
+      "owner": "Akash Guha",
+      "purpose": "advisory-only signal evaluation: walk-forward advisory backtester with explicit assumptions",
+      "inputs": [
+        "signal samples",
+        "entry/exit reference prices",
+        "benchmark"
+      ],
+      "outputs": [
+        "hit_rate",
+        "expectancy",
+        "Sharpe",
+        "Sortino",
+        "MDD",
+        "abstention_rate",
+        "regime metrics"
+      ],
+      "uses_llm": false,
+      "uses_market_data": true,
+      "uses_future_data": false,
+      "execution_capable": false,
+      "human_required": true,
+      "tests": [
+        "tests/test_backtest_advisory_signals.py"
+      ],
+      "known_limits": [
+        "reference prices are observation points, not fills"
+      ]
+    },
+    {
+      "name": "model_calibration_pass4",
+      "version": "1.0-pass4",
+      "owner": "Akash Guha",
+      "purpose": "advisory-only signal evaluation: Brier/ECE/log-loss/reliability bins/abstention analysis",
+      "inputs": [
+        "probabilities",
+        "binary outcomes"
+      ],
+      "outputs": [
+        "calibration summary + report"
+      ],
+      "uses_llm": false,
+      "uses_market_data": false,
+      "uses_future_data": false,
+      "execution_capable": false,
+      "human_required": true,
+      "tests": [
+        "tests/test_model_calibration_pass4.py"
+      ],
+      "known_limits": []
+    },
+    {
+      "name": "llm_grounding_guard",
+      "version": "1.0-pass4",
+      "owner": "Akash Guha",
+      "purpose": "advisory-only signal evaluation: zero weight for unsourced LLM claims; hallucinated tickers rejected",
+      "inputs": [
+        "LLM claims",
+        "evidence ledger items",
+        "symbol master"
+      ],
+      "outputs": [
+        "GroundedClaim with weight = base*conf*freshness*contradiction"
+      ],
+      "uses_llm": true,
+      "uses_market_data": false,
+      "uses_future_data": false,
+      "execution_capable": false,
+      "human_required": true,
+      "tests": [
+        "tests/test_llm_grounding_guard.py"
+      ],
+      "known_limits": []
+    },
+    {
+      "name": "sensitivity_analysis",
+      "version": "1.0-pass4",
+      "owner": "Akash Guha",
+      "purpose": "advisory-only signal evaluation: perturbation/Monte-Carlo robustness with abstain recommendation",
+      "inputs": [
+        "weights",
+        "features"
+      ],
+      "outputs": [
+        "fragility report",
+        "ABSTAIN|PROCEED_WITH_HUMAN_REVIEW"
+      ],
+      "uses_llm": false,
+      "uses_market_data": false,
+      "uses_future_data": false,
+      "execution_capable": false,
+      "human_required": true,
+      "tests": [
+        "tests/test_sensitivity_analysis.py"
+      ],
+      "known_limits": []
+    },
+    {
+      "name": "decision_memo_generator",
+      "version": "1.0-pass4",
+      "owner": "Akash Guha",
+      "purpose": "advisory-only signal evaluation: human decision memos with banned-phrase guard",
+      "inputs": [
+        "signal dict",
+        "evidence/backtest/calibration context"
+      ],
+      "outputs": [
+        "markdown memo"
+      ],
+      "uses_llm": false,
+      "uses_market_data": false,
+      "uses_future_data": false,
+      "execution_capable": false,
+      "human_required": true,
+      "tests": [
+        "tests/test_decision_memo.py"
+      ],
+      "known_limits": []
+    },
+    {
+      "name": "post_outcome_review",
+      "version": "1.0-pass4",
+      "owner": "Akash Guha",
+      "purpose": "advisory-only signal evaluation: MAE/bias/staleness/abstention review of resolved signals",
+      "inputs": [
+        "resolved signals with p,y,returns"
+      ],
+      "outputs": [
+        "review report with lessons"
+      ],
+      "uses_llm": false,
+      "uses_market_data": false,
+      "uses_future_data": false,
+      "execution_capable": false,
+      "human_required": true,
+      "tests": [
+        "tests/test_post_outcome_review.py"
+      ],
+      "known_limits": []
+    },
+    {
+      "name": "model_scorecard",
+      "version": "1.0-pass4",
+      "owner": "Akash Guha",
+      "purpose": "advisory-only signal evaluation: evidence-capped segmented model quality scoring",
+      "inputs": [
+        "segment entries with evidence flags"
+      ],
+      "outputs": [
+        "scorecard report, total/10"
+      ],
+      "uses_llm": false,
+      "uses_market_data": false,
+      "uses_future_data": false,
+      "execution_capable": false,
+      "human_required": true,
+      "tests": [
+        "tests/test_model_scorecard.py"
+      ],
+      "known_limits": []
+    }
+  ]
+}

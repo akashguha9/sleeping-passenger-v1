@@ -62,6 +62,8 @@ CONTRACT: dict[str, str] = {
     "MVP_LOCKDOWN_MODE": _PLAIN,
     # tamper-evident audit log location (gitignored; defaults under logs/)
     "MVP_AUDIT_LOG_PATH": _PLAIN,
+    # evidence ledger location (Pass 4; gitignored; defaults under runtime/)
+    "MVP_EVIDENCE_LEDGER_PATH": _PLAIN,
     # non-loopback exposure hard stop acknowledgements
     "MVP_PUBLIC_MODE": _PLAIN,
     "MVP_TLS_TERMINATED": _PLAIN,

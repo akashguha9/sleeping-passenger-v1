@@ -125,6 +125,9 @@ _SUPPORT_EXPLICIT: frozenset[str] = frozenset({
     "secret_provider", "manage_secrets",
     "backup_private_data", "restore_private_data",
     "generate_checksums",
+    # Pass-4 model-quality tooling (advisory-only analytics).
+    "generate_decision_memo", "review_signal_outcomes",
+    "model_scorecard", "sensitivity_analysis",
 })
 
 

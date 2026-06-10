@@ -245,6 +245,14 @@ EXPLICIT_IN_SCOPE: frozenset[str] = frozenset({
     "secret_provider.py", "manage_secrets.py",
     "backup_private_data.py", "restore_private_data.py",
     "audit_log.py", "generate_checksums.py",
+    # Pass-4 model-quality modules: evidence ledger, anti-leakage guard,
+    # advisory backtesting/calibration/scorecard, LLM grounding,
+    # sensitivity, decision memos, outcome review. All advisory-only,
+    # no broker, no execution.
+    "data_quality.py", "temporal_guard.py", "backtest_advisory_signals.py",
+    "model_calibration.py", "model_scorecard.py", "llm_grounding_guard.py",
+    "sensitivity_analysis.py", "generate_decision_memo.py",
+    "review_signal_outcomes.py",
 })
 
 # Modules deliberately marked OUT_OF_SCOPE inside ``scripts/``.  This
