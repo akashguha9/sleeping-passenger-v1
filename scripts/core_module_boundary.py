@@ -115,6 +115,9 @@ _SUPPORT_EXPLICIT: frozenset[str] = frozenset({
     # Local operator-journal reset maintenance tool (DB + JSONL); dry-run by
     # default, --apply guarded by operator_permission_guard. SUPPORT tooling.
     "reset_local_logs",
+    # First-run owner setup: generates MVP_API_TOKEN for the fail-closed
+    # startup preflight and writes it to the gitignored .env. SUPPORT tooling.
+    "generate_api_token",
 })
 
 

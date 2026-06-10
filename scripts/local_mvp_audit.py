@@ -277,8 +277,10 @@ def token_status_section() -> dict[str, Any]:
         "section": "token_status",
         "mvp_api_token_set": set_locally,
         "policy": (
-            "When set, mutating POST routes require Bearer auth.  When unset, "
-            "they are permissive (local-only single-user MVP)."
+            "MVP_API_TOKEN is required: the server fails closed at startup "
+            "without it, and all journal reads/writes require Bearer auth. "
+            "Unset is reachable only via the explicit loopback-only "
+            "MVP_ALLOW_UNAUTH=1 dev override."
         ),
         "frontend_token_storage": "sessionStorage (cleared on tab close)",
         **_safety_stamps(),

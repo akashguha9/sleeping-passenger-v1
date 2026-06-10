@@ -21,7 +21,44 @@ Advisory invariants (never change):
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
+
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+
+
+def _load_local_dotenv() -> None:
+    """Best-effort load of the repo-root ``.env`` into ``os.environ``.
+
+    Owner-only hardening: the startup preflight requires ``MVP_API_TOKEN``
+    by default, and the Windows start scripts launch uvicorn without
+    exporting env vars — so the server must be able to read the operator's
+    gitignored ``.env`` itself.  Rules:
+
+    * ``setdefault`` semantics only — real environment variables always win.
+    * Never runs under pytest (a developer's local ``.env`` must not leak
+      into test assertions); disable explicitly with ``MVP_SKIP_DOTENV=1``.
+    * Parses only simple ``KEY=VALUE`` lines; no interpolation, no export
+      keywords, no multi-line values.  Values are never logged.
+    """
+    if "pytest" in sys.modules or os.environ.get("MVP_SKIP_DOTENV", "").strip() == "1":
+        return
+    try:
+        text = (_REPO_ROOT / ".env").read_text(encoding="utf-8-sig")
+    except (FileNotFoundError, OSError):
+        return
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        key = key.strip()
+        if not key or not key.replace("_", "").isalnum():
+            continue
+        os.environ.setdefault(key, value.strip().strip('"').strip("'"))
+
+
+_load_local_dotenv()
 
 # Advisory constants — duplicated in api_server.py / persistence.py /
 # signal_inbox_api.py for historical reasons.  Importing them from here is
@@ -116,33 +153,97 @@ class StartupSecurityError(RuntimeError):
 
 
 def preflight_auth_or_die() -> None:
-    """Refuse to boot if a non-loopback bind has no MVP_API_TOKEN set.
+    """Fail closed: refuse to boot unless owner auth is configured.
 
-    Override with ``MVP_ALLOW_UNAUTH=1`` (e.g. for a one-off load test on
-    a trusted private network).  The override is loud: it is surfaced on
-    /health/full and logged at startup.
+    Owner-only contract (sole-proprietor hardening):
+
+    * ``MVP_API_TOKEN`` set            → boot (all reads/writes token-gated).
+    * No token, ``MVP_ALLOW_UNAUTH=1`` → boot ONLY on a loopback bind.  The
+      override is loud: surfaced on /health/full and logged at startup.
+    * No token, non-loopback bind      → always refuse, even with the
+      override — exposing an unauthenticated server beyond loopback is
+      never a supported configuration.
+    * No token, no override            → refuse, with first-run setup help.
+
+    Generate a token with ``python scripts/generate_api_token.py --write-env``.
 
     Advisory invariants are not affected by this preflight — the
     execution_gate stays LOCKED whether the server starts or not.
     """
     if api_token_required():
         return
-    if is_loopback_bind():
+    if _bool_env("MVP_ALLOW_UNAUTH", False) and is_loopback_bind():
         return
-    if _bool_env("MVP_ALLOW_UNAUTH", False):
-        return
+    if not is_loopback_bind():
+        raise StartupSecurityError(
+            "Refusing to start: API_HOST="
+            + repr(get_api_host())
+            + " is non-loopback but MVP_API_TOKEN is not set. "
+            "Set MVP_API_TOKEN and bind API_HOST=127.0.0.1. "
+            "Unauthenticated non-loopback operation is not supported."
+        )
     raise StartupSecurityError(
-        "Refusing to start: API_HOST="
-        + repr(get_api_host())
-        + " is non-loopback but MVP_API_TOKEN is not set. "
-        "Set MVP_API_TOKEN, bind API_HOST=127.0.0.1, or explicitly "
-        "set MVP_ALLOW_UNAUTH=1 to override."
+        "Refusing to start: MVP_API_TOKEN is not set. This MVP is "
+        "owner-only and fails closed by default. First-run setup: run "
+        "`python scripts/generate_api_token.py --write-env` to create a "
+        "token in your local .env, then restart. To explicitly run an "
+        "UNAUTHENTICATED loopback-only dev server instead, set "
+        "MVP_ALLOW_UNAUTH=1."
     )
 
 
 def unauth_override_active() -> bool:
     """True iff the operator explicitly bypassed S1 preflight via MVP_ALLOW_UNAUTH=1."""
     return _bool_env("MVP_ALLOW_UNAUTH", False) and not api_token_required()
+
+
+# DNS-rebinding defense: a malicious website can rebind its own hostname to
+# 127.0.0.1 and issue same-origin requests against a loopback-bound API from
+# the owner's browser (CORS does not apply — the browser believes it is
+# same-origin).  Validating the Host header kills that class of attack.
+_DEFAULT_ALLOWED_HOSTS = (
+    "localhost",
+    "127.0.0.1",
+    "[::1]",
+    "::1",
+    "sleepingpassenger",
+    "sleepingpassenger.local",
+    # starlette/httpx TestClient default base URL host.
+    "testserver",
+)
+
+
+def get_allowed_hosts() -> frozenset[str]:
+    """Host-header allowlist (lowercase, no port).
+
+    ``MVP_ALLOWED_HOSTS`` is a comma-separated override; the configured
+    ``API_HOST`` bind address is always included so a deliberate LAN bind
+    (with a token) keeps working without extra configuration.
+    """
+    raw = os.environ.get("MVP_ALLOWED_HOSTS", "").strip()
+    hosts = {h.strip().lower() for h in raw.split(",") if h.strip()} if raw else set(
+        _DEFAULT_ALLOWED_HOSTS
+    )
+    hosts.add(get_api_host().strip().lower())
+    return frozenset(hosts)
+
+
+def host_header_allowed(host_header: str | None) -> bool:
+    """True iff the request's Host header names an allowed host.
+
+    Port suffixes are stripped (``localhost:8000`` → ``localhost``); IPv6
+    bracket forms are matched both with and without brackets.  A missing
+    Host header fails closed.
+    """
+    if not host_header or not host_header.strip():
+        return False
+    host = host_header.strip().lower()
+    if host.startswith("["):  # [::1]:8000 → [::1]
+        host = host.split("]", 1)[0] + "]"
+    elif ":" in host:
+        host = host.split(":", 1)[0]
+    allowed = get_allowed_hosts()
+    return host in allowed or host.strip("[]") in allowed
 
 
 def get_environment_tag() -> str:

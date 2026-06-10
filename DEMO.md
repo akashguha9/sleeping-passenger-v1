@@ -179,4 +179,4 @@ That's the entire safety story. Demo over.
 | Frontend stays on mock data | Verify `curl http://127.0.0.1:8000/health` returns 200; check `frontend/.env.local` |
 | Signal inbox is empty | Run `python scripts\run_live_sources_phase1.py --write` |
 | CORS error in browser console | Add origin to `ALLOWED_ORIGINS` in `.env`, restart backend |
-| Manual trade POST returns 401 | `MVP_API_TOKEN` is set; either unset it for the demo or pass `Authorization: Bearer <token>` (see SETUP.md) |
+| Manual trade POST returns 401 | Pass `Authorization: Bearer <token>` (paste the token in the frontend's Local API token panel; see OWNER_ACCESS.md) |

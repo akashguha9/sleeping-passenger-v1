@@ -153,7 +153,11 @@ def run_smoke_check(api_base: str, timeout: float = 5.0) -> dict[str, Any]:
     if token_required is True:
         record("api_token_required", "INFO", "true (mutations require Bearer token)")
     elif token_required is False:
-        record("api_token_required", "INFO", "false (permissive local mode)")
+        record(
+            "api_token_required",
+            "WARN",
+            "false (MVP_ALLOW_UNAUTH override active; owner-only default bypassed)",
+        )
     else:
         record("api_token_required", "INFO", "absent from /health")
 

@@ -3,8 +3,9 @@
  *
  * The client must:
  *   * round-trip a token through sessionStorage
- *   * attach Authorization: Bearer <token> on POST/non-GET requests
- *   * NOT attach the header on GET requests
+ *   * attach Authorization: Bearer <token> on EVERY request (the backend
+ *     gates reads too via require_api_token_for_reads, so GETs without
+ *     the header would 401 once MVP_API_TOKEN is set)
  *   * raise ApiTokenRequiredError on 401/403 with a safe message that
  *     does NOT promise execution permission
  *   * never touch localStorage / cookies
@@ -91,7 +92,7 @@ describe('apiClient request headers', () => {
     expect(headers['Authorization']).toBe('Bearer post-token-xyz');
   });
 
-  it('does NOT attach Authorization on GET requests', async () => {
+  it('attaches Authorization on GET requests too (reads are token-gated)', async () => {
     setStoredApiToken('get-token-abc');
     const fetchSpy = vi
       .spyOn(globalThis, 'fetch' as any)
@@ -102,6 +103,22 @@ describe('apiClient request headers', () => {
       } as any);
     await getManualTrades();
     expect(fetchSpy).toHaveBeenCalled();
+    const [, init] = fetchSpy.mock.calls[0];
+    const headers = (init as RequestInit | undefined)?.headers as
+      | Record<string, string>
+      | undefined;
+    expect(headers?.['Authorization']).toBe('Bearer get-token-abc');
+  });
+
+  it('does not attach Authorization when no token is stored', async () => {
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch' as any)
+      .mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({ trades: [] }),
+      } as any);
+    await getManualTrades();
     const [, init] = fetchSpy.mock.calls[0];
     const headers = (init as RequestInit | undefined)?.headers as
       | Record<string, string>

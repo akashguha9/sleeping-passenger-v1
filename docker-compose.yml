@@ -4,8 +4,10 @@
 #   * single replica per service
 #   * SQLite under runtime/ (volume-mounted)
 #   * no reverse proxy, no TLS, no rate limiting, no monitoring
-#   * MVP_API_TOKEN is optional and read from the shell env or a local
-#     .env file -- never commit a real token.
+#   * MVP_API_TOKEN is REQUIRED (the container binds 0.0.0.0 internally
+#     and the backend fails closed without a token). Compose reads it
+#     from the shell env or the repo-root .env -- never commit a real
+#     token. Generate one: python scripts/generate_api_token.py --write-env
 #
 # Bring up:
 #     docker compose up --build
@@ -35,8 +37,9 @@ services:
       MVP_ENVIRONMENT: docker
       MVP_DB_PATH: /app/runtime/mvp_local.db
       ALLOWED_ORIGINS: "http://localhost:3000,http://127.0.0.1:3000"
-      # S1: REQUIRED when API_HOST is non-loopback.  Empty means the
-      # backend refuses to boot unless MVP_ALLOW_UNAUTH=1 is also set.
+      # S1: REQUIRED -- the container binds 0.0.0.0 internally and an
+      # unauthenticated non-loopback server is never bootable (the
+      # MVP_ALLOW_UNAUTH override is honoured on loopback binds only).
       MVP_API_TOKEN: "${MVP_API_TOKEN:-}"
       # Explicit opt-out for one-off load tests on private networks.
       # Loud: /health/full surfaces unauth_override_active=true.

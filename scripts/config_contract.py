@@ -52,8 +52,10 @@ CONTRACT: dict[str, str] = {
     "ALLOWED_ORIGINS": _PLAIN,
     "MVP_ENVIRONMENT": _PLAIN,
     "MVP_DB_PATH": _REQUIRED,
-    # local token (optional)
+    # owner token (required at server boot — preflight fails closed)
     "MVP_API_TOKEN": _SECRET,
+    # host-header allowlist (DNS-rebinding defense; optional override)
+    "MVP_ALLOWED_HOSTS": _PLAIN,
     # source secrets (optional)
     "EDINET_API_KEY": _SECRET,
     "JAPAN_EDINET_API_KEY": _SECRET,

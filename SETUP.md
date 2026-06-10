@@ -67,7 +67,8 @@ below is required.
 | `API_HOST` | `127.0.0.1` | uvicorn bind host. Set `0.0.0.0` inside containers. |
 | `API_PORT` | `8000` | uvicorn bind port. |
 | `ALLOWED_ORIGINS` | localhost:3000,127.0.0.1:3000,sleepingpassenger,sleepingpassenger.local | CORS allowlist (comma-separated). |
-| `MVP_API_TOKEN` | _(unset)_ | If set, mutating POST routes require `Authorization: Bearer <token>`. Unset = permissive local mode. |
+| `MVP_API_TOKEN` | _(required)_ | Owner token; the server **refuses to start without it**. All journal reads and writes then require `Authorization: Bearer <token>`. Generate with `python scripts/generate_api_token.py --write-env`. Dev-only bypass: `MVP_ALLOW_UNAUTH=1` (loopback only). |
+| `MVP_ALLOWED_HOSTS` | _(local names)_ | Host-header allowlist (DNS-rebinding defense). Defaults cover localhost / 127.0.0.1 / ::1 / sleepingpassenger. |
 | `MVP_DB_PATH` | `runtime/mvp_local.db` | SQLite location. |
 | `MVP_ENVIRONMENT` | `local` | Tag for `/health`. |
 | `PIPELINE_ENABLE_PAPER_EXECUTION` | `false` | Leave false unless you know what you're doing. |

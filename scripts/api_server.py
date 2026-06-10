@@ -142,6 +142,7 @@ try:
         get_environment_tag,
         get_max_request_bytes,
         get_trusted_proxies,
+        host_header_allowed,
         is_loopback_bind,
         preflight_auth_or_die,
         rate_limit_expensive_max_requests,
@@ -168,6 +169,7 @@ except ModuleNotFoundError:  # pragma: no cover
         get_environment_tag,
         get_max_request_bytes,
         get_trusted_proxies,
+        host_header_allowed,
         is_loopback_bind,
         preflight_auth_or_die,
         rate_limit_expensive_max_requests,
@@ -476,6 +478,29 @@ if _FASTAPI_AVAILABLE:
         """
         method = request.method.upper()
         is_mutating = method in _MUTATING_METHODS
+
+        # 0. Host-header allowlist (DNS-rebinding defense).  A malicious
+        #    website can rebind its own hostname to 127.0.0.1 and drive
+        #    same-origin requests against this loopback API from the
+        #    owner's browser; CORS never fires in that scenario.  Any
+        #    request whose Host is not an allowed local name is refused.
+        if not host_header_allowed(request.headers.get("host")):
+            payload = {
+                "error": "host_not_allowed",
+                "status_code": 421,
+                "advisory_status": _ADVISORY_STATUS,
+                "execution_mode": _EXECUTION_MODE,
+                "execution_gate": "LOCKED",
+                "ai_execution_count": _AI_EXECUTION_COUNT,
+                "broker_api_called": False,
+                "broker_order_id": "NONE",
+                "human_review_required": True,
+            }
+            response = JSONResponse(status_code=421, content=payload)
+            for header, value in security_headers().items():
+                response.headers.setdefault(header, value)
+            return response
+
         # S3 fix: resolve real client IP via the trusted-proxy allowlist so
         # the limiter cannot be bypassed (or starved) by everyone-looks-the-
         # same when uvicorn sits behind nginx/traefik.
@@ -561,19 +586,16 @@ if _FASTAPI_AVAILABLE:
         # MVP_ALLOW_UNAUTH=1 is set explicitly.  Raises StartupSecurityError.
         preflight_auth_or_die()
         if not api_token_required():
-            if is_loopback_bind():
-                _logger.warning(
-                    "MVP_API_TOKEN not set; mutating routes are unprotected. "
-                    "Loopback bind only (API_HOST=%s).",
-                    get_api_host(),
-                )
-            else:
-                _logger.warning(
-                    "MVP_API_TOKEN not set AND MVP_ALLOW_UNAUTH=1 explicitly "
-                    "overrides S1 preflight. NON-LOOPBACK bind is exposed."
-                )
+            # Only reachable with the explicit MVP_ALLOW_UNAUTH=1 override,
+            # and only on a loopback bind (preflight refuses otherwise).
+            _logger.warning(
+                "MVP_ALLOW_UNAUTH=1 override active: MVP_API_TOKEN not set, "
+                "routes are unauthenticated. Loopback bind only (API_HOST=%s). "
+                "Owner-only fail-closed default is BYPASSED.",
+                get_api_host(),
+            )
         else:
-            _logger.info("MVP_API_TOKEN set; mutating routes require Bearer auth.")
+            _logger.info("MVP_API_TOKEN set; all journal routes require Bearer auth.")
         _logger.info(
             "advisory contract enforced: %s / %s / execution_gate=%s / ai_execution_count=%d",
             _ADVISORY_STATUS,
@@ -3149,8 +3171,9 @@ if __name__ == "__main__":  # pragma: no cover
             sys.exit(2)
         if not api_token_required():
             print(
-                "[warning] MVP_API_TOKEN not set; mutating routes are unprotected. "
-                "Loopback-only use recommended.",
+                "[warning] MVP_ALLOW_UNAUTH=1 override active: MVP_API_TOKEN "
+                "not set, routes are unauthenticated (loopback only). "
+                "Generate a token: python scripts/generate_api_token.py --write-env",
                 file=sys.stderr,
             )
         # A4: pin uvicorn to ONE worker.  The in-memory rate-limit and

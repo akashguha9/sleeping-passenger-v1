@@ -53,8 +53,22 @@ def _fresh_app(monkeypatch, **overrides):
 # ---------------------------------------------------------------------------
 
 
-def test_s1_loopback_default_boots_without_token(monkeypatch):
+def test_s1_loopback_without_token_refuses_fail_closed(monkeypatch):
+    """Owner-only hardening: no token means no boot, even on loopback.
+
+    Replaces the previous permissive contract (loopback boots without a
+    token).  First-run setup is scripts/generate_api_token.py; the only
+    sanctioned bypass is the explicit MVP_ALLOW_UNAUTH=1 override.
+    """
     _reset_env(monkeypatch, API_HOST="127.0.0.1")
+    with pytest.raises(rc.StartupSecurityError) as ei:
+        rc.preflight_auth_or_die()
+    assert "MVP_API_TOKEN" in str(ei.value)
+    assert "generate_api_token" in str(ei.value)
+
+
+def test_s1_loopback_with_token_boots(monkeypatch):
+    _reset_env(monkeypatch, API_HOST="127.0.0.1", MVP_API_TOKEN="t0p-s3cret")
     rc.preflight_auth_or_die()  # must not raise
 
 
@@ -70,10 +84,19 @@ def test_s1_non_loopback_with_token_boots(monkeypatch):
     rc.preflight_auth_or_die()
 
 
-def test_s1_explicit_unauth_override_boots(monkeypatch):
-    _reset_env(monkeypatch, API_HOST="0.0.0.0", MVP_ALLOW_UNAUTH="1")
+def test_s1_explicit_unauth_override_boots_loopback_only(monkeypatch):
+    """MVP_ALLOW_UNAUTH=1 is honoured ONLY on a loopback bind."""
+    _reset_env(monkeypatch, API_HOST="127.0.0.1", MVP_ALLOW_UNAUTH="1")
     rc.preflight_auth_or_die()
     assert rc.unauth_override_active() is True
+
+
+def test_s1_unauth_override_never_allows_non_loopback(monkeypatch):
+    """Tightened contract: an unauthenticated non-loopback server is never
+    a supported configuration — the old override escape hatch is gone."""
+    _reset_env(monkeypatch, API_HOST="0.0.0.0", MVP_ALLOW_UNAUTH="1")
+    with pytest.raises(rc.StartupSecurityError):
+        rc.preflight_auth_or_die()
 
 
 # ---------------------------------------------------------------------------

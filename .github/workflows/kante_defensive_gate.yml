@@ -16,12 +16,18 @@ on:
   push:
   pull_request:
 
+# Least-privilege token: the gate only reads repo contents.
+permissions:
+  contents: read
+
 jobs:
   defensive-gate:
     name: defensive gate (release + compliance + hygiene)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"

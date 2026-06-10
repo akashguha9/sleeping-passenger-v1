@@ -4,6 +4,28 @@
 > signals into a SQLite store, surfaces them in a Next.js dashboard, and lets
 > a human reflect, log a manual trade, and reconcile the outcome.
 
+## Ownership & security posture
+
+**Proprietary — All Rights Reserved.** This repository and MVP are owned and
+controlled by **Akash Guha**. No permission is granted to use, copy, modify,
+deploy, commercialize, sublicense, or redistribute this code or any derived
+system without explicit written permission. See
+[PROPRIETARY_NOTICE.md](PROPRIETARY_NOTICE.md) and [LICENSE](LICENSE).
+
+**Owner-only, fail-closed access.** The backend refuses to start without an
+owner `MVP_API_TOKEN`; with it set, every journal read and write requires
+`Authorization: Bearer <token>`. There is no signup, no multi-user mode, and
+no broker execution anywhere. First-run setup:
+
+```powershell
+python scripts/generate_api_token.py --write-env
+```
+
+Details: [OWNER_ACCESS.md](OWNER_ACCESS.md) (access model + GitHub settings
+checklist) and [SECURITY.md](SECURITY.md) (threat model, rotation, incident
+response). Advisory-only: nothing in this repo places orders or constitutes
+investment advice.
+
 ## Python version
 
 This project requires **Python >= 3.12**. The test suite and several runtime
