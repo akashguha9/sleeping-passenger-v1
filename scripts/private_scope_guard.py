@@ -249,6 +249,13 @@ EXPLICIT_IN_SCOPE: frozenset[str] = frozenset({
     # SEC-S7 paid-LLM call budget: per-run + daily ceilings, fail closed.
     # Cost-control guard — no broker, no execution.
     "llm_call_budget.py",
+    # DISC discovery tooling (Track B): symbol mapping, bias guards,
+    # snapshot fetch (operator machine), offline backtest runner.
+    # Advisory tooling only; results firewalled from edge claims.
+    "discovery_symbol_map.py",
+    "discovery_bias_guards.py",
+    "fetch_discovery_snapshot.py",
+    "run_discovery_backtest.py",
 })
 
 # Modules deliberately marked OUT_OF_SCOPE inside ``scripts/``.  This

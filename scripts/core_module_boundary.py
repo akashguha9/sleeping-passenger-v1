@@ -125,6 +125,10 @@ _SUPPORT_EXPLICIT: frozenset[str] = frozenset({
     # paid-LLM call budget. Pure guards — no broker, no execution.
     "untrusted_text_guard",
     "llm_call_budget",
+    # DISC-B1/B2 discovery tooling: explicit exchange->Yahoo mapping and
+    # backtest bias guards. Pure, no network. Results firewalled from edge.
+    "discovery_symbol_map",
+    "discovery_bias_guards",
 })
 
 
