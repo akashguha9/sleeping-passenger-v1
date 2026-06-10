@@ -166,3 +166,7 @@ Prompt_*.txt
 reports/calibration_report_*.md
 reports/model_scorecard_*.md
 reports/decision_memos/
+reports/weight_sanity_report_*
+reports/signal_tournament_*.md
+reports/model_redteam_*.md
+reports/score_change_explanations/

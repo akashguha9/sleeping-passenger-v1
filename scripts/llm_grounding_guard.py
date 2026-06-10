@@ -21,7 +21,10 @@ Rules (test-pinned):
   * contradictory sources reduce confidence multiplicatively;
   * stale sources decay via the freshness factor;
   * every grounded claim records WHICH evidence ids support it, so the
-    final recommendation can say what it stands on.
+    final recommendation can say what it stands on;
+  * (Pass 5) support/contradiction are counted by EFFECTIVE independent
+    source clusters via ``syndication_detector`` — twenty syndicated
+    copies of one wire story count as one confirmation, not twenty.
 
 Advisory-only: this guards inputs to a human-facing score. Nothing here
 (or anywhere) executes trades.
@@ -117,12 +120,21 @@ def ground_claim(
                  "rejected as a probable hallucination",
         )
 
-    support = [e for e in evidence_items
-               if e.get("symbol", "").upper() == symbol
-               and not e.get("contradicts", False)]
-    contra = [e for e in evidence_items
-              if e.get("symbol", "").upper() == symbol
-              and e.get("contradicts", False)]
+    support_raw = [e for e in evidence_items
+                   if e.get("symbol", "").upper() == symbol
+                   and not e.get("contradicts", False)]
+    contra_raw = [e for e in evidence_items
+                  if e.get("symbol", "").upper() == symbol
+                  and e.get("contradicts", False)]
+    # Pass-5 syndication collapse: twenty copies of one wire story are ONE
+    # confirmation. Support/contradiction are counted by effective
+    # independent clusters, never raw copies.
+    try:
+        from scripts.syndication_detector import representatives
+    except ModuleNotFoundError:  # pragma: no cover - script-style env
+        from syndication_detector import representatives  # type: ignore[no-redef]
+    support = representatives(support_raw)
+    contra = representatives(contra_raw)
 
     if _looks_speculative(claim):
         return GroundedClaim(
@@ -164,8 +176,13 @@ def ground_claim(
         freshness_factor=fresh,
         contradiction_penalty=penalty,
         weight=weight,
-        note=f"grounded by {len(support)} evidence item(s)"
-             + (f", contradicted by {len(contra)}" if contra else ""),
+        note=(
+            f"grounded by {len(support)} independent source cluster(s)"
+            + (f" [{len(support_raw)} raw items; "
+               f"{len(support_raw) - len(support)} syndicated copies collapsed]"
+               if len(support_raw) != len(support) else "")
+            + (f", contradicted by {len(contra)} independent cluster(s)" if contra else "")
+        ),
     )
 
 

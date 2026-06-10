@@ -94,7 +94,32 @@ def review_sample(sample: dict) -> dict:
 
 
 def aggregate_review(samples: list[dict]) -> dict:
-    """Aggregate MAE/Bias + calibration drift over many reviews."""
+    """Aggregate MAE/Bias + calibration drift over many reviews.
+
+    Pass 5: samples carrying timestamps are temporal-guard validated
+    first; leaked samples are excluded from the aggregates and reported.
+    Samples without timestamps are reviewed with a warning (production
+    journaling continues; evaluation hygiene is flagged).
+    """
+    try:
+        from scripts.temporal_guard import validate_sample
+    except ModuleNotFoundError:  # pragma: no cover - script-style env
+        from temporal_guard import validate_sample  # type: ignore[no-redef]
+
+    usable, rejected, unstamped = [], [], 0
+    for s in samples:
+        if s.get("t_decision"):
+            verdict = validate_sample(
+                t_decision=s.get("t_decision"), t_outcome=s.get("t_outcome"),
+                t_observed=s.get("t_observed"), t_published=s.get("t_published"),
+            )
+            if not verdict.usable_for_evaluation:
+                rejected.append((s, verdict.reasons))
+                continue
+        else:
+            unstamped += 1
+        usable.append(s)
+    samples = usable
     reviews = [review_sample(s) for s in samples]
     pred_errors = [r["prediction_error"] for r in reviews if "prediction_error" in r]
     abs_errors = [r["absolute_error"] for r in reviews if "absolute_error" in r]
@@ -122,6 +147,14 @@ def aggregate_review(samples: list[dict]) -> dict:
         "top_lessons": sorted(
             {lesson for r in reviews for lesson in r["lessons"]}
         )[:20],
+        "temporal_guard": {
+            "samples_rejected": len(rejected),
+            "samples_unstamped_warning": unstamped,
+            "rejection_reasons": [
+                {"sample": s.get("signal_id", "?"), "reasons": list(r)}
+                for s, r in rejected
+            ][:25],
+        },
         "advisory_only": True,
         "human_review_required": True,
     }

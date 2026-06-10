@@ -51,7 +51,8 @@ EVENT_TYPES = frozenset({
     "journal_write", "journal_delete", "import", "export", "reconciliation",
     "settings_change", "token_rotation", "backup", "restore",
     "auth_failure_burst", "unsafe_override_boot", "lockdown_block",
-    "lockdown_engaged", "dashboard_nonloopback_access", "other",
+    "lockdown_engaged", "dashboard_nonloopback_access", "evidence_recorded",
+    "other",
 })
 
 

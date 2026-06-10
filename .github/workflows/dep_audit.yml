@@ -85,3 +85,5 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: python scripts/audit_github_owner_controls.py
+      - name: Model readiness gate (advisory-only model-quality controls)
+        run: python scripts/run_model_readiness_gate.py

@@ -161,6 +161,40 @@ def calibration_summary(
     return summary
 
 
+def calibration_summary_guarded(samples: list[dict], n_bins: int = 10) -> dict:
+    """Pass 5: temporal-guard-filtered calibration over outcome samples.
+
+    Each sample: {"p", "y", "t_decision", "t_outcome", ...}. Samples that
+    fail t_published<=t_observed<=t_decision<t_outcome are EXCLUDED from
+    the metrics and REPORTED — a calibration number computed on leaked
+    samples is worse than no number.
+    """
+    try:
+        from scripts.temporal_guard import filter_evaluation_samples
+    except ModuleNotFoundError:  # pragma: no cover - script-style env
+        from temporal_guard import filter_evaluation_samples  # type: ignore[no-redef]
+
+    result = filter_evaluation_samples(samples)
+    usable = result["usable"]
+    summary = calibration_summary(
+        [float(s["p"]) for s in usable],
+        [int(s["y"]) for s in usable],
+        n_bins,
+    ) if usable else {"n": 0, "warnings": ["no temporally valid samples"],
+                      "brier": None, "log_loss": None, "ece": None,
+                      "bins": [], "abstention": [], "base_rate": None,
+                      "advisory_only": True}
+    summary["temporal_guard"] = {
+        "samples_in": len(samples),
+        "samples_rejected": len(result["rejected"]),
+        "rejection_reasons": [
+            {"sample": s.get("signal_id", "?"), "reasons": list(r)}
+            for s, r in result["rejected"]
+        ][:25],
+    }
+    return summary
+
+
 def render_report(summary: dict, model_name: str = "advisory-signal") -> str:
     lines = [
         f"# Calibration report — {model_name}",

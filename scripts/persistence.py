@@ -1069,6 +1069,16 @@ def insert_manual_trade(
             vals,
         )
         conn.commit()
+        # Pass 5: journal entries are evidence by default (best-effort).
+        try:
+            from scripts.evidence_bridge import on_manual_trade
+        except ModuleNotFoundError:  # pragma: no cover
+            from evidence_bridge import on_manual_trade  # type: ignore[no-redef]
+        on_manual_trade({
+            "trade_id": trade_id, "ticker": ticker, "side": side,
+            "quantity": quantity, "price": price, "thesis": thesis,
+            "executed_at": executed_at,
+        })
     finally:
         conn.close()
 
@@ -1251,6 +1261,16 @@ def insert_reconciliation(
             ),
         )
         conn.commit()
+        # Pass 5: reconciled outcomes are evidence by default (best-effort).
+        try:
+            from scripts.evidence_bridge import on_reconciliation
+        except ModuleNotFoundError:  # pragma: no cover
+            from evidence_bridge import on_reconciliation  # type: ignore[no-redef]
+        on_reconciliation({
+            "trade_id": trade_id, "outcome_status": outcome_status,
+            "pnl_estimate": pnl_estimate, "actual_price": actual_fill_price,
+            "reconciled_at": reconciled_at,
+        })
     finally:
         conn.close()
 
@@ -1420,6 +1440,13 @@ def insert_imported_outcomes(rows: list[dict[str, Any]], db_path: Path = DB_PATH
             )
             written += cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
         conn.commit()
+        # Pass 5: imported backtest/outcome datasets are evidence by default.
+        if written:
+            try:
+                from scripts.evidence_bridge import on_imported_outcomes
+            except ModuleNotFoundError:  # pragma: no cover
+                from evidence_bridge import on_imported_outcomes  # type: ignore[no-redef]
+            on_imported_outcomes(rows)
     finally:
         conn.close()
     return written
@@ -1491,6 +1518,16 @@ def insert_moltbook_entry(
             ),
         )
         conn.commit()
+        # Pass 5: moltbook post-mortems are evidence by default (best-effort).
+        try:
+            from scripts.evidence_bridge import on_moltbook_entry
+        except ModuleNotFoundError:  # pragma: no cover
+            from evidence_bridge import on_moltbook_entry  # type: ignore[no-redef]
+        on_moltbook_entry({
+            "entry_id": entry_id, "ticker": ticker, "outcome": outcome,
+            "mistake_type": mistake_type, "lesson_learned": lesson_learned,
+            "created_at": logged_at,
+        })
     finally:
         conn.close()
 
@@ -1842,7 +1879,17 @@ def insert_signal_event(
             ),
         )
         conn.commit()
-        return cursor.rowcount > 0
+        inserted = cursor.rowcount > 0
+        if inserted:
+            # Pass 5: every NEW ingested signal event becomes ledger
+            # evidence by default (best-effort bridge; never raises;
+            # duplicates skipped because INSERT OR IGNORE returned False).
+            try:
+                from scripts.evidence_bridge import on_signal_event
+            except ModuleNotFoundError:  # pragma: no cover
+                from evidence_bridge import on_signal_event  # type: ignore[no-redef]
+            on_signal_event(event_id, source_name, raw_payload, fetched_at)
+        return inserted
     finally:
         conn.close()
 

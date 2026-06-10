@@ -253,6 +253,69 @@ def rolling_reliability(
     return round(_clamp01(value), 6)
 
 
+def ground_normalized_reports(
+    normalized: list[dict[str, Any]],
+    *,
+    evidence_items: list[dict[str, Any]],
+    known_symbols: set[str] | None = None,
+) -> dict[str, Any]:
+    """Pass 5: route every normalized LLM report through the grounding guard.
+
+    Each report's ``confidence`` is REPLACED by its grounded confidence —
+    the maximum evidence-backed claim weight across its asset tags — so an
+    unsourced or hallucinated report contributes exactly zero to consensus
+    (consensus weighs ``stance_numeric × confidence``). The raw value is
+    preserved as ``confidence_ungrounded`` for audit, never for scoring.
+    Returns a grounding summary block for the ingestion summary.
+    """
+    try:
+        from scripts.llm_grounding_guard import ground_claim
+    except ModuleNotFoundError:  # pragma: no cover - script-style env
+        from llm_grounding_guard import ground_claim  # type: ignore[no-redef]
+
+    ungrounded_reports = 0
+    rejected_symbols: list[str] = []
+    for r in normalized:
+        claims_text = " ; ".join(r.get("extracted_claims") or []) or (
+            f"{r.get('stance', '?')} stance from {r.get('model_name', '?')}"
+        )
+        per_asset: dict[str, dict[str, Any]] = {}
+        base = _clamp01(float(r.get("confidence") or 0.0))
+        for tag in (r.get("asset_tags") or []):
+            gc = ground_claim(
+                claim=claims_text,
+                symbol=str(tag),
+                base_weight=base,
+                evidence_items=evidence_items,
+                known_symbols=known_symbols,
+            )
+            per_asset[str(tag)] = {
+                "classification": gc.classification,
+                "weight": gc.weight,
+                "evidence_ids": list(gc.supporting_evidence_ids),
+                "contradicting_evidence_ids": list(gc.contradicting_evidence_ids),
+                "note": gc.note,
+            }
+            if gc.classification == "rejected":
+                rejected_symbols.append(str(tag))
+        grounded_conf = max(
+            (a["weight"] for a in per_asset.values()), default=0.0
+        )
+        r["confidence_ungrounded"] = r.get("confidence")
+        r["confidence"] = round(_clamp01(grounded_conf), 6)
+        r["grounding"] = {"per_asset": per_asset, "mode": "grounded"}
+        if grounded_conf == 0.0:
+            ungrounded_reports += 1
+    return {
+        "mode": "grounded",
+        "reports_total": len(normalized),
+        "reports_with_zero_grounded_weight": ungrounded_reports,
+        "rejected_symbols": sorted(set(rejected_symbols)),
+        "rule": "unsourced/speculative/hallucinated claims carry zero "
+                "consensus weight; evidence ids are the audit trail",
+    }
+
+
 def build_ingestion_summary(
     reports: Iterable[dict[str, Any]],
     *,
@@ -260,9 +323,33 @@ def build_ingestion_summary(
     cqs_base: float | None = None,
     write_summary: bool = True,
     summary_path: Path | None = None,
+    evidence_items: list[dict[str, Any]] | None = None,
+    known_symbols: set[str] | None = None,
 ) -> dict[str, Any]:
-    """Top-level entry — normalize, aggregate, optionally persist a summary."""
+    """Top-level entry — normalize, ground (Pass 5), aggregate, persist.
+
+    With ``evidence_items`` provided, every report is routed through the
+    LLM grounding guard BEFORE consensus; without it the summary is
+    loudly marked ``grounding_mode="ungrounded_legacy"``.
+    """
     normalized = [normalize_report(r) for r in reports]
+    grounding_summary: dict[str, Any] = {
+        "mode": "ungrounded_legacy",
+        "rule": "no evidence ledger supplied — confidences are RAW model "
+                "claims; do not let this summary feed scoring",
+    }
+    if evidence_items is not None:
+        grounding_summary = ground_normalized_reports(
+            normalized, evidence_items=evidence_items,
+            known_symbols=known_symbols,
+        )
+    # Pass 5: every ingested LLM report becomes ledger evidence (best-effort).
+    try:
+        from scripts.evidence_bridge import on_ai_report
+    except ModuleNotFoundError:  # pragma: no cover - script-style env
+        from evidence_bridge import on_ai_report  # type: ignore[no-redef]
+    for r in normalized:
+        on_ai_report(r)
     assets = sorted({a for r in normalized for a in (r.get("asset_tags") or [])})
     consensus_by_asset = {
         a: compute_consensus(normalized, asset=a, reliabilities=reliabilities)
@@ -297,6 +384,8 @@ def build_ingestion_summary(
         "cqs_base": cqs_base,
         "cqs_ai_adjusted": cqs_adjustment,
         "normalized_reports": normalized,
+        "grounding": grounding_summary,
+        "grounding_mode": grounding_summary["mode"],
         "ai_ingestion_ok": True,
         "advisory_only": True,
         "human_review_required": True,

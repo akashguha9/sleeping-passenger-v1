@@ -844,6 +844,169 @@
         "tests/test_model_scorecard.py"
       ],
       "known_limits": []
+    },
+    {
+      "name": "evidence_bridge",
+      "version": "1.0-pass5",
+      "owner": "Akash Guha",
+      "purpose": "advisory-only signal evaluation: default evidence-ledger wiring for all production writes",
+      "inputs": [
+        "signal events",
+        "journal writes",
+        "AI reports",
+        "imported outcomes"
+      ],
+      "outputs": [
+        "EvidenceItem + evidence_recorded audit event"
+      ],
+      "uses_llm": false,
+      "uses_market_data": false,
+      "uses_future_data": false,
+      "execution_capable": false,
+      "human_required": true,
+      "tests": [
+        "tests/test_evidence_production_wiring.py"
+      ],
+      "known_limits": [
+        "best-effort: never blocks journaling; inert under pytest unless ledger path set",
+        "naive legacy timestamps recorded as assumed-UTC, confidence capped 0.4"
+      ]
+    },
+    {
+      "name": "syndication_detector",
+      "version": "1.0-pass5",
+      "owner": "Akash Guha",
+      "purpose": "advisory-only signal evaluation: collapse syndicated wire copies into effective independent confirmations",
+      "inputs": [
+        "evidence claims"
+      ],
+      "outputs": [
+        "effective_count, clusters, representatives"
+      ],
+      "uses_llm": false,
+      "uses_market_data": false,
+      "uses_future_data": false,
+      "execution_capable": false,
+      "human_required": true,
+      "tests": [
+        "tests/test_syndication_and_tournament.py"
+      ],
+      "known_limits": [
+        "text-similarity based (Jaccard 3-shingles, tau=0.55); non-text evidence stays independent"
+      ]
+    },
+    {
+      "name": "signal_tournament",
+      "version": "1.0-pass5",
+      "owner": "Akash Guha",
+      "purpose": "advisory-only signal evaluation: compare advisory variants on identical guarded windows, OOS-only ranking",
+      "inputs": [
+        "guarded samples",
+        "variant scorers"
+      ],
+      "outputs": [
+        "shadow-paper ledger rows (NOT_AN_ORDER)",
+        "tournament report"
+      ],
+      "uses_llm": false,
+      "uses_market_data": false,
+      "uses_future_data": false,
+      "execution_capable": false,
+      "human_required": true,
+      "tests": [
+        "tests/test_syndication_and_tournament.py"
+      ],
+      "known_limits": [
+        "needs accumulated real history to rank meaningfully"
+      ]
+    },
+    {
+      "name": "weight_sanity",
+      "version": "1.0-pass5",
+      "owner": "Akash Guha",
+      "purpose": "advisory-only signal evaluation: static + sensitivity checks on production weights; constrained OOS fitting that refuses without data",
+      "inputs": [
+        "production weight sets",
+        "outcome samples"
+      ],
+      "outputs": [
+        "sanity report",
+        "INSUFFICIENT_DATA_FOR_FIT or candidate weights"
+      ],
+      "uses_llm": false,
+      "uses_market_data": false,
+      "uses_future_data": false,
+      "execution_capable": false,
+      "human_required": true,
+      "tests": [
+        "tests/test_weight_sanity_and_explain.py"
+      ],
+      "known_limits": [
+        "fit requires >=100 outcomes; candidates never auto-adopted"
+      ]
+    },
+    {
+      "name": "redteam_model",
+      "version": "1.0-pass5",
+      "owner": "Akash Guha",
+      "purpose": "advisory-only signal evaluation: 20 adversarial cases asserting safe behaviors against live modules",
+      "inputs": [
+        "synthetic adversarial inputs"
+      ],
+      "outputs": [
+        "redteam report; CI gate"
+      ],
+      "uses_llm": false,
+      "uses_market_data": false,
+      "uses_future_data": false,
+      "execution_capable": false,
+      "human_required": true,
+      "tests": [
+        "tests/test_redteam_and_readiness_gate.py"
+      ],
+      "known_limits": []
+    },
+    {
+      "name": "explain_score_change",
+      "version": "1.0-pass5",
+      "owner": "Akash Guha",
+      "purpose": "advisory-only signal evaluation: exact linear (or labeled-approximate) score-movement attribution with evidence diff",
+      "inputs": [
+        "two signal snapshots"
+      ],
+      "outputs": [
+        "explanation report"
+      ],
+      "uses_llm": false,
+      "uses_market_data": false,
+      "uses_future_data": false,
+      "execution_capable": false,
+      "human_required": true,
+      "tests": [
+        "tests/test_weight_sanity_and_explain.py"
+      ],
+      "known_limits": []
+    },
+    {
+      "name": "model_readiness_gate",
+      "version": "1.0-pass5",
+      "owner": "Akash Guha",
+      "purpose": "advisory-only signal evaluation: single-command fail-closed gate over all model-quality controls",
+      "inputs": [
+        "live modules"
+      ],
+      "outputs": [
+        "pass/fail + per-gate detail"
+      ],
+      "uses_llm": false,
+      "uses_market_data": false,
+      "uses_future_data": false,
+      "execution_capable": false,
+      "human_required": true,
+      "tests": [
+        "tests/test_redteam_and_readiness_gate.py"
+      ],
+      "known_limits": []
     }
   ]
 }

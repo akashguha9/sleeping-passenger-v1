@@ -64,6 +64,9 @@ CONTRACT: dict[str, str] = {
     "MVP_AUDIT_LOG_PATH": _PLAIN,
     # evidence ledger location (Pass 4; gitignored; defaults under runtime/)
     "MVP_EVIDENCE_LEDGER_PATH": _PLAIN,
+    # shadow-paper tournament ledger (Pass 5; hypothetical observations
+    # only — order-shaped rows are refused; gitignored under runtime/)
+    "MVP_SHADOW_LEDGER_PATH": _PLAIN,
     # non-loopback exposure hard stop acknowledgements
     "MVP_PUBLIC_MODE": _PLAIN,
     "MVP_TLS_TERMINATED": _PLAIN,

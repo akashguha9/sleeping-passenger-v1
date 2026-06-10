@@ -85,6 +85,50 @@ def _dashboard_token_ok(candidate: str | None) -> bool:
     return verify_api_token(candidate)
 
 
+def _model_quality_summary() -> dict:
+    """Pass-5 model-quality status for the dashboard (pure; testable).
+
+    Never raises; every field degrades to an honest 'unknown'.
+    """
+    summary = {
+        "advisory_label": "ADVISORY_ONLY — human review required; "
+                          "nothing here executes or recommends execution",
+        "evidence_items": None,
+        "evidence_ledger_valid": None,
+        "grounding_rule": "unsourced/hallucinated LLM claims carry zero weight",
+        "temporal_rule": "t_published ≤ t_observed ≤ t_decision < t_outcome "
+                         "enforced for every evaluation",
+        "readiness_gate_cmd": "python scripts/run_model_readiness_gate.py",
+    }
+    try:
+        from scripts import data_quality as _dq
+
+        items = _dq.read_ledger()
+        summary["evidence_items"] = len(items)
+        summary["evidence_ledger_valid"] = not _dq.verify_ledger()
+    except Exception:
+        pass
+    return summary
+
+
+def _render_model_quality_panel(st_mod) -> None:  # pragma: no cover - UI glue
+    info = _model_quality_summary()
+    with st_mod.expander("Model quality (Pass 5 controls)"):
+        st_mod.caption(info["advisory_label"])
+        st_mod.write({
+            "evidence_items_in_ledger": info["evidence_items"],
+            "evidence_ledger_chain_valid": info["evidence_ledger_valid"],
+            "llm_grounding": info["grounding_rule"],
+            "temporal_integrity": info["temporal_rule"],
+            "full_gate": info["readiness_gate_cmd"],
+        })
+        if not info["evidence_items"]:
+            st_mod.warning(
+                "Evidence ledger is empty — signals shown below have no "
+                "recorded evidence trail yet. Treat scores as unsupported."
+            )
+
+
 def render_dashboard(db_path: str | Path = DEFAULT_DB_PATH) -> None:
     """Render the Streamlit dashboard if Streamlit is available."""
     if st is None:
@@ -121,6 +165,7 @@ def render_dashboard(db_path: str | Path = DEFAULT_DB_PATH) -> None:
                 st.info("Enter the owner token to load the dashboard.")
             st.stop()
             return
+    _render_model_quality_panel(st)
     store = SQLiteStore(db_path)
     snapshots = store.read_latest_market_snapshots()
     scores = store.read_latest_signal_scores()

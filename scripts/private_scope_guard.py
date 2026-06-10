@@ -253,6 +253,14 @@ EXPLICIT_IN_SCOPE: frozenset[str] = frozenset({
     "model_calibration.py", "model_scorecard.py", "llm_grounding_guard.py",
     "sensitivity_analysis.py", "generate_decision_memo.py",
     "review_signal_outcomes.py",
+    # Pass-5 production integration + adversarial validation: evidence
+    # bridge, syndication collapse, weight sanity, tournament (shadow
+    # observations only — order-shaped rows are refused by contract),
+    # red-team, score explainer, single-command readiness gate. All
+    # advisory-only; no broker, no execution.
+    "evidence_bridge.py", "syndication_detector.py", "signal_tournament.py",
+    "weight_sanity.py", "redteam_model.py", "explain_score_change.py",
+    "run_model_readiness_gate.py",
 })
 
 # Modules deliberately marked OUT_OF_SCOPE inside ``scripts/``.  This

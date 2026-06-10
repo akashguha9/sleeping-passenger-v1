@@ -128,6 +128,9 @@ _SUPPORT_EXPLICIT: frozenset[str] = frozenset({
     # Pass-4 model-quality tooling (advisory-only analytics).
     "generate_decision_memo", "review_signal_outcomes",
     "model_scorecard", "sensitivity_analysis",
+    # Pass-5 integration/adversarial tooling.
+    "signal_tournament", "weight_sanity", "redteam_model",
+    "explain_score_change",
 })
 
 
