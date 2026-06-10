@@ -30,6 +30,10 @@ class PredictionMarketSignal:
     resolution_date: str
     source: str = "manual_stub"
     confidence: float = 50.0
+    # How market_probability was derived: bid_ask_mid | implied_probability
+    # | last_price | neutral_fallback | manual.
+    derivation_method: str = "manual"
+    missing_inputs: list[str] = field(default_factory=list)
 
     @property
     def probability_edge(self) -> float:

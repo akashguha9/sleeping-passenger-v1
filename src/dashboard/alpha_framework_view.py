@@ -45,11 +45,12 @@ def render_alpha_framework_section(st) -> None:
         }
     )
 
-    st.markdown("**Opportunity score components**")
+    st.markdown("**Opportunity score components (evidence-weighted v2)**")
     opportunity = case_study["opportunity_score"]
     st.write(
         {
             "opportunity_score": round(float(opportunity["opportunity_score"]), 1),
+            "confidence": round(float(opportunity.get("confidence", 0.0)), 1),
             "advisory_verdict": opportunity["advisory_verdict"],
             "missing_inputs": opportunity["missing_inputs"],
         }
@@ -58,6 +59,39 @@ def render_alpha_framework_section(st) -> None:
         [
             {"component": key, "score": round(float(value), 1)}
             for key, value in opportunity["score_components"].items()
+        ]
+    )
+
+    st.markdown("**Trap flags / why not higher / why not lower**")
+    st.write(
+        {
+            "trap_flags": opportunity.get("trap_flags", []) or ["none raised"],
+            "why_not_higher": opportunity.get("why_not_higher", []),
+            "why_not_lower": opportunity.get("why_not_lower", []),
+        }
+    )
+
+    st.markdown("**Value-chain graph (nodes, edges, failure-cost math)**")
+    graph = case_study.get("value_chain_graph", {})
+    st.write(
+        {
+            "node_count": graph.get("node_count", 0),
+            "edge_count": graph.get("edge_count", 0),
+            "graph_valid": graph.get("graph_valid", False),
+            "top_node": graph.get("top_node"),
+        }
+    )
+    st.dataframe(
+        [
+            {
+                "node": row["node_id"],
+                "position": row["position"],
+                "attractiveness": round(float(row["node_attractiveness"]), 1),
+                "failure_cost": row["failure_cost_score"],
+                "replacement_cycle": row["replacement_cycle_score"],
+                "children": ", ".join(row["children"]),
+            }
+            for row in graph.get("nodes", [])
         ]
     )
 
@@ -80,4 +114,45 @@ def render_alpha_framework_section(st) -> None:
             "data_provenance": case_study["data_provenance"],
         }
     )
+
+    st.markdown("**Replay metrics (deterministic demo fixtures)**")
+    from src.alpha.replay import demo_replay_dataset, evaluate_replay
+
+    replay = evaluate_replay(demo_replay_dataset(), k=2)
+    st.write(
+        {
+            "record_count": replay["record_count"],
+            "outcome_counts": replay["outcome_counts"],
+            "precision_at_k": replay["precision_at_k"],
+            "brier_score": replay["brier_score"],
+            "trap_flag_false_positive_rate": replay["trap_flag_false_positive_rate"],
+            "calibration_support": replay["calibration_support"],
+            "data_provenance": "manual_stub demo fixtures, not live outcomes",
+        }
+    )
+    st.caption(replay["disclaimer"])
+
+    st.markdown("**Filing excerpt parser (offline, deterministic)**")
+    filing_text = st.text_area(
+        "Paste a filing excerpt to extract evidence with lineage "
+        "(parsed locally; nothing is stored or transmitted):",
+        value="",
+        key="alpha_filing_excerpt",
+    )
+    if filing_text and filing_text.strip():
+        from src.alpha.filing_parser import parse_filing_text
+
+        parsed = parse_filing_text(filing_text[:100_000], source_type="manual_excerpt")
+        st.write(
+            {
+                "classification": parsed["classification"],
+                "embedded_proof_score": round(float(parsed["embedded_proof_score"]), 1),
+                "substrate_score": round(float(parsed["substrate_score"]), 1),
+                "filing_risk_disclosure_score": round(
+                    float(parsed["filing_risk_disclosure_score"]), 1
+                ),
+            }
+        )
+        st.dataframe(parsed["evidence"] + parsed["risk_disclosures"])
+
     st.caption(case_study["disclaimer"])

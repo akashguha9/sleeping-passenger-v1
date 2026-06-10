@@ -165,18 +165,33 @@ Offline-safe dataclasses define the ingestion contract:
 "manual_stub"` so nothing offline can masquerade as live data. No live
 Kalshi/Polymarket calls are made by this package.
 
+Phase 2 wired the first two contracts to real producers:
+`src/alpha/adapters/prediction_market_adapter.py` converts
+Kalshi/Polymarket snapshots (from the read-only ingestion clients) into
+`PredictionMarketSignal`s with bid/ask-mid probabilities and
+spread-aware confidence, and `src/alpha/filing_parser.py` builds
+`FilingSignal`s from parsed filing excerpts with line-level evidence
+lineage.
+
 ## API surface (read-only, advisory-only)
 
 ```text
 GET  /alpha/case-studies/plumbing
-POST /alpha/score
+POST /alpha/score                          (evidence-weighted v2)
 POST /alpha/value-chain/map
 POST /alpha/signal/decay
+POST /alpha/filing/parse                   (Phase 2)
+POST /alpha/prediction-market/normalize    (Phase 2)
+POST /alpha/replay/evaluate                (Phase 2)
 ```
 
-All four are pure deterministic computations over caller-supplied (or
+All routes are pure deterministic computations over caller-supplied (or
 hardcoded case-study) inputs: no DB writes, no network calls, the same
-advisory stamps and token gating as the rest of the API.
+advisory stamps and token gating as the rest of the API.  See
+`docs/alpha_framework_phase2.md` for the evidence-weighted scoring
+(trap flags, why-not explanations, confidence, calibration gating),
+`docs/alpha_filing_signal_parser.md` for filing evidence lineage, and
+`docs/alpha_replay_and_calibration.md` for the replay harness.
 
 ## Dashboard
 

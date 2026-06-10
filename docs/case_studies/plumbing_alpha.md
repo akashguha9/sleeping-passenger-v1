@@ -76,14 +76,21 @@ Produced by `build_plumbing_case_study()` and served at
 4. **Embedded proof**: `substrate` — plumbing companies are structurally
    built around the theme; the evidence (revenue segments, audited
    financials, shipped product) is the business, not a badge.
-5. **Opportunity score**: aggregated via
-   `(N × P × E × B × H × R_u × F) / (1 + V + R + C + D)`; with neutral
-   narrative/probability inputs the verdict lands at `deep_research` —
-   honest, since narrative velocity and prediction-market confirmation
-   are unpopulated stubs.
+5. **Opportunity score (evidence-weighted v2)**: aggregated via
+   `clamp(positive_core × (1 − penalty_core/100), 0, 100)` with
+   confidence, trap flags, and why-not-higher/lower explanations; the
+   verdict lands at `deep_research` — partly because narrative velocity
+   and prediction-market confirmation are neutral stubs, and partly
+   because the engine caps every verdict at `deep_research` until the
+   replay harness provides outcome-backed `calibration_support`.
 6. **Advisory containers per node**: each node gets an advisory-only
    container recommendation (watchlist / deep_research / …), never an
    instruction to trade.
+7. **Value-chain graph** (`value_chain_graph` key): the same 13 nodes
+   with explicit parents/children, captures-value-from and
+   passes-cost-to edges, plus failure-cost and replacement-cycle math —
+   insurance monetizes failure cost (95/100), plumbers monetize urgency
+   and labour scarcity, raw materials stay commodity-priced.
 
 ## What this case study is for
 

@@ -3166,11 +3166,53 @@ class AlphaScoreRequest(BaseModel):
     """Component scores (0-100) for the opportunity aggregator.
 
     Unknown keys are ignored; missing keys default to neutral 50 and are
-    echoed back in ``missing_inputs``.
+    echoed back in ``missing_inputs``.  Optionally accepts a raw
+    prediction-market quote (to derive probability confirmation) and a
+    filing excerpt (to derive embedded proof and risk disclosures).
     """
 
     components: dict[str, float] = Field(default_factory=dict)
     half_life_days: float | None = None
+    # Optional raw market quote: yes_bid/yes_ask/no_ask/implied_probability/
+    # last_price/source — normalized via the prediction-market adapter.
+    prediction_market: dict | None = None
+    model_probability: float | None = Field(default=None, ge=0.0, le=1.0)
+    # Optional filing excerpt parsed into evidence and risk disclosures.
+    filing_text: str | None = Field(default=None, max_length=100_000)
+    filing_source_type: str = "manual_excerpt"
+    narrative_claims: list[str] = Field(default_factory=list)
+    portfolio_overlap_risk: float | None = Field(default=None, ge=0.0, le=100.0)
+    liquidity_score: float | None = Field(default=None, ge=0.0, le=100.0)
+    # From the replay harness (calibration_support in its report).  Without
+    # it the verdict is capped at deep_research: uncalibrated engines may
+    # research, not size.
+    calibration_support: float | None = Field(default=None, ge=0.0, le=100.0)
+
+
+class AlphaFilingParseRequest(BaseModel):
+    """A filing/document excerpt to parse into evidence with lineage."""
+
+    text: str = Field(max_length=100_000)
+    source_type: str = "manual_excerpt"
+    narrative_claims: list[str] = Field(default_factory=list)
+    company: str = ""
+    ticker: str = ""
+    source_date: str | None = None
+
+
+class AlphaPredictionMarketNormalizeRequest(BaseModel):
+    """Raw market quotes to normalize into prediction-market signals."""
+
+    markets: list[dict] = Field(default_factory=list)
+    model_probability: float | None = Field(default=None, ge=0.0, le=1.0)
+
+
+class AlphaReplayEvaluateRequest(BaseModel):
+    """Historical advisory records to evaluate for signal quality."""
+
+    records: list[dict] = Field(default_factory=list)
+    k: int = Field(default=5, ge=1, le=100)
+    use_demo_fixture: bool = False
 
 
 class AlphaValueChainRequest(BaseModel):
@@ -3208,9 +3250,19 @@ def post_alpha_opportunity_score(
     body: AlphaScoreRequest,
     _auth: None = Depends(require_api_token),
 ) -> dict:
-    """Aggregate framework component scores into one advisory verdict."""
+    """Aggregate framework component scores into one advisory verdict.
+
+    Evidence-weighted (v2): a raw prediction-market quote can populate
+    the probability-confirmation component, and a filing excerpt can
+    populate embedded proof + risk disclosures.  Explicit ``components``
+    always win over derived values.
+    """
     _import_alpha()
-    from src.alpha.opportunity import POSITIVE_COMPONENTS, RISK_COMPONENTS, aggregate_opportunity_score
+    from src.alpha.opportunity import (
+        POSITIVE_COMPONENTS,
+        RISK_COMPONENTS,
+        aggregate_opportunity_score_v2,
+    )
 
     known = set(POSITIVE_COMPONENTS) | set(RISK_COMPONENTS)
     components = {
@@ -3218,10 +3270,64 @@ def post_alpha_opportunity_score(
         for key, value in (body.components or {}).items()
         if key in known
     }
-    result = aggregate_opportunity_score(
-        components, half_life_days=body.half_life_days
+
+    derived: dict = {}
+    probability_edge = None
+    if body.prediction_market is not None:
+        from src.alpha.adapters.prediction_market_adapter import (
+            convert_to_prediction_market_signal,
+            probability_confirmation_score,
+        )
+
+        signal = convert_to_prediction_market_signal(
+            body.prediction_market, body.model_probability
+        )
+        probability_edge = signal.probability_edge
+        derived["prediction_market_signal"] = signal.to_dict()
+        if "probability_confirmation" not in components:
+            components["probability_confirmation"] = probability_confirmation_score(
+                signal.probability_edge, signal.confidence
+            )
+
+    filing_risk = None
+    evidence_quality = None
+    filing_claims_present = False
+    if body.filing_text is not None:
+        from src.alpha.filing_parser import parse_filing_text
+
+        parsed = parse_filing_text(
+            body.filing_text,
+            source_type=body.filing_source_type,
+            narrative_claims=body.narrative_claims or None,
+        )
+        filing_risk = float(parsed["filing_risk_disclosure_score"])
+        evidence_quality = float(parsed["embedded_proof_score"])
+        filing_claims_present = bool(
+            parsed["narrative_claims"] or parsed["marketing_claims"]
+        )
+        if "embedded_proof" not in components:
+            components["embedded_proof"] = float(parsed["embedded_proof_score"])
+        derived["filing_parse"] = {
+            "classification": parsed["classification"],
+            "embedded_proof_score": parsed["embedded_proof_score"],
+            "substrate_score": parsed["substrate_score"],
+            "filing_risk_disclosure_score": parsed["filing_risk_disclosure_score"],
+            "evidence_count": len(parsed["evidence"]),
+            "risk_disclosure_count": len(parsed["risk_disclosures"]),
+        }
+
+    result = aggregate_opportunity_score_v2(
+        components,
+        half_life_days=body.half_life_days,
+        filing_risk_disclosure_score=filing_risk,
+        evidence_quality=evidence_quality,
+        calibration_support=body.calibration_support,
+        probability_edge=probability_edge,
+        liquidity_score=body.liquidity_score,
+        portfolio_overlap_risk=body.portfolio_overlap_risk,
+        filing_claims_present=filing_claims_present,
     )
-    return {**_alpha_advisory_stamp(), **result}
+    return {**_alpha_advisory_stamp(), **result, **derived}
 
 
 @app.post("/alpha/value-chain/map")
@@ -3285,6 +3391,88 @@ def post_alpha_signal_decay(
     )
     if estimate is not None:
         result["half_life_estimate"] = estimate
+    return {**_alpha_advisory_stamp(), **result}
+
+
+@app.post("/alpha/filing/parse")
+def post_alpha_filing_parse(
+    body: AlphaFilingParseRequest,
+    _auth: None = Depends(require_api_token),
+) -> dict:
+    """Parse a filing excerpt into evidence with lineage (deterministic,
+    offline keyword matching — no SEC network calls)."""
+    _import_alpha()
+    from src.alpha import ADVISORY_DISCLAIMER
+    from src.alpha.filing_parser import parse_filing_text, to_filing_signal
+
+    parsed = parse_filing_text(
+        body.text,
+        source_type=body.source_type,
+        narrative_claims=body.narrative_claims or None,
+        source_date=body.source_date,
+    )
+    response = {**_alpha_advisory_stamp(), **parsed, "disclaimer": ADVISORY_DISCLAIMER}
+    if body.company or body.ticker:
+        response["filing_signal"] = to_filing_signal(
+            parsed,
+            company=body.company,
+            ticker=body.ticker,
+            source_date=body.source_date or "",
+        ).to_dict()
+    return response
+
+
+@app.post("/alpha/prediction-market/normalize")
+def post_alpha_prediction_market_normalize(
+    body: AlphaPredictionMarketNormalizeRequest,
+    _auth: None = Depends(require_api_token),
+) -> dict:
+    """Normalize raw market quotes into prediction-market signals.
+
+    Pure computation over caller-supplied quotes — fetching stays in the
+    read-only ingestion clients.
+    """
+    _import_alpha()
+    from src.alpha import ADVISORY_DISCLAIMER
+    from src.alpha.adapters.prediction_market_adapter import (
+        convert_to_prediction_market_signal,
+    )
+
+    markets = body.markets or []
+    if len(markets) > 200:
+        raise HTTPException(status_code=422, detail="at most 200 markets per call")
+    signals = [
+        convert_to_prediction_market_signal(raw, body.model_probability).to_dict()
+        for raw in markets
+    ]
+    return {
+        **_alpha_advisory_stamp(),
+        "signal_count": len(signals),
+        "signals": signals,
+        "disclaimer": ADVISORY_DISCLAIMER,
+    }
+
+
+@app.post("/alpha/replay/evaluate")
+def post_alpha_replay_evaluate(
+    body: AlphaReplayEvaluateRequest,
+    _auth: None = Depends(require_api_token),
+) -> dict:
+    """Evaluate historical advisory records for signal quality.
+
+    Measures calibration and hit rates of past advisory outputs — never
+    investment performance.  ``use_demo_fixture`` substitutes the
+    deterministic demo dataset when no records are supplied.
+    """
+    _import_alpha()
+    from src.alpha.replay import demo_replay_dataset, evaluate_replay
+
+    records = body.records or []
+    if len(records) > 1000:
+        raise HTTPException(status_code=422, detail="at most 1000 records per call")
+    if not records and body.use_demo_fixture:
+        records = demo_replay_dataset()
+    result = evaluate_replay(records, k=body.k)
     return {**_alpha_advisory_stamp(), **result}
 
 

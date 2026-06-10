@@ -19,9 +19,10 @@ from src.alpha.casino_food_chain import classify_casino_food_chain
 from src.alpha.container import recommend_container
 from src.alpha.embedded_proof import detect_embedded_proof
 from src.alpha.half_life import estimate_half_life
-from src.alpha.opportunity import aggregate_opportunity_score
+from src.alpha.opportunity import aggregate_opportunity_score_v2
 from src.alpha.residual_utility import score_residual_utility
 from src.alpha.value_chain import ValueChainNode, map_value_chain
+from src.alpha.value_chain_graph import build_plumbing_value_chain_graph
 
 THEME = "residential plumbing and water access"
 
@@ -250,7 +251,7 @@ def build_plumbing_case_study() -> dict[str, object]:
         structurally_theme_native=True,
     )
 
-    opportunity = aggregate_opportunity_score(
+    opportunity = aggregate_opportunity_score_v2(
         {
             "narrative_velocity": 35.0,
             "probability_confirmation": 50.0,
@@ -265,6 +266,11 @@ def build_plumbing_case_study() -> dict[str, object]:
             "casino_distortion": 10.0,
         },
         half_life_days=float(half_life["half_life_days"]),
+        # Illustrative: a mature plumbing 10-K carries routine risk-factor
+        # disclosures but no overhang-level findings.
+        filing_risk_disclosure_score=30.0,
+        evidence_quality=proof["embedded_proof_score"],
+        source_quality=60.0,
     )
 
     node_verdicts = []
@@ -295,6 +301,7 @@ def build_plumbing_case_study() -> dict[str, object]:
             "is the value-chain node that captures durable profit."
         ),
         "value_chain": chain,
+        "value_chain_graph": build_plumbing_value_chain_graph(),
         "casino_food_chain": layer,
         "half_life": half_life,
         "residual_utility": residual,
