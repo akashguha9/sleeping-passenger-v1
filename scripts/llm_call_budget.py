@@ -57,6 +57,15 @@ def _state_path() -> Path:
     override = os.environ.get("MVP_LLM_BUDGET_STATE_PATH", "").strip()
     if override:
         return Path(override)
+    # S4 hermeticity fix: under pytest (without an explicit override) the
+    # counter lives in a per-process temp file.  Repeated suite runs were
+    # consuming the OPERATOR'S real daily ceiling (200/200 observed),
+    # which then failed adapter tests and would have blocked real runs —
+    # the suite must never share spend-state with production.
+    if os.environ.get("PYTEST_CURRENT_TEST"):
+        import tempfile
+
+        return Path(tempfile.gettempdir()) / f"mvp_llm_budget_{os.getpid()}.json"
     # Lives under diagnostics_cache/ (operational state), NOT the runtime
     # root — artifact-coherence scans runtime/*.json for pipeline
     # provenance and would flag a bare counter file as legacy-unmanaged.
