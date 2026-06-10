@@ -41,6 +41,16 @@ services:
       # unauthenticated non-loopback server is never bootable (the
       # MVP_ALLOW_UNAUTH override is honoured on loopback binds only).
       MVP_API_TOKEN: "${MVP_API_TOKEN:-}"
+      # Preferred hash mode (raw token never on disk in the container env).
+      MVP_API_TOKEN_HASH: "${MVP_API_TOKEN_HASH:-}"
+      # Exposure hard stop: the container binds 0.0.0.0 internally, but by
+      # default the published port maps to host loopback (HOST_BIND above).
+      # If you override HOST_BIND=0.0.0.0 this hint stops acknowledging the
+      # exposure and the backend refuses to boot until you set
+      # MVP_TLS_TERMINATED=1 or the explicit MVP_UNSAFE_LAN_HTTP escape hatch.
+      MVP_PUBLISHED_BIND: "${HOST_BIND:-127.0.0.1}"
+      MVP_TLS_TERMINATED: "${MVP_TLS_TERMINATED:-0}"
+      MVP_UNSAFE_LAN_HTTP: "${MVP_UNSAFE_LAN_HTTP:-}"
       # Explicit opt-out for one-off load tests on private networks.
       # Loud: /health/full surfaces unauth_override_active=true.
       MVP_ALLOW_UNAUTH: "${MVP_ALLOW_UNAUTH:-0}"

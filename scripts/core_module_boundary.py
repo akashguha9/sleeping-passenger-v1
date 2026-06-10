@@ -104,6 +104,8 @@ _SUPPORT_PREFIXES: tuple[str, ...] = (
     "build_", "run_", "apply_", "backfill_", "seed_", "import_", "export_",
     "fetch_", "update_", "verify_", "check_", "refresh_", "quarantine_",
     "repair_", "cleanup_", "bulk_", "sync_", "prewarm_", "milk_test_",
+    # Pass-2 security policy audits (read-only repo checks; CI gates).
+    "audit_",
 )
 # Explicit SUPPORT modules that don't match a naming family.
 _SUPPORT_EXPLICIT: frozenset[str] = frozenset({

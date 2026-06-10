@@ -43,12 +43,19 @@ akashguha@outlook.com. Do not open public issues for security findings.
 
 ## Secret rotation
 
-If `MVP_API_TOKEN` may have leaked:
+If the owner token may have leaked:
 
 ```powershell
-python scripts/generate_api_token.py --write-env   # new token
-# restart the backend, re-paste the token in the frontend panel
+python scripts/generate_api_token.py --rotate --write-env   # new token, old one dies
+# restart the backend, re-paste the new token in the frontend panel
 ```
+
+Preferred storage is hash mode: only `MVP_API_TOKEN_HASH` (SHA-256) sits
+in `.env`; the raw token is printed once at generation and is otherwise
+unrecoverable — if lost, rotate. Verify a candidate token without
+exposing it: `python scripts/generate_api_token.py --verify-token`
+(reads from stdin, prints MATCH / NO MATCH). The legacy plaintext
+`MVP_API_TOKEN` still authenticates but logs a startup warning.
 
 If a provider API key in `.env` may have leaked (EDINET, OpenDART,
 Etherscan, xAI, NewsAPI, …): revoke/rotate it in that provider's console,
@@ -70,6 +77,45 @@ settings, then review the repo audit log.
    (see docs/LOCAL_RECOVERY_RUNBOOK.md).
 6. Re-run `python -m pytest tests -q` and `python scripts/repo_hygiene_gate.py`
    before resuming.
+
+## Local data protection (honest scope)
+
+API auth protects the network surface only. It does **not** protect
+against malware or any process running as your own OS user — those can
+read `runtime/mvp_local.db` and `.env` directly. For meaningful local
+protection:
+
+- use a password-protected Windows account and **BitLocker / device
+  encryption**;
+- run `scripts/harden_local_owner_files.ps1` (dry-run by default,
+  `-Apply` to set NTFS ACLs) to restrict `.env`, `runtime/`, `logs/`,
+  and local backups to your user;
+- never let `.env` or the SQLite DB sync into public cloud folders
+  (OneDrive/Dropbox/Drive) unencrypted — the hardening script warns when
+  the repo path looks cloud-synced;
+- `scripts/audit_local_data_protection.py` (CI-enforced) fails if a
+  secret, DB, or backup ever becomes git-tracked or world-readable.
+
+At-rest DB encryption (SQLCipher or application-level) is **future
+work**: the repo has no key-management model today, and bolting one on
+without it would be security theater. Tracked in the register below.
+
+## LAN / public exposure hard stop
+
+Binding beyond loopback (or `MVP_PUBLIC_MODE=1`) requires the owner token
+**plus** an explicit transport-security acknowledgement, otherwise the
+server refuses to boot: `MVP_TLS_TERMINATED=1` (TLS proxy/tunnel in
+front), `MVP_TRUSTED_PROXIES=<ips>` (declared reverse proxy),
+`MVP_PUBLISHED_BIND=127.0.0.1` (container port mapped to host loopback),
+or the deliberately ugly last resort
+`MVP_UNSAFE_LAN_HTTP=I_UNDERSTAND_THIS_EXPOSES_MY_TOKEN`.
+
+## Dependency advisory register
+
+Unresolved (CI-tolerated) advisories are tracked with mandatory review
+dates in `docs/DEPENDENCY_ADVISORY_REGISTER.md`;
+`scripts/audit_dependency_advisory_register.py` fails CI when an entry
+goes stale. High/Critical advisories are never "accepted".
 
 ## Backups & retention
 

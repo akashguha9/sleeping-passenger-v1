@@ -234,6 +234,10 @@ EXPLICIT_IN_SCOPE: frozenset[str] = frozenset({
     # operator_permission_guard.  In-scope record-keeping maintenance — it
     # never touches signal_events, brokers, or execution.
     "reset_local_logs.py",
+    # Pass-2 local data protection: NTFS ACL hardening for .env / runtime /
+    # logs / backups. Dry-run by default (-Apply to change ACLs), never
+    # deletes data, never touches signal_events, brokers, or execution.
+    "harden_local_owner_files.ps1",
 })
 
 # Modules deliberately marked OUT_OF_SCOPE inside ``scripts/``.  This

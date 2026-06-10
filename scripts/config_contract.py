@@ -52,8 +52,15 @@ CONTRACT: dict[str, str] = {
     "ALLOWED_ORIGINS": _PLAIN,
     "MVP_ENVIRONMENT": _PLAIN,
     "MVP_DB_PATH": _REQUIRED,
-    # owner token (required at server boot — preflight fails closed)
+    # owner auth (required at server boot — preflight fails closed).
+    # Hash mode preferred; plaintext is a warned legacy fallback.
+    "MVP_API_TOKEN_HASH": _SECRET,
     "MVP_API_TOKEN": _SECRET,
+    # non-loopback exposure hard stop acknowledgements
+    "MVP_PUBLIC_MODE": _PLAIN,
+    "MVP_TLS_TERMINATED": _PLAIN,
+    "MVP_PUBLISHED_BIND": _PLAIN,
+    "MVP_UNSAFE_LAN_HTTP": _PLAIN,
     # host-header allowlist (DNS-rebinding defense; optional override)
     "MVP_ALLOWED_HOSTS": _PLAIN,
     # source secrets (optional)

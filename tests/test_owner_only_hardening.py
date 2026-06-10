@@ -23,10 +23,16 @@ from scripts import generate_api_token as gen
 def _reset_env(monkeypatch, **overrides):
     for var in (
         "MVP_API_TOKEN",
+        "MVP_API_TOKEN_HASH",
         "API_HOST",
         "MVP_ALLOW_UNAUTH",
         "MVP_ALLOWED_HOSTS",
         "ALLOWED_ORIGINS",
+        "MVP_PUBLIC_MODE",
+        "MVP_TLS_TERMINATED",
+        "MVP_PUBLISHED_BIND",
+        "MVP_UNSAFE_LAN_HTTP",
+        "MVP_TRUSTED_PROXIES",
     ):
         monkeypatch.delenv(var, raising=False)
     for k, v in overrides.items():
@@ -100,7 +106,7 @@ def test_api_requests_with_foreign_host_header_rejected(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# First-run token setup helper
+# Token lifecycle: generation, hash storage, verification, rotation
 # ---------------------------------------------------------------------------
 
 
@@ -111,24 +117,148 @@ def test_generated_tokens_are_strong_and_unique():
         assert len(token) >= 40  # 32 bytes urlsafe-encoded
 
 
-def test_write_env_creates_and_updates_only_token_line(tmp_path):
+def test_hash_token_is_sha256_hex():
+    import hashlib
+
+    raw = "sample-token-abc"
+    assert gen.hash_token(raw) == hashlib.sha256(raw.encode()).hexdigest()
+    assert len(gen.hash_token(raw)) == 64
+
+
+def test_verify_invariant_only_matching_token_verifies():
+    """∀ T_wrong ≠ T_raw: Verify(T_wrong, H_env) = False; Verify(T_raw, H_env) = True."""
+    raw = gen.generate_token()
+    h = gen.hash_token(raw)
+    assert gen.verify_candidate(raw, h) is True
+    for wrong in (raw + "x", raw[:-1], raw.upper(), gen.generate_token(), "", "Bearer"):
+        if wrong == raw:
+            continue
+        assert gen.verify_candidate(wrong, h) is False, wrong
+
+
+def test_runtime_verify_api_token_hash_mode(monkeypatch):
+    raw = gen.generate_token()
+    _reset_env(monkeypatch, MVP_API_TOKEN_HASH=gen.hash_token(raw))
+    assert rc.verify_api_token(raw) is True
+    assert rc.verify_api_token(raw + "x") is False
+    assert rc.verify_api_token(None) is False
+    assert rc.api_token_required() is True
+    assert rc.plaintext_token_fallback_active() is False
+
+
+def test_runtime_verify_api_token_plaintext_fallback(monkeypatch):
+    _reset_env(monkeypatch, MVP_API_TOKEN="legacy-plain-token")
+    assert rc.verify_api_token("legacy-plain-token") is True
+    assert rc.verify_api_token("wrong") is False
+    assert rc.plaintext_token_fallback_active() is True
+
+
+def test_hash_mode_wins_when_both_configured(monkeypatch):
+    raw = gen.generate_token()
+    _reset_env(
+        monkeypatch,
+        MVP_API_TOKEN_HASH=gen.hash_token(raw),
+        MVP_API_TOKEN="some-other-plaintext",
+    )
+    assert rc.verify_api_token(raw) is True
+    # The plaintext token no longer authenticates once hash mode is on.
+    assert rc.verify_api_token("some-other-plaintext") is False
+    assert rc.plaintext_token_fallback_active() is False
+
+
+def test_malformed_hash_fails_closed_at_preflight(monkeypatch):
+    _reset_env(monkeypatch, MVP_API_TOKEN_HASH="not-a-hash", API_HOST="127.0.0.1")
+    assert rc.api_token_hash_malformed() is True
+    # A malformed hash must never verify anything…
+    assert rc.verify_api_token("anything") is False
+    # …and must refuse boot rather than silently degrade.
+    with pytest.raises(rc.StartupSecurityError):
+        rc.preflight_auth_or_die()
+
+
+def test_missing_token_and_hash_fails_closed(monkeypatch):
+    _reset_env(monkeypatch, API_HOST="127.0.0.1")
+    assert rc.verify_api_token("anything") is False
+    with pytest.raises(rc.StartupSecurityError):
+        rc.preflight_auth_or_die()
+
+
+def test_write_env_hash_stores_only_hash_and_drops_plaintext(tmp_path):
     env = tmp_path / ".env"
-    assert gen.write_env("tok-one", env) == "created"
-    assert env.read_text(encoding="utf-8") == "MVP_API_TOKEN=tok-one\n"
+    raw = gen.generate_token()
+    h = gen.hash_token(raw)
+    assert gen.write_env_hash(h, env) == "created"
+    assert env.read_text(encoding="utf-8") == f"MVP_API_TOKEN_HASH={h}\n"
 
     env.write_text(
-        "API_HOST=127.0.0.1\nMVP_API_TOKEN=old\n# comment\nAPI_PORT=8000\n",
+        "API_HOST=127.0.0.1\nMVP_API_TOKEN=old-plaintext\n# comment\n"
+        f"MVP_API_TOKEN_HASH={'0' * 64}\nAPI_PORT=8000\n",
         encoding="utf-8",
     )
-    assert gen.write_env("tok-two", env) == "updated"
+    assert gen.write_env_hash(h, env) == "updated"
     text = env.read_text(encoding="utf-8")
-    assert "MVP_API_TOKEN=tok-two" in text
-    assert "old" not in text
+    assert f"MVP_API_TOKEN_HASH={h}" in text
+    assert "old-plaintext" not in text  # legacy plaintext line removed
+    assert "0" * 64 not in text  # old hash replaced
     assert "API_HOST=127.0.0.1" in text and "# comment" in text
+    # The raw token never lands in the file — only its hash.
+    assert raw not in text
 
-    env.write_text("API_HOST=127.0.0.1\n", encoding="utf-8")
-    assert gen.write_env("tok-three", env) == "appended"
-    assert env.read_text(encoding="utf-8").endswith("MVP_API_TOKEN=tok-three\n")
+
+def test_rotation_invalidates_old_token(tmp_path, monkeypatch):
+    env = tmp_path / ".env"
+    old_raw = gen.generate_token()
+    gen.write_env_hash(gen.hash_token(old_raw), env)
+    new_raw = gen.generate_token()
+    gen.write_env_hash(gen.hash_token(new_raw), env)
+
+    stored = gen.read_env_hash(env)
+    assert stored == gen.hash_token(new_raw)
+    assert gen.verify_candidate(new_raw, stored) is True
+    assert gen.verify_candidate(old_raw, stored) is False
+
+    _reset_env(monkeypatch, MVP_API_TOKEN_HASH=stored)
+    assert rc.verify_api_token(new_raw) is True
+    assert rc.verify_api_token(old_raw) is False
+
+
+def test_generator_cli_never_prints_raw_token_after_generation(tmp_path, monkeypatch, capsys):
+    """--write-env prints the raw token exactly once (stdout line 1); the
+    stderr feedback and the .env file contain only the hash."""
+    monkeypatch.setattr(gen, "_ENV_PATH", tmp_path / ".env")
+    assert gen.main(["--write-env"]) == 0
+    captured = capsys.readouterr()
+    raw = captured.out.splitlines()[0].strip()
+    assert len(raw) >= 40
+    assert raw not in captured.err
+    env_text = (tmp_path / ".env").read_text(encoding="utf-8")
+    assert raw not in env_text
+    assert gen.hash_token(raw) in env_text
+
+
+def test_api_401_then_200_with_hash_mode(monkeypatch):
+    fastapi = pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+
+    raw = gen.generate_token()
+    _reset_env(monkeypatch, MVP_API_TOKEN_HASH=gen.hash_token(raw))
+    import scripts.api_server as srv
+
+    importlib.reload(srv)
+    client = TestClient(srv.app)
+    assert client.get("/manual-trades").status_code == 401
+    assert (
+        client.get(
+            "/manual-trades", headers={"Authorization": f"Bearer {raw}"}
+        ).status_code
+        == 200
+    )
+    assert (
+        client.get(
+            "/manual-trades", headers={"Authorization": "Bearer wrong"}
+        ).status_code
+        == 401
+    )
 
 
 # ---------------------------------------------------------------------------

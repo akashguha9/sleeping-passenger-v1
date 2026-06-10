@@ -1,12 +1,22 @@
 """Streamlit dashboard for the read-only signal refinery MVP.
 
-U3 fix (PARTIAL): Streamlit has no built-in auth; the only safe deployment
-is loopback-only.  ``render_dashboard`` now enforces that posture: it
-refuses to render when Streamlit's listen address is non-loopback unless
-``MVP_DASHBOARD_ALLOW_NONLOOPBACK=1`` is set (the same explicit-override
-pattern S1 uses for the API).  Reads carry no PII beyond what's already
-in the SQLite store, but operator reflections / mistake tags are part of
-that store, so the refusal matters.
+U3 fix + Pass-2 owner gate: Streamlit has no built-in auth; the only safe
+deployment is loopback-only.  ``render_dashboard`` enforces that posture:
+
+* Non-loopback bind without ``MVP_DASHBOARD_ALLOW_NONLOOPBACK=1`` →
+  refuses to render (same explicit-override pattern S1 uses for the API).
+* Non-loopback bind WITH the override → an owner-token gate is now
+  REQUIRED: the operator must enter the same token that gates the API
+  (verified through ``runtime_config.verify_api_token`` — hash mode
+  preferred, plaintext legacy fallback).  Previously the override
+  rendered with no auth at all.
+* Loopback (default) → renders without a token: any process running as
+  the same OS user can already read the SQLite file directly, so a token
+  prompt adds friction, not security.  Force the prompt anyway with
+  ``MVP_DASHBOARD_REQUIRE_TOKEN=1``.
+
+The dashboard never exposes exports or log files; it reads the local
+SQLite store only.  Advisory-only: nothing here executes trades.
 """
 
 from __future__ import annotations
@@ -43,6 +53,38 @@ def _dashboard_unauth_override() -> bool:
     )
 
 
+def _dashboard_requires_token() -> bool:
+    """Owner-token gate policy.
+
+    Required on any non-loopback bind (the override only unlocks the
+    bind, never the data), or when the operator opts in explicitly via
+    ``MVP_DASHBOARD_REQUIRE_TOKEN=1``.
+    """
+    if not _dashboard_bind_is_loopback():
+        return True
+    return os.environ.get("MVP_DASHBOARD_REQUIRE_TOKEN", "").strip() in (
+        "1",
+        "true",
+        "yes",
+    )
+
+
+def _dashboard_token_ok(candidate: str | None) -> bool:
+    """Verify a candidate owner token with the API's own logic.
+
+    Single verification path for the whole MVP: SHA-256 hash mode
+    (``MVP_API_TOKEN_HASH``) preferred, legacy plaintext fallback,
+    constant-time comparison.  No token configured → False (fail closed:
+    a token-gated dashboard with nothing to verify against must not
+    render).
+    """
+    try:
+        from scripts.runtime_config import verify_api_token
+    except ModuleNotFoundError:  # pragma: no cover - script-style env
+        from runtime_config import verify_api_token  # type: ignore[no-redef]
+    return verify_api_token(candidate)
+
+
 def render_dashboard(db_path: str | Path = DEFAULT_DB_PATH) -> None:
     """Render the Streamlit dashboard if Streamlit is available."""
     if st is None:
@@ -51,11 +93,28 @@ def render_dashboard(db_path: str | Path = DEFAULT_DB_PATH) -> None:
         st.error(
             "Refusing to render: Streamlit dashboard is bound to a non-"
             "loopback address but MVP_DASHBOARD_ALLOW_NONLOOPBACK is not "
-            "set.  This dashboard has no auth; expose it only to "
-            "localhost.  Set STREAMLIT_SERVER_ADDRESS=127.0.0.1 (or the "
-            "explicit override env var)."
+            "set.  Expose it only to localhost.  Set "
+            "STREAMLIT_SERVER_ADDRESS=127.0.0.1 (or the explicit override "
+            "env var)."
         )
         return
+    if _dashboard_requires_token():
+        candidate = st.text_input(
+            "Owner API token (required beyond loopback)",
+            type="password",
+            help=(
+                "Same token that gates the journal API. Verified against "
+                "MVP_API_TOKEN_HASH (or the legacy plaintext token). "
+                "It never authorizes trade execution."
+            ),
+        )
+        if not _dashboard_token_ok(candidate):
+            if candidate:
+                st.error("Invalid owner token.")
+            else:
+                st.info("Enter the owner token to load the dashboard.")
+            st.stop()
+            return
     store = SQLiteStore(db_path)
     snapshots = store.read_latest_market_snapshots()
     scores = store.read_latest_signal_scores()

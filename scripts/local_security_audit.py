@@ -302,8 +302,10 @@ def run_security_audit(
                name="no_db_files_tracked", status="WARN",
                detail="could not verify (git unavailable)")
 
-    # 5. MVP_API_TOKEN: configured / missing / placeholder.  NEVER PRINT.
-    token_raw = str(env_map.get("MVP_API_TOKEN", "") or "")
+    # 5. Owner auth: hash mode preferred, plaintext legacy.  NEVER PRINT.
+    token_raw = str(
+        env_map.get("MVP_API_TOKEN_HASH", "") or env_map.get("MVP_API_TOKEN", "") or ""
+    )
     if not token_raw.strip():
         _check(check_results, failed, warnings,
                name="api_token_configured", status="WARN",

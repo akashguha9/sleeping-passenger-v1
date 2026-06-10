@@ -144,6 +144,7 @@ try:
         get_trusted_proxies,
         host_header_allowed,
         is_loopback_bind,
+        plaintext_token_fallback_active,
         preflight_auth_or_die,
         rate_limit_expensive_max_requests,
         rate_limit_enabled,
@@ -153,6 +154,7 @@ try:
         safe_db_display_path,
         security_headers,
         unauth_override_active,
+        verify_api_token,
     )
 except ModuleNotFoundError:  # pragma: no cover
     from runtime_config import (  # type: ignore[no-redef]
@@ -171,6 +173,7 @@ except ModuleNotFoundError:  # pragma: no cover
         get_trusted_proxies,
         host_header_allowed,
         is_loopback_bind,
+        plaintext_token_fallback_active,
         preflight_auth_or_die,
         rate_limit_expensive_max_requests,
         rate_limit_enabled,
@@ -180,6 +183,7 @@ except ModuleNotFoundError:  # pragma: no cover
         safe_db_display_path,
         security_headers,
         unauth_override_active,
+        verify_api_token,
     )
 
 # Read-only diagnostics service — the single backend source for the cockpit.
@@ -594,8 +598,17 @@ if _FASTAPI_AVAILABLE:
                 "Owner-only fail-closed default is BYPASSED.",
                 get_api_host(),
             )
+        elif plaintext_token_fallback_active():
+            _logger.warning(
+                "Legacy PLAINTEXT MVP_API_TOKEN in use; all journal routes "
+                "require Bearer auth, but the raw token sits in your env/.env. "
+                "Prefer hash mode: python scripts/generate_api_token.py "
+                "--rotate --write-env (stores only MVP_API_TOKEN_HASH)."
+            )
         else:
-            _logger.info("MVP_API_TOKEN set; all journal routes require Bearer auth.")
+            _logger.info(
+                "MVP_API_TOKEN_HASH set; all journal routes require Bearer auth."
+            )
         _logger.info(
             "advisory contract enforced: %s / %s / execution_gate=%s / ai_execution_count=%d",
             _ADVISORY_STATUS,
@@ -665,18 +678,18 @@ if _FASTAPI_AVAILABLE:
     def _check_bearer_token(authorization: str | None) -> None:
         """Constant-time bearer-token verification.
 
-        S2 fix: use ``hmac.compare_digest`` instead of ``!=`` so the
-        comparison does not leak length/equality timing.
+        Delegates to ``runtime_config.verify_api_token`` which prefers the
+        SHA-256 hash mode (``MVP_API_TOKEN_HASH``) and falls back to the
+        legacy plaintext ``MVP_API_TOKEN``; both paths use
+        ``hmac.compare_digest`` so the comparison does not leak
+        length/equality timing.
         """
-        import hmac
-
-        expected = get_api_token()
-        if not expected:
+        if not api_token_required():
             return None
         if not authorization or not authorization.lower().startswith("bearer "):
             raise HTTPException(status_code=401, detail="missing bearer token")
         provided = authorization.split(" ", 1)[1].strip()
-        if not hmac.compare_digest(provided.encode("utf-8"), expected.encode("utf-8")):
+        if not verify_api_token(provided):
             raise HTTPException(status_code=401, detail="invalid bearer token")
         return None
 
@@ -698,8 +711,7 @@ if _FASTAPI_AVAILABLE:
         When a token IS set, every read endpoint protected by this
         dependency requires ``Authorization: Bearer <token>``.
         """
-        expected = get_api_token()
-        if expected:
+        if api_token_required():
             return _check_bearer_token(authorization)
         # No token configured: only allowed for loopback binds (preflight
         # already refused non-loopback boot without override).  We still
