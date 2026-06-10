@@ -390,6 +390,17 @@ def _journal_write_failure_count() -> int:
     return total
 
 
+def _registry_token_count_safe() -> int:
+    try:
+        try:
+            from scripts.token_registry import registry_token_count
+        except ModuleNotFoundError:  # pragma: no cover - script fallback
+            from token_registry import registry_token_count  # type: ignore
+        return int(registry_token_count())
+    except Exception:  # pragma: no cover - health must never 500 on this
+        return 0
+
+
 def _alert_delivery_failures() -> int:
     try:
         try:
@@ -973,27 +984,101 @@ if _FASTAPI_AVAILABLE:
 
 
 
-    def _check_bearer_token(authorization: str | None) -> None:
-        """Constant-time bearer-token verification.
+    def _stamped_auth_error(status_code: int, message: str) -> "HTTPException":
+        return HTTPException(
+            status_code=status_code,
+            detail={
+                "error": message,
+                "advisory_status": _ADVISORY_STATUS,
+                "execution_gate": "LOCKED",
+                "broker_api_called": False,
+                "ai_execution_count": _AI_EXECUTION_COUNT,
+            },
+        )
 
-        S2 fix: use ``hmac.compare_digest`` instead of ``!=`` so the
-        comparison does not leak length/equality timing.
+    def _resolve_role(authorization: str | None) -> str | None:
+        """S4-A3: resolve the caller's role from the token registry or the
+        legacy single token (bootstrap ADMIN, flagged deprecated in health).
+
+        Returns the role string, or None when no credential was presented.
+        Raises a stamped 401 on a presented-but-invalid credential.
+        Tokens are never logged.
         """
         import hmac
 
-        expected = get_api_token()
-        if not expected:
+        if not authorization:
             return None
-        if not authorization or not authorization.lower().startswith("bearer "):
-            raise HTTPException(status_code=401, detail="missing bearer token")
+        if not authorization.lower().startswith("bearer "):
+            raise _stamped_auth_error(401, "missing bearer token")
         provided = authorization.split(" ", 1)[1].strip()
-        if not hmac.compare_digest(provided.encode("utf-8"), expected.encode("utf-8")):
-            raise HTTPException(status_code=401, detail="invalid bearer token")
+        # Registry tokens carry the mvp_<id>_ prefix → single timing-safe
+        # lookup in token_registry.
+        if provided.startswith("mvp_"):
+            try:
+                try:
+                    from scripts.token_registry import verify_token
+                except ModuleNotFoundError:  # pragma: no cover - script fallback
+                    from token_registry import verify_token  # type: ignore
+                verdict = verify_token(provided)
+            except Exception:
+                _logger.exception("token registry verification unavailable")
+                raise _stamped_auth_error(401, "invalid bearer token")
+            if verdict.get("valid"):
+                return str(verdict["role"])
+            raise _stamped_auth_error(401, "invalid bearer token")
+        # Legacy single token → bootstrap ADMIN (deprecated).
+        expected = get_api_token()
+        if expected and hmac.compare_digest(
+            provided.encode("utf-8"), expected.encode("utf-8")
+        ):
+            return "ADMIN"
+        raise _stamped_auth_error(401, "invalid bearer token")
+
+    def _auth_required() -> bool:
+        """Auth is enforced when the legacy token OR any registry token exists."""
+        if api_token_required():
+            return True
+        try:
+            try:
+                from scripts.token_registry import registry_token_count
+            except ModuleNotFoundError:  # pragma: no cover - script fallback
+                from token_registry import registry_token_count  # type: ignore
+            return registry_token_count() > 0
+        except Exception:  # pragma: no cover - fail toward enforcement off
+            return False
+
+    def _require_role_floor(authorization: str | None, floor: str) -> None:
+        """Role-floor enforcement shared by all auth dependencies."""
+        try:
+            from scripts.token_registry import role_at_least
+        except ModuleNotFoundError:  # pragma: no cover - script fallback
+            from token_registry import role_at_least  # type: ignore
+
+        if not _auth_required():
+            # Open-loopback single-operator mode (no credentials configured)
+            # — preserved behavior; preflight already guards the bind.
+            return None
+        role = _resolve_role(authorization)
+        if role is None:
+            raise _stamped_auth_error(401, "missing bearer token")
+        if not role_at_least(role, floor):
+            raise _stamped_auth_error(
+                403, f"insufficient role: {role} < required {floor}"
+            )
         return None
 
+    def _check_bearer_token(authorization: str | None) -> None:
+        """Constant-time bearer-token verification (legacy name, kept for
+        compatibility).  S4-A3: now role-aware — OPERATOR floor."""
+        return _require_role_floor(authorization, "OPERATOR")
+
     def require_api_token(authorization: str | None = Header(default=None)) -> None:
-        """Enforce Bearer token on mutating routes when ``MVP_API_TOKEN`` is set."""
-        return _check_bearer_token(authorization)
+        """Journal-write routes: OPERATOR or higher (legacy token = ADMIN)."""
+        return _require_role_floor(authorization, "OPERATOR")
+
+    def require_admin_token(authorization: str | None = Header(default=None)) -> None:
+        """Admin routes (backup/restore/token management): ADMIN only."""
+        return _require_role_floor(authorization, "ADMIN")
 
     def require_api_token_for_reads(
         request: "Request",
@@ -1009,9 +1094,8 @@ if _FASTAPI_AVAILABLE:
         When a token IS set, every read endpoint protected by this
         dependency requires ``Authorization: Bearer <token>``.
         """
-        expected = get_api_token()
-        if expected:
-            return _check_bearer_token(authorization)
+        if _auth_required():
+            return _require_role_floor(authorization, "VIEWER")
         # No token configured: only allowed for loopback binds (preflight
         # already refused non-loopback boot without override).  We still
         # log to /health that the override is active.
@@ -1376,6 +1460,11 @@ def health_full(_auth: None = Depends(require_api_token_for_reads)) -> dict:
         "db_available": db_available(),
         "db_path": safe_db_display_path(),
         "api_token_required": api_token_required(),
+        # S4-A3: role-token registry posture.  The legacy single token is
+        # bootstrap-ADMIN and DEPRECATED whenever configured.
+        "token_registry_active_tokens": _registry_token_count_safe(),
+        "legacy_single_token_configured": api_token_required(),
+        "legacy_single_token_deprecated": api_token_required(),
         "loopback_bind": is_loopback_bind(),
         "unauth_override_active": unauth_override_active(),
         "allowed_origins_count": len(_allowed),
@@ -1419,7 +1508,7 @@ def health_full(_auth: None = Depends(require_api_token_for_reads)) -> dict:
 
 
 @app.post("/admin/backup")
-def post_admin_backup(_auth: None = Depends(require_api_token)) -> dict:
+def post_admin_backup(_auth: None = Depends(require_admin_token)) -> dict:
     """H4: operator-triggered DB backup (token-gated, record-keeping only).
 
     Backups are non-destructive reads — no dry-run-receipt doctrine

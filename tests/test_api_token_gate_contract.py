@@ -35,7 +35,13 @@ def _route_depends_on_token(route) -> bool:
             continue
         seen.add(id(node))
         call = getattr(node, "call", None)
-        if call is not None and getattr(call, "__name__", "") == "require_api_token":
+        # S4-A3: require_admin_token is a STRICTER gate than
+        # require_api_token (ADMIN floor > OPERATOR floor) — both satisfy
+        # the mutating-route token contract.
+        if call is not None and getattr(call, "__name__", "") in (
+            "require_api_token",
+            "require_admin_token",
+        ):
             return True
         for child in getattr(node, "dependencies", []) or []:
             queue.append(child)

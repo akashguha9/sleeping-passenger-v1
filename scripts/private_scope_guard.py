@@ -264,6 +264,10 @@ EXPLICIT_IN_SCOPE: frozenset[str] = frozenset({
     # S4-A2 degraded-state push alerting (log/Telegram/SMTP/toast sinks,
     # cooldown, secret redaction). Notification only — no broker.
     "alerting.py",
+    # S4-A3 per-role local token registry + CLI: hashed-at-rest tokens,
+    # VIEWER/OPERATOR/ADMIN floors, revoke/rotate. Auth only — no broker.
+    "token_registry.py",
+    "manage_tokens.py",
 })
 
 # Modules deliberately marked OUT_OF_SCOPE inside ``scripts/``.  This

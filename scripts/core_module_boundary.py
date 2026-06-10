@@ -133,6 +133,9 @@ _SUPPORT_EXPLICIT: frozenset[str] = frozenset({
     # Integrity infrastructure — no broker, no execution.
     "write_journal",
     "write_journal_registry",
+    # S4-A2/A3 alerting + token management CLI. No broker, no execution.
+    "alerting",
+    "manage_tokens",
 })
 
 
