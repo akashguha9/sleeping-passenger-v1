@@ -55,7 +55,12 @@ class LLMBudgetExceeded(RuntimeError):
 
 def _state_path() -> Path:
     override = os.environ.get("MVP_LLM_BUDGET_STATE_PATH", "").strip()
-    return Path(override) if override else RUNTIME_DIR / _STATE_FILENAME
+    if override:
+        return Path(override)
+    # Lives under diagnostics_cache/ (operational state), NOT the runtime
+    # root — artifact-coherence scans runtime/*.json for pipeline
+    # provenance and would flag a bare counter file as legacy-unmanaged.
+    return RUNTIME_DIR / "diagnostics_cache" / _STATE_FILENAME
 
 
 def run_budget() -> int:
