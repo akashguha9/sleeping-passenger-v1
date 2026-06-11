@@ -1,0 +1,158 @@
+{
+  "_comment": [
+    "Deterministic case-study fixtures for the Customer Consent &",
+    "Regulatory Fragility Engine, derived from the operator reflection.",
+    "SIMULATED RESEARCH DATA: anonymized composites of reported personal",
+    "experience, not statistical evidence about any real company.",
+    "Used by tests/test_consent_revenue_quality.py and the docs."
+  ],
+  "premium_gym": {
+    "company": "CASE_PremiumGym",
+    "segment": "international_students",
+    "official_promises": ["premium", "student_friendly", "flexible"],
+    "complaint_texts": [
+      "pause requires a german only email and the reply took a week, still charged",
+      "my sneakers were stolen from the locker and the front desk did not help, no support",
+      "trainer contract locked in, cannot cancel the trainer anytime",
+      "charged after cancel was confirmed, interest charged on small dues",
+      "upfront fee of 250 euros, restricted access, not all equipment available, trainer required",
+      "cannot pause in app even though the app takes payment"
+    ],
+    "premium": { "price_premium": 0.8 },
+    "pause": {
+      "manual_pause_burden": 0.8,
+      "language_burden": 0.8,
+      "processing_delay_days": 7,
+      "billing_continues_during_delay": true,
+      "charge_per_week": 7.5
+    },
+    "delay": {
+      "processing_delay_days": 7,
+      "charge_rate_per_week": 7.5,
+      "complaint_frequency": 0.5
+    },
+    "subscription": { "recurring_billing_dependency": 0.9 },
+    "capabilities": {
+      "collection": {
+        "digital_signup": true,
+        "digital_payment": true,
+        "stored_payment_method": true,
+        "auto_renewal": true,
+        "instant_billing": true
+      },
+      "relief": { "view_billing_period": true }
+    },
+    "service_fulfilment": 0.3
+  },
+  "deutschland_ticket": {
+    "company": "CASE_TransitSubscription",
+    "segment": "international_students",
+    "official_promises": ["digital_first", "flexible", "easy_cancellation"],
+    "complaint_texts": [
+      "app says cancelled but the local store says not cancelled and sent a fine",
+      "german only legal letter, had to translate three pages to understand the charge",
+      "cancellation deadline missed because the store was not synchronized with the app",
+      "kept charging after the app cancellation, debt letter followed",
+      "wrong department, the office did not know about the app subscription"
+    ],
+    "subscription": {
+      "recurring_billing_dependency": 0.9,
+      "billing_ambiguity": 0.7,
+      "penalty_escalation": 0.7
+    },
+    "capabilities": {
+      "collection": {
+        "digital_signup": true,
+        "digital_payment": true,
+        "stored_payment_method": true,
+        "auto_renewal": true,
+        "instant_billing": true
+      },
+      "relief": { "cancel_in_app": true, "view_billing_period": true }
+    },
+    "enforcement": {
+      "collection_speed": 0.9,
+      "penalty_strength": 0.8,
+      "debit_precision": 0.9,
+      "resolution_speed": 0.2,
+      "refund_speed": 0.1,
+      "human_accountability": 0.2
+    },
+    "fragility": { "vulnerable_user_exposure": 0.8, "legal_ambiguity": 0.6 },
+    "service_fulfilment": 0.4
+  },
+  "insurer_claims": {
+    "company": "CASE_StudentInsurer",
+    "segment": "international_students",
+    "official_promises": ["reimbursed", "fast_claims", "customer_centric"],
+    "complaint_texts": [
+      "never reimbursed a single claim despite premiums paid every month",
+      "automated bot on the phone, no human, the final answer is please email",
+      "claim ignored for months, no formal rejection ever issued",
+      "documents missing loop, asked for the same invoice three times",
+      "no response from support, claim denied without explanation"
+    ],
+    "claims": {
+      "claims_submitted": 6,
+      "claims_paid": 0,
+      "formal_decisions_issued": 0
+    },
+    "service_fulfilment": 0.2
+  },
+  "asymmetric_app": {
+    "company": "CASE_AppPayEmailCancel",
+    "segment": "general",
+    "official_promises": ["digital_first", "seamless"],
+    "complaint_texts": [
+      "signing up took one click but cancelling is only by email",
+      "payment is instant but the refund pending for three weeks",
+      "had to email twice, support did not reply, still charged"
+    ],
+    "capabilities": {
+      "collection": {
+        "digital_signup": true,
+        "digital_payment": true,
+        "stored_payment_method": true,
+        "auto_renewal": true,
+        "instant_billing": true
+      },
+      "relief": { "view_billing_period": true }
+    }
+  },
+  "clean_saas": {
+    "company": "CASE_CleanSaaS",
+    "segment": "general",
+    "official_promises": ["transparent", "easy_cancellation"],
+    "complaint_texts": [
+      "easy to cancel in the app, refunded quickly when I asked",
+      "responsive support, a human answered within an hour",
+      "cancelled in app, no problem cancelling, instant refund of unused time"
+    ],
+    "consent": {
+      "clarity_of_terms": 0.9,
+      "billing_predictability": 0.9,
+      "cancellation_clarity": 0.9,
+      "refund_accessibility": 0.8,
+      "dispute_fairness": 0.8,
+      "human_escalation": 0.9
+    },
+    "capabilities": {
+      "collection": {
+        "digital_signup": true,
+        "digital_payment": true,
+        "stored_payment_method": true
+      },
+      "relief": {
+        "cancel_in_app": true,
+        "pause_in_app": true,
+        "refund_in_app": true,
+        "dispute_in_app": true,
+        "update_billing_in_app": true,
+        "view_billing_period": true,
+        "reach_human_support": true
+      }
+    },
+    "service_fulfilment": 0.9,
+    "reported_revenue_quality": 8.0
+  }
+}

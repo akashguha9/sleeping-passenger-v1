@@ -62,6 +62,13 @@ RISK_FACTOR_CATEGORIES: dict[str, str] = {
     "chasing": CRASH_CATEGORY_DRIVER,
     "oversizing": CRASH_CATEGORY_DRIVER,
     "revenge_trading": CRASH_CATEGORY_DRIVER,
+    # Consent-engine bridge (src/consent/revenue_quality.py): business-model
+    # fragility surfaces as crash vectors.
+    "extractive_revenue": CRASH_CATEGORY_FUNDAMENTAL,
+    "regulatory_fragility": CRASH_CATEGORY_MACRO,
+    "claims_non_payment": CRASH_CATEGORY_FUNDAMENTAL,
+    "customer_churn_pressure": CRASH_CATEGORY_FUNDAMENTAL,
+    "narrative_experience_gap": CRASH_CATEGORY_NARRATIVE,
 }
 
 # Default interaction coefficients.
@@ -78,6 +85,11 @@ SYNERGY_PAIR_BETAS: dict[frozenset[str], float] = {
     frozenset({"margin_compression", "receivables_spike"}): 0.8,
     frozenset({"election_uncertainty", "regulatory_delay"}): 0.7,
     frozenset({"stale_signal", "dirty_air"}): 0.7,
+    # Extractive revenue under regulatory heat is the classic blow-up:
+    # growth built on trapped users collapses when a regulator acts.
+    frozenset({"extractive_revenue", "regulatory_fragility"}): 1.0,
+    frozenset({"extractive_revenue", "high_valuation"}): 0.9,
+    frozenset({"claims_non_payment", "regulatory_fragility"}): 0.9,
 }
 
 # A tested combination is severe when its combined score crosses this.

@@ -1282,6 +1282,43 @@ def get_simulator_calibration_report(
 
 
 # ---------------------------------------------------------------------------
+# Customer Consent & Regulatory Fragility Engine (advisory-only research)
+# ---------------------------------------------------------------------------
+
+
+@app.get("/consent/doctrine")
+def get_consent_doctrine(
+    _auth: None = Depends(require_api_token_for_reads),
+) -> dict:
+    """Consent-engine doctrine, limitations, and advisory framing."""
+    try:
+        from scripts.consent_api import consent_doctrine
+    except ModuleNotFoundError:  # pragma: no cover
+        from consent_api import consent_doctrine  # type: ignore[no-redef]
+    return consent_doctrine()
+
+
+@app.post("/consent/evaluate")
+def post_consent_evaluate(
+    body: dict,
+    _auth: None = Depends(require_api_token),
+) -> dict:
+    """Stress-test a company's revenue quality against customer consent.
+
+    Stateless scoring of caller-supplied structured inputs and complaint
+    texts. Detects business-model risk patterns (extraction, asymmetry,
+    claims non-payment) — never legal guilt. ADVISORY_ONLY; no order path.
+    """
+    try:
+        from scripts.consent_api import evaluate_consent_candidate
+    except ModuleNotFoundError:  # pragma: no cover
+        from consent_api import (  # type: ignore[no-redef]
+            evaluate_consent_candidate,
+        )
+    return evaluate_consent_candidate(body)
+
+
+# ---------------------------------------------------------------------------
 # Manual trades
 # ---------------------------------------------------------------------------
 
