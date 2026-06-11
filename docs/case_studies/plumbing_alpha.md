@@ -111,6 +111,23 @@ profile verdict honestly caps at research grade — position-candidate
 verdicts unlock only when real reconciled outcomes flow through the
 journal-to-replay bridge.
 
+## v4: the calibrated architecture, demonstrated honestly
+
+`build_plumbing_case_study_v4()` (the version served by the API and
+dashboard) adds the final layer: per-node blind-test differentials, the
+raw-vs-calibrated probability distinction, reliability-diagram data, a
+deterministic evidence bundle per node, the operator calibration
+checklist, and a readiness statement that refuses to overstate:
+
+> Strong research-grade intelligence. Not fully calibrated position
+> intelligence until resolved replay history exists.
+
+On the isolated test journal, calibration honestly reports
+`insufficient_data`, every node's calibration gate tier is
+`uncalibrated`, and the checklist says exactly what to journal
+(50 resolved outcomes with score, verdict, window, realized outcome,
+drawdown, fundamental/narrative/filing confirmation) to unlock the rest.
+
 ## What this case study is for
 
 It exercises every framework module end-to-end with zero network

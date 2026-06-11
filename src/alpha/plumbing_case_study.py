@@ -630,3 +630,123 @@ def build_plumbing_case_study_v3() -> dict[str, object]:
         "node_profiles": node_profiles,
         "autopsy": autopsy,
     }
+
+
+# ---------------------------------------------------------------------------
+# v4 — the calibrated architecture, demonstrated honestly: raw vs calibrated
+#      probability, reliability data, evidence bundles, operator checklist,
+#      and an explicit refusal to overstate readiness.
+# ---------------------------------------------------------------------------
+
+
+def build_plumbing_case_study_v4() -> dict[str, object]:
+    """Full calibrated-architecture demonstration.
+
+    Extends v3 with: per-node blind-test differentials, the raw vs
+    calibrated probability distinction (calibration honestly reports
+    insufficient_data on an empty journal), reliability-diagram data,
+    a portable evidence bundle per node, and the operator checklist
+    that says exactly what journaling unlocks the rest.
+    """
+    from src.alpha.blind_test import blind_test_differential
+    from src.alpha.calibration_bridge import (
+        fit_alpha_calibration_map,
+        summarize_alpha_calibration,
+    )
+    from src.alpha.calibration_report import reliability_from_replay_records
+    from src.alpha.evidence_bundle import build_evidence_bundle
+    from src.alpha.journal_replay_bridge import build_replay_records_from_journal
+    from src.alpha.operator_checklist import build_operator_checklist
+
+    base = build_plumbing_case_study_v3()
+    bridge = build_replay_records_from_journal()
+    _, calibration_summary = fit_alpha_calibration_map(bridge["records"])
+    reliability = reliability_from_replay_records(bridge["records"])
+    checklist = build_operator_checklist(bridge_result=bridge)
+    pm_signal = base["prediction_market_stub"]
+    raw_event_probability = float(pm_signal["market_probability"])
+
+    node_reports: dict[str, dict[str, object]] = {}
+    for node_id, profile in base["node_profiles"].items():
+        components = {
+            "narrative_velocity": float(
+                base["narrative_snapshot"]["narrative_velocity_score"]
+            ),
+            "embedded_proof": float(
+                base["filing_excerpt_parse"]["embedded_proof_score"]
+            ),
+            "node_strength": float(profile["node_attractiveness"]),
+            "half_life": 95.0,
+            "residual_utility": float(profile["residual_utility_score"]),
+            "food_chain": float(profile["food_chain_score"]),
+            "casino_distortion": float(profile["casino_score"]),
+        }
+        blind = blind_test_differential(components)
+        bundle = build_evidence_bundle(
+            signal_name=f"residential plumbing / {node_id}",
+            input_snapshot=components,
+            opportunity={
+                "opportunity_score": profile["opportunity_score"],
+                "confidence": profile["confidence"],
+                "advisory_verdict": profile["advisory_verdict"],
+                "trap_flags": profile["trap_flags"],
+                "why_not_higher": profile["why_not_higher"],
+                "why_not_lower": profile["why_not_lower"],
+                "probability_source": "raw_proxy",
+                "raw_event_probability": raw_event_probability,
+                "calibrated_event_probability": None,
+            },
+            autopsy=base["autopsy"] if node_id == "plumbers_contractors" else None,
+            filing_lineage=[
+                {
+                    "category": "manual_stub_filing_excerpt",
+                    "evidence_count": base["filing_excerpt_parse"]["evidence_count"],
+                }
+            ],
+            prediction_market_lineage=[dict(pm_signal)],
+            narrative_lineage=[
+                {
+                    "as_of": base["narrative_snapshot"]["as_of"],
+                    "narrative_velocity_score": base["narrative_snapshot"][
+                        "narrative_velocity_score"
+                    ],
+                    "unique_sources": base["narrative_snapshot"]["unique_sources"],
+                }
+            ],
+            value_chain_lineage=[{"node_id": node_id}],
+            replay_lineage=[dict(base["calibration_state"])],
+            calibration_summary=calibration_summary,
+            created_at="fixed_for_determinism",
+        )
+        node_reports[node_id] = {
+            **profile,
+            "blind_test_differential": {
+                "blind_class": blind["blind_class"],
+                "narrative_contribution": blind["narrative_contribution"],
+                "survives_blind_test": blind["survives_blind_test"],
+            },
+            "raw_event_probability": raw_event_probability,
+            "calibrated_event_probability_status": calibration_summary["method"],
+            "calibration_gate_tier": "uncalibrated"
+            if calibration_summary["calibration_support"] < 10.0
+            else "see calibration_summary",
+            "evidence_bundle_id": bundle["bundle_id"],
+            "evidence_bundle": bundle,
+            "next_evidence_to_collect": base["autopsy"]["next_evidence_to_collect"],
+        }
+
+    return {
+        **base,
+        "version": "v4",
+        "calibration_summary": calibration_summary,
+        "reliability": reliability,
+        "operator_checklist": checklist,
+        "node_reports": node_reports,
+        "readiness_statement": (
+            "Strong research-grade intelligence. Not fully calibrated "
+            "position intelligence until resolved replay history exists: "
+            f"{checklist['records_needed']} more resolved advisory outcome(s) "
+            "are required before the calibration gate unlocks "
+            "position-candidate verdicts."
+        ),
+    }

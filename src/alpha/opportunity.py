@@ -280,6 +280,8 @@ def aggregate_opportunity_score_v2(
     filing_claims_present: bool = False,
     outcome_coverage: float | None = None,
     triangulation: dict[str, object] | None = None,
+    event_probability_raw: float | None = None,
+    event_probability_calibrated: float | None = None,
 ) -> dict[str, object]:
     """Evidence-weighted opportunity aggregation.
 
@@ -294,8 +296,32 @@ def aggregate_opportunity_score_v2(
     moves only the event/confirmation component (already inside
     ``components``), never residual utility.
     """
-    provided = components or {}
+    provided = dict(components or {})
     missing_inputs: list[str] = []
+    calibration_warnings: list[str] = []
+
+    # ----- probability source ladder (v3) -----
+    # calibrated > raw score proxy > neutral.  An explicit
+    # probability_confirmation component always wins over derivation.
+    if "probability_confirmation" in provided:
+        probability_source = "component_supplied"
+    elif event_probability_calibrated is not None:
+        calibrated_p = clip(float(event_probability_calibrated), 0.0, 1.0)
+        provided["probability_confirmation"] = 100.0 * calibrated_p
+        probability_source = "calibrated"
+    elif event_probability_raw is not None:
+        raw_p = clip(float(event_probability_raw), 0.0, 1.0)
+        provided["probability_confirmation"] = 100.0 * raw_p
+        probability_source = "raw_proxy"
+        calibration_warnings.append(
+            "raw_score_probability_proxy: probability derived from an "
+            "uncalibrated score; treat as a hypothesis, not a frequency"
+        )
+    else:
+        probability_source = "neutral_missing"
+        if "probability_confirmation" not in provided:
+            missing_inputs.append("event_probability")
+
     resolved: dict[str, float] = {}
     for key in POSITIVE_COMPONENTS + RISK_COMPONENTS:
         if key in provided:
@@ -389,6 +415,25 @@ def aggregate_opportunity_score_v2(
         0.0,
         100.0,
     )
+    # calibration_adjusted_confidence =
+    #   base × (0.5 + 0.5·support/100) × max(0.25, coverage)
+    # Confidence can only reach its base level with both outcome-backed
+    # calibration support AND usable-record coverage; low coverage
+    # suppresses overconfidence even when support looks high.
+    _support = confidence_terms["calibration_support"]
+    _coverage = clip(
+        float(outcome_coverage) if outcome_coverage is not None else 1.0, 0.0, 1.0
+    )
+    calibration_adjusted_confidence = clip(
+        confidence * (0.5 + 0.5 * _support / 100.0) * max(0.25, _coverage),
+        0.0,
+        100.0,
+    )
+    if outcome_coverage is not None and _coverage < 0.5:
+        calibration_warnings.append(
+            f"low outcome coverage ({_coverage:.2f}): many journal records "
+            "were unusable; calibration-adjusted confidence is suppressed"
+        )
 
     # ----- triangulation adjustments (Phase 3) -----
     triangulation_summary: dict[str, object] | None = None
@@ -492,12 +537,27 @@ def aggregate_opportunity_score_v2(
     return {
         "opportunity_score": opportunity_score,
         "confidence": confidence,
+        "calibration_adjusted_confidence": calibration_adjusted_confidence,
         "advisory_verdict": verdict,
         "evidence_quality_score": evidence_quality_score,
         "evidence_gap_risk": evidence_gap_risk,
         "filing_risk_disclosure_score": filing_risk,
         "positive_core": positive_core,
         "penalty_core": penalty_core,
+        "probability_source": probability_source,
+        "raw_event_probability": (
+            clip(float(event_probability_raw), 0.0, 1.0)
+            if event_probability_raw is not None
+            else None
+        ),
+        "calibrated_event_probability": (
+            clip(float(event_probability_calibrated), 0.0, 1.0)
+            if event_probability_calibrated is not None
+            else None
+        ),
+        "calibration_support": _support,
+        "outcome_coverage": 100.0 * _coverage if outcome_coverage is not None else None,
+        "calibration_warnings": calibration_warnings,
         "score_components": resolved,
         "penalty_components": penalty_terms,
         "confidence_components": confidence_terms,

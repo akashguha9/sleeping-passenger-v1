@@ -145,10 +145,25 @@ forbid execution surfaces, the calibration gate's ceiling is an advisory
 container, and the compliance preflight verifies no broker route exists.
 A score is a research classification, not an instruction.
 
+## Calibration pass (Phase 4)
+
+The follow-up pass closed the remaining code-shaped gap: the
+journal-to-replay bridge now chains into `scripts/calibration_map.py`
+(isotonic/Platt, OOS-validated, identity fallback) via
+`src/alpha/calibration_bridge.py`, with serialized artifacts,
+reliability-diagram data (`calibration_report.py`), calibration-aware
+probability sourcing in opportunity scoring (calibrated > raw proxy >
+neutral, each labelled), portable evidence bundles
+(`evidence_bundle.py`), the operator calibration checklist
+(`operator_checklist.py`), and the plumbing v4 case study.  See
+`docs/alpha_calibration_bridge.md`, `docs/alpha_evidence_bundle.md`,
+and `docs/operator_calibration_checklist.md`.
+
 ## What remains before scores can go above 9
 
-1. Real reconciled outcomes flowing through the bridge (the machinery is
-   live; the journal history is not yet large enough to matter).
+1. **Data, not code**: ~50 reconciled advisory outcomes through the
+   journal (the operator checklist quantifies this live; the machinery
+   is built and refuses to pretend otherwise).
 2. Live narrative and filing ingestion (adapters are offline-snapshot).
 3. Multiple full replay cycles with out-of-sample verification.
 4. Language-aware filing parsing beyond token-window rules.

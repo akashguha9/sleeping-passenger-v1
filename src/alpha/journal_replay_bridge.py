@@ -89,6 +89,7 @@ def outcome_to_replay_record(
         "theme": str(outcome.get("signal_class") or outcome.get("archetype") or ""),
         "ticker": str(outcome.get("ticker") or ""),
         "opportunity_score": score,
+        "raw_score": score,
         "confidence": clip(100.0 * float(outcome.get("quality") or 0.0), 0.0, 100.0),
         "verdict": str(outcome.get("archetype") or "journal_entry"),
         "subsequent_observation_window_days": 30,
@@ -101,23 +102,66 @@ def outcome_to_replay_record(
         },
         "trap_flags": [],
         "source": "journal_reconciliation",
+        "calibrated_event_probability": None,
+        "calibration_method": "insufficient_data",
+        "calibration_artifact_id": None,
         "lineage": {
             "outcome_id": str(outcome.get("outcome_id") or ""),
             "trade_id": str(outcome.get("trade_id") or ""),
             "journal_source_type": source_type,
             "outcome_label": label,
             "quality": float(outcome.get("quality") or 0.0),
+            "raw_score_source": "journal_score_at_entry",
             "score_normalization": "mixed_scale_to_0_100",
             "probability_derivation": (
                 "score_proxy" if calibration_eligible else "none"
             ),
+            "calibration_source": "none",
+            "outcome_source": "journal_reconciliation",
         },
     }
     if calibration_eligible:
-        # Score-as-probability proxy, eligible records only; the repo's
-        # calibration_map applies the same score->outcome treatment.
+        # raw_probability = clamp(score / 100, 0, 1).  A score proxy,
+        # eligible records only; the repo's calibration_map applies the
+        # same score->outcome treatment.  Calibration (when fitted)
+        # replaces event_probability and records its lineage.
+        record["raw_event_probability"] = score / 100.0
         record["event_probability"] = score / 100.0
     return record, None
+
+
+def apply_calibration_to_records(
+    records: list[dict[str, Any]],
+    calibration_map: Any,
+    *,
+    artifact_id: str | None = None,
+) -> int:
+    """Apply a fitted calibration map to bridge records, in place.
+
+    ``event_probability`` (the value the replay harness scores) becomes
+    the calibrated probability; the raw score proxy stays available as
+    ``raw_event_probability`` and the lineage records the substitution.
+    Returns the number of records calibrated.
+    """
+    from src.alpha.calibration_bridge import apply_alpha_calibration
+
+    method = str(getattr(calibration_map, "method", "identity"))
+    applied = 0
+    for record in records:
+        raw = record.get("raw_event_probability")
+        if raw is None:
+            continue
+        calibrated = apply_alpha_calibration(float(raw), calibration_map)
+        record["calibrated_event_probability"] = calibrated
+        record["event_probability"] = calibrated
+        record["calibration_method"] = method
+        record["calibration_artifact_id"] = artifact_id
+        record["lineage"]["probability_derivation"] = "calibrated_score_proxy"
+        record["lineage"]["calibration_source"] = (
+            f"artifact:{artifact_id}" if artifact_id else f"fitted:{method}"
+        )
+        applied += 1
+    return applied
 
 
 def build_replay_records_from_journal(
@@ -175,10 +219,66 @@ def journal_replay_report(
     db_path: Path | str | None = None,
     *,
     k: int = 5,
+    fit_calibration: bool = False,
+    calibration_artifact_path: Path | str | None = None,
+    save_artifact_path: Path | str | None = None,
 ) -> dict[str, Any]:
-    """Bridge + replay in one deterministic, read-only report."""
+    """Bridge + (optional) calibration + replay in one read-only report.
+
+    ``fit_calibration`` fits a map from the journal's own resolved
+    records (refusing honestly below the data floor);
+    ``calibration_artifact_path`` loads a previously fitted artifact and
+    applies it instead.  ``save_artifact_path`` persists a freshly
+    fitted map.  Without either, probabilities stay raw score proxies.
+    """
+    from src.alpha.calibration_bridge import (
+        fit_alpha_calibration_map,
+        load_alpha_calibration_map,
+        save_alpha_calibration_map,
+        summarize_alpha_calibration,
+    )
+    from src.alpha.calibration_report import reliability_from_replay_records
+
     bridge = build_replay_records_from_journal(db_path)
-    replay = evaluate_replay(bridge["records"], k=k)
+    records = bridge["records"]
+
+    calibration_summary: dict[str, Any]
+    if calibration_artifact_path is not None:
+        try:
+            cmap, artifact = load_alpha_calibration_map(calibration_artifact_path)
+            applied = apply_calibration_to_records(
+                records, cmap, artifact_id=str(artifact.get("artifact_id"))
+            )
+            calibration_summary = summarize_alpha_calibration(
+                cmap,
+                resolved_count=applied,
+                artifact_path=str(calibration_artifact_path),
+            )
+        except Exception as exc:
+            calibration_summary = summarize_alpha_calibration(
+                None,
+                resolved_count=0,
+                warnings=[f"failed to load calibration artifact: {exc}"],
+                missing_inputs=["calibration_artifact"],
+            )
+    elif fit_calibration:
+        cmap, calibration_summary = fit_alpha_calibration_map(records)
+        if cmap is not None and cmap.method != "identity":
+            artifact_id = None
+            if save_artifact_path is not None:
+                artifact = save_alpha_calibration_map(cmap, save_artifact_path)
+                artifact_id = str(artifact["artifact_id"])
+                calibration_summary["artifact_path"] = str(save_artifact_path)
+            apply_calibration_to_records(records, cmap, artifact_id=artifact_id)
+    else:
+        calibration_summary = summarize_alpha_calibration(
+            None,
+            resolved_count=0,
+            warnings=["calibration not requested: probabilities are raw score proxies"],
+            missing_inputs=["calibration_map"],
+        )
+
+    replay = evaluate_replay(records, k=k)
     return {
         "bridge": {
             "discovered_records": bridge["discovered_records"],
@@ -189,14 +289,16 @@ def journal_replay_report(
             "missing_inputs": bridge["missing_inputs"],
         },
         "replay": replay,
+        "calibration": calibration_summary,
+        "reliability": reliability_from_replay_records(records),
         "calibration_support": replay["calibration_support"],
         "outcome_coverage": bridge["outcome_coverage"],
         "explanation": [
             f"{bridge['discovered_records']} journal outcome(s) discovered, "
             f"{bridge['usable_records']} usable for replay "
             f"(coverage {bridge['outcome_coverage']:.2f}).",
-            "Event probabilities are score proxies on calibration-eligible "
-            "records only; the derivation is stamped per-record in lineage.",
+            f"Probability calibration: {calibration_summary['method']} "
+            f"(available={calibration_summary['calibration_available']}).",
             f"calibration_support {replay['calibration_support']:.1f}/100 "
             "gates position-candidate verdicts in the opportunity engine.",
         ],

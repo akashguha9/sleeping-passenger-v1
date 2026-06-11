@@ -76,12 +76,15 @@ def test_autopsy_rejects_oversized_inputs(client) -> None:
     )
 
 
-def test_case_study_endpoint_serves_v3(client) -> None:
+def test_case_study_endpoint_serves_v4(client) -> None:
     payload = client.get("/alpha/case-studies/plumbing").json()
-    assert payload["version"] == "v3"
+    assert payload["version"] == "v4"
     assert "node_profiles" in payload
     assert "autopsy" in payload
     assert "calibration_state" in payload
+    assert "calibration_summary" in payload
+    assert "operator_checklist" in payload
+    assert "readiness_statement" in payload
 
 
 def test_final_routes_require_token_when_set(client, monkeypatch) -> None:

@@ -148,6 +148,7 @@ def test_no_execution_route_added_under_alpha_prefix(client) -> None:
     assert sorted(alpha_paths) == [
         "/alpha/autopsy",
         "/alpha/case-studies/plumbing",
+        "/alpha/evidence-bundle",
         "/alpha/filing/parse",
         "/alpha/prediction-market/normalize",
         "/alpha/replay/evaluate",

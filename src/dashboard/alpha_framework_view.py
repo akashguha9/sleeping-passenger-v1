@@ -8,7 +8,7 @@ here writes state or touches a broker surface.
 from __future__ import annotations
 
 from src.alpha import ADVISORY_DISCLAIMER
-from src.alpha.plumbing_case_study import build_plumbing_case_study_v3
+from src.alpha.plumbing_case_study import build_plumbing_case_study_v4
 
 _FRAMEWORK_SUMMARY = (
     "Markets are casinos sitting on top of real-world food chains. "
@@ -26,7 +26,7 @@ def render_alpha_framework_section(st) -> None:
     ``st`` is passed in (rather than imported) so the module stays
     importable and testable without Streamlit installed.
     """
-    case_study = build_plumbing_case_study_v3()
+    case_study = build_plumbing_case_study_v4()
     st.subheader("Alpha Framework / Plumbing Case Study")
     st.caption(ADVISORY_DISCLAIMER)
     st.write(_FRAMEWORK_SUMMARY)
@@ -155,6 +155,56 @@ def render_alpha_framework_section(st) -> None:
         }
     )
     st.caption(journal["disclaimer"])
+
+    st.markdown("**Calibration / Reliability Diagram Data**")
+    calibration_summary = case_study.get("calibration_summary", {})
+    reliability = case_study.get("reliability", {})
+    st.write(
+        {
+            "calibration_available": calibration_summary.get("calibration_available"),
+            "method": calibration_summary.get("method"),
+            "resolved_count": calibration_summary.get("resolved_count"),
+            "brier_before": calibration_summary.get("brier_before"),
+            "brier_after": calibration_summary.get("brier_after"),
+            "expected_calibration_error": reliability.get(
+                "expected_calibration_error"
+            ),
+            "warnings": calibration_summary.get("warnings", []),
+        }
+    )
+    st.dataframe(reliability.get("bins", []))
+
+    st.markdown("**Operator Calibration Checklist**")
+    checklist = case_study.get("operator_checklist", {})
+    st.write(
+        {
+            "data_quality_score": checklist.get("data_quality_score"),
+            "current_resolved_records": checklist.get("current_resolved_records"),
+            "records_needed": checklist.get("records_needed"),
+            "missing_fields": checklist.get("missing_fields", []),
+            "next_actions": checklist.get("next_actions", []),
+        }
+    )
+
+    st.markdown("**Evidence bundles (per node, auditable)**")
+    st.dataframe(
+        [
+            {
+                "node": node_id,
+                "bundle_id": report.get("evidence_bundle_id"),
+                "blind_class": report.get("blind_test_differential", {}).get(
+                    "blind_class"
+                ),
+                "raw_probability": report.get("raw_event_probability"),
+                "calibrated_status": report.get(
+                    "calibrated_event_probability_status"
+                ),
+                "verdict": report.get("advisory_verdict"),
+            }
+            for node_id, report in case_study.get("node_reports", {}).items()
+        ]
+    )
+    st.caption(case_study.get("readiness_statement", ""))
 
     st.markdown("**Alpha Autopsy (the system explaining itself to an auditor)**")
     autopsy = case_study.get("autopsy", {})
