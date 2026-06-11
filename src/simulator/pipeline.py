@@ -355,8 +355,54 @@ def evaluate_candidate_payload(payload: dict[str, Any]) -> dict[str, Any]:
         decision.gate_results["consent_gate"] = True
         decision.reason_codes.append("CONSENT_EVIDENCE_ABSENT")
 
+    # 14b. Strategy section + the Stewards' Room. When the payload carries
+    # a "strategy" section, the strategy chain runs inside the pipeline,
+    # its self-report is cross-examined against the rest of the payload,
+    # and ALL engines are reconciled into one conservative unified verdict
+    # with contradictions as first-class cited outputs.
+    strategy_result = None
+    cross_exam_report = None
+    strategy_section = payload.get("strategy")
+    if isinstance(strategy_section, dict) and strategy_section:
+        from src.strategy.cross_exam import cross_examine_strategy
+        from src.strategy.final_decision import evaluate_strategy_payload
+
+        strategy_result = evaluate_strategy_payload(
+            {**strategy_section, "ticker": ticker}
+        )
+        cross_exam_report = cross_examine_strategy(payload)
+
+    from src.simulator.unified_verdict import build_unified_verdict
+
+    unified = build_unified_verdict(
+        simulator_state=decision.final_state,
+        simulator_score_100=decision.final_candidate_score,
+        strategy_result=strategy_result,
+        cross_exam=cross_exam_report,
+        consent_revenue_label=(
+            str((consent_context.profile or {}).get("revenue_quality_label", ""))
+            if consent_context.evidence_present
+            else ""
+        ),
+        crash_gate_passed=decision.gate_results.get("crash_gate", True),
+    )
+    if unified.final_state != decision.final_state:
+        decision.final_state = unified.final_state
+        decision.reason_codes.append("UNIFIED_CONSERVATIVE_CAP")
+        decision.decision_reason += (
+            f" Unified verdict: most conservative engine wins "
+            f"({unified.state_before_unification} -> {unified.final_state})."
+        )
+    if unified.contradiction_hold:
+        decision.reason_codes.append("CONTRADICTION_HOLD")
+        decision.decision_reason += (
+            " CONTRADICTION_HOLD: engines disagree materially; human "
+            "resolution required."
+        )
+
     # 15. Telemetry — no candidate is promoted without it. Captures the
-    # post-consent decision so replay sees what the operator saw.
+    # post-consent, post-unification decision so replay sees what the
+    # operator saw.
     telemetry = build_decision_telemetry(
         decision,
         driver_discipline_score=driver.discipline_score,
@@ -378,6 +424,11 @@ def evaluate_candidate_payload(payload: dict[str, Any]) -> dict[str, Any]:
         "doctrine": list(DOCTRINE),
         "decision": decision.to_dict(),
         "consent_ledger": consent_ledger.to_dict(),
+        "unified_verdict": unified.to_dict(),
+        "strategy": strategy_result,
+        "strategy_cross_exam": (
+            cross_exam_report.to_dict() if cross_exam_report else None
+        ),
         "telemetry": telemetry.to_dict(),
         "breakdown": {
             "narrative_shock": shock.to_dict() if shock else None,

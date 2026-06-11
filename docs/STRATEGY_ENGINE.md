@@ -83,6 +83,38 @@ Exposed at `POST /strategy/evaluate` and `GET /strategy/doctrine`.
   Inflection Clock = tyre half-life physics, Archive Ledger = decision
   telemetry.
 
+## The Stewards' Room — unified verdict (cross-engine reconciliation)
+
+When a candidate payload carries a `strategy` section,
+`evaluate_candidate_payload` runs the strategy chain *inside* the
+simulator pipeline and reconciles all engines into ONE verdict
+(`src/simulator/unified_verdict.py`):
+
+* **Most conservative engine wins.** Engine verdicts map onto a single
+  conservatism scale; disagreement never averages up, it resolves down.
+* **Disagreement is information.** Every cross-engine contradiction
+  (physics vs strategy, consent vs strategy BUY, crash wall vs BUY,
+  buried-noise vs high composite) is a first-class cited output — the
+  reflection's Contradiction Card ("market says X, data says Y"),
+  rendered by `frontend/src/components/ContradictionCard.tsx`. Material
+  splits place the verdict under **CONTRADICTION_HOLD** pending human
+  resolution.
+* **Self-report is cross-examined** (`src/strategy/cross_exam.py`):
+  backhand evidence-strength claims are checked against actual evidence
+  volume, hidden-asset traits against visibility claims, probability
+  shocks against the prediction-market delta actually present, and
+  threshold claims against the meal-box invalidation. Credibility is
+  asymmetric: a discredited strategy section may still DOWNGRADE the
+  unified verdict but can never upgrade it — gaming the inputs only
+  makes the system more conservative.
+* Telemetry records the post-unification state, so replay sees what the
+  operator saw. Interrupt states (pit stop, black flag) outrank the
+  stewards entirely.
+
+This closes the confirmation-bias hole: with three engines and no
+reconciliation, an operator could act on whichever verdict agreed with
+them. Now there is one verdict, and the disagreements are on the record.
+
 ## Hard rules (caps override scores)
 
 No BUY if: threshold uncrossed · existential bear case unresolved · no

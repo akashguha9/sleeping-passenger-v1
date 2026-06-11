@@ -4,6 +4,9 @@ import { useState } from 'react';
 import { postSimulatorEvaluate } from '@/lib/apiClient';
 import { AdvisoryOnlyBadge } from '@/components/AdvisoryOnlyBadge';
 import ConsentPanel, { type ConsentLedger } from '@/components/ConsentPanel';
+import ContradictionCard, {
+  type UnifiedVerdict,
+} from '@/components/ContradictionCard';
 import SimulatorVerdictCard, {
   type SimulatorDecision,
 } from '@/components/SimulatorVerdictCard';
@@ -38,6 +41,7 @@ interface SimulatorResult {
     };
   };
   consent_ledger?: ConsentLedger;
+  unified_verdict?: UnifiedVerdict;
   advisory_status?: string;
 }
 
@@ -188,6 +192,10 @@ export default function SimulatorPage() {
       <SimulatorVerdictCard decision={result?.decision ?? null} />
 
       {result && <ConsentPanel ledger={result.consent_ledger ?? null} />}
+
+      {result?.unified_verdict && (
+        <ContradictionCard verdict={result.unified_verdict} />
+      )}
 
       {scrutineering && (
         <div
