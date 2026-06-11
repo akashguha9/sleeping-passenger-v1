@@ -1,0 +1,8 @@
+{
+  "_comment": "SIMULATED clean-company control evidence.",
+  "complaints": [
+    {"text": "cancelled in app with confirmation, easy to cancel, took 2 minutes", "source": "trustpilot", "source_type": "verified_review", "date": "2026-04-01"},
+    {"text": "refund received within 24 hours, all fees explained upfront", "source": "google_reviews", "source_type": "verified_review", "date": "2026-03-22"},
+    {"text": "human answered immediately and the claim paid in full within 5 days", "source": "app_store", "source_type": "app_store_review", "date": "2026-02-17"}
+  ]
+}

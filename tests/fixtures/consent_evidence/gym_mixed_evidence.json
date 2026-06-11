@@ -1,0 +1,10 @@
+{
+  "_comment": "SIMULATED mixed German-English gym evidence (reflection composite).",
+  "complaints": [
+    {"text": "Trotz Kündigung weiter abgebucht, dann kam eine Mahngebühr und Inkasso", "source": "bewertung_portal", "source_type": "verified_review", "date": "2026-04-02", "jurisdiction": "de"},
+    {"text": "Stilllegung nur schriftlich per E-Mail möglich, Bearbeitungszeit eine Woche, still charged 7.50", "source": "google_reviews", "source_type": "verified_review", "date": "2026-03-18", "jurisdiction": "de"},
+    {"text": "pause requires a german only email and the reply took a week", "source": "reddit", "source_type": "forum_post", "date": "2026-02-25"},
+    {"text": "trainer contract locked in, cannot cancel anytime, upfront fee of 250 euros", "source": "trustpilot", "source_type": "verified_review", "date": "2026-01-30"},
+    {"text": "friendly staff and great equipment", "source": "google_reviews", "source_type": "verified_review", "date": "2026-05-05"}
+  ]
+}

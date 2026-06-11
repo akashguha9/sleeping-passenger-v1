@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { postSimulatorEvaluate } from '@/lib/apiClient';
 import { AdvisoryOnlyBadge } from '@/components/AdvisoryOnlyBadge';
+import ConsentPanel, { type ConsentLedger } from '@/components/ConsentPanel';
 import SimulatorVerdictCard, {
   type SimulatorDecision,
 } from '@/components/SimulatorVerdictCard';
@@ -36,6 +37,7 @@ interface SimulatorResult {
       violations?: { check: string; explanation: string }[];
     };
   };
+  consent_ledger?: ConsentLedger;
   advisory_status?: string;
 }
 
@@ -184,6 +186,8 @@ export default function SimulatorPage() {
       )}
 
       <SimulatorVerdictCard decision={result?.decision ?? null} />
+
+      {result && <ConsentPanel ledger={result.consent_ledger ?? null} />}
 
       {scrutineering && (
         <div

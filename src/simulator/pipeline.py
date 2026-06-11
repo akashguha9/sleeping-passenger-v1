@@ -46,6 +46,18 @@ def evaluate_candidate_payload(payload: dict[str, Any]) -> dict[str, Any]:
     ticker = str(payload.get("ticker", "UNKNOWN"))
     theme_name = str(payload.get("theme", "unmapped_theme"))
 
+    # 0. Consent bridge (pre-decision): detect consumer evidence, build the
+    # consent profile + reliability, and feed business-model fragility into
+    # the crash wall automatically. No manual merging.
+    from src.consent.pipeline_bridge import prepare_consent_context
+
+    consent_context = prepare_consent_context(payload)
+    if consent_context.risk_factors:
+        merged_risks = dict(_section(payload, "risk_factors"))
+        for name, value in consent_context.risk_factors.items():
+            merged_risks[name] = max(coerce_float(merged_risks.get(name)), value)
+        payload = {**payload, "risk_factors": merged_risks}
+
     # 1. Prediction-market radar (optional).
     radar = _section(payload, "prediction_market")
     shock = None
@@ -306,7 +318,45 @@ def evaluate_candidate_payload(payload: dict[str, Any]) -> dict[str, Any]:
         thesis_damaged=bool(payload.get("thesis_damaged", False)),
     )
 
-    # 14. Telemetry — no candidate is promoted without it.
+    # 14. Consent bridge (post-decision): multipliers, penalties, and
+    # severity caps adjust the verdict — and the ledger records every step
+    # so there is no hidden magic and no unexplained downgrade.
+    from src.consent.pipeline_bridge import apply_consent_adjustment
+    from src.simulator.threshold_ladder import LADDER_STATES
+
+    consent_ledger = apply_consent_adjustment(
+        context=consent_context,
+        score_before=decision.final_candidate_score,
+        state_before=decision.final_state,
+        ladder_states=LADDER_STATES,
+    )
+    if consent_context.evidence_present:
+        decision.final_candidate_score = consent_ledger.score_after_consent
+        if consent_ledger.recommendation_after_consent != decision.final_state:
+            decision.final_state = consent_ledger.recommendation_after_consent
+            decision.reason_codes.append("CONSENT_CAP_APPLIED")
+        if consent_ledger.risk_caps_applied:
+            decision.gate_results["consent_gate"] = False
+            decision.decision_reason += (
+                " Consent gate: "
+                + "; ".join(consent_ledger.risk_caps_applied)
+                + "."
+            )
+        else:
+            decision.gate_results["consent_gate"] = True
+            if consent_ledger.score_after_consent < (
+                consent_ledger.score_before_consent - 1e-9
+            ):
+                decision.decision_reason += (
+                    " Consent adjustment applied (see consent_ledger)."
+                )
+        decision.reason_codes.append("CONSENT_EVIDENCE_EVALUATED")
+    else:
+        decision.gate_results["consent_gate"] = True
+        decision.reason_codes.append("CONSENT_EVIDENCE_ABSENT")
+
+    # 15. Telemetry — no candidate is promoted without it. Captures the
+    # post-consent decision so replay sees what the operator saw.
     telemetry = build_decision_telemetry(
         decision,
         driver_discipline_score=driver.discipline_score,
@@ -327,6 +377,7 @@ def evaluate_candidate_payload(payload: dict[str, Any]) -> dict[str, Any]:
         "advisory_note": ADVISORY_NOTE,
         "doctrine": list(DOCTRINE),
         "decision": decision.to_dict(),
+        "consent_ledger": consent_ledger.to_dict(),
         "telemetry": telemetry.to_dict(),
         "breakdown": {
             "narrative_shock": shock.to_dict() if shock else None,

@@ -27,72 +27,203 @@ EVIDENCE_LEXICONS: dict[str, tuple[str, ...]] = {
         "charged after cancel", "cancelled but billed", "canceled but billed",
         "billed after cancellation", "app says cancelled",
         "store says not cancelled", "kept charging", "payment after cancellation",
+        # German: debits after a (timely) cancellation
+        "nach kundigung abgebucht", "trotz kundigung abgebucht",
+        "trotz kundigung weiter abgebucht", "nach kundigung weiter",
+        "abbuchung nach kundigung",
     ),
     "cannot_cancel": (
         "cannot cancel", "can't cancel", "couldn't cancel", "could not cancel",
         "no cancellation option", "hard to cancel", "written notice required",
         "cancellation deadline", "auto-renew", "auto renewal",
+        # German: Kündigung (cancellation) friction — harm-context phrases
+        # only; the bare topic word lives in GERMAN_TOPIC_TERMS.
+        "kundigung abgelehnt", "kundigung nicht moglich", "nicht kundbar",
+        "kundigung nur schriftlich", "kundigungsfrist verpasst",
+        "zum nachstmoglichen zeitpunkt", "vertrag verlangert",
+        "mitgliedschaft verlangert", "fristgerecht gekundigt, trotzdem",
     ),
     "email_only_relief": (
         "email only", "had to email", "write an email", "only by email",
         "by post", "letter required", "in writing only",
+        # German: written-form / email-only requirements
+        "nur schriftlich", "nur per e-mail", "nur per email", "nur per brief",
+        "schriftform erforderlich",
     ),
     "bot_only_support": (
         "bot only", "automated bot", "no human", "support unreachable",
         "please email", "no response", "never replied", "no escalation",
         "call queue", "hotline loop",
+        # German: bot/queue/abandonment support
+        "warteschleife", "nur ein automat", "roboter", "nicht zustandig",
+        "kundenservice nicht erreichbar", "keine antwort",
     ),
     "language_burden": (
         "german only", "only in german", "had to translate", "no english",
         "foreign language letter", "not in english",
+        "nur auf deutsch", "kein englisch",
     ),
     "processing_delay": (
         "took a week", "took weeks", "still charged", "waiting for response",
         "processing delay", "refund pending", "processed once per week",
         "slow reply", "weeks for refund", "still waiting",
+        # German: processing-time / pending refunds
+        "bearbeitungszeit", "erstattung steht aus", "warte seit wochen",
+        "keine ruckmeldung",
     ),
     "hidden_fees": (
         "hidden fee", "unexpected charge", "admin fee", "interest charged",
         "late fee", "mahnung", "collection letter", "sent to collections",
         "debt collection", "default interest", "reminder fee",
+        # German: dunning / arrears monetization
+        "mahngebuhr", "verzugszinsen", "inkasso", "forderung",
+        "versteckte gebuhr", "bearbeitungsgebuhr",
     ),
     "claims_non_payment": (
         "claim denied", "no reimbursement", "never reimbursed",
         "not reimbursed", "claim ignored", "documents missing",
         "no formal rejection", "no payout", "claim rejected without",
         "never paid a claim",
+        # German: insurance claim / reimbursement failures
+        "erstattungsantrag abgelehnt", "anspruch abgelehnt", "abgelehnt",
+        "unterlagen fehlen", "nicht eingegangen", "keine erstattung",
+        "keine ruckerstattung", "keine ruckzahlung", "leistungsfall",
+        "versicherung zahlt nicht",
     ),
     "premium_failure": (
         "stolen", "theft", "no support", "poor service", "restricted access",
         "not all equipment", "trainer required", "upfront fee", "no refund",
         "front desk did not help", "incident ignored",
+        "gestohlen", "diebstahl",
     ),
     "lock_in": (
         "lock-in", "locked in", "minimum term", "trainer contract",
         "cannot pause", "add-on contract", "bundled contract",
+        "mindestlaufzeit", "vertragsbindung",
     ),
     "pause_friction": (
         "cannot pause in app", "pause requires", "freeze requires",
         "pause by email", "freeze by email", "still charged while waiting",
         "pause took", "suspend membership",
+        # German: pause / dormancy (Stilllegung)
+        "stilllegung", "stilllegen", "pausieren", "ruhend stellen",
+        "mitgliedschaft pausieren",
     ),
     "enforcement_speed": (
         "debited immediately", "instant debit", "direct debit failed",
         "fine", "penalty letter", "fast to charge", "debt letter",
         "enforcement",
+        # German: SEPA / direct-debit enforcement (harm-context phrases;
+        # bare "lastschrift"/"sepa"/"abbuchung" are topic words)
+        "sofort abgebucht", "beitrag eingezogen", "lastschrift geplatzt",
+        "lastschrift fehlgeschlagen", "abbuchung ohne ankundigung",
     ),
     "backend_mismatch": (
         "app says cancelled", "store says not cancelled", "different department",
         "wrong department", "not synchronized", "office did not know",
         "local store was not informed",
+        # German: app/portal/store desync (Deutschlandticket case family)
+        "deutschlandticket", "aboportal", "db navigator", "handy-ticket",
+        "im abo gekundigt aber",
     ),
     "positive_relief": (
         "easy to cancel", "cancelled in app", "refunded quickly",
         "quick refund", "responsive support", "no problem cancelling",
         "claim paid", "reimbursed promptly", "instant refund",
         "human answered",
+        "schnell erstattet", "problemlos gekundigt", "sofort erstattet",
     ),
 }
+
+# German TOPIC terms: establish that a text discusses cancellation,
+# billing, insurance, etc. — WITHOUT counting as harm evidence. Mapping a
+# bare "Vertrag" or "SEPA" to a harm category would let any German text
+# mentioning a contract masquerade as a complaint (an inverted gaming
+# vector). Used for language detection and evidence-term surfacing only.
+GERMAN_TOPIC_TERMS: dict[str, str] = {
+    "kundigung": "cancellation",
+    "kundigen": "cancellation",
+    "fristgerecht": "cancellation",
+    "kundigungsfrist": "cancellation",
+    "mitgliedschaft": "contract",
+    "vertrag": "contract",
+    "abo": "contract",
+    "mindestlaufzeit": "contract",
+    "stilllegung": "pause",
+    "stilllegen": "pause",
+    "pausieren": "pause",
+    "ruhend stellen": "pause",
+    "beitrag": "billing",
+    "abbuchung": "billing",
+    "lastschrift": "billing",
+    "sepa": "billing",
+    "iban": "billing",
+    "rechnung": "billing",
+    "gebuhr": "billing",
+    "mahnung": "arrears",
+    "mahngebuhr": "arrears",
+    "verzugszinsen": "arrears",
+    "forderung": "arrears",
+    "inkasso": "arrears",
+    "ruckerstattung": "refund",
+    "erstattung": "refund",
+    "ruckzahlung": "refund",
+    "bearbeitungszeit": "processing",
+    "schriftlich": "channel",
+    "per e-mail": "channel",
+    "kundenservice": "support",
+    "warteschleife": "support",
+    "automat": "support",
+    "roboter": "support",
+    "nicht zustandig": "support",
+    "versicherung": "insurance",
+    "erstattungsantrag": "insurance",
+    "leistungsfall": "insurance",
+    "anspruch": "insurance",
+    "abgelehnt": "insurance",
+    "unterlagen fehlen": "insurance",
+    "nicht eingegangen": "insurance",
+    "deutschlandticket": "mobility",
+    "aboportal": "mobility",
+    "db navigator": "mobility",
+    "handy-ticket": "mobility",
+}
+
+import re as _re
+
+_UMLAUT_FOLD = str.maketrans({"ä": "a", "ö": "o", "ü": "u", "ß": "s"})
+_PUNCTUATION_PATTERN = _re.compile(r"[,!?;:()\"']")
+_SENTENCE_PERIOD_PATTERN = _re.compile(r"\.(?!\d)")
+
+
+def normalize_text(text: str) -> str:
+    """Umlaut-safe, hyphen-tolerant lowercase normalization.
+
+    Both evidence texts and lexicon phrases pass through this, so
+    "Kündigung", "Kuendigung", and "kundigung" all meet at the same form,
+    and "Handy-Ticket" matches "handy ticket".
+    """
+    lowered = str(text).lower().translate(_UMLAUT_FOLD)
+    # Digraph transliterations Germans type without umlaut keys.
+    for digraph, folded in (("ae", "a"), ("oe", "o"), ("ue", "u"), ("ss", "s")):
+        lowered = lowered.replace(digraph, folded)
+    lowered = lowered.replace("-", " ")
+    # Strip punctuation so "confirmed," tokenizes as "confirmed"; periods
+    # survive only inside numbers ("9.90").
+    lowered = _PUNCTUATION_PATTERN.sub(" ", lowered)
+    lowered = _SENTENCE_PERIOD_PATTERN.sub(" ", lowered)
+    return " ".join(lowered.split())
+
+
+# Precompute normalized lexicons once; extraction matches in folded space
+# but reports the original phrase so German terms stay readable.
+_NORMALIZED_LEXICONS: dict[str, tuple[tuple[str, str], ...]] = {
+    category: tuple((normalize_text(phrase), phrase) for phrase in phrases)
+    for category, phrases in EVIDENCE_LEXICONS.items()
+}
+_NORMALIZED_TOPICS: tuple[tuple[str, str], ...] = tuple(
+    (normalize_text(term), term) for term in GERMAN_TOPIC_TERMS
+)
 
 # Confidence: how many independent evidence texts are enough to trust the
 # qualitative extraction. Below the floor, scores carry explicit warnings.
@@ -136,22 +267,47 @@ class LayerScore:
 
 
 def extract_evidence(texts: list[str]) -> dict[str, EvidenceHit]:
-    """Deterministic phrase extraction over complaint/review texts."""
+    """Deterministic phrase extraction over complaint/review texts.
+
+    Matching happens in normalized (umlaut-folded, hyphen-tolerant)
+    space; reported terms are the original lexicon phrases so German
+    evidence stays readable in ``evidence_terms``.
+    """
     hits: dict[str, EvidenceHit] = {}
-    lowered = [str(t).lower() for t in texts or []]
-    for category, phrases in EVIDENCE_LEXICONS.items():
+    normalized = [normalize_text(t) for t in texts or []]
+    for category, phrases in _NORMALIZED_LEXICONS.items():
         matched: list[str] = []
         count = 0
-        for text in lowered:
-            for phrase in phrases:
-                if phrase in text:
+        for text in normalized:
+            for folded, original in phrases:
+                if folded in text:
                     count += 1
-                    if phrase not in matched:
-                        matched.append(phrase)
+                    if original not in matched:
+                        matched.append(original)
         hits[category] = EvidenceHit(
             category=category, count=count, matched_terms=matched
         )
     return hits
+
+
+def detect_topics(texts: list[str]) -> dict[str, list[str]]:
+    """German topic-term detection: {topic: [matched terms]}.
+
+    Establishes WHAT a text is about (cancellation, billing, insurance)
+    without counting as harm evidence. Also the basis for crude language
+    detection in the ingestion adapter.
+    """
+    normalized = [normalize_text(t) for t in texts or []]
+    topics: dict[str, list[str]] = {}
+    for folded, original in _NORMALIZED_TOPICS:
+        topic = GERMAN_TOPIC_TERMS[original]
+        for text in normalized:
+            if folded in text:
+                topics.setdefault(topic, [])
+                if original not in topics[topic]:
+                    topics[topic].append(original)
+                break
+    return topics
 
 
 def evidence_intensity(hit: EvidenceHit, text_count: int) -> float:

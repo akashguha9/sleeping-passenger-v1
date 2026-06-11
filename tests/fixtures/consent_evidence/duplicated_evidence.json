@@ -1,0 +1,10 @@
+{
+  "_comment": "SIMULATED duplicate-complaint set: one harm, four echoes.",
+  "complaints": [
+    {"text": "charged after cancel was confirmed, hidden fee of 9.90 added", "source": "portal_a", "source_type": "verified_review", "date": "2026-03-01"},
+    {"text": "charged after cancel was confirmed, hidden fee of 9.90 added", "source": "portal_b", "source_type": "forum_post", "date": "2026-03-02"},
+    {"text": "Charged after cancel was confirmed, hidden fee of 9.90 added!", "source": "portal_c", "source_type": "forum_post", "date": "2026-03-03"},
+    {"text": "charged after cancel was confirmed - hidden fee of 9.90 added", "source": "portal_d", "source_type": "anonymous", "date": "2026-03-04"},
+    {"text": "i was charged after cancel was confirmed and a hidden fee of 9.90 was added", "source": "portal_e", "source_type": "anonymous", "date": "2026-03-05"}
+  ]
+}

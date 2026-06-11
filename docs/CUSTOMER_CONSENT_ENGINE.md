@@ -83,6 +83,134 @@ operator reflection, labeled SIMULATED RESEARCH DATA:
 | `asymmetric_app` | one-click signup, email-only cancellation | relief gap ≥7 |
 | `clean_saas` | in-app cancel/pause/refund, human escalation | `mostly_clean`; the control case |
 
+## End-to-end pipeline bridge (added after `fae6800`)
+
+The consent layer is now an **automatic decision modifier**, not a parked
+scorer. Inside `evaluate_candidate_payload`:
+
+```text
+complaint evidence (raw text / JSON / CSV / structured records)
+  → normalized evidence bundle (dedup, language, categories)
+  → evidence reliability (source-weighted, anti-inflation)
+  → consent/regulatory profile + jurisdiction map + dark-pattern chain
+  → crash-wall risk factors (scaled by reliability)
+  → multipliers / penalties / severity caps on the final verdict
+  → Buy/Watch/Avoid effect, recorded in a deterministic decision ledger
+```
+
+Candidate payload evidence fields (any may be present):
+`consent_profile`, `complaint_texts`, `consumer_evidence`,
+`complaint_evidence`, `regulatory_evidence` (defaults to regulator-action
+source weight), `customer_reviews`.
+
+Adjustment contract (`src/consent/pipeline_bridge.py`):
+
+```text
+score_after =
+  score_before
+  × gate(clamp(adjusted_revenue_quality/10, 0.25, 1.05))
+  × gate(clamp(consent_quality/10,          0.35, 1.05))
+  × gate(clamp(1 − regulatory_fragility/10, 0.30, 1.00))
+  − friction_penalty − claims_penalty − narrative_gap_penalty
+
+gate(m) = 1 − (1 − m) × reliability_factor   # reliability gates impact
+```
+
+Fairness rules (tested): clean/specific positive evidence → neutral
+multipliers (no punishment); **zero harm-category evidence → multipliers
+floored at 0.97** (ignorance from missing structured inputs is never
+treated as harm); missing evidence → full neutrality + `insufficient_data`
+warning. Severity caps by reliability band: severe + high reliability caps
+the ladder at watchlist; severe + medium at active_watch; severe + low is
+a warning with a mild cap — one angry anecdote is never a verdict.
+
+## Evidence reliability (`evidence_reliability.py`)
+
+```text
+reliability = 0.35·source_quality + 0.25·corroboration + 0.10·recency
+            + 0.20·specificity + 0.10·severity
+            − anecdote_penalty − duplicate_penalty − vague_language_penalty
+```
+
+Source weights: regulator action (1.0) > lawsuit (0.95) > official
+disclosure (0.85) > verified review (0.70) > app-store review (0.55) >
+forum post (0.40) > anonymous (0.25). Near-duplicates (Jaccard ≥ 0.75
+after normalization) are collapsed — copied text does not corroborate
+itself. Bands: high ≥ 6.5, medium ≥ 3.5, low below.
+
+## German-English lexicon
+
+Matching is umlaut-safe and digraph-tolerant (`Kündigung` ≡ `Kuendigung` ≡
+`kundigung`) and hyphen-tolerant (`Handy-Ticket` ≡ `handy ticket`). Harm
+phrases map to categories ("trotz kundigung abgebucht" →
+charged-after-cancellation, "mahngebuhr"/"inkasso" → hidden fees,
+"stilllegung" → pause friction, "erstattungsantrag abgelehnt" → claims
+non-payment). Bare topic words (`Vertrag`, `SEPA`, `Abo`, `Beitrag`…) are
+deliberately **not** harm evidence — they map to topics for language
+detection and term surfacing only, so a neutral German contract text
+scores zero harm.
+
+## Offline ingestion (`ingestion.py`)
+
+`ingest_raw_texts`, `ingest_json_file`, `ingest_csv_file` →
+`EvidenceBundle` (deduplicated records, language guesses, categories,
+topics, reliability, warnings). Strictly offline; fixtures live in
+`tests/fixtures/consent_evidence/`. Offline ingestion is not live
+monitoring — sourcing and source-ToS compliance stay with the operator.
+
+## Jurisdiction risk map (`jurisdiction.py`)
+
+Evidence categories map onto eight named domains
+(consumer_subscription_risk, insurance_claims_risk,
+direct_debit_billing_risk, language_accessibility_risk, dark_pattern_risk,
+vulnerable_user_risk, claims_handling_risk, refund_friction_risk), with
+DE/EU consumer-subscription and SEPA context weighted fully and
+vulnerable segments held at full intensity. Pattern classification only —
+not legal advice, no guilt, no intent.
+
+## Anti-gaming rules (`anti_gaming.py`)
+
+1. Generic praise ("friendly staff") refutes nothing.
+2. Marketing language ("award-winning", "we pride ourselves") is flagged,
+   never counted as customer proof.
+3. Positive evidence helps only in the category it directly refutes
+   ("refund received within 24 hours" reduces refund friction — it does
+   not unsay "claim never reimbursed").
+4. Resolution evidence ("refunded after I complained") grants bounded
+   severity relief across layers.
+5. Maximum refutation relief is capped at 50% — proof reduces, never
+   erases, contrary evidence.
+
+## Dark-pattern chain detector — the eureka move (`dark_pattern_chain.py`)
+
+"Fraud is sometimes a system design, not one illegal act." The detector
+reconstructs the extraction journey as an ordered six-stage chain —
+easy signup/recurring billing → hard pause/cancel → slow processing →
+continued billing → fees/interest → collections — and scores the longest
+**consecutive** run superlinearly:
+
+```text
+chain = (longest_run / 6)² × mean_stage_severity
+        × reliability_factor × vulnerable_multiplier(1.25)
+```
+
+Scattered frictions barely register; an unbroken chain is the system
+design itself. Each stage cites its evidence terms; an unreliable chain is
+explicitly labeled a hypothesis, not a finding. The chain feeds the crash
+wall as the `dark_pattern_chain` risk factor.
+
+## Decision ledger schema (`ConsentDecisionLedger`)
+
+Deterministic and machine-readable: `input_summary`, `evidence_sources`,
+`deduplication_summary`, `detected_terms`, `layer_scores`,
+`evidence_reliability_score`, `reliability_band`, `multipliers_applied`,
+`penalties_applied`, `risk_caps_applied`, `simulator_factors_added`,
+`jurisdiction_domains`, `dark_pattern_chain`, `anti_gaming`,
+`recommendation_before_consent`, `recommendation_after_consent`,
+`score_before_consent`, `score_after_consent`, `warnings`, `rationale`,
+`advisory_only_notice`. Same input → byte-identical ledger (tested). No
+secrets, no raw file paths.
+
 ## Simulator integration
 
 `to_simulator_risk_factors(profile)` bridges the consent profile into the
@@ -124,8 +252,11 @@ The engine never emits trade instructions. In journal terms:
   structural asymmetry (e.g., delay that happens to be revenue), never
   purpose.
 * **The model detects risk patterns, not legal guilt.**
-* Phrase lexicons are English-language v1; multilingual complaint
-  handling (German Mahnung/Kündigung vocabularies, etc.) is future work.
-* No scraping is built in: the engine scores caller-supplied texts; data
+* Lexicons now cover German + English harm phrases, but they remain
+  hand-built keyword lists, not language models; coverage gaps exist.
+* No scraping is built in: ingestion is offline (raw text/JSON/CSV); data
   sourcing (reviews, regulator databases) is a separate, ToS-respecting
-  concern.
+  concern. Offline ingestion is not live monitoring.
+* All thresholds, weights, source weights, and the chain exponent are
+  doctrine-derived, **not empirically calibrated** — no labeled outcome
+  data exists yet.

@@ -1,0 +1,8 @@
+{
+  "_comment": "SIMULATED Deutschland-Ticket app/store mismatch evidence.",
+  "complaints": [
+    {"text": "Im Aboportal gekündigt aber der DB Navigator zeigte das Abo weiter, dann kam eine Forderung", "source": "verbraucherportal", "source_type": "verified_review", "date": "2026-03-01", "jurisdiction": "de"},
+    {"text": "app says cancelled but store says not cancelled, sent a fine and a debt letter", "source": "reddit", "source_type": "forum_post", "date": "2026-02-14"},
+    {"text": "Deutschlandticket: kept charging after the app cancellation, german only legal letter", "source": "trustpilot", "source_type": "verified_review", "date": "2026-04-11", "jurisdiction": "de"}
+  ]
+}
