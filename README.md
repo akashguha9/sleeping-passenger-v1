@@ -83,6 +83,7 @@ Open http://localhost:3000.
 | [SHOWCASE.md](SHOWCASE.md) | One-stop product showcase (problem, workflow, safety, demo) |
 | [docs/MARKET_PHYSICS_SIMULATOR.md](docs/MARKET_PHYSICS_SIMULATOR.md) | Simulator layer: signal tyres, narrative radar, crash permutations, driver license, cherry-pick gates |
 | [docs/CUSTOMER_CONSENT_ENGINE.md](docs/CUSTOMER_CONSENT_ENGINE.md) | Consent & regulatory-fragility layer: revenue-quality stress testing, digital relief asymmetry, claims non-payment, friction tax |
+| [docs/STRATEGY_ENGINE.md](docs/STRATEGY_ENGINE.md) | Strategy layer: mechanism gate, predator nodes, node payoff matrix, chess promotion, underground breakout, distribution intelligence, backhand defence |
 | [SETUP.md](SETUP.md) | Install, env vars, start/stop, troubleshooting |
 | [DEMO.md](DEMO.md) | 5-minute scripted walkthrough |
 | [TESTING.md](TESTING.md) | What is and isn't tested, how to run |

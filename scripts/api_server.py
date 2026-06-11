@@ -1282,6 +1282,44 @@ def get_simulator_calibration_report(
 
 
 # ---------------------------------------------------------------------------
+# Strategy engine (advisory-only research classifications)
+# ---------------------------------------------------------------------------
+
+
+@app.get("/strategy/doctrine")
+def get_strategy_doctrine(
+    _auth: None = Depends(require_api_token_for_reads),
+) -> dict:
+    """Strategy doctrine, decision classes, and predator-node taxonomy."""
+    try:
+        from scripts.strategy_api import strategy_doctrine
+    except ModuleNotFoundError:  # pragma: no cover
+        from strategy_api import strategy_doctrine  # type: ignore[no-redef]
+    return strategy_doctrine()
+
+
+@app.post("/strategy/evaluate")
+def post_strategy_evaluate(
+    body: dict,
+    _auth: None = Depends(require_api_token),
+) -> dict:
+    """Run one candidate through the narrative-to-stock strategy chain.
+
+    Stateless scoring: mechanism gate, doctrine filter, predator node,
+    competition density, node payoff matrix, chess promotion, underground
+    breakout, distribution intelligence, backhand defence, final research
+    verdict. ADVISORY_ONLY — classifications, never instructions.
+    """
+    try:
+        from scripts.strategy_api import evaluate_strategy_candidate
+    except ModuleNotFoundError:  # pragma: no cover
+        from strategy_api import (  # type: ignore[no-redef]
+            evaluate_strategy_candidate,
+        )
+    return evaluate_strategy_candidate(body)
+
+
+# ---------------------------------------------------------------------------
 # Customer Consent & Regulatory Fragility Engine (advisory-only research)
 # ---------------------------------------------------------------------------
 
