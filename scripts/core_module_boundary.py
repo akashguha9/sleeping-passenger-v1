@@ -123,6 +123,9 @@ _SUPPORT_EXPLICIT: frozenset[str] = frozenset({
     # Pass-3 hardening tooling: OS key custody, encrypted backup/restore,
     # release checksums. All local-only, advisory-safe SUPPORT scripts.
     "secret_provider", "manage_secrets", "secret_fixture_lint",
+    # API surface manifest tripwire: enumerates FastAPI routes into a
+    # committed manifest so no endpoint can appear/vanish silently.
+    "generate_api_route_manifest",
     "backup_private_data", "restore_private_data",
     "generate_checksums",
     # Pass-4 model-quality tooling (advisory-only analytics).

@@ -1,0 +1,247 @@
+{
+  "schema_version": 1,
+  "policy": "Committed enumeration of every HTTP endpoint. Any surface change requires regenerating this file in the same commit (--write) and passes through the advisory-only boundary audit + human review. Advisory-only: no execution endpoints, ever.",
+  "route_count": 60,
+  "routes": [
+    {
+      "method": "GET",
+      "path": "/api/business-value/summary"
+    },
+    {
+      "method": "GET",
+      "path": "/api/calibration-map"
+    },
+    {
+      "method": "GET",
+      "path": "/api/calibration-recommendations"
+    },
+    {
+      "method": "GET",
+      "path": "/api/compliance/readiness"
+    },
+    {
+      "method": "GET",
+      "path": "/api/fresh-discovery"
+    },
+    {
+      "method": "POST",
+      "path": "/api/live-refresh/run"
+    },
+    {
+      "method": "GET",
+      "path": "/api/live-refresh/summary"
+    },
+    {
+      "method": "GET",
+      "path": "/api/model-disagreement/summary"
+    },
+    {
+      "method": "GET",
+      "path": "/api/portfolio-truth"
+    },
+    {
+      "method": "GET",
+      "path": "/api/readiness/daily-signal"
+    },
+    {
+      "method": "GET",
+      "path": "/api/readiness/real-money"
+    },
+    {
+      "method": "GET",
+      "path": "/api/readiness/release-gate"
+    },
+    {
+      "method": "GET",
+      "path": "/api/score-calibration"
+    },
+    {
+      "method": "GET",
+      "path": "/api/signal-input-quality/summary"
+    },
+    {
+      "method": "GET",
+      "path": "/api/signal-quality"
+    },
+    {
+      "method": "GET",
+      "path": "/api/source-health"
+    },
+    {
+      "method": "GET",
+      "path": "/api/version"
+    },
+    {
+      "method": "GET",
+      "path": "/api/why-today/summary"
+    },
+    {
+      "method": "GET",
+      "path": "/chart-structure"
+    },
+    {
+      "method": "POST",
+      "path": "/chart-structure/bootstrap-symbol"
+    },
+    {
+      "method": "GET",
+      "path": "/config/supported-currencies"
+    },
+    {
+      "method": "GET",
+      "path": "/db/status"
+    },
+    {
+      "method": "GET",
+      "path": "/diagnostics/cockpit"
+    },
+    {
+      "method": "GET",
+      "path": "/docs"
+    },
+    {
+      "method": "GET",
+      "path": "/docs/oauth2-redirect"
+    },
+    {
+      "method": "GET",
+      "path": "/exports/manual-trades.csv"
+    },
+    {
+      "method": "GET",
+      "path": "/exports/moltbook.csv"
+    },
+    {
+      "method": "GET",
+      "path": "/exports/reconciliation.csv"
+    },
+    {
+      "method": "GET",
+      "path": "/exports/reflections.csv"
+    },
+    {
+      "method": "GET",
+      "path": "/exports/signal-inbox.csv"
+    },
+    {
+      "method": "GET",
+      "path": "/exports/source-health.csv"
+    },
+    {
+      "method": "GET",
+      "path": "/health"
+    },
+    {
+      "method": "GET",
+      "path": "/health/full"
+    },
+    {
+      "method": "GET",
+      "path": "/learning-completeness"
+    },
+    {
+      "method": "GET",
+      "path": "/live-signals"
+    },
+    {
+      "method": "GET",
+      "path": "/live-sources/status"
+    },
+    {
+      "method": "GET",
+      "path": "/manual-trades"
+    },
+    {
+      "method": "POST",
+      "path": "/manual-trades"
+    },
+    {
+      "method": "POST",
+      "path": "/manual-trades/{trade_id}/cancel"
+    },
+    {
+      "method": "POST",
+      "path": "/manual-trades/{trade_id}/reconcile"
+    },
+    {
+      "method": "GET",
+      "path": "/moltbook"
+    },
+    {
+      "method": "POST",
+      "path": "/moltbook"
+    },
+    {
+      "method": "GET",
+      "path": "/openapi.json"
+    },
+    {
+      "method": "POST",
+      "path": "/reconciliation/auto-update"
+    },
+    {
+      "method": "GET",
+      "path": "/redoc"
+    },
+    {
+      "method": "DELETE",
+      "path": "/reflections/{reflection_id}"
+    },
+    {
+      "method": "GET",
+      "path": "/securities/search"
+    },
+    {
+      "method": "GET",
+      "path": "/securities/{symbol}"
+    },
+    {
+      "method": "GET",
+      "path": "/securities/{symbol}/coverage"
+    },
+    {
+      "method": "GET",
+      "path": "/self-test/reconciliation-queue"
+    },
+    {
+      "method": "GET",
+      "path": "/self-test/summary"
+    },
+    {
+      "method": "GET",
+      "path": "/signals"
+    },
+    {
+      "method": "GET",
+      "path": "/signals/diagnostics"
+    },
+    {
+      "method": "GET",
+      "path": "/signals/{event_id}"
+    },
+    {
+      "method": "POST",
+      "path": "/signals/{event_id}/ai-summary"
+    },
+    {
+      "method": "POST",
+      "path": "/signals/{event_id}/decision"
+    },
+    {
+      "method": "POST",
+      "path": "/signals/{event_id}/reflection"
+    },
+    {
+      "method": "POST",
+      "path": "/signals/{event_id}/validate"
+    },
+    {
+      "method": "GET",
+      "path": "/source-health"
+    },
+    {
+      "method": "GET",
+      "path": "/source-health/summary"
+    }
+  ]
+}

@@ -3,6 +3,9 @@
 > A **local, single-user advisory signal journal**. It pulls public-data
 > signals into a SQLite store, surfaces them in a Next.js dashboard, and lets
 > a human reflect, log a manual trade, and reconcile the outcome.
+>
+> **This system is advisory-only. It does not place trades, route orders, custody assets, or connect to broker execution APIs.** This boundary is
+> machine-enforced by `scripts/audit_advisory_only_boundary.py` (CI-blocking).
 
 ## Ownership & security posture
 

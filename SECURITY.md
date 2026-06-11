@@ -11,6 +11,9 @@ This is a private, single-operator system with no third-party users. If
 you somehow obtained access and found a vulnerability, email
 akashguha@outlook.com. Do not open public issues for security findings.
 
+**This system is advisory-only. It does not place trades, route orders, custody assets, or connect to broker execution APIs.**
+This boundary is machine-enforced by `scripts/audit_advisory_only_boundary.py`.
+
 ## Threat model (summary)
 
 | Actor | Primary defense |
