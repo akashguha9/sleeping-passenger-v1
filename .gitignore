@@ -95,6 +95,14 @@ data/logs/*
 *.db
 # Committed CSV templates (negate the blanket *.csv ignore above).
 !templates/outcome_import_template.csv
+# Committed test fixtures (negate the blanket data-file ignores above).
+# The blanket *.csv has silently swallowed test fixtures twice (outcome
+# import template, consent insurer_evidence.csv -> CI FileNotFoundError
+# on clean checkout). Every offline test must bring its own committed
+# fixture; generated fixture dirs stay ignored via their _generated_*
+# paths, not via file extension.
+!tests/fixtures/**/*.csv
+!tests/fixtures/**/*.tsv
 *.sqlite
 *.sqlite3
 

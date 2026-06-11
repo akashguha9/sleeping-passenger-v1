@@ -257,3 +257,49 @@ def test_resolution_evidence_reduces_severity_globally() -> None:
         report,
     )
     assert adjusted["claims_non_payment"] < 8.0
+
+
+# ---------------------------------------------------------------------------
+# CI hermeticity guard
+# ---------------------------------------------------------------------------
+
+
+def test_consent_fixtures_are_git_tracked() -> None:
+    """Every offline test must bring its own committed fixture.
+
+    The blanket ``*.csv`` gitignore has silently swallowed test fixtures
+    twice (templates/outcome_import_template.csv historically, then
+    insurer_evidence.csv -> FileNotFoundError only on a clean CI
+    checkout while passing locally). This guard fails fast, at the
+    source, with an actionable message if any consent fixture present on
+    disk is not tracked by git.
+    """
+    import shutil
+    import subprocess
+
+    if shutil.which("git") is None:
+        pytest.skip("git not available (e.g. tarball checkout)")
+    repo_root = FIXTURES.parents[2]
+    if not (repo_root / ".git").exists():
+        pytest.skip("not a git checkout")
+
+    tracked = set(
+        subprocess.run(
+            ["git", "ls-files", "--", "tests/fixtures/consent_evidence"],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.splitlines()
+    )
+    on_disk = {
+        str(path.relative_to(repo_root)).replace("\\", "/")
+        for path in FIXTURES.iterdir()
+        if path.is_file()
+    }
+    untracked = sorted(on_disk - tracked)
+    assert not untracked, (
+        "consent fixture(s) exist on disk but are NOT committed — a clean "
+        f"CI checkout will fail with FileNotFoundError: {untracked}. "
+        "Run `git add` (the .gitignore negates *.csv under tests/fixtures/)."
+    )
