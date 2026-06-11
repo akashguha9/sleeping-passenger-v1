@@ -11,7 +11,8 @@ import {
 /**
  * Sprint 8.1 — local-only operator-token panel.
  *
- * When the backend has `MVP_API_TOKEN` set, mutating POST routes require
+ * When the backend has `MVP_API_TOKEN` set (the fail-closed default —
+ * the server refuses to boot without one), all journal routes require
  * a Bearer token.  This panel lets the operator paste that token once
  * per browser session.  The token is stored in `sessionStorage` (NOT
  * `localStorage`, NOT cookies) and is cleared when the tab closes.

@@ -137,6 +137,41 @@ def test_workflow_frontend_job_runs_typecheck_and_build(workflow_text: str) -> N
     assert "npm ci" in workflow_text
 
 
+def test_workflow_declares_least_privilege_permissions(workflow_text: str) -> None:
+    """Every workflow must pin the GITHUB_TOKEN to read-only contents so a
+    compromised step cannot push code, tags, or releases."""
+    assert "permissions:" in workflow_text
+    assert "contents: read" in workflow_text
+    for forbidden in ("contents: write", "packages: write", "id-token: write"):
+        assert forbidden not in workflow_text, forbidden
+
+
+def test_all_workflows_declare_least_privilege_permissions() -> None:
+    """Same guarantee across every workflow file, not just pytest.yml."""
+    workflows_dir = _REPO_ROOT / ".github" / "workflows"
+    for wf in sorted(workflows_dir.glob("*.yml")):
+        text = wf.read_text(encoding="utf-8")
+        assert "permissions:" in text, f"{wf.name} missing permissions block"
+        assert "contents: read" in text, f"{wf.name} not read-only"
+        assert "pull_request_target" not in text, (
+            f"{wf.name} uses pull_request_target (untrusted-fork secret risk)"
+        )
+
+
+def test_checkout_steps_do_not_persist_credentials() -> None:
+    """No job pushes back to the repo, so the checkout token must not be
+    persisted into .git/config where later steps could read it."""
+    workflows_dir = _REPO_ROOT / ".github" / "workflows"
+    for wf in sorted(workflows_dir.glob("*.yml")):
+        text = wf.read_text(encoding="utf-8")
+        checkouts = text.count("actions/checkout@")
+        persisted_off = text.count("persist-credentials: false")
+        assert checkouts == persisted_off, (
+            f"{wf.name}: {checkouts} checkout step(s) but only "
+            f"{persisted_off} persist-credentials: false"
+        )
+
+
 def test_workflow_does_not_commit_runtime_db(workflow_text: str) -> None:
     """No step should add `runtime/mvp_local.db` or push artefacts."""
     assert "mvp_local.db" not in workflow_text

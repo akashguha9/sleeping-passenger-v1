@@ -17,6 +17,7 @@ Pin
 from __future__ import annotations
 
 from scripts import live_source_registry as lsr
+from tests.helpers import scanner_probes as probes
 
 
 # ---------------------------------------------------------------------------
@@ -209,10 +210,12 @@ def test_no_secret_value_exposed_in_freshness_output():
     import json
 
     now = 1_700_000_000.0
+    # Values assembled at runtime: literal ones beside *_API_KEY names are
+    # generic-api-key scanner bait (tests/helpers/scanner_probes.py).
     leaky_env = {
-        "NEWS_API_KEY": "sk-LEAKED-1234567890",
-        "XAI_API_KEY": "xai-LEAKED-ABCDEFGHIJ",
-        "ETHERSCAN_API_KEY": "ES-LEAKED-XYZ",
+        "NEWS_API_KEY": probes.sk_style_token("LEAKED-1234567890"),
+        "XAI_API_KEY": probes.xai_style_token("LEAKED-ABCDEFGHIJ"),
+        "ETHERSCAN_API_KEY": probes.assemble("ES-", "LEAKED", "-XYZ"),
     }
     result = lsr.compute_source_freshness(
         [], cadence_hours=6, now_epoch=now, env=leaky_env

@@ -1,0 +1,49 @@
+name: history-audit
+
+# Manual (workflow_dispatch) full-history secret scan, checked against the
+# verified ledger in docs/security/historical_findings_ledger.json.
+#
+# Deliberately NOT merge-blocking: git history does not change on a normal
+# push, the known historical findings are verified synthetic fixtures (see
+# docs/security/historical-secret-scan-ledger.md), and an UNKNOWN finding
+# needs human verification — and, if real, credential rotation — not an
+# automatic red X on an unrelated PR. Current-tree leaks are still blocked
+# on every push by the dep-audit secrets job; this workflow only adds the
+# all-of-history view on demand.
+#
+# Fails on: any current-tree finding (exit 2), any historical finding not
+# in the verified ledger (exit 1), shallow history (exit 4).
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  history:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          # Complete history is mandatory — the audit refuses shallow clones.
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install gitleaks 8.24.3 (version + checksum pinned)
+        run: |
+          curl -sSfL -o /tmp/gitleaks.tar.gz \
+            https://github.com/gitleaks/gitleaks/releases/download/v8.24.3/gitleaks_8.24.3_linux_x64.tar.gz
+          # Same pinned binary + SHA-256 as the dep-audit secrets job.
+          echo "9991e0b2903da4c8f6122b5c3186448b927a5da4deef1fe45271c3793f4ee29c  /tmp/gitleaks.tar.gz" | sha256sum --check --strict -
+          tar -xzf /tmp/gitleaks.tar.gz -C /tmp gitleaks
+          install -m 0755 /tmp/gitleaks /usr/local/bin/gitleaks
+          gitleaks version
+      - name: Full-history scan vs verified ledger
+        run: python3 scripts/audit_historical_secret_ledger.py
+      - name: Upload machine-readable report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: historical-secret-scan
+          path: runtime/reports/historical_secret_scan.json
+          if-no-files-found: ignore

@@ -19,8 +19,10 @@ jobs:
   python:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.13"
       - name: Install pip-audit
@@ -36,8 +38,10 @@ jobs:
       run:
         working-directory: frontend
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: "20"
           cache: npm
@@ -50,11 +54,126 @@ jobs:
 
   secrets:
     # D3 fix: scan the repo for committed secrets on every push.
+    #
+    # Why the gitleaks CLI instead of gitleaks/gitleaks-action@v2: the
+    # action calls the GitHub Users API at runtime to decide whether a
+    # commercial license key is required, and a transient API/JSON error
+    # has failed this job before with "missing gitleaks license". A
+    # merge-blocking secret gate must be deterministic, so we download
+    # the open-source CLI directly, pinned by version AND SHA-256
+    # (verified offline below). This keeps the exact scan command, scope
+    # (--log-opts=-1 = the pushed commit), strict exit-code behavior, and
+    # SARIF artifact the action produced — with no license/API dependency.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           fetch-depth: 0
-      - uses: gitleaks/gitleaks-action@v2
+          persist-credentials: false
+      - name: Secret-fixture hygiene lint (early guard, not a gitleaks substitute)
+        # Fails fast on scanner-bait fixtures (fake keys beside credential
+        # keywords) with a fix-it message; see scripts/secret_fixture_lint.py.
+        run: python3 scripts/secret_fixture_lint.py
+      - name: Install gitleaks 8.24.3 (version + checksum pinned)
+        run: |
+          curl -sSfL -o /tmp/gitleaks.tar.gz \
+            https://github.com/gitleaks/gitleaks/releases/download/v8.24.3/gitleaks_8.24.3_linux_x64.tar.gz
+          # SHA-256 from the v8.24.3 release checksums file; a tampered or
+          # repointed download fails the job here.
+          echo "9991e0b2903da4c8f6122b5c3186448b927a5da4deef1fe45271c3793f4ee29c  /tmp/gitleaks.tar.gz" | sha256sum --check --strict -
+          tar -xzf /tmp/gitleaks.tar.gz -C /tmp gitleaks
+          install -m 0755 /tmp/gitleaks /usr/local/bin/gitleaks
+          gitleaks version
+      - name: Gitleaks full-tree scan (defense in depth)
+        # The commit-scope scan below only sees lines added in the pushed
+        # commit, so bait or leaks already in the tree would go unnoticed
+        # until edited. This pass scans the checked-out tree as files.
+        # Report goes outside the workspace so the commit scan below never
+        # re-scans scanner output.
+        run: |
+          gitleaks detect --no-git --config=.gitleaks.toml --redact \
+            --exit-code=2 --report-format=sarif \
+            --report-path=/tmp/results-tree.sarif --source=.
+      - name: Gitleaks commit scan (pushed commit; real leaks exit non-zero)
+        # Same command gitleaks-action@v2 ran (scope preserved:
+        # --log-opts=-1 scans the pushed commit). --config is explicit so
+        # .gitleaks.toml discovery is deterministic, not accidental.
+        run: |
+          gitleaks detect --config=.gitleaks.toml --redact -v --exit-code=2 \
+            --report-format=sarif --report-path=results.sarif \
+            --log-level=debug --log-opts=-1
+      - name: Upload SARIF reports
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: gitleaks-results
+          path: |
+            results.sarif
+            /tmp/results-tree.sarif
+          if-no-files-found: ignore
+      - name: Build security evidence bundle
+        # Machine-readable record of what this job verified (exit codes +
+        # SHA-256 of every security-relevant file). --skip-pytest because
+        # test deps are not installed here; the bundle records that check
+        # as "skipped", never as passed (pytest has its own workflow).
+        # --allow-skips tolerates exactly that deliberate skip; any FAILED
+        # check still exits non-zero and fails this job.
+        run: |
+          python3 scripts/build_security_evidence_bundle.py \
+            --skip-pytest --allow-skips
+      - name: Upload security evidence bundle
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: security-evidence-bundle
+          path: runtime/reports/security_evidence_bundle.json
+          if-no-files-found: ignore
+      - name: Build + verify release evidence bundle (tamper-evident)
+        # Builds the release-grade attestation (lockfile/workflow/core
+        # hashes, audit results, canonical bundle_sha256) and immediately
+        # verifies it. --skip-pytest: test deps are not installed here;
+        # recorded as skipped, never as passed. Failed audits still fail.
+        run: |
+          python3 scripts/build_release_evidence_bundle.py \
+            --skip-pytest --allow-skips
+          python3 scripts/verify_release_evidence_bundle.py \
+            runtime/reports/release_evidence_bundle.json
+      - name: Upload release evidence bundle
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: release-evidence-bundle
+          path: runtime/reports/release_evidence_bundle.json
+          if-no-files-found: ignore
+
+  policy:
+    # Pass-2 supply-chain / data-protection policy gates. Stdlib-only
+    # scripts — no dependency install needed.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.13"
+      - name: Actions SHA-pinning audit
+        run: python scripts/audit_github_actions_pinning.py
+      - name: Security-gate integrity audit (gitleaks pipeline cannot drift)
+        run: python scripts/audit_security_gate_integrity.py
+      - name: Dependency reproducibility audit (hash-locked release path)
+        run: python scripts/audit_dependency_reproducibility.py
+      - name: Advisory-only boundary audit (no execution-shaped code, ever)
+        run: python scripts/audit_advisory_only_boundary.py
+      - name: Model-evaluation honesty audit (no overclaims, honest evidence)
+        run: python scripts/audit_model_evaluation_honesty.py
+      - name: Dependency advisory register audit (review-window expiry)
+        run: python scripts/audit_dependency_advisory_register.py
+      - name: Local data-protection audit (tracked secrets/DBs/backups)
+        run: python scripts/audit_local_data_protection.py
+      - name: GitHub owner-controls audit (read-only; fails only on VERIFIED-unsafe)
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python scripts/audit_github_owner_controls.py
+      - name: Model readiness gate (advisory-only model-quality controls)
+        run: python scripts/run_model_readiness_gate.py

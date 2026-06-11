@@ -667,7 +667,7 @@ The state/archetype system is ambitious but fragmented.
   - Score: **5/10**
 
 - **GALLARDO**
-  - Where: some execution-ready mappings
+  - Where: some decision-ready (advisory) mappings
   - Trigger: disciplined execution readiness
   - Issue: often defined but intentionally not assigned in some layers
   - Score: **4/10**

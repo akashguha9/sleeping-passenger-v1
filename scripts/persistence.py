@@ -14,6 +14,7 @@ Advisory invariants enforced on every write and read:
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 from pathlib import Path
 from typing import Any
@@ -518,10 +519,41 @@ def _additive_migrations(conn: sqlite3.Connection) -> None:
             pass
 
 
+def harden_db_permissions(db_path: Path = DB_PATH) -> None:
+    """Enforce owner-only permissions on the DB file and its directory.
+
+    ``sqlite3.connect`` creates missing DB files honoring the process
+    umask (typically 0644 → world-readable), and the local data-protection
+    audit (scripts/audit_local_data_protection.py) fails closed on any
+    world-accessible ``runtime/*.db``. Hardening immediately after
+    create/connect keeps the canonical DB at 0600 (dir 0700) no matter
+    which caller created it first. SQLite sidecar files (-wal/-shm)
+    inherit the main DB file's mode.
+
+    POSIX only: Windows has no chmod-style owner-only bits — that surface
+    is handled by scripts/harden_local_owner_files.ps1. Failures are
+    swallowed (exotic filesystems must not break persistence callers).
+    """
+    if os.name != "posix":
+        return
+    targets: list[tuple[Path, int]] = [(db_path, 0o600)]
+    # Only the canonical runtime dir is tightened to 0700; arbitrary
+    # parents (pytest tmp dirs, operator-chosen MVP_DB_PATH locations)
+    # are left alone.
+    if db_path.parent == RUNTIME_DIR:
+        targets.insert(0, (RUNTIME_DIR, 0o700))
+    for target, mode in targets:
+        try:
+            os.chmod(target, mode)
+        except OSError:
+            pass
+
+
 def init_schema(db_path: Path = DB_PATH) -> None:
     """Create runtime dir and initialize all tables. Idempotent."""
     db_path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(db_path))
+    harden_db_permissions(db_path)
     try:
         _apply_pragmas(conn)
         conn.executescript(_SCHEMA_SQL)
@@ -538,6 +570,9 @@ def _get_conn(db_path: Path = DB_PATH) -> sqlite3.Connection:
     if key not in _initialized:
         init_schema(db_path)
     conn = sqlite3.connect(str(db_path))
+    # Heal permissions even when the file pre-exists (e.g. created earlier
+    # by a raw sqlite3.connect under a permissive umask).
+    harden_db_permissions(db_path)
     conn.row_factory = sqlite3.Row
     _apply_pragmas(conn)
     return conn
@@ -1069,6 +1104,16 @@ def insert_manual_trade(
             vals,
         )
         conn.commit()
+        # Pass 5: journal entries are evidence by default (best-effort).
+        try:
+            from scripts.evidence_bridge import on_manual_trade
+        except ModuleNotFoundError:  # pragma: no cover
+            from evidence_bridge import on_manual_trade  # type: ignore[no-redef]
+        on_manual_trade({
+            "trade_id": trade_id, "ticker": ticker, "side": side,
+            "quantity": quantity, "price": price, "thesis": thesis,
+            "executed_at": executed_at,
+        })
     finally:
         conn.close()
 
@@ -1251,6 +1296,16 @@ def insert_reconciliation(
             ),
         )
         conn.commit()
+        # Pass 5: reconciled outcomes are evidence by default (best-effort).
+        try:
+            from scripts.evidence_bridge import on_reconciliation
+        except ModuleNotFoundError:  # pragma: no cover
+            from evidence_bridge import on_reconciliation  # type: ignore[no-redef]
+        on_reconciliation({
+            "trade_id": trade_id, "outcome_status": outcome_status,
+            "pnl_estimate": pnl_estimate, "actual_price": actual_fill_price,
+            "reconciled_at": reconciled_at,
+        })
     finally:
         conn.close()
 
@@ -1420,6 +1475,13 @@ def insert_imported_outcomes(rows: list[dict[str, Any]], db_path: Path = DB_PATH
             )
             written += cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
         conn.commit()
+        # Pass 5: imported backtest/outcome datasets are evidence by default.
+        if written:
+            try:
+                from scripts.evidence_bridge import on_imported_outcomes
+            except ModuleNotFoundError:  # pragma: no cover
+                from evidence_bridge import on_imported_outcomes  # type: ignore[no-redef]
+            on_imported_outcomes(rows)
     finally:
         conn.close()
     return written
@@ -1491,6 +1553,16 @@ def insert_moltbook_entry(
             ),
         )
         conn.commit()
+        # Pass 5: moltbook post-mortems are evidence by default (best-effort).
+        try:
+            from scripts.evidence_bridge import on_moltbook_entry
+        except ModuleNotFoundError:  # pragma: no cover
+            from evidence_bridge import on_moltbook_entry  # type: ignore[no-redef]
+        on_moltbook_entry({
+            "entry_id": entry_id, "ticker": ticker, "outcome": outcome,
+            "mistake_type": mistake_type, "lesson_learned": lesson_learned,
+            "created_at": logged_at,
+        })
     finally:
         conn.close()
 
@@ -1842,7 +1914,17 @@ def insert_signal_event(
             ),
         )
         conn.commit()
-        return cursor.rowcount > 0
+        inserted = cursor.rowcount > 0
+        if inserted:
+            # Pass 5: every NEW ingested signal event becomes ledger
+            # evidence by default (best-effort bridge; never raises;
+            # duplicates skipped because INSERT OR IGNORE returned False).
+            try:
+                from scripts.evidence_bridge import on_signal_event
+            except ModuleNotFoundError:  # pragma: no cover
+                from evidence_bridge import on_signal_event  # type: ignore[no-redef]
+            on_signal_event(event_id, source_name, raw_payload, fetched_at)
+        return inserted
     finally:
         conn.close()
 

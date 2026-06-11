@@ -65,7 +65,7 @@ Presentation does not increase structural validity.
 - `MIURA_RAW_DENT`: raw strength without validation
 - `MURCIELAGO_DURABILITY_REPAIR`: repair and stress-survival stage
 - `AVENTADOR_VALIDATED_SURFACE`: validated but not execution-finish ready
-- `GALLARDO_EXECUTION_FINISH`: validated and execution-ready
+- `GALLARDO_EXECUTION_FINISH`: validated and decision-ready (advisory surface finish — never broker execution)
 - `ISLERO_SHOCK_RECLASSIFICATION`: contradiction or cure shock reset
 - `DIABLO_CHAOS_SURFACE_VETO`: policy or chaos veto
 - `HURACAN_FAST_TRACK_SURFACE`: only after policy, chaos, validation, stress, and cure gates pass

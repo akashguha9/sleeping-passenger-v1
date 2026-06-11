@@ -680,6 +680,18 @@ def list_inbox_items(
     fallback_used = truth_source != "sqlite"
     canonical = truth_source == "sqlite"
 
+    # Pass 6: every signal card carries its model-quality annotation
+    # (advisory labels, evidence coverage, temporal validity, grounding,
+    # score-change cause, memo pointer). Best-effort; never breaks the inbox.
+    try:
+        try:
+            from scripts.signal_annotation import annotate_items as _annotate
+        except ModuleNotFoundError:  # pragma: no cover - script-style env
+            from signal_annotation import annotate_items as _annotate  # type: ignore[no-redef]
+        _annotate(items)
+    except Exception:  # pragma: no cover
+        pass
+
     return {
         "operation": "list_inbox_items",
         "item_count": len(items),

@@ -42,7 +42,11 @@ _TRADE_PAYLOAD = {
 
 @pytest.fixture
 def client_no_token(monkeypatch):
-    """MVP_API_TOKEN explicitly unset → permissive local mode."""
+    """MVP_API_TOKEN explicitly unset → request-level open mode.
+
+    Only reachable in a real server via the explicit loopback-only
+    MVP_ALLOW_UNAUTH=1 override — startup otherwise fails closed
+    (see tests/test_hackathon_sprint1.py)."""
     monkeypatch.delenv("MVP_API_TOKEN", raising=False)
     import scripts.api_server as srv
 

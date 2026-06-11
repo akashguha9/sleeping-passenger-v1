@@ -22,7 +22,7 @@ surface. **Do not delete or weaken these without a written reason.**
 | API: reconciliation | `tests/test_api_server.py` | advisory stamps, 422 on missing fields |
 | API: exports CSV | `tests/test_api_server.py` | content-type `text/csv` |
 | API: AST proof | `tests/test_api_server.py` | no `/execute`, `/buy`, `/sell`, `/order`, `place_order`, etc. exist in router or function names |
-| API: token gate | `tests/test_api_token_gate.py` | `MVP_API_TOKEN` unset → mutating POSTs allowed; set → require Bearer token; GETs always open |
+| API: token gate | `tests/test_api_token_gate.py` | `MVP_API_TOKEN` set → all journal routes require Bearer token. Startup fails closed without a token (`tests/test_owner_only_hardening.py`, `tests/test_hackathon_sprint1.py`) |
 | API: error honesty | `tests/test_api_error_honesty.py` | global handler returns sanitized JSON with explicit HTTP status |
 | Persistence | `tests/test_persistence.py` | schema init, advisory stamp enforcement on writes |
 | Persistence truth model | `tests/test_persistence_truth_model.py` | doctrine doc exists, inbox/list responses expose `truth_source`, fallback is never claimed canonical |
@@ -103,7 +103,7 @@ If any step fails, the demo isn't ready. Do not present.
 The single most valuable end-to-end test to write (when Playwright is wired):
 
 ```
-1. Start backend with MVP_API_TOKEN unset.
+1. Start backend with a token: `python scripts/generate_api_token.py --write-env` (or set MVP_ALLOW_UNAUTH=1 for a throwaway unauthenticated loopback run).
 2. POST a synthetic signal_event row via the persistence layer (fixture).
 3. Open Dashboard → assert backend dot is green.
 4. Open Signal Inbox → assert the synthetic ticker appears, status=pending.

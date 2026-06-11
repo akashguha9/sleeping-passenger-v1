@@ -234,6 +234,46 @@ EXPLICIT_IN_SCOPE: frozenset[str] = frozenset({
     # operator_permission_guard.  In-scope record-keeping maintenance — it
     # never touches signal_events, brokers, or execution.
     "reset_local_logs.py",
+    # Pass-2 local data protection: NTFS ACL hardening for .env / runtime /
+    # logs / backups. Dry-run by default (-Apply to change ACLs), never
+    # deletes data, never touches signal_events, brokers, or execution.
+    "harden_local_owner_files.ps1",
+    # Pass-3 E2E helper: runs the route-mocked Playwright suite, optional
+    # throwaway-token live probe. No broker, no execution, no .env writes.
+    "run_e2e_owner_auth.ps1",
+    # Pass-3 owner hardening modules (custody / backup / audit / provenance).
+    "secret_provider.py", "manage_secrets.py",
+    "backup_private_data.py", "restore_private_data.py",
+    "audit_log.py", "generate_checksums.py",
+    # Pass-4 model-quality modules: evidence ledger, anti-leakage guard,
+    # advisory backtesting/calibration/scorecard, LLM grounding,
+    # sensitivity, decision memos, outcome review. All advisory-only,
+    # no broker, no execution.
+    "data_quality.py", "temporal_guard.py", "backtest_advisory_signals.py",
+    "model_calibration.py", "model_scorecard.py", "llm_grounding_guard.py",
+    "sensitivity_analysis.py", "generate_decision_memo.py",
+    "review_signal_outcomes.py",
+    # Pass-5 production integration + adversarial validation: evidence
+    # bridge, syndication collapse, weight sanity, tournament (shadow
+    # observations only — order-shaped rows are refused by contract),
+    # red-team, score explainer, single-command readiness gate. All
+    # advisory-only; no broker, no execution.
+    "evidence_bridge.py", "syndication_detector.py", "signal_tournament.py",
+    "weight_sanity.py", "redteam_model.py", "explain_score_change.py",
+    "run_model_readiness_gate.py",
+    # Pass-6 operating loop + honesty machinery: timestamp migration
+    # (guarded MIGRATION_WRITE), derived-score ledger + verifier, signal
+    # annotations, history bootstrap, daily loop (manual command, no
+    # daemon), external-readiness checker, trust ladder. All advisory-
+    # only; the ledgers structurally refuse order/execution shapes.
+    "migrate_legacy_timestamps.py", "derived_score_ledger.py",
+    "verify_derived_score_ledger.py", "signal_annotation.py",
+    "bootstrap_signal_history.py", "daily_model_operating_loop.py",
+    "final_external_readiness_check.py", "model_trust_ladder.py",
+    # CI-hygiene hardening: secret-fixture lint (read-only repo scan that
+    # blocks scanner-bait fixtures before gitleaks; see SECURITY.md
+    # "Secret fixture hygiene"). No DB, no network, no execution.
+    "secret_fixture_lint.py",
 })
 
 # Modules deliberately marked OUT_OF_SCOPE inside ``scripts/``.  This

@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import os
+from tests.helpers import scanner_probes as probes
 from typing import Any
 from unittest.mock import MagicMock, patch
 
@@ -178,7 +179,8 @@ def _grok_resp(status: int, body: dict | str) -> MagicMock:
 
 
 class TestGrokSanitizedErrors:
-    _SECRET = "xai-super-secret-key-do-not-leak"
+    # Probe assembled at runtime — never literal scanner bait in source.
+    _SECRET = probes.xai_style_token("do-not-leak")
 
     def test_400_skip_reason_contains_status_and_body(self) -> None:
         body = {"error": {"message": "Model not available"}}

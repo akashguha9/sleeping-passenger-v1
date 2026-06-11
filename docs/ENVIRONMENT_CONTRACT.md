@@ -30,7 +30,7 @@ booleans.  It never touches the DB and never calls a broker.
 | Class | Severity if missing | Examples |
 |---|---|---|
 | **required** | `FAIL` if blank/unresolvable | `MVP_DB_PATH` (falls back to `runtime/mvp_local.db`) |
-| **secret** (optional) | `WARN` (source stays off) | `XAI_API_KEY`, `EDINET_API_KEY`, `MVP_API_TOKEN` |
+| **secret** (optional*) | `WARN` (source stays off) | `XAI_API_KEY`, `EDINET_API_KEY`, `MVP_API_TOKEN` (*required at server boot — startup preflight fails closed without it; see OWNER_ACCESS.md) |
 | **source** (optional) | `WARN` (source stays off) | `SEC_USER_AGENT`, `POLY_*_BASE_URL`, `PIPELINE_QUOTE_PROVIDER` |
 | **plain** | `INFO`/default | `API_HOST`, `API_PORT`, `ALLOWED_ORIGINS`, `MVP_ENVIRONMENT` |
 | **exec_flag** | must stay OFF | `PIPELINE_ENABLE_LIVE_EXECUTION` (truthy → `FAIL`), `PIPELINE_ENABLE_PAPER_EXECUTION` (truthy → `WARN`) |

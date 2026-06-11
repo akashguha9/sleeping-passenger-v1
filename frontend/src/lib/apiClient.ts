@@ -55,12 +55,15 @@ export interface MoltbookListResponse {
 
 // Sprint 8.1 — local-only operator-token support.
 //
-// When `MVP_API_TOKEN` is set on the backend, mutating POST routes
-// require an `Authorization: Bearer <token>` header.  The token is
-// stored in **sessionStorage** (cleared when the tab closes) under
-// `mvp_api_token` and is NEVER committed, NEVER exposed via
-// `NEXT_PUBLIC_*`, and NEVER logged.  GET requests do not send the token
-// by default — it is attached only to non-GET methods.
+// When `MVP_API_TOKEN` is set on the backend, ALL journal routes —
+// reads and writes — require an `Authorization: Bearer <token>` header
+// (the backend gates reads via `require_api_token_for_reads`).  The
+// token is stored in **sessionStorage** (cleared when the tab closes)
+// under `mvp_api_token` and is NEVER committed, NEVER exposed via
+// `NEXT_PUBLIC_*`, and NEVER logged.  The header is attached to every
+// request method when a session token exists; previously it was
+// attached only to non-GET methods, which made token-mode unusable for
+// read pages.
 //
 // Token-mode is local operator convenience, NOT a SaaS auth scheme.
 // Setting a token does not authorise trades; the backend always returns
@@ -108,12 +111,9 @@ function buildHeaders(init?: RequestInit): Record<string, string> {
     'Content-Type': 'application/json',
     ...((init?.headers as Record<string, string>) ?? {}),
   };
-  const method = (init?.method ?? 'GET').toUpperCase();
-  if (method !== 'GET' && method !== 'HEAD') {
-    const token = getStoredApiToken();
-    if (token && !headers['Authorization']) {
-      headers['Authorization'] = `Bearer ${token}`;
-    }
+  const token = getStoredApiToken();
+  if (token && !headers['Authorization']) {
+    headers['Authorization'] = `Bearer ${token}`;
   }
   return headers;
 }

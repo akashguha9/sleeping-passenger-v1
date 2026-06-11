@@ -111,10 +111,10 @@ def test_missing_credentials_counted_skipped(tmp_path):
 def test_no_secret_exposure_in_output(tmp_path):
     payload = sra.run_audit(
         tmp_path / "absent.db",
-        env={"NEWS_API_KEY": "super-secret-news-key-987654"},
+        env={"NEWS_API_KEY": "DUMMY_VALUE_FOR_TESTS_ONLY"},
     )
     serialized = json.dumps(payload)
-    assert "super-secret-news-key-987654" not in serialized
+    assert "DUMMY_VALUE_FOR_TESTS_ONLY" not in serialized
 
 
 # ---------------------------------------------------------------------------

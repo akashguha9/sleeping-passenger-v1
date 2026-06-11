@@ -1,0 +1,224 @@
+{
+  "schema_version": 1,
+  "verified_at": "2026-06-11",
+  "verified_against_commits": 291,
+  "policy": "Known historical findings listed here are synthetic scanner bait, verified line-by-line. scripts/audit_historical_secret_ledger.py fails on any historical finding NOT in this list and on ANY current-tree finding. Entries must never be added to suppress a real or unverified secret.",
+  "known_findings": [
+    {
+      "fingerprint": "18b2ce67d7c8b745974f9eda30dc61fe1640a289:tests/test_secret_custody.py:generic-api-key:116",
+      "commit": "18b2ce67d7c8b745974f9eda30dc61fe1640a289",
+      "file": "tests/test_secret_custody.py",
+      "line": 116,
+      "rule": "generic-api-key",
+      "classification": "synthetic_fixture",
+      "note": "Fabricated test fixture (fake token / placeholder beside a credential keyword); manually verified against the commit content on 2026-06-11. Never a real credential."
+    },
+    {
+      "fingerprint": "2f54f16f2f62dad19f156c847c13bcec8270d2db:tests/test_runtime_artifact_hygiene.py:generic-api-key:68",
+      "commit": "2f54f16f2f62dad19f156c847c13bcec8270d2db",
+      "file": "tests/test_runtime_artifact_hygiene.py",
+      "line": 68,
+      "rule": "generic-api-key",
+      "classification": "synthetic_fixture",
+      "note": "Fabricated test fixture (fake token / placeholder beside a credential keyword); manually verified against the commit content on 2026-06-11. Never a real credential."
+    },
+    {
+      "fingerprint": "43981b4d7d7be256e771c5269bdc2d254114665b:tests/test_external_evidence_reliability_api.py:generic-api-key:60",
+      "commit": "43981b4d7d7be256e771c5269bdc2d254114665b",
+      "file": "tests/test_external_evidence_reliability_api.py",
+      "line": 60,
+      "rule": "generic-api-key",
+      "classification": "synthetic_fixture",
+      "note": "Fabricated test fixture (fake token / placeholder beside a credential keyword); manually verified against the commit content on 2026-06-11. Never a real credential."
+    },
+    {
+      "fingerprint": "4a1a8d44d8acbb99747ba71f95f5180e7f673165:tests/test_ai_output_schema.py:generic-api-key:279",
+      "commit": "4a1a8d44d8acbb99747ba71f95f5180e7f673165",
+      "file": "tests/test_ai_output_schema.py",
+      "line": 279,
+      "rule": "generic-api-key",
+      "classification": "synthetic_fixture",
+      "note": "Fabricated test fixture (fake token / placeholder beside a credential keyword); manually verified against the commit content on 2026-06-11. Never a real credential."
+    },
+    {
+      "fingerprint": "4a1a8d44d8acbb99747ba71f95f5180e7f673165:tests/test_ai_output_schema.py:generic-api-key:288",
+      "commit": "4a1a8d44d8acbb99747ba71f95f5180e7f673165",
+      "file": "tests/test_ai_output_schema.py",
+      "line": 288,
+      "rule": "generic-api-key",
+      "classification": "synthetic_fixture",
+      "note": "Fabricated test fixture (fake token / placeholder beside a credential keyword); manually verified against the commit content on 2026-06-11. Never a real credential."
+    },
+    {
+      "fingerprint": "4af7b802677e57b128151b466b9ebcb1eabb8b61:tests/test_local_security_audit.py:generic-api-key:68",
+      "commit": "4af7b802677e57b128151b466b9ebcb1eabb8b61",
+      "file": "tests/test_local_security_audit.py",
+      "line": 68,
+      "rule": "generic-api-key",
+      "classification": "synthetic_fixture",
+      "note": "Fabricated test fixture (fake token / placeholder beside a credential keyword); manually verified against the commit content on 2026-06-11. Never a real credential."
+    },
+    {
+      "fingerprint": "52a5179576ee896f5152943ba592639322cdaea4:tests/test_ai_schema_integration.py:generic-api-key:213",
+      "commit": "52a5179576ee896f5152943ba592639322cdaea4",
+      "file": "tests/test_ai_schema_integration.py",
+      "line": 213,
+      "rule": "generic-api-key",
+      "classification": "synthetic_fixture",
+      "note": "Fabricated test fixture (fake token / placeholder beside a credential keyword); manually verified against the commit content on 2026-06-11. Never a real credential."
+    },
+    {
+      "fingerprint": "52a5179576ee896f5152943ba592639322cdaea4:tests/test_source_health_truth.py:generic-api-key:210",
+      "commit": "52a5179576ee896f5152943ba592639322cdaea4",
+      "file": "tests/test_source_health_truth.py",
+      "line": 210,
+      "rule": "generic-api-key",
+      "classification": "synthetic_fixture",
+      "note": "Fabricated test fixture (fake token / placeholder beside a credential keyword); manually verified against the commit content on 2026-06-11. Never a real credential."
+    },
+    {
+      "fingerprint": "554d9533326de231e43bbb105d712af810e07e6f:tests/test_evidence_production_wiring.py:generic-api-key:157",
+      "commit": "554d9533326de231e43bbb105d712af810e07e6f",
+      "file": "tests/test_evidence_production_wiring.py",
+      "line": 157,
+      "rule": "generic-api-key",
+      "classification": "synthetic_fixture",
+      "note": "Fabricated test fixture (fake token / placeholder beside a credential keyword); manually verified against the commit content on 2026-06-11. Never a real credential."
+    },
+    {
+      "fingerprint": "6c3fb4c20c62ecc2a9a4c66460fdf2e152c48b14:tests/test_kante_real_provider_canary.py:generic-api-key:175",
+      "commit": "6c3fb4c20c62ecc2a9a4c66460fdf2e152c48b14",
+      "file": "tests/test_kante_real_provider_canary.py",
+      "line": 175,
+      "rule": "generic-api-key",
+      "classification": "synthetic_fixture",
+      "note": "Fabricated test fixture (fake token / placeholder beside a credential keyword); manually verified against the commit content on 2026-06-11. Never a real credential."
+    },
+    {
+      "fingerprint": "84cdca3ba67b6b3afc11c39f548539b60da20662:scripts/runtime_config.py:generic-api-key:139",
+      "commit": "84cdca3ba67b6b3afc11c39f548539b60da20662",
+      "file": "scripts/runtime_config.py",
+      "line": 139,
+      "rule": "generic-api-key",
+      "classification": "synthetic_fixture",
+      "note": "Fabricated test fixture (fake token / placeholder beside a credential keyword); manually verified against the commit content on 2026-06-11. Never a real credential."
+    },
+    {
+      "fingerprint": "8a578d78c185c0041c646d09c3f2f8ce98b76079:tests/test_five_model_synthesis_workflow.py:generic-api-key:120",
+      "commit": "8a578d78c185c0041c646d09c3f2f8ce98b76079",
+      "file": "tests/test_five_model_synthesis_workflow.py",
+      "line": 120,
+      "rule": "generic-api-key",
+      "classification": "synthetic_fixture",
+      "note": "Fabricated test fixture (fake token / placeholder beside a credential keyword); manually verified against the commit content on 2026-06-11. Never a real credential."
+    },
+    {
+      "fingerprint": "8a578d78c185c0041c646d09c3f2f8ce98b76079:tests/test_five_model_synthesis_workflow.py:generic-api-key:148",
+      "commit": "8a578d78c185c0041c646d09c3f2f8ce98b76079",
+      "file": "tests/test_five_model_synthesis_workflow.py",
+      "line": 148,
+      "rule": "generic-api-key",
+      "classification": "synthetic_fixture",
+      "note": "Fabricated test fixture (fake token / placeholder beside a credential keyword); manually verified against the commit content on 2026-06-11. Never a real credential."
+    },
+    {
+      "fingerprint": "9f960f95d2a6a69690059c4f7d6319b7eb3a7f33:tests/test_five_model_synthesis_workflow.py:generic-api-key:93",
+      "commit": "9f960f95d2a6a69690059c4f7d6319b7eb3a7f33",
+      "file": "tests/test_five_model_synthesis_workflow.py",
+      "line": 93,
+      "rule": "generic-api-key",
+      "classification": "synthetic_fixture",
+      "note": "Fabricated test fixture (fake token / placeholder beside a credential keyword); manually verified against the commit content on 2026-06-11. Never a real credential."
+    },
+    {
+      "fingerprint": "9f960f95d2a6a69690059c4f7d6319b7eb3a7f33:tests/test_five_model_synthesis_workflow.py:generic-api-key:107",
+      "commit": "9f960f95d2a6a69690059c4f7d6319b7eb3a7f33",
+      "file": "tests/test_five_model_synthesis_workflow.py",
+      "line": 107,
+      "rule": "generic-api-key",
+      "classification": "synthetic_fixture",
+      "note": "Fabricated test fixture (fake token / placeholder beside a credential keyword); manually verified against the commit content on 2026-06-11. Never a real credential."
+    },
+    {
+      "fingerprint": "9f960f95d2a6a69690059c4f7d6319b7eb3a7f33:tests/test_five_model_synthesis_workflow.py:generic-api-key:148",
+      "commit": "9f960f95d2a6a69690059c4f7d6319b7eb3a7f33",
+      "file": "tests/test_five_model_synthesis_workflow.py",
+      "line": 148,
+      "rule": "generic-api-key",
+      "classification": "synthetic_fixture",
+      "note": "Fabricated test fixture (fake token / placeholder beside a credential keyword); manually verified against the commit content on 2026-06-11. Never a real credential."
+    },
+    {
+      "fingerprint": "a93a4ca12811fd1ea08f6d38d00d6d651846b712:tests/test_alerting.py:generic-api-key:105",
+      "commit": "a93a4ca12811fd1ea08f6d38d00d6d651846b712",
+      "file": "tests/test_alerting.py",
+      "line": 105,
+      "rule": "generic-api-key",
+      "classification": "synthetic_fixture",
+      "note": "Fabricated test fixture (fake token / placeholder beside a credential keyword); manually verified against the commit content on 2026-06-11. Never a real credential."
+    },
+    {
+      "fingerprint": "b4f40fb3825f3cdee0d38f5ef83c3df0119814e0:tests/test_compliance_preflight.py:generic-api-key:60",
+      "commit": "b4f40fb3825f3cdee0d38f5ef83c3df0119814e0",
+      "file": "tests/test_compliance_preflight.py",
+      "line": 60,
+      "rule": "generic-api-key",
+      "classification": "synthetic_fixture",
+      "note": "Fabricated test fixture (fake token / placeholder beside a credential keyword); manually verified against the commit content on 2026-06-11. Never a real credential."
+    },
+    {
+      "fingerprint": "c2f513227b2416edd63f9e1e936140f709705fc3:tests/test_data_quality_evidence.py:generic-api-key:74",
+      "commit": "c2f513227b2416edd63f9e1e936140f709705fc3",
+      "file": "tests/test_data_quality_evidence.py",
+      "line": 74,
+      "rule": "generic-api-key",
+      "classification": "synthetic_fixture",
+      "note": "Fabricated test fixture (fake token / placeholder beside a credential keyword); manually verified against the commit content on 2026-06-11. Never a real credential."
+    },
+    {
+      "fingerprint": "cbc8450f7010c526e154c1420b6e0a56a462cc32:tests/test_source_health_summary.py:generic-api-key:85",
+      "commit": "cbc8450f7010c526e154c1420b6e0a56a462cc32",
+      "file": "tests/test_source_health_summary.py",
+      "line": 85,
+      "rule": "generic-api-key",
+      "classification": "synthetic_fixture",
+      "note": "Fabricated test fixture (fake token / placeholder beside a credential keyword); manually verified against the commit content on 2026-06-11. Never a real credential."
+    },
+    {
+      "fingerprint": "de86e22b5969fdfd9aa9e0ec1bfc2b9d550704cd:tests/test_source_health_summary.py:generic-api-key:103",
+      "commit": "de86e22b5969fdfd9aa9e0ec1bfc2b9d550704cd",
+      "file": "tests/test_source_health_summary.py",
+      "line": 103,
+      "rule": "generic-api-key",
+      "classification": "synthetic_fixture",
+      "note": "Fabricated test fixture (fake token / placeholder beside a credential keyword); manually verified against the commit content on 2026-06-11. Never a real credential."
+    },
+    {
+      "fingerprint": "deae24c28e7f9e1ec2ce2f9df7507a4a9a91d6ee:tests/test_provider_secret_redaction.py:generic-api-key:30",
+      "commit": "deae24c28e7f9e1ec2ce2f9df7507a4a9a91d6ee",
+      "file": "tests/test_provider_secret_redaction.py",
+      "line": 30,
+      "rule": "generic-api-key",
+      "classification": "synthetic_fixture",
+      "note": "Fabricated test fixture (fake token / placeholder beside a credential keyword); manually verified against the commit content on 2026-06-11. Never a real credential."
+    },
+    {
+      "fingerprint": "deae24c28e7f9e1ec2ce2f9df7507a4a9a91d6ee:tests/test_provider_secret_redaction.py:generic-api-key:39",
+      "commit": "deae24c28e7f9e1ec2ce2f9df7507a4a9a91d6ee",
+      "file": "tests/test_provider_secret_redaction.py",
+      "line": 39,
+      "rule": "generic-api-key",
+      "classification": "synthetic_fixture",
+      "note": "Fabricated test fixture (fake token / placeholder beside a credential keyword); manually verified against the commit content on 2026-06-11. Never a real credential."
+    },
+    {
+      "fingerprint": "f04e06f5086486cb46687a059ef584b1a4e8a868:tests/test_news_provider_fallback_chain.py:generic-api-key:132",
+      "commit": "f04e06f5086486cb46687a059ef584b1a4e8a868",
+      "file": "tests/test_news_provider_fallback_chain.py",
+      "line": 132,
+      "rule": "generic-api-key",
+      "classification": "synthetic_fixture",
+      "note": "Fabricated test fixture (fake token / placeholder beside a credential keyword); manually verified against the commit content on 2026-06-11. Never a real credential."
+    }
+  ]
+}

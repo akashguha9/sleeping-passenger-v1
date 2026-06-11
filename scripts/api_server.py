@@ -142,7 +142,10 @@ try:
         get_environment_tag,
         get_max_request_bytes,
         get_trusted_proxies,
+        host_header_allowed,
         is_loopback_bind,
+        lockdown_mode_active,
+        plaintext_token_fallback_active,
         preflight_auth_or_die,
         rate_limit_expensive_max_requests,
         rate_limit_enabled,
@@ -152,6 +155,7 @@ try:
         safe_db_display_path,
         security_headers,
         unauth_override_active,
+        verify_api_token,
     )
 except ModuleNotFoundError:  # pragma: no cover
     from runtime_config import (  # type: ignore[no-redef]
@@ -168,7 +172,10 @@ except ModuleNotFoundError:  # pragma: no cover
         get_environment_tag,
         get_max_request_bytes,
         get_trusted_proxies,
+        host_header_allowed,
         is_loopback_bind,
+        lockdown_mode_active,
+        plaintext_token_fallback_active,
         preflight_auth_or_die,
         rate_limit_expensive_max_requests,
         rate_limit_enabled,
@@ -178,7 +185,13 @@ except ModuleNotFoundError:  # pragma: no cover
         safe_db_display_path,
         security_headers,
         unauth_override_active,
+        verify_api_token,
     )
+
+try:
+    from scripts.audit_log import append_event as _audit_append
+except ModuleNotFoundError:  # pragma: no cover - script-style env
+    from audit_log import append_event as _audit_append  # type: ignore[no-redef]
 
 # Read-only diagnostics service — the single backend source for the cockpit.
 # Bound at module level so tests can patch ``scripts.api_server.get_diagnostics_snapshot``.
@@ -462,6 +475,10 @@ if _FASTAPI_AVAILABLE:
 
     _MUTATING_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 
+    # Pass 3: consecutive-401 counter per client for auth_failure_burst
+    # audit events (reset on any non-401 response from that client).
+    _AUTH_FAILURES: dict[str, int] = {}
+
     @app.middleware("http")
     async def _security_and_limits(request: "Request", call_next):
         """Single middleware that stacks four concerns in one place:
@@ -476,6 +493,62 @@ if _FASTAPI_AVAILABLE:
         """
         method = request.method.upper()
         is_mutating = method in _MUTATING_METHODS
+
+        # 0. Host-header allowlist (DNS-rebinding defense).  A malicious
+        #    website can rebind its own hostname to 127.0.0.1 and drive
+        #    same-origin requests against this loopback API from the
+        #    owner's browser; CORS never fires in that scenario.  Any
+        #    request whose Host is not an allowed local name is refused.
+        if not host_header_allowed(request.headers.get("host")):
+            payload = {
+                "error": "host_not_allowed",
+                "status_code": 421,
+                "advisory_status": _ADVISORY_STATUS,
+                "execution_mode": _EXECUTION_MODE,
+                "execution_gate": "LOCKED",
+                "ai_execution_count": _AI_EXECUTION_COUNT,
+                "broker_api_called": False,
+                "broker_order_id": "NONE",
+                "human_review_required": True,
+            }
+            response = JSONResponse(status_code=421, content=payload)
+            for header, value in security_headers().items():
+                response.headers.setdefault(header, value)
+            return response
+
+        # 0.5 Emergency lockdown (Pass 3): every mutating route is refused
+        #     with 423 Locked while MVP_LOCKDOWN_MODE=1. Reads stay
+        #     token-gated as usual. The refusal itself is audit-logged.
+        if is_mutating and lockdown_mode_active():
+            _audit_append(
+                "lockdown_block",
+                actor="unknown",
+                action=f"{method} {request.url.path}",
+                outcome="blocked_423",
+            )
+            payload = {
+                "error": "lockdown_mode_active",
+                "status_code": 423,
+                "detail": {
+                    "message": (
+                        "Emergency read-only mode is active "
+                        "(MVP_LOCKDOWN_MODE=1). Mutations are disabled; "
+                        "see docs/INCIDENT_LOCKDOWN.md."
+                    )
+                },
+                "advisory_status": _ADVISORY_STATUS,
+                "execution_mode": _EXECUTION_MODE,
+                "execution_gate": "LOCKED",
+                "ai_execution_count": _AI_EXECUTION_COUNT,
+                "broker_api_called": False,
+                "broker_order_id": "NONE",
+                "human_review_required": True,
+            }
+            response = JSONResponse(status_code=423, content=payload)
+            for header, value in security_headers().items():
+                response.headers.setdefault(header, value)
+            return response
+
         # S3 fix: resolve real client IP via the trusted-proxy allowlist so
         # the limiter cannot be bypassed (or starved) by everyone-looks-the-
         # same when uvicorn sits behind nginx/traefik.
@@ -553,6 +626,44 @@ if _FASTAPI_AVAILABLE:
         response = await call_next(request)
         for header, value in security_headers().items():
             response.headers.setdefault(header, value)
+
+        # 4. Tamper-evident audit trail (Pass 3). Records THAT a sensitive
+        #    action happened — never payloads, never tokens (audit_log
+        #    redacts aggressively as defense in depth).
+        try:
+            path = request.url.path
+            if is_mutating and response.status_code < 400:
+                event_type = (
+                    "journal_delete" if method == "DELETE"
+                    else "reconciliation" if "reconcil" in path
+                    else "import" if "import" in path
+                    else "journal_write"
+                )
+                _audit_append(
+                    event_type,
+                    actor="owner",
+                    action=f"{method} {path}",
+                    outcome=f"http_{response.status_code}",
+                )
+            elif path.startswith("/exports/") and response.status_code == 200:
+                _audit_append(
+                    "export", actor="owner", action=f"GET {path}", outcome="http_200"
+                )
+            elif response.status_code == 401:
+                count = _AUTH_FAILURES.get(client_host, 0) + 1
+                _AUTH_FAILURES[client_host] = count
+                if count % 5 == 0:
+                    _audit_append(
+                        "auth_failure_burst",
+                        actor="unknown",
+                        action=f"{method} {path}",
+                        outcome=f"{count}_consecutive_401s",
+                        metadata={"client": client_host},
+                    )
+            if response.status_code not in (401,):
+                _AUTH_FAILURES.pop(client_host, None)
+        except Exception:  # pragma: no cover - audit must never break serving
+            pass
         return response
 
     @app.on_event("startup")
@@ -560,20 +671,36 @@ if _FASTAPI_AVAILABLE:
         # S1: refuse to start on non-loopback bind without a token unless
         # MVP_ALLOW_UNAUTH=1 is set explicitly.  Raises StartupSecurityError.
         preflight_auth_or_die()
+        if lockdown_mode_active():
+            _logger.warning(
+                "MVP_LOCKDOWN_MODE=1: emergency read-only mode — all "
+                "mutating routes return 423 Locked."
+            )
+            _audit_append("lockdown_engaged", actor="system",
+                          action="startup", outcome="active")
+        if unauth_override_active():
+            _audit_append("unsafe_override_boot", actor="system",
+                          action="startup", outcome="MVP_ALLOW_UNAUTH=1")
         if not api_token_required():
-            if is_loopback_bind():
-                _logger.warning(
-                    "MVP_API_TOKEN not set; mutating routes are unprotected. "
-                    "Loopback bind only (API_HOST=%s).",
-                    get_api_host(),
-                )
-            else:
-                _logger.warning(
-                    "MVP_API_TOKEN not set AND MVP_ALLOW_UNAUTH=1 explicitly "
-                    "overrides S1 preflight. NON-LOOPBACK bind is exposed."
-                )
+            # Only reachable with the explicit MVP_ALLOW_UNAUTH=1 override,
+            # and only on a loopback bind (preflight refuses otherwise).
+            _logger.warning(
+                "MVP_ALLOW_UNAUTH=1 override active: MVP_API_TOKEN not set, "
+                "routes are unauthenticated. Loopback bind only (API_HOST=%s). "
+                "Owner-only fail-closed default is BYPASSED.",
+                get_api_host(),
+            )
+        elif plaintext_token_fallback_active():
+            _logger.warning(
+                "Legacy PLAINTEXT MVP_API_TOKEN in use; all journal routes "
+                "require Bearer auth, but the raw token sits in your env/.env. "
+                "Prefer hash mode: python scripts/generate_api_token.py "
+                "--rotate --write-env (stores only MVP_API_TOKEN_HASH)."
+            )
         else:
-            _logger.info("MVP_API_TOKEN set; mutating routes require Bearer auth.")
+            _logger.info(
+                "MVP_API_TOKEN_HASH set; all journal routes require Bearer auth."
+            )
         _logger.info(
             "advisory contract enforced: %s / %s / execution_gate=%s / ai_execution_count=%d",
             _ADVISORY_STATUS,
@@ -643,18 +770,18 @@ if _FASTAPI_AVAILABLE:
     def _check_bearer_token(authorization: str | None) -> None:
         """Constant-time bearer-token verification.
 
-        S2 fix: use ``hmac.compare_digest`` instead of ``!=`` so the
-        comparison does not leak length/equality timing.
+        Delegates to ``runtime_config.verify_api_token`` which prefers the
+        SHA-256 hash mode (``MVP_API_TOKEN_HASH``) and falls back to the
+        legacy plaintext ``MVP_API_TOKEN``; both paths use
+        ``hmac.compare_digest`` so the comparison does not leak
+        length/equality timing.
         """
-        import hmac
-
-        expected = get_api_token()
-        if not expected:
+        if not api_token_required():
             return None
         if not authorization or not authorization.lower().startswith("bearer "):
             raise HTTPException(status_code=401, detail="missing bearer token")
         provided = authorization.split(" ", 1)[1].strip()
-        if not hmac.compare_digest(provided.encode("utf-8"), expected.encode("utf-8")):
+        if not verify_api_token(provided):
             raise HTTPException(status_code=401, detail="invalid bearer token")
         return None
 
@@ -676,8 +803,7 @@ if _FASTAPI_AVAILABLE:
         When a token IS set, every read endpoint protected by this
         dependency requires ``Authorization: Bearer <token>``.
         """
-        expected = get_api_token()
-        if expected:
+        if api_token_required():
             return _check_bearer_token(authorization)
         # No token configured: only allowed for loopback binds (preflight
         # already refused non-loopback boot without override).  We still
@@ -1002,6 +1128,7 @@ def health() -> dict:
         "version": _VERSION,
         # Benign operational fields — safe for an unauth uptime probe.
         "db_available": db_available(),
+        "lockdown_mode": lockdown_mode_active(),
         "generated_at": datetime.now(timezone.utc)
         .replace(microsecond=0)
         .isoformat(),
@@ -3149,8 +3276,9 @@ if __name__ == "__main__":  # pragma: no cover
             sys.exit(2)
         if not api_token_required():
             print(
-                "[warning] MVP_API_TOKEN not set; mutating routes are unprotected. "
-                "Loopback-only use recommended.",
+                "[warning] MVP_ALLOW_UNAUTH=1 override active: MVP_API_TOKEN "
+                "not set, routes are unauthenticated (loopback only). "
+                "Generate a token: python scripts/generate_api_token.py --write-env",
                 file=sys.stderr,
             )
         # A4: pin uvicorn to ONE worker.  The in-memory rate-limit and

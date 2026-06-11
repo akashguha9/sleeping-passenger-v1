@@ -158,3 +158,22 @@ data/manual_trades_by_date.json
 # Local-only LLM prompt drafts. Canonical prompts live under prompts/.
 Prompt_*.txt
 
+
+# Local audit/tooling virtualenvs (any name starting with .venv)
+.venv*/
+
+# Pass-4 generated model-quality artifacts (timestamped; local only).
+reports/calibration_report_*.md
+reports/model_scorecard_*.md
+reports/decision_memos/
+reports/weight_sanity_report_*
+reports/signal_tournament_*.md
+reports/model_redteam_*.md
+reports/score_change_explanations/
+reports/daily_model_loop_*.md
+reports/history_bootstrap_*.md
+reports/model_trust_ladder_*.md
+reports/timestamp_migration_*.json
+
+# Scanner output (gitleaks SARIF/JSON reports) must never be committed.
+*.sarif

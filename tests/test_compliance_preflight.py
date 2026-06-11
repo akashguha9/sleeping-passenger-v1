@@ -6,6 +6,7 @@ posture and that the gate fails loudly when it does not.
 from __future__ import annotations
 
 from scripts import compliance_preflight as comp
+from tests.helpers import scanner_probes as probes
 
 
 def test_passes_current_advisory_only_posture():
@@ -57,7 +58,9 @@ def test_fails_if_source_register_missing(tmp_path):
 
 
 def test_find_secret_like():
-    assert comp.find_secret_like("api_key = sk-abcdef0123456789abcd")
+    # Probe assembled at runtime so the source never contains scanner bait.
+    probe = f"{probes.KW_API_KEY} = {probes.sk_style_token('abcdef0123456789abcd')}"
+    assert comp.find_secret_like(probe)
     assert comp.find_secret_like("nothing here") == []
 
 

@@ -52,8 +52,31 @@ CONTRACT: dict[str, str] = {
     "ALLOWED_ORIGINS": _PLAIN,
     "MVP_ENVIRONMENT": _PLAIN,
     "MVP_DB_PATH": _REQUIRED,
-    # local token (optional)
+    # owner auth (required at server boot — preflight fails closed).
+    # Hash mode preferred; plaintext is a warned legacy fallback.
+    "MVP_API_TOKEN_HASH": _SECRET,
     "MVP_API_TOKEN": _SECRET,
+    # secret custody mode (env | windows-credential-manager)
+    "SECRET_PROVIDER": _PLAIN,
+    # emergency read-only mode (Pass 3): blocks all mutating routes
+    "MVP_LOCKDOWN_MODE": _PLAIN,
+    # tamper-evident audit log location (gitignored; defaults under logs/)
+    "MVP_AUDIT_LOG_PATH": _PLAIN,
+    # evidence ledger location (Pass 4; gitignored; defaults under runtime/)
+    "MVP_EVIDENCE_LEDGER_PATH": _PLAIN,
+    # shadow-paper tournament ledger (Pass 5; hypothetical observations
+    # only — order-shaped rows are refused; gitignored under runtime/)
+    "MVP_SHADOW_LEDGER_PATH": _PLAIN,
+    # derived score ledger (Pass 6; hash-chained model outputs linked to
+    # evidence ids; execution-shaped fields refused; gitignored)
+    "MVP_DERIVED_SCORE_LEDGER_PATH": _PLAIN,
+    # non-loopback exposure hard stop acknowledgements
+    "MVP_PUBLIC_MODE": _PLAIN,
+    "MVP_TLS_TERMINATED": _PLAIN,
+    "MVP_PUBLISHED_BIND": _PLAIN,
+    "MVP_UNSAFE_LAN_HTTP": _PLAIN,
+    # host-header allowlist (DNS-rebinding defense; optional override)
+    "MVP_ALLOWED_HOSTS": _PLAIN,
     # source secrets (optional)
     "EDINET_API_KEY": _SECRET,
     "JAPAN_EDINET_API_KEY": _SECRET,

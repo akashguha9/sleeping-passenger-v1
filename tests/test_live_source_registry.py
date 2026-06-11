@@ -9,6 +9,7 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 import pytest
+from tests.helpers import scanner_probes as probes
 
 from scripts.live_source_registry import (
     ADAPTER_IMPLEMENTED,
@@ -124,7 +125,7 @@ def test_get_source_family_empty_key_raises() -> None:
 
 def test_credential_state_redacts_values_completely() -> None:
     env = {
-        "XAI_API_KEY": "xai-supersecret1234567890",
+        "XAI_API_KEY": probes.xai_style_token("valueforredaction"),
         "NEWS_API_KEY": "news-supersecret",
         "ETHERSCAN_API_KEY": "ethsupersecret",
         "EVENT_REGISTRY_API_KEY": "er-supersecret",
@@ -255,8 +256,9 @@ def test_refresh_plan_explicit_cadence_respected() -> None:
 
 
 def test_refresh_plan_no_secret_value_appears_anywhere() -> None:
-    env = {"XAI_API_KEY": "xai-shouldnotleak-1234567890ABCDEF"}
+    fake_key = probes.xai_style_token("shouldnotleak")
+    env = {"XAI_API_KEY": fake_key}
     plan = build_refresh_plan(env=env)
     flat = repr(plan)
     assert "shouldnotleak" not in flat
-    assert "xai-shouldnotleak" not in flat
+    assert fake_key not in flat

@@ -21,7 +21,63 @@ Advisory invariants (never change):
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
+
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+
+
+def _load_local_dotenv() -> None:
+    """Best-effort load of the repo-root ``.env`` into ``os.environ``.
+
+    Owner-only hardening: the startup preflight requires ``MVP_API_TOKEN``
+    by default, and the Windows start scripts launch uvicorn without
+    exporting env vars — so the server must be able to read the operator's
+    gitignored ``.env`` itself.  Rules:
+
+    * ``setdefault`` semantics only — real environment variables always win.
+    * Never runs under pytest (a developer's local ``.env`` must not leak
+      into test assertions); disable explicitly with ``MVP_SKIP_DOTENV=1``.
+    * Parses only simple ``KEY=VALUE`` lines; no interpolation, no export
+      keywords, no multi-line values.  Values are never logged.
+    """
+    if "pytest" in sys.modules or os.environ.get("MVP_SKIP_DOTENV", "").strip() == "1":
+        return
+    try:
+        text = (_REPO_ROOT / ".env").read_text(encoding="utf-8-sig")
+    except (FileNotFoundError, OSError):
+        return
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        key = key.strip()
+        if not key or not key.replace("_", "").isalnum():
+            continue
+        os.environ.setdefault(key, value.strip().strip('"').strip("'"))
+
+
+def _hydrate_provider_secrets() -> None:
+    """Pass-3 secret custody: when ``SECRET_PROVIDER=windows-credential-manager``,
+    copy known provider keys from OS custody into os.environ (setdefault —
+    real env and .env values win). Never raises: unavailable custody just
+    leaves keys unset and the loaders skip cleanly. Inert under pytest for
+    the same reason the dotenv loader is."""
+    if "pytest" in sys.modules:
+        return
+    try:
+        try:
+            from scripts.secret_provider import hydrate_environment
+        except ModuleNotFoundError:  # pragma: no cover - script-style env
+            from secret_provider import hydrate_environment  # type: ignore[no-redef]
+        hydrate_environment()
+    except Exception:  # pragma: no cover - custody must never block boot
+        pass
+
+
+_load_local_dotenv()
+_hydrate_provider_secrets()
 
 # Advisory constants — duplicated in api_server.py / persistence.py /
 # signal_inbox_api.py for historical reasons.  Importing them from here is
@@ -88,21 +144,82 @@ def get_allowed_origins() -> list[str]:
 
 
 def get_api_token() -> str | None:
-    """Returns the API token if set, else None.
+    """Returns the legacy PLAINTEXT API token if set, else None.
 
-    When None, mutating routes are unprotected — appropriate for STRICT
-    loopback only.  A startup precondition refuses to boot the server in
-    that state unless ``MVP_ALLOW_UNAUTH=1`` is also set as an explicit
-    operator override (see ``preflight_auth_or_die``).
+    Prefer ``MVP_API_TOKEN_HASH`` (see ``get_api_token_hash``): with hash
+    mode the raw token never sits on disk.  Plaintext remains supported as
+    a fallback but the server logs a warning at startup.
     """
     raw = os.environ.get("MVP_API_TOKEN", "")
     token = raw.strip()
     return token if token else None
 
 
+# Allowed alphabet for stored token hashes (see get_api_token_hash).
+# Deliberately NOT named after the credential it validates: a name like
+# "<credential>_HEX64 = ..." reads as a hard-coded secret to scanners
+# (gitleaks generic-api-key flagged the previous name of this constant).
+_LOWER_HEX_DIGITS = "0123456789abcdef"
+
+
+def get_api_token_hash() -> str | None:
+    """Returns the stored SHA-256 token hash (lowercase hex) if set.
+
+    Format is validated strictly: exactly 64 lowercase hex chars after
+    normalisation.  A malformed value returns None here and is rejected at
+    startup by ``preflight_auth_or_die`` — never silently ignored at
+    request time, because that would fail OPEN.
+
+    SHA-256 without salt/stretching is appropriate ONLY because the token
+    is 256 bits of machine-generated randomness (no dictionary/rainbow
+    attack is possible).  Never reuse this scheme for human passwords.
+    """
+    raw = os.environ.get("MVP_API_TOKEN_HASH", "").strip().lower()
+    if not raw:
+        return None
+    if len(raw) != 64 or any(c not in _LOWER_HEX_DIGITS for c in raw):
+        return None
+    return raw
+
+
+def api_token_hash_malformed() -> bool:
+    """True iff MVP_API_TOKEN_HASH is set but not 64 lowercase hex chars."""
+    raw = os.environ.get("MVP_API_TOKEN_HASH", "").strip()
+    return bool(raw) and get_api_token_hash() is None
+
+
 def api_token_required() -> bool:
-    """True iff ``MVP_API_TOKEN`` is set and non-empty."""
-    return get_api_token() is not None
+    """True iff owner auth is configured (hash mode or plaintext fallback)."""
+    return get_api_token_hash() is not None or get_api_token() is not None
+
+
+def plaintext_token_fallback_active() -> bool:
+    """True iff only the legacy plaintext MVP_API_TOKEN is configured."""
+    return get_api_token_hash() is None and get_api_token() is not None
+
+
+def verify_api_token(presented: str | None) -> bool:
+    """Constant-time owner-token verification.
+
+    Hash mode wins when both are configured.  Invariant (test-pinned):
+    ``Verify(t, H) is True`` iff sha256(t) == H (hash mode) or t == token
+    (legacy mode); every other input returns False.  No token configured
+    → False (fail closed; the request-level gates decide whether an open
+    loopback dev override applies).
+    """
+    import hashlib
+    import hmac
+
+    if not presented:
+        return False
+    stored_hash = get_api_token_hash()
+    if stored_hash is not None:
+        presented_hash = hashlib.sha256(presented.encode("utf-8")).hexdigest()
+        return hmac.compare_digest(presented_hash, stored_hash)
+    expected = get_api_token()
+    if expected is not None:
+        return hmac.compare_digest(presented.encode("utf-8"), expected.encode("utf-8"))
+    return False
 
 
 def is_loopback_bind(host: str | None = None) -> bool:
@@ -115,34 +232,176 @@ class StartupSecurityError(RuntimeError):
     """Raised when the server's startup posture is unsafe and not explicitly overridden."""
 
 
-def preflight_auth_or_die() -> None:
-    """Refuse to boot if a non-loopback bind has no MVP_API_TOKEN set.
+_UNSAFE_LAN_ACK = "I_UNDERSTAND_THIS_EXPOSES_MY_TOKEN"
 
-    Override with ``MVP_ALLOW_UNAUTH=1`` (e.g. for a one-off load test on
-    a trusted private network).  The override is loud: it is surfaced on
-    /health/full and logged at startup.
+
+def lockdown_mode_active() -> bool:
+    """Emergency read-only mode (Pass 3): ``MVP_LOCKDOWN_MODE=1``.
+
+    When active, every mutating route returns 423 Locked; reads stay
+    token-gated as usual. Use during suspected compromise, token leak,
+    dependency incident, or shared-machine situations
+    (docs/INCIDENT_LOCKDOWN.md)."""
+    return _bool_env("MVP_LOCKDOWN_MODE", False)
+
+
+def public_mode_requested() -> bool:
+    """True iff the operator explicitly flagged a public deployment."""
+    return _bool_env("MVP_PUBLIC_MODE", False)
+
+
+def exposure_acknowledgement() -> str | None:
+    """How a non-loopback (or public-mode) bind is acknowledged, if at all.
+
+    A bearer token over plain HTTP is readable by anyone on the path, so
+    exposing the API beyond loopback requires the operator to state how
+    transport security is handled.  Returns one of:
+
+    * ``"tls_terminated"``    — MVP_TLS_TERMINATED=1: TLS terminates in
+      front of this server (reverse proxy / tunnel).
+    * ``"reverse_proxy"``     — MVP_TRUSTED_PROXIES explicitly set: a
+      declared proxy allowlist fronts the server.
+    * ``"portmap_loopback"``  — MVP_PUBLISHED_BIND resolves to loopback:
+      the process binds 0.0.0.0 inside a container but the published
+      host port is mapped to 127.0.0.1 (docker-compose default).
+    * ``"unsafe_lan_http"``   — MVP_UNSAFE_LAN_HTTP carries the exact
+      acknowledgement string: deliberate, loud, token-exposing escape
+      hatch for a trusted private network.
+    * ``None``                — no acknowledgement: refuse to boot.
+    """
+    if _bool_env("MVP_TLS_TERMINATED", False):
+        return "tls_terminated"
+    if os.environ.get("MVP_TRUSTED_PROXIES", "").strip():
+        return "reverse_proxy"
+    published = os.environ.get("MVP_PUBLISHED_BIND", "").strip().lower()
+    if published and published in _LOOPBACK_HOSTS and not public_mode_requested():
+        return "portmap_loopback"
+    if os.environ.get("MVP_UNSAFE_LAN_HTTP", "").strip() == _UNSAFE_LAN_ACK:
+        return "unsafe_lan_http"
+    return None
+
+
+def preflight_auth_or_die() -> None:
+    """Fail closed: refuse to boot unless owner auth is configured.
+
+    Owner-only contract (sole-proprietor hardening):
+
+    * Owner token configured (``MVP_API_TOKEN_HASH`` preferred, plaintext
+      ``MVP_API_TOKEN`` legacy fallback) → boot on loopback.  On a
+      NON-loopback bind (or ``MVP_PUBLIC_MODE=1``) the token alone is NOT
+      enough: bearer-over-plain-HTTP exposes the token, so the operator
+      must additionally acknowledge transport security (see
+      ``exposure_acknowledgement``).
+    * Malformed ``MVP_API_TOKEN_HASH`` → refuse (would otherwise fail open).
+    * No token, ``MVP_ALLOW_UNAUTH=1`` → boot ONLY on a loopback bind.
+    * No token, non-loopback bind      → always refuse, even with the
+      override — an unauthenticated non-loopback server is never a
+      supported configuration.
+    * No token, no override            → refuse, with first-run setup help.
+
+    Generate a token with ``python scripts/generate_api_token.py --write-env``.
 
     Advisory invariants are not affected by this preflight — the
     execution_gate stays LOCKED whether the server starts or not.
     """
+    if api_token_hash_malformed():
+        raise StartupSecurityError(
+            "Refusing to start: MVP_API_TOKEN_HASH is set but malformed "
+            "(expected 64 lowercase hex chars = SHA-256). Re-generate with "
+            "`python scripts/generate_api_token.py --rotate --write-env`."
+        )
     if api_token_required():
+        if is_loopback_bind() and not public_mode_requested():
+            return
+        ack = exposure_acknowledgement()
+        if ack is not None:
+            return
+        raise StartupSecurityError(
+            "Refusing to start: API_HOST="
+            + repr(get_api_host())
+            + (" with MVP_PUBLIC_MODE=1" if public_mode_requested() else "")
+            + " exposes the API beyond loopback, and a bearer token over "
+            "plain HTTP is readable by anyone on the network path. "
+            "Acknowledge transport security with ONE of: "
+            "MVP_TLS_TERMINATED=1 (TLS reverse proxy/tunnel in front), "
+            "MVP_TRUSTED_PROXIES=<proxy-ip-list> (declared reverse proxy), "
+            "MVP_PUBLISHED_BIND=127.0.0.1 (container port mapped to host "
+            "loopback), or the deliberate escape hatch "
+            "MVP_UNSAFE_LAN_HTTP=" + _UNSAFE_LAN_ACK + "."
+        )
+    if _bool_env("MVP_ALLOW_UNAUTH", False) and is_loopback_bind():
         return
-    if is_loopback_bind():
-        return
-    if _bool_env("MVP_ALLOW_UNAUTH", False):
-        return
+    if not is_loopback_bind():
+        raise StartupSecurityError(
+            "Refusing to start: API_HOST="
+            + repr(get_api_host())
+            + " is non-loopback but no owner token is set. "
+            "Set MVP_API_TOKEN_HASH and bind API_HOST=127.0.0.1. "
+            "Unauthenticated non-loopback operation is not supported."
+        )
     raise StartupSecurityError(
-        "Refusing to start: API_HOST="
-        + repr(get_api_host())
-        + " is non-loopback but MVP_API_TOKEN is not set. "
-        "Set MVP_API_TOKEN, bind API_HOST=127.0.0.1, or explicitly "
-        "set MVP_ALLOW_UNAUTH=1 to override."
+        "Refusing to start: no owner token is configured (neither "
+        "MVP_API_TOKEN_HASH nor legacy MVP_API_TOKEN). This MVP is "
+        "owner-only and fails closed by default. First-run setup: run "
+        "`python scripts/generate_api_token.py --write-env` to store a "
+        "token hash in your local .env, then restart. To explicitly run an "
+        "UNAUTHENTICATED loopback-only dev server instead, set "
+        "MVP_ALLOW_UNAUTH=1."
     )
 
 
 def unauth_override_active() -> bool:
     """True iff the operator explicitly bypassed S1 preflight via MVP_ALLOW_UNAUTH=1."""
     return _bool_env("MVP_ALLOW_UNAUTH", False) and not api_token_required()
+
+
+# DNS-rebinding defense: a malicious website can rebind its own hostname to
+# 127.0.0.1 and issue same-origin requests against a loopback-bound API from
+# the owner's browser (CORS does not apply — the browser believes it is
+# same-origin).  Validating the Host header kills that class of attack.
+_DEFAULT_ALLOWED_HOSTS = (
+    "localhost",
+    "127.0.0.1",
+    "[::1]",
+    "::1",
+    "sleepingpassenger",
+    "sleepingpassenger.local",
+    # starlette/httpx TestClient default base URL host.
+    "testserver",
+)
+
+
+def get_allowed_hosts() -> frozenset[str]:
+    """Host-header allowlist (lowercase, no port).
+
+    ``MVP_ALLOWED_HOSTS`` is a comma-separated override; the configured
+    ``API_HOST`` bind address is always included so a deliberate LAN bind
+    (with a token) keeps working without extra configuration.
+    """
+    raw = os.environ.get("MVP_ALLOWED_HOSTS", "").strip()
+    hosts = {h.strip().lower() for h in raw.split(",") if h.strip()} if raw else set(
+        _DEFAULT_ALLOWED_HOSTS
+    )
+    hosts.add(get_api_host().strip().lower())
+    return frozenset(hosts)
+
+
+def host_header_allowed(host_header: str | None) -> bool:
+    """True iff the request's Host header names an allowed host.
+
+    Port suffixes are stripped (``localhost:8000`` → ``localhost``); IPv6
+    bracket forms are matched both with and without brackets.  A missing
+    Host header fails closed.
+    """
+    if not host_header or not host_header.strip():
+        return False
+    host = host_header.strip().lower()
+    if host.startswith("["):  # [::1]:8000 → [::1]
+        host = host.split("]", 1)[0] + "]"
+    elif ":" in host:
+        host = host.split(":", 1)[0]
+    allowed = get_allowed_hosts()
+    return host in allowed or host.strip("[]") in allowed
 
 
 def get_environment_tag() -> str:

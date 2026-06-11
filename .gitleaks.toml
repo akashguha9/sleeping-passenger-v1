@@ -1,0 +1,21 @@
+# Gitleaks configuration — sleeping-passenger-v1.
+#
+# CI (.github/workflows/dep_audit.yml, "secrets" job) passes this file
+# explicitly via --config=.gitleaks.toml so config discovery is
+# deterministic. Earlier CI runs logged "no gitleaks config found in path
+# .gitleaks.toml, using default gitleaks config" because the file did not
+# exist and discovery was accidental.
+#
+# Policy — do not weaken the scan:
+#   * the FULL default gitleaks ruleset stays active (useDefault below);
+#   * no custom allowlists for "synthetic" fixtures. Fixtures that look
+#     like secrets are forbidden at the source instead: see
+#     scripts/secret_fixture_lint.py (CI + pytest + pre-commit guard) and
+#     tests/helpers/scanner_probes.py (runtime-assembled probes). That
+#     keeps gitleaks at full sensitivity for REAL leaks.
+#   * if a one-off false positive ever must be suppressed, use a
+#     fingerprint-specific .gitleaksignore entry with a justification
+#     comment — never a path or rule-wide allowlist here.
+
+[extend]
+useDefault = true

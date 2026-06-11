@@ -21,6 +21,7 @@ from pathlib import Path
 import pytest
 
 from scripts import local_security_audit as lsa
+from tests.helpers import scanner_probes as probes
 
 
 # ---------------------------------------------------------------------------
@@ -46,12 +47,13 @@ def _make_repo(tmp_path: Path, *, with_api_server: bool = True) -> Path:
 
 def test_token_value_never_printed(tmp_path, capsys):
     root = _make_repo(tmp_path)
-    env = {"MVP_API_TOKEN": "super-secret-token-xyz-12345"}
+    token_value = probes.high_entropy_token()
+    env = {"MVP_API_TOKEN": token_value}
     payload = lsa.run_security_audit(root, env=env)
     serialized = json.dumps(payload)
-    assert "super-secret-token-xyz-12345" not in serialized
+    assert token_value not in serialized
     text = lsa._render_text(payload)
-    assert "super-secret-token-xyz-12345" not in text
+    assert token_value not in text
 
 
 def test_placeholder_token_raises_warning(tmp_path):
@@ -65,7 +67,9 @@ def test_placeholder_token_raises_warning(tmp_path):
 
 def test_real_token_passes(tmp_path):
     root = _make_repo(tmp_path)
-    env = {"MVP_API_TOKEN": "z9b8a7c6d5e4f3g2h1i0j9k8l7m6n5o4"}
+    # High-entropy value assembled at runtime: a literal one beside the
+    # token env-var name is generic-api-key scanner bait.
+    env = {"MVP_API_TOKEN": probes.high_entropy_token()}
     payload = lsa.run_security_audit(root, env=env)
     statuses = {c["name"]: c["status"] for c in payload["check_results"]}
     assert statuses["api_token_configured"] == "PASS"

@@ -12,6 +12,7 @@ import pytest
 
 from scripts import persistence
 from scripts import operator_readiness_report as orr
+from tests.helpers import scanner_probes as probes
 
 
 @pytest.fixture
@@ -82,9 +83,10 @@ def test_advisory_stamp_present(clean_db):
 
 
 def test_no_secrets_in_report(clean_db, monkeypatch):
-    monkeypatch.setenv("SOME_API_KEY", "sk-shouldnotappear1234567890")
+    fake_key = probes.sk_style_token("shouldnotappear")
+    monkeypatch.setenv("SOME_API_KEY", fake_key)
     blob = json.dumps(orr.build_readiness_report(clean_db))
-    assert "sk-shouldnotappear" not in blob
+    assert fake_key not in blob
     assert "SOME_API_KEY" not in blob
 
 

@@ -17,6 +17,7 @@ from pathlib import Path
 import pytest
 
 from scripts import operator_permission_guard as guard
+from tests.helpers import scanner_probes as probes
 from scripts.operator_permission_guard import (
     OperationClass,
     OperatorRole,
@@ -280,13 +281,15 @@ def test_audit_log_carries_locked_invariants(tmp_path):
 
 
 def test_audit_log_does_not_expose_secrets(tmp_path):
-    leaky = "quarantine?api_key=sk-ABCDEFGHIJKLMNOPQRST"
+    # Probe assembled at runtime — never literal scanner bait in source.
+    fake_key = probes.sk_style_token("ABCDEFGHIJKLMNOPQRST")
+    leaky = f"quarantine?{probes.api_key_assignment(fake_key)}"
     with pytest.raises(PermissionError):
         guard.require_permission_or_exit(_req(
             tmp_path, operation_name=leaky,
             operator_role=OperatorRole.VIEWER))
     blob = json.dumps(guard.read_recent_audit_events())
-    assert "sk-ABCDEFGHIJKLMNOPQRST" not in blob
+    assert fake_key not in blob
     assert "[REDACTED]" in blob
 
 

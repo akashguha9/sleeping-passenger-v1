@@ -105,10 +105,10 @@ def test_compute_source_freshness_failed_state() -> None:
 def test_compute_source_freshness_no_secrets_exposed() -> None:
     freshness = compute_source_freshness(
         latest_runs=None,
-        env={"NEWS_API_KEY": "super-secret-key-12345"},
+        env={"NEWS_API_KEY": "DUMMY_VALUE_FOR_TESTS_ONLY"},
     )
     flat = repr(freshness)
-    assert "super-secret-key" not in flat
+    assert "DUMMY_VALUE_FOR_TESTS_ONLY" not in flat
     # NewsAPI must be marked configured but we never leak the value.
     assert freshness["newsapi"]["credential_configured"] is True
 

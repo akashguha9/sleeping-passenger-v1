@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 
 from scripts import error_contracts as ec
+from tests.helpers import scanner_probes as probes
 
 
 def test_error_response_shape():
@@ -61,8 +62,10 @@ def test_secrets_redacted_in_details():
     r = ec.build_error_response(
         error_id="x", message="y", operator_action="z",
         details={
-            "MVP_API_TOKEN": "super-secret-token-12345",
-            "api_key": "another-secret-987",
+            # Values via sentinels: realistic ones beside credential keys
+            # are secret-scanner bait (scripts/secret_fixture_lint.py).
+            "MVP_API_TOKEN": "DUMMY_VALUE_FOR_TESTS_ONLY",
+            "api_key": "SENTINEL_VALUE_FOR_TESTS_ONLY",
             "passphrase": "do-not-leak",
             "bearer_token": "bearer-abc",
             "free_text": "fine to print",

@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import './globals.css';
 import { Sidebar } from '@/components/layout/Sidebar';
 import { NoExecutionBanner } from '@/components/NoExecutionBanner';
+import { LockdownBanner } from '@/components/LockdownBanner';
 
 export const metadata: Metadata = {
   title: '//SleepingPassenger v1',
@@ -16,6 +17,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <Sidebar />
           <div className="flex-1 flex flex-col min-h-screen ml-60">
             <NoExecutionBanner />
+            <LockdownBanner />
             <main className="flex-1 p-8 overflow-auto">{children}</main>
           </div>
         </div>

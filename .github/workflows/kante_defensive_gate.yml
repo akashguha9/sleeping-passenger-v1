@@ -16,13 +16,19 @@ on:
   push:
   pull_request:
 
+# Least-privilege token: the gate only reads repo contents.
+permissions:
+  contents: read
+
 jobs:
   defensive-gate:
     name: defensive gate (release + compliance + hygiene)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.13"
       - name: Install dependencies
@@ -54,6 +60,9 @@ jobs:
 
       - name: Repo hygiene gate (no runtime DB / secret / broker module tracked)
         run: python scripts/repo_hygiene_gate.py
+
+      - name: Security-gate integrity audit (gitleaks pipeline cannot drift)
+        run: python scripts/audit_security_gate_integrity.py
 
       - name: Initialize empty runtime schema (gitignored; never committed)
         run: python -c "from scripts import persistence; persistence.init_schema(persistence.DB_PATH)"

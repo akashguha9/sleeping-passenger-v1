@@ -104,6 +104,8 @@ _SUPPORT_PREFIXES: tuple[str, ...] = (
     "build_", "run_", "apply_", "backfill_", "seed_", "import_", "export_",
     "fetch_", "update_", "verify_", "check_", "refresh_", "quarantine_",
     "repair_", "cleanup_", "bulk_", "sync_", "prewarm_", "milk_test_",
+    # Pass-2 security policy audits (read-only repo checks; CI gates).
+    "audit_",
 )
 # Explicit SUPPORT modules that don't match a naming family.
 _SUPPORT_EXPLICIT: frozenset[str] = frozenset({
@@ -115,6 +117,26 @@ _SUPPORT_EXPLICIT: frozenset[str] = frozenset({
     # Local operator-journal reset maintenance tool (DB + JSONL); dry-run by
     # default, --apply guarded by operator_permission_guard. SUPPORT tooling.
     "reset_local_logs",
+    # First-run owner setup: generates MVP_API_TOKEN for the fail-closed
+    # startup preflight and writes it to the gitignored .env. SUPPORT tooling.
+    "generate_api_token",
+    # Pass-3 hardening tooling: OS key custody, encrypted backup/restore,
+    # release checksums. All local-only, advisory-safe SUPPORT scripts.
+    "secret_provider", "manage_secrets", "secret_fixture_lint",
+    # API surface manifest tripwire: enumerates FastAPI routes into a
+    # committed manifest so no endpoint can appear/vanish silently.
+    "generate_api_route_manifest",
+    "backup_private_data", "restore_private_data",
+    "generate_checksums",
+    # Pass-4 model-quality tooling (advisory-only analytics).
+    "generate_decision_memo", "review_signal_outcomes",
+    "model_scorecard", "sensitivity_analysis",
+    # Pass-5 integration/adversarial tooling.
+    "signal_tournament", "weight_sanity", "redteam_model",
+    "explain_score_change",
+    # Pass-6 operating-loop tooling.
+    "signal_annotation", "daily_model_operating_loop",
+    "model_trust_ladder", "migrate_legacy_timestamps",
 })
 
 

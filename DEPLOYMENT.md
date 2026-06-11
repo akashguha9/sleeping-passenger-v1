@@ -7,14 +7,14 @@
 
 - **Demo-ready locally:** YES — runs on Windows via `python scripts\api_server.py` and `npm run dev`.
 - **Single-machine MVP:** YES — one user on loopback.
-- **Private beta:** NOT READY — no auth (unless `MVP_API_TOKEN` is set), no hosted DB, no container artifacts.
+- **Private beta:** NOT APPLICABLE BY POLICY — owner-only system. Auth is fail-closed (`MVP_API_TOKEN` required to boot; all journal routes token-gated), but there is no multi-user model and none is planned.
 - **Public launch:** NOT READY — no horizontal scaling, no multi-user model, no compliance review.
 
 ## Production blockers (ranked)
 
 | # | Blocker | Severity | Notes |
 |---|---|---|---|
-| 1 | No multi-user auth | P0 | Token gate exists for mutations (`MVP_API_TOKEN`) but there is no user model, no session, no per-user data. |
+| 1 | No multi-user auth | P0 | Owner token now gates ALL reads and writes and the server fails closed without it — but there is still no user model, no session, no per-user data. Single-operator only. |
 | 2 | SQLite at `runtime/mvp_local.db` | P0 | Not viable past a few concurrent writers. Plan a Postgres swap. |
 | 3 | No Dockerfile/compose | P0 | No reproducible build artifact. |
 | 4 | Hardcoded `127.0.0.1` was the default | P1 | Fixed: `API_HOST` / `API_PORT` env vars now control bind. CORS via `ALLOWED_ORIGINS`. |
@@ -29,7 +29,7 @@
 
 - Env-driven `API_HOST`, `API_PORT`, `ALLOWED_ORIGINS`, `MVP_API_TOKEN`,
   `MVP_DB_PATH`, `MVP_ENVIRONMENT` (`scripts/runtime_config.py`).
-- Token-gated mutations (opt-in via `MVP_API_TOKEN`).
+- Token-gated reads AND writes; `MVP_API_TOKEN` is mandatory (fail-closed startup, host-header allowlist for DNS-rebinding defense).
 - Global FastAPI exception handler returning sanitized JSON + real HTTP status codes.
 - Expanded `/health` reporting DB availability, allowed-origins count, token-required flag, environment tag.
 - Manual SQLite backup/restore tooling (`scripts/backup_db.py`,

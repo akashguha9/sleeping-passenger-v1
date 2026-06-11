@@ -8,6 +8,27 @@
 # pytest workflow.
 
 repos:
+  - repo: local
+    hooks:
+      - id: secret-fixture-lint
+        # Early guard (NOT a gitleaks substitute): rejects scanner-bait
+        # fixtures — fake keys/REDACTED beside credential keywords — with
+        # a fix-it message before gitleaks ever sees them. See SECURITY.md
+        # "Secret fixture hygiene".
+        name: secret fixture hygiene lint
+        entry: python scripts/secret_fixture_lint.py
+        language: system
+        pass_filenames: false
+      - id: security-gate-integrity
+        # The gates themselves must not drift: verifies the gitleaks
+        # pipeline (pinned CLI + checksum, explicit config, lint-first,
+        # tree+commit scans, SARIF artifact, fail-closed) across all
+        # workflow files. Stdlib-only, milliseconds.
+        name: security gate integrity audit
+        entry: python scripts/audit_security_gate_integrity.py
+        language: system
+        pass_filenames: false
+
   - repo: https://github.com/gitleaks/gitleaks
     rev: v8.18.4
     hooks:

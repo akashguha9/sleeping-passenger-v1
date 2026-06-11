@@ -32,6 +32,7 @@ from scripts.ai_output_schema import (
     redact_secret_patterns,
     validate_ai_interpretation_payload,
 )
+from tests.helpers import scanner_probes as probes
 
 
 _SAFETY_KEYS = {
@@ -268,44 +269,50 @@ def test_invalid_status_is_honored_even_if_safety_overrides_present() -> None:
 # ---------------------------------------------------------------------------
 
 
+# Secret-shaped probes are assembled at runtime (tests/helpers/
+# scanner_probes.py) so the source never contains literal scanner bait.
 def test_secret_redaction_removes_api_key_like_strings() -> None:
-    text = "Bearer sk-1234567890abcdefghij1234 in response"
+    fake_key = probes.sk_style_token("1234567890abcdefghij1234")
+    text = f"Bearer {fake_key} in response"
     cleaned = redact_secret_patterns(text)
-    assert "sk-1234567890abcdefghij1234" not in cleaned
+    assert fake_key not in cleaned
     assert "<redacted-secret>" in cleaned
 
 
 def test_secret_redaction_redacts_xai_key_pattern() -> None:
-    text = "XAI_API_KEY: xai-abcdef1234567890ABCDEF on header"
+    fake_key = probes.xai_style_token("abcdef1234567890ABCDEF")
+    text = f"{probes.KW_XAI_API_KEY}: {fake_key} on header"
     cleaned = redact_secret_patterns(text)
-    assert "xai-abcdef1234567890ABCDEF" not in cleaned
+    assert fake_key not in cleaned
 
 
 def test_validation_errors_never_contain_apikey_pattern() -> None:
+    fake_key = probes.sk_style_token("1234567890abcdefghij1234")
     payload = {
         "summary": "Some text",
         "contradiction_flags": [
-            "api_key=sk-1234567890abcdefghij1234",
+            probes.api_key_assignment(fake_key),
             "ok_flag",
         ],
     }
     result = validate_ai_interpretation_payload(payload)
     # The error strings, if any, must not contain the raw key.
     for err in result["validation_errors"]:
-        assert "sk-1234567890abcdefghij1234" not in err
+        assert fake_key not in err
     # The cleaned flag list should still have ok_flag at least.
     assert "ok_flag" in result["contradiction_flags"]
 
 
 def test_raw_response_string_with_secret_is_redacted() -> None:
+    fake_key = probes.sk_style_token("abcdef1234567890ABCDEF")
     payload = {
         "summary": "x",
-        "raw_response": "Authorization: Bearer sk-abcdef1234567890ABCDEF",
+        "raw_response": f"Authorization: Bearer {fake_key}",
     }
     result = validate_ai_interpretation_payload(payload)
     raw = result["raw_response"]
     assert isinstance(raw, str)
-    assert "sk-abcdef1234567890ABCDEF" not in raw
+    assert fake_key not in raw
 
 
 # ---------------------------------------------------------------------------

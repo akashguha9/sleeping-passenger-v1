@@ -67,7 +67,10 @@ below is required.
 | `API_HOST` | `127.0.0.1` | uvicorn bind host. Set `0.0.0.0` inside containers. |
 | `API_PORT` | `8000` | uvicorn bind port. |
 | `ALLOWED_ORIGINS` | localhost:3000,127.0.0.1:3000,sleepingpassenger,sleepingpassenger.local | CORS allowlist (comma-separated). |
-| `MVP_API_TOKEN` | _(unset)_ | If set, mutating POST routes require `Authorization: Bearer <token>`. Unset = permissive local mode. |
+| `MVP_API_TOKEN_HASH` | _(required*)_ | PREFERRED owner auth: SHA-256 of the token; the raw token never sits on disk. The server **refuses to start without owner auth**. Generate/rotate with `python scripts/generate_api_token.py [--rotate] --write-env`. |
+| `MVP_API_TOKEN` | _(legacy)_ | Plaintext fallback; still works but logs a startup warning. Hash mode wins when both are set. Dev-only bypass: `MVP_ALLOW_UNAUTH=1` (loopback only). |
+| `MVP_TLS_TERMINATED` / `MVP_UNSAFE_LAN_HTTP` / `MVP_PUBLISHED_BIND` / `MVP_PUBLIC_MODE` | _(exposure)_ | Non-loopback binds additionally require a transport acknowledgement; see SECURITY.md "LAN / public exposure hard stop". |
+| `MVP_ALLOWED_HOSTS` | _(local names)_ | Host-header allowlist (DNS-rebinding defense). Defaults cover localhost / 127.0.0.1 / ::1 / sleepingpassenger. |
 | `MVP_DB_PATH` | `runtime/mvp_local.db` | SQLite location. |
 | `MVP_ENVIRONMENT` | `local` | Tag for `/health`. |
 | `PIPELINE_ENABLE_PAPER_EXECUTION` | `false` | Leave false unless you know what you're doing. |

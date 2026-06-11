@@ -271,14 +271,19 @@ def calibration_gate_section(db_path: Path = DEFAULT_DB) -> dict[str, Any]:
 
 
 def token_status_section() -> dict[str, Any]:
-    """Whether MVP_API_TOKEN is set on this process (no value leaked)."""
-    set_locally = bool(os.environ.get("MVP_API_TOKEN", "").strip())
+    """Whether owner auth is configured on this process (no value leaked)."""
+    set_locally = bool(
+        os.environ.get("MVP_API_TOKEN_HASH", "").strip()
+        or os.environ.get("MVP_API_TOKEN", "").strip()
+    )
     return {
         "section": "token_status",
         "mvp_api_token_set": set_locally,
         "policy": (
-            "When set, mutating POST routes require Bearer auth.  When unset, "
-            "they are permissive (local-only single-user MVP)."
+            "MVP_API_TOKEN is required: the server fails closed at startup "
+            "without it, and all journal reads/writes require Bearer auth. "
+            "Unset is reachable only via the explicit loopback-only "
+            "MVP_ALLOW_UNAUTH=1 dev override."
         ),
         "frontend_token_storage": "sessionStorage (cleared on tab close)",
         **_safety_stamps(),
