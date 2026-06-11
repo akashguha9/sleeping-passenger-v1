@@ -8,6 +8,18 @@
 # pytest workflow.
 
 repos:
+  - repo: local
+    hooks:
+      - id: secret-fixture-lint
+        # Early guard (NOT a gitleaks substitute): rejects scanner-bait
+        # fixtures — fake keys/REDACTED beside credential keywords — with
+        # a fix-it message before gitleaks ever sees them. See SECURITY.md
+        # "Secret fixture hygiene".
+        name: secret fixture hygiene lint
+        entry: python scripts/secret_fixture_lint.py
+        language: system
+        pass_filenames: false
+
   - repo: https://github.com/gitleaks/gitleaks
     rev: v8.18.4
     hooks:

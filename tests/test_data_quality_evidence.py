@@ -6,6 +6,7 @@ import datetime as dt
 import pytest
 
 from scripts import data_quality as dq
+from tests.helpers import scanner_probes as probes
 
 UTC = dt.timezone.utc
 T0 = dt.datetime(2026, 6, 1, 12, 0, tzinfo=UTC)
@@ -70,9 +71,11 @@ def test_naive_timestamps_rejected():
         _item(observed_at=dt.datetime(2026, 6, 1, 12, 0))  # no tzinfo
 
 
+# Probes assembled at runtime (tests/helpers/scanner_probes.py) so the
+# source never contains literal scanner bait that gitleaks would flag.
 @pytest.mark.parametrize("secret", [
-    "api_key=abcd1234efgh5678", "Bearer abcdefghijklmnop1234",
-    "sk-aaaaaaaaaaaaaaaaaaaa", "password: hunter2hunter2",
+    probes.api_key_assignment(), probes.bearer_probe(),
+    probes.sk_style_token(), probes.password_assignment(),
 ])
 def test_secret_looking_values_refused(secret):
     with pytest.raises(dq.EvidenceError):

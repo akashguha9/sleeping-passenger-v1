@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import datetime as _dt
 import json
+from tests.helpers import scanner_probes as probes
 import sqlite3
 from pathlib import Path
 
@@ -190,12 +191,13 @@ def test_unreconciled_full_review_threshold(tmp_path):
 
 def test_no_secret_exposure(tmp_path):
     root, db = _make_full_repo(tmp_path)
+    token_value = probes.high_entropy_token()
     payload = prp.run_preflight(
         db, repo_root=root,
-        env={"MVP_API_TOKEN": "supersecret-token-zzz-999"},
+        env={"MVP_API_TOKEN": token_value},
     )
     serialized = json.dumps(payload)
-    assert "supersecret-token-zzz-999" not in serialized
+    assert token_value not in serialized
 
 
 # ---------------------------------------------------------------------------

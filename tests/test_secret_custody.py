@@ -6,6 +6,15 @@ import pytest
 from scripts import manage_secrets as ms
 from scripts import secret_provider as sp
 
+# Sentinel values only: provider.set(...) lines sit right next to *_API_KEY
+# names, so any realistic-looking inline value is generic-api-key scanner
+# bait (see scripts/secret_fixture_lint.py). Indirection through these
+# constants keeps every such line free of quoted values.
+DUMMY_VALUE = "DUMMY_VALUE_FOR_TESTS_ONLY"
+SENTINEL_VALUE = "SENTINEL_VALUE_FOR_TESTS_ONLY"
+PLACEHOLDER_VALUE = "PLACEHOLDER_VALUE_FOR_TESTS_ONLY"
+STDIN_VALUE = "NOT_A_SECRET_TEST_VALUE"
+
 
 @pytest.fixture
 def clean_env(monkeypatch):
@@ -26,8 +35,8 @@ def test_known_names_come_from_config_contract(clean_env):
 def test_env_provider_roundtrip_and_missing_secret(clean_env):
     provider = sp.EnvProvider()
     assert provider.get("EDINET_API_KEY") is None  # missing fails safely
-    provider.set("EDINET_API_KEY", "synthetic-test-value")
-    assert provider.get("EDINET_API_KEY") == "synthetic-test-value"
+    provider.set("EDINET_API_KEY", DUMMY_VALUE)
+    assert provider.get("EDINET_API_KEY") == DUMMY_VALUE
     assert "EDINET_API_KEY" in provider.list_set_names()
     provider.delete("EDINET_API_KEY")
     assert provider.get("EDINET_API_KEY") is None
@@ -51,8 +60,8 @@ def test_wcm_provider_unavailable_off_windows(clean_env):
 
 def test_resolve_secret_falls_back_to_env(clean_env):
     clean_env.setenv("SECRET_PROVIDER", sp.MODE_WCM)  # unavailable here
-    clean_env.setenv("OPENDART_API_KEY", "env-fallback-value")
-    assert sp.resolve_secret("OPENDART_API_KEY") == "env-fallback-value"
+    clean_env.setenv("OPENDART_API_KEY", PLACEHOLDER_VALUE)
+    assert sp.resolve_secret("OPENDART_API_KEY") == PLACEHOLDER_VALUE
     assert sp.resolve_secret("EDINET_API_KEY") is None
 
 
@@ -69,25 +78,25 @@ def test_hydrate_is_noop_in_env_mode_and_when_wcm_unavailable(clean_env):
 
 def test_cli_get_is_redacted_by_default(clean_env, capsys):
     provider = sp.InMemoryProvider()
-    provider.set("EDINET_API_KEY", "raw-secret-abc")
+    provider.set("EDINET_API_KEY", SENTINEL_VALUE)
     assert ms.cmd_get(provider, "EDINET_API_KEY", show_secret=None) == 0
     out = capsys.readouterr().out
     assert ms.REDACTED in out
-    assert "raw-secret-abc" not in out
+    assert SENTINEL_VALUE not in out
 
 
 def test_cli_raw_reveal_requires_exact_acknowledgement(clean_env, capsys):
     provider = sp.InMemoryProvider()
-    provider.set("EDINET_API_KEY", "raw-secret-abc")
+    provider.set("EDINET_API_KEY", SENTINEL_VALUE)
     assert ms.cmd_get(provider, "EDINET_API_KEY", show_secret="I_UNDERSTAND") == 0
-    assert "raw-secret-abc" in capsys.readouterr().out
+    assert SENTINEL_VALUE in capsys.readouterr().out
     # Wrong acknowledgement string at the CLI layer → refused, value unseen.
     monkey_provider = sp.InMemoryProvider()
-    monkey_provider.set("EDINET_API_KEY", "raw-secret-abc")
+    monkey_provider.set("EDINET_API_KEY", SENTINEL_VALUE)
     rc = ms.main(["get", "--name", "EDINET_API_KEY", "--show-secret", "yes"])
     captured = capsys.readouterr()
     assert rc == 2
-    assert "raw-secret-abc" not in captured.out + captured.err
+    assert SENTINEL_VALUE not in captured.out + captured.err
 
 
 def test_cli_get_missing_secret_fails_safely(clean_env, capsys):
@@ -99,8 +108,8 @@ def test_cli_set_reads_value_from_stdin_not_argv(clean_env, capsys):
     import io
 
     provider = sp.InMemoryProvider()
-    assert ms.cmd_set(provider, "EDINET_API_KEY", stdin=io.StringIO("stdin-value\n")) == 0
-    assert provider.get("EDINET_API_KEY") == "stdin-value"
+    assert ms.cmd_set(provider, "EDINET_API_KEY", stdin=io.StringIO(STDIN_VALUE + "\n")) == 0
+    assert provider.get("EDINET_API_KEY") == STDIN_VALUE
     # Empty input stores nothing.
     assert ms.cmd_set(provider, "XAI_API_KEY", stdin=io.StringIO("\n")) == 2
     assert provider.get("XAI_API_KEY") is None
@@ -113,12 +122,12 @@ def test_cli_unknown_name_refused(clean_env):
 
 def test_cli_list_names_marks_set_state(clean_env, capsys):
     provider = sp.InMemoryProvider()
-    provider.set("EDINET_API_KEY", "zq9-distinctive-secret")
+    provider.set("EDINET_API_KEY", SENTINEL_VALUE)
     ms.cmd_list_names(provider)
     out = capsys.readouterr().out
     assert "EDINET_API_KEY: SET" in out
     assert "OPENDART_API_KEY: not set" in out
-    assert "zq9-distinctive-secret" not in out  # value never printed
+    assert SENTINEL_VALUE not in out  # value never printed
 
 
 def test_cli_audit_passes_on_clean_repo(clean_env, capsys):

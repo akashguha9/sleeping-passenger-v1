@@ -23,6 +23,8 @@ import sqlite3
 
 import pytest
 
+from tests.helpers import scanner_probes as probes
+
 
 def _srv():
     """Pure source-health module (no FastAPI dependency)."""
@@ -100,8 +102,12 @@ def test_classifier_skipped_missing_api_key():
 
 def test_sanitizer_redacts_api_key():
     srv = _srv()
-    cleaned = srv.sanitize_error_text("Failed: api_key=sk-secret-12345 bad token")
-    assert "sk-secret-12345" not in cleaned
+    # Probe assembled at runtime so the source never contains scanner bait.
+    fake_key = probes.sk_style_token("abcde-12345")
+    cleaned = srv.sanitize_error_text(
+        f"Failed: {probes.api_key_assignment(fake_key)} rejected upstream"
+    )
+    assert fake_key not in cleaned
     assert "<redacted>" in cleaned
 
 

@@ -270,6 +270,10 @@ EXPLICIT_IN_SCOPE: frozenset[str] = frozenset({
     "verify_derived_score_ledger.py", "signal_annotation.py",
     "bootstrap_signal_history.py", "daily_model_operating_loop.py",
     "final_external_readiness_check.py", "model_trust_ladder.py",
+    # CI-hygiene hardening: secret-fixture lint (read-only repo scan that
+    # blocks scanner-bait fixtures before gitleaks; see SECURITY.md
+    # "Secret fixture hygiene"). No DB, no network, no execution.
+    "secret_fixture_lint.py",
 })
 
 # Modules deliberately marked OUT_OF_SCOPE inside ``scripts/``.  This

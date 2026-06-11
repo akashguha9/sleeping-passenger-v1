@@ -16,6 +16,7 @@ from scripts import moltbook_reconciliation_bridge as bridge
 from scripts import moltbook_cleanup_fake_seed as cleanup
 from scripts import restore_db
 from scripts import backup_db
+from tests.helpers import scanner_probes as probes
 
 
 @pytest.fixture(autouse=True)
@@ -83,9 +84,11 @@ def test_no_role_can_unlock_execution(role, _isolated_audit):
 
 def test_audit_event_has_locked_invariants_and_no_secrets(_isolated_audit):
     # A resource string carrying a secret-looking token must be redacted.
+    # (Probe assembled at runtime — never literal scanner bait in source.)
+    fake_key = probes.sk_style_token("ABCDEFGHIJKLMNOPQRST")
     with pytest.raises(PermissionError):
         audit.enforce("manual_trade_log", role="VIEWER",
-                      resource="db?api_key=sk-ABCDEFGHIJKLMNOPQRST")
+                      resource=f"db?{probes.api_key_assignment(fake_key)}")
     events = audit.read_recent()
     last = events[-1]
     assert last["advisory_status"] == "ADVISORY_ONLY"
@@ -93,7 +96,7 @@ def test_audit_event_has_locked_invariants_and_no_secrets(_isolated_audit):
     assert last["broker_api_called"] is False
     assert last["ai_execution_count"] == 0
     blob = json.dumps(events)
-    assert "sk-ABCDEFGHIJKLMNOPQRST" not in blob
+    assert fake_key not in blob
     assert "[REDACTED]" in blob
 
 

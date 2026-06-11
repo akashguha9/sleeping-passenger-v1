@@ -18,6 +18,7 @@ if str(_REPO_ROOT) not in sys.path:
 import pytest
 
 from scripts.live_source_registry import ADVISORY_STATUS, EXECUTION_GATE_LOCKED
+from tests.helpers import scanner_probes as probes
 from scripts.run_live_refresh import (
     _evaluate_derived_disagreement_hook,
     build_orchestrator_report,
@@ -56,7 +57,7 @@ def _all_live_keys(monkeypatch) -> None:
     monkeypatch.setenv("NEWS_API_KEY", "fake-news")
     monkeypatch.setenv("EVENT_REGISTRY_API_KEY", "fake-er")
     monkeypatch.setenv("ETHERSCAN_API_KEY", "fake-eth")
-    monkeypatch.setenv("XAI_API_KEY", "xai-fake-not-real-1234567890")
+    monkeypatch.setenv("XAI_API_KEY", probes.xai_style_token("fake-not-real"))
     monkeypatch.setenv("SEC_USER_AGENT", "SleepingPassenger contact@example.com")
 
 
@@ -200,8 +201,9 @@ def test_unknown_source_returns_safe_failure(capsys, monkeypatch) -> None:
 
 
 def test_orchestrator_does_not_leak_secret_values(monkeypatch, capsys) -> None:
-    monkeypatch.setenv("XAI_API_KEY", "xai-supersecretvaluethatshouldneverappear")
-    monkeypatch.setenv("NEWS_API_KEY", "news-supersecretvaluethatshouldneverappear")
+    # Probes assembled at runtime so the source never contains scanner bait.
+    monkeypatch.setenv("XAI_API_KEY", probes.xai_style_token("valuethatshouldneverappear"))
+    monkeypatch.setenv("NEWS_API_KEY", probes.assemble("news-", "valuethat", "shouldneverappear"))
     monkeypatch.delenv("EVENT_REGISTRY_API_KEY", raising=False)
     monkeypatch.delenv("ETHERSCAN_API_KEY", raising=False)
     monkeypatch.delenv("SEC_USER_AGENT", raising=False)

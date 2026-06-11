@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import os
+from tests.helpers import scanner_probes as probes
 from pathlib import Path
 from unittest.mock import MagicMock, call, patch
 
@@ -168,7 +169,7 @@ class TestGrokAPIKey:
         from scripts.ingestion.grok_interpreter import GrokInterpreter
 
         env = {k: v for k, v in os.environ.items() if k not in ("XAI_API_KEY", "GROK_API_KEY")}
-        env["XAI_API_KEY"] = "xai-key-value"
+        env["XAI_API_KEY"] = probes.xai_style_token("primary-alias")
         with patch.dict(os.environ, env, clear=True):
             with patch("requests.post", return_value=_mock_resp(_GROK_PAYLOAD)):
                 result = GrokInterpreter().safe_fetch()
@@ -217,7 +218,7 @@ class TestGrokAPIKey:
         env = {k: v for k, v in os.environ.items() if k not in ("XAI_API_KEY", "GROK_API_KEY")}
         with patch.dict(os.environ, env, clear=True):
             result = GrokInterpreter().safe_fetch()
-        assert "xai-key-value" not in result.skip_reason
+        assert probes.xai_style_token("primary-alias") not in result.skip_reason
         assert "grok-alias-value" not in result.skip_reason
 
 

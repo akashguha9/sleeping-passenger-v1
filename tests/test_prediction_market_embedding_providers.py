@@ -24,6 +24,7 @@ from __future__ import annotations
 from typing import Any, Mapping
 
 import pytest
+from tests.helpers import scanner_probes as probes
 
 from scripts.prediction_market_embedding_providers import (
     DeterministicEmbeddingProvider,
@@ -113,7 +114,7 @@ class TestResolveEmbeddingProvider:
 
     def test_no_secret_value_leaks_into_status(self):
         env = {
-            "OPENAI_API_KEY": "sk-do-not-leak-1234567890ABCDEFGHIJ",
+            "OPENAI_API_KEY": probes.sk_style_token("do-not-leak"),
         }
 
         def _transport(*_args, **_kwargs):  # pragma: no cover - not invoked
@@ -149,7 +150,7 @@ class TestHTTPProviderWithFakeTransport:
 
         provider = resolve_embedding_provider(
             "real",
-            env={"OPENAI_API_KEY": "sk-fake-1234"},
+            env={"OPENAI_API_KEY": probes.sk_style_token("fake")},
             transport=fake_transport,
         )
         vec = provider.embed_text("Will Bitcoin hit $100k in May?")

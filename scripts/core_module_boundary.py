@@ -122,7 +122,7 @@ _SUPPORT_EXPLICIT: frozenset[str] = frozenset({
     "generate_api_token",
     # Pass-3 hardening tooling: OS key custody, encrypted backup/restore,
     # release checksums. All local-only, advisory-safe SUPPORT scripts.
-    "secret_provider", "manage_secrets",
+    "secret_provider", "manage_secrets", "secret_fixture_lint",
     "backup_private_data", "restore_private_data",
     "generate_checksums",
     # Pass-4 model-quality tooling (advisory-only analytics).

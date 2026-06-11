@@ -41,6 +41,36 @@ akashguha@outlook.com. Do not open public issues for security findings.
 - **Secrets:** gitleaks in CI and pre-commit; `.env` gitignored; repo
   hygiene gate fails CI if a runtime DB or `.env` is ever tracked.
 
+## Secret fixture hygiene (tests & docs)
+
+CI scans every push with the gitleaks CLI (pinned `v8.24.3`, checksum
+verified — no license/API dependency) using `.gitleaks.toml`, which keeps
+the **full default ruleset**. Scanners cannot tell a synthetic fixture
+from a real leak, so the rule is enforced at the source:
+
+- **Never commit a `<keyword><operator><value>` credential shape**, even
+  with a fake or `REDACTED` value. That means no `…key=REDACTED`, no
+  realistic-looking fake tokens (`sk-…`, `xai-…`, `ghp_…`, `AKIA…`), and
+  no high-entropy values beside names containing key/token/secret/
+  password/credential.
+- Tests that need secret-*shaped* strings (to prove redaction/refusal)
+  assemble them at runtime via `tests/helpers/scanner_probes.py` — the
+  probe never exists in tracked source.
+- Everything else uses the approved sentinels
+  (`DUMMY_VALUE_FOR_TESTS_ONLY`, `SENTINEL_VALUE_FOR_TESTS_ONLY`,
+  `PLACEHOLDER_VALUE_FOR_TESTS_ONLY`, `NOT_A_SECRET_TEST_VALUE`).
+- `scripts/secret_fixture_lint.py` enforces this (pytest:
+  `tests/test_secret_fixture_hygiene.py`; pre-commit; CI step before
+  gitleaks). It is an early tripwire, **not** a gitleaks replacement —
+  gitleaks still fails CI on real leaks.
+- Sensitive runtime files are created owner-only: `runtime/*.db` is
+  hardened to `0600` (dir `0700`) on POSIX by
+  `scripts.persistence.harden_db_permissions` at every create/connect;
+  Windows ACLs via `scripts/harden_local_owner_files.ps1`.
+- Never add gitleaks allowlists to hide fixtures; if a one-off false
+  positive must be suppressed, use a fingerprint-specific
+  `.gitleaksignore` entry with a justification comment.
+
 ## Secret rotation
 
 If the owner token may have leaked:

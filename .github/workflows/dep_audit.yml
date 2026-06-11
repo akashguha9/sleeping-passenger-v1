@@ -54,15 +54,63 @@ jobs:
 
   secrets:
     # D3 fix: scan the repo for committed secrets on every push.
+    #
+    # Why the gitleaks CLI instead of gitleaks/gitleaks-action@v2: the
+    # action calls the GitHub Users API at runtime to decide whether a
+    # commercial license key is required, and a transient API/JSON error
+    # has failed this job before with "missing gitleaks license". A
+    # merge-blocking secret gate must be deterministic, so we download
+    # the open-source CLI directly, pinned by version AND SHA-256
+    # (verified offline below). This keeps the exact scan command, scope
+    # (--log-opts=-1 = the pushed commit), strict exit-code behavior, and
+    # SARIF artifact the action produced — with no license/API dependency.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           fetch-depth: 0
           persist-credentials: false
-      - uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2.3.9
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Secret-fixture hygiene lint (early guard, not a gitleaks substitute)
+        # Fails fast on scanner-bait fixtures (fake keys beside credential
+        # keywords) with a fix-it message; see scripts/secret_fixture_lint.py.
+        run: python3 scripts/secret_fixture_lint.py
+      - name: Install gitleaks 8.24.3 (version + checksum pinned)
+        run: |
+          curl -sSfL -o /tmp/gitleaks.tar.gz \
+            https://github.com/gitleaks/gitleaks/releases/download/v8.24.3/gitleaks_8.24.3_linux_x64.tar.gz
+          # SHA-256 from the v8.24.3 release checksums file; a tampered or
+          # repointed download fails the job here.
+          echo "9991e0b2903da4c8f6122b5c3186448b927a5da4deef1fe45271c3793f4ee29c  /tmp/gitleaks.tar.gz" | sha256sum --check --strict -
+          tar -xzf /tmp/gitleaks.tar.gz -C /tmp gitleaks
+          install -m 0755 /tmp/gitleaks /usr/local/bin/gitleaks
+          gitleaks version
+      - name: Gitleaks full-tree scan (defense in depth)
+        # The commit-scope scan below only sees lines added in the pushed
+        # commit, so bait or leaks already in the tree would go unnoticed
+        # until edited. This pass scans the checked-out tree as files.
+        # Report goes outside the workspace so the commit scan below never
+        # re-scans scanner output.
+        run: |
+          gitleaks detect --no-git --config=.gitleaks.toml --redact \
+            --exit-code=2 --report-format=sarif \
+            --report-path=/tmp/results-tree.sarif --source=.
+      - name: Gitleaks commit scan (pushed commit; real leaks exit non-zero)
+        # Same command gitleaks-action@v2 ran (scope preserved:
+        # --log-opts=-1 scans the pushed commit). --config is explicit so
+        # .gitleaks.toml discovery is deterministic, not accidental.
+        run: |
+          gitleaks detect --config=.gitleaks.toml --redact -v --exit-code=2 \
+            --report-format=sarif --report-path=results.sarif \
+            --log-level=debug --log-opts=-1
+      - name: Upload SARIF reports
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: gitleaks-results
+          path: |
+            results.sarif
+            /tmp/results-tree.sarif
+          if-no-files-found: ignore
 
   policy:
     # Pass-2 supply-chain / data-protection policy gates. Stdlib-only

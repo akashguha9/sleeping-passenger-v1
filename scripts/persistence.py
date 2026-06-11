@@ -14,6 +14,7 @@ Advisory invariants enforced on every write and read:
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 from pathlib import Path
 from typing import Any
@@ -518,10 +519,41 @@ def _additive_migrations(conn: sqlite3.Connection) -> None:
             pass
 
 
+def harden_db_permissions(db_path: Path = DB_PATH) -> None:
+    """Enforce owner-only permissions on the DB file and its directory.
+
+    ``sqlite3.connect`` creates missing DB files honoring the process
+    umask (typically 0644 → world-readable), and the local data-protection
+    audit (scripts/audit_local_data_protection.py) fails closed on any
+    world-accessible ``runtime/*.db``. Hardening immediately after
+    create/connect keeps the canonical DB at 0600 (dir 0700) no matter
+    which caller created it first. SQLite sidecar files (-wal/-shm)
+    inherit the main DB file's mode.
+
+    POSIX only: Windows has no chmod-style owner-only bits — that surface
+    is handled by scripts/harden_local_owner_files.ps1. Failures are
+    swallowed (exotic filesystems must not break persistence callers).
+    """
+    if os.name != "posix":
+        return
+    targets: list[tuple[Path, int]] = [(db_path, 0o600)]
+    # Only the canonical runtime dir is tightened to 0700; arbitrary
+    # parents (pytest tmp dirs, operator-chosen MVP_DB_PATH locations)
+    # are left alone.
+    if db_path.parent == RUNTIME_DIR:
+        targets.insert(0, (RUNTIME_DIR, 0o700))
+    for target, mode in targets:
+        try:
+            os.chmod(target, mode)
+        except OSError:
+            pass
+
+
 def init_schema(db_path: Path = DB_PATH) -> None:
     """Create runtime dir and initialize all tables. Idempotent."""
     db_path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(db_path))
+    harden_db_permissions(db_path)
     try:
         _apply_pragmas(conn)
         conn.executescript(_SCHEMA_SQL)
@@ -538,6 +570,9 @@ def _get_conn(db_path: Path = DB_PATH) -> sqlite3.Connection:
     if key not in _initialized:
         init_schema(db_path)
     conn = sqlite3.connect(str(db_path))
+    # Heal permissions even when the file pre-exists (e.g. created earlier
+    # by a raw sqlite3.connect under a permissive umask).
+    harden_db_permissions(db_path)
     conn.row_factory = sqlite3.Row
     _apply_pragmas(conn)
     return conn

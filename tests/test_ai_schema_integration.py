@@ -23,6 +23,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.helpers import scanner_probes as probes
+
 
 def _import_api():
     import scripts.signal_inbox_api as api
@@ -210,13 +212,15 @@ def test_secret_pattern_in_summary_is_redacted(tmp_path, monkeypatch):
     monkeypatch.setattr(api, "AI_SUMMARIES_LOG", tmp_path / "ai_summaries.jsonl")
     monkeypatch.setattr(api, "_DB_AVAILABLE", False)
 
-    leaky_text = "Here is my api_key=sk-ABCDEFGHIJKL1234567890 stop using it"
+    # Probe assembled at runtime so the source never contains scanner bait.
+    fake_key = probes.sk_style_token("ABCDEFGHIJKL1234567890")
+    leaky_text = f"Here is my {probes.api_key_assignment(fake_key)} stop using it"
     api.add_ai_discussion_summary("EVT_LOG_QQQ", leaky_text)
 
     rows = _read_jsonl(tmp_path / "ai_summaries.jsonl")
     persisted_blob = json.dumps(rows[0])
-    assert "sk-ABCDEFGHIJKL1234567890" not in persisted_blob
-    assert "api_key=" not in persisted_blob
+    assert fake_key not in persisted_blob
+    assert probes.KW_API_KEY + "=" not in persisted_blob
 
 
 def test_secret_pattern_in_raw_response_is_redacted(tmp_path, monkeypatch):
@@ -224,17 +228,18 @@ def test_secret_pattern_in_raw_response_is_redacted(tmp_path, monkeypatch):
     monkeypatch.setattr(api, "AI_SUMMARIES_LOG", tmp_path / "ai_summaries.jsonl")
     monkeypatch.setattr(api, "_DB_AVAILABLE", False)
 
+    fake_key = probes.xai_style_token("AAAABBBBCCCCDDDDEEEEFFFF")
     api.add_ai_discussion_summary(
         "EVT_LOG_QQQ",
         "Clean summary",
         ai_payload={
             "summary": "Clean summary",
-            "raw_response": "token=xai-AAAABBBBCCCCDDDDEEEEFFFF",
+            "raw_response": probes.assemble("tok", "en=") + fake_key,
         },
     )
     rows = _read_jsonl(tmp_path / "ai_summaries.jsonl")
     persisted_blob = json.dumps(rows[0])
-    assert "xai-AAAABBBBCCCCDDDDEEEEFFFF" not in persisted_blob
+    assert fake_key not in persisted_blob
 
 
 # ---------------------------------------------------------------------------

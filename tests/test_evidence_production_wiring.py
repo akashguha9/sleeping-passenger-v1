@@ -9,6 +9,7 @@ import pytest
 
 from scripts import data_quality as dq
 from scripts import evidence_bridge as eb
+from tests.helpers import scanner_probes as probes
 
 UTC = dt.timezone.utc
 NOW = dt.datetime(2026, 6, 1, 12, 0, tzinfo=UTC).isoformat()
@@ -152,9 +153,10 @@ def test_naive_timestamps_recorded_as_assumed_utc_with_capped_confidence(ledger)
 
 
 def test_secret_looking_payloads_refused_without_breaking_caller(ledger):
+    # Probe assembled at runtime so the source never contains scanner bait.
     record = eb.record_evidence(
         source_type="api", source_name="x",
-        claim="api_key=abcd1234efgh5678 leaked into claim",
+        claim=probes.api_key_assignment() + " leaked into claim",
         raw_evidence=b"r", observed_at=NOW,
     )
     assert record is None  # refused by data_quality, swallowed by bridge

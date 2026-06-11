@@ -155,7 +155,11 @@ def get_api_token() -> str | None:
     return token if token else None
 
 
-_TOKEN_HASH_RE_HEX64 = "0123456789abcdef"
+# Allowed alphabet for stored token hashes (see get_api_token_hash).
+# Deliberately NOT named after the credential it validates: a name like
+# "<credential>_HEX64 = ..." reads as a hard-coded secret to scanners
+# (gitleaks generic-api-key flagged the previous name of this constant).
+_LOWER_HEX_DIGITS = "0123456789abcdef"
 
 
 def get_api_token_hash() -> str | None:
@@ -173,7 +177,7 @@ def get_api_token_hash() -> str | None:
     raw = os.environ.get("MVP_API_TOKEN_HASH", "").strip().lower()
     if not raw:
         return None
-    if len(raw) != 64 or any(c not in _TOKEN_HASH_RE_HEX64 for c in raw):
+    if len(raw) != 64 or any(c not in _LOWER_HEX_DIGITS for c in raw):
         return None
     return raw
 
