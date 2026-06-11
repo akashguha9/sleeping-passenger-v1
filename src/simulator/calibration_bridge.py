@@ -58,6 +58,10 @@ SEGMENT_KEYS: tuple[str, ...] = (
 
 MODE_INSUFFICIENT = "insufficient_data"
 MODE_FIXTURE = "fixture_replay"
+# Walk-forward wind-tunnel rows over IMPORTED historical prices: real
+# prices, counterfactual decisions. Stronger evidence than seeded
+# fixtures, weaker than live resolved decisions — never autotune-eligible.
+MODE_BACKTEST = "backtest_replay"
 MODE_EMPIRICAL = "empirical"
 
 ADVISORY_NOTE = (
@@ -97,6 +101,7 @@ class CalibrationBridgeReport:
     unsafe_to_autotune: bool = True
     autotune_blockers: list[str] = field(default_factory=list)
     fixture_rows: int = 0
+    backtest_rows: int = 0
     empirical_rows: int = 0
     advisory_note: str = ADVISORY_NOTE
 
@@ -123,14 +128,21 @@ def _usable_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return usable
 
 
-def _mode(usable: list[dict[str, Any]]) -> tuple[str, int, int]:
+def _mode(usable: list[dict[str, Any]]) -> tuple[str, int, int, int]:
+    """Honest epistemic ladder: the WEAKEST evidence tier present labels
+    the whole report (fixture < backtest < empirical)."""
     fixture = sum(1 for r in usable if r.get("data_source") == "fixture_replay")
-    empirical = len(usable) - fixture
+    backtest = sum(
+        1 for r in usable if r.get("data_source") == "backtest_replay"
+    )
+    empirical = len(usable) - fixture - backtest
     if len(usable) < MIN_SAMPLE_FOR_SIGNAL:
-        return MODE_INSUFFICIENT, fixture, empirical
+        return MODE_INSUFFICIENT, fixture, backtest, empirical
     if fixture > 0:
-        return MODE_FIXTURE, fixture, empirical
-    return MODE_EMPIRICAL, fixture, empirical
+        return MODE_FIXTURE, fixture, backtest, empirical
+    if backtest > 0:
+        return MODE_BACKTEST, fixture, backtest, empirical
+    return MODE_EMPIRICAL, fixture, backtest, empirical
 
 
 def propose_half_life(h_old: float, drift: float) -> float:
@@ -188,7 +200,7 @@ def build_calibration_report(
 ) -> CalibrationBridgeReport:
     """Compute segment-level calibration from telemetry replay rows."""
     usable = _usable_rows(telemetry_rows)
-    mode, fixture_rows, empirical_rows = _mode(usable)
+    mode, fixture_rows, backtest_rows, empirical_rows = _mode(usable)
 
     if not usable:
         return CalibrationBridgeReport(
@@ -282,5 +294,6 @@ def build_calibration_report(
         unsafe_to_autotune=not safe,
         autotune_blockers=blockers,
         fixture_rows=fixture_rows,
+        backtest_rows=backtest_rows,
         empirical_rows=empirical_rows,
     )

@@ -142,3 +142,34 @@ def simulator_doctrine() -> dict[str, Any]:
         "generated_at": utc_now_iso(),
         **advisory_safety_stamps(),
     }
+
+
+MAX_WIND_TUNNEL_BARS = 2000
+
+
+def run_wind_tunnel_candidate(payload: dict[str, Any] | None) -> dict[str, Any]:
+    """Walk-forward wind-tunnel replay over caller-supplied bars.
+
+    Offline and deterministic: bars come in the request (bounded), no
+    network, no clock. Provenance is REQUIRED in the payload; synthetic
+    bars are labeled fixture_replay and can never masquerade as imported
+    history. ADVISORY_ONLY — a counterfactual replay, not a return promise.
+    """
+    from src.simulator.wind_tunnel import run_wind_tunnel
+
+    if not isinstance(payload, dict):
+        payload = {}
+    bars = payload.get("bars")
+    bars = list(bars)[:MAX_WIND_TUNNEL_BARS] if isinstance(bars, list) else []
+    report = run_wind_tunnel(
+        ticker=str(payload.get("ticker", "UNKNOWN")),
+        bars=[b for b in bars if isinstance(b, dict)],
+        price_provenance=str(payload.get("price_provenance", "SYNTHETIC")),
+        horizon_days=int(payload.get("horizon_days", 10) or 10),
+        every_n_bars=int(payload.get("every_n_bars", 5) or 5),
+        persist=bool(payload.get("persist", False)),
+    )
+    result = report.to_dict()
+    result["generated_at"] = utc_now_iso()
+    result.update(advisory_safety_stamps())
+    return result

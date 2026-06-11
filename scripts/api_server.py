@@ -1267,6 +1267,25 @@ def get_simulator_history(
     return simulator_history(ticker=ticker, limit=limit)
 
 
+@app.post("/simulator/wind-tunnel")
+def post_simulator_wind_tunnel(
+    body: dict,
+    _auth: None = Depends(require_api_token),
+) -> dict:
+    """Walk-forward wind-tunnel replay over caller-supplied bars.
+
+    Deterministic, offline, bounded. Counterfactual research replay with
+    mandatory price provenance — never a return promise, never an order.
+    """
+    try:
+        from scripts.simulator_api import run_wind_tunnel_candidate
+    except ModuleNotFoundError:  # pragma: no cover
+        from simulator_api import (  # type: ignore[no-redef]
+            run_wind_tunnel_candidate,
+        )
+    return run_wind_tunnel_candidate(body)
+
+
 @app.get("/simulator/calibration/report")
 def get_simulator_calibration_report(
     _auth: None = Depends(require_api_token_for_reads),

@@ -210,15 +210,44 @@ thresholds; reaction lag reduces effective strength; triple-blind review is
 serializable; final state is never a naked score; advisory language is
 preserved end to end.
 
+## The Wind Tunnel — walk-forward outcome evidence
+
+`src/simulator/wind_tunnel.py` connects the repo's walk-forward backtest
+discipline (`scripts/backtest_calibration.py`: strict no-lookahead,
+mandatory price provenance) to the simulator's telemetry-resolution →
+calibration loop. At each historical decision point the ENTIRE pipeline
+runs (physics, consent, strategy, stewards' room) on strictly
+backward-looking bars; verdicts are resolved against realized forward
+returns, producing per-state performance tables, Brier/ECE over actual
+outcomes, and the contradiction-hold cohort split (do held verdicts
+underperform clean ones?).
+
+Honesty ladder — the weakest evidence tier present labels the report:
+
+```text
+insufficient_data < fixture_replay (synthetic bars)
+                  < backtest_replay (IMPORTED bars, counterfactual decisions)
+                  < empirical (live resolved decisions)
+```
+
+Backtest evidence measures drift but NEVER clears autotune: real prices
+do not make simulated decisions real. Provenance is required; unknown
+provenance is treated as synthetic. Exposed at
+`POST /simulator/wind-tunnel` (bounded, offline, deterministic — the
+no-lookahead proof corrupts future bars and asserts identical decisions).
+With `persist=true` the resolved rows flow into the simulator store, so
+`GET /simulator/calibration/report` serves walk-forward evidence.
+
 ## Known limits (honest)
 
 * The live adapter is a tested boundary, but the 6-hour refresh job does
   not yet call it automatically — assembling payloads from stored
   ingestion is still operator-initiated.
 * Half-lives, betas, weights, and thresholds remain doctrine-derived
-  defaults. The calibration bridge can now measure drift and propose
-  adjustments, but **no empirical fitting has occurred** (no resolved
-  real-decision sample exists yet) and autotune is locked.
+  defaults. The wind tunnel can now measure drift against historical
+  outcomes (backtest_replay tier), but **no empirical fitting has
+  occurred**: backtests are counterfactual, no live resolved sample
+  exists, and autotune stays locked on anything below empirical.
 * The exposure graph is a seeded v0 structure, not a real supply-chain
   dataset.
 * Driver derivation reads the journal but the simulator does not yet
