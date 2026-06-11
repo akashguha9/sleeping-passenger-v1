@@ -170,3 +170,7 @@ reports/weight_sanity_report_*
 reports/signal_tournament_*.md
 reports/model_redteam_*.md
 reports/score_change_explanations/
+reports/daily_model_loop_*.md
+reports/history_bootstrap_*.md
+reports/model_trust_ladder_*.md
+reports/timestamp_migration_*.json

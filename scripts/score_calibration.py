@@ -133,7 +133,25 @@ def compute_score_calibration(
     wins = losses = breakeven = 0
     pnl_total = 0.0
     pnl_count = 0
+    temporal_uncertain = 0
     for row in reconciliations:
+        # Pass 6: rows whose timestamps are naive (no timezone) are
+        # temporally UNCERTAIN — they are excluded from calibration rates
+        # and surfaced as a count, never silently averaged in. New writes
+        # stamp aware UTC; legacy rows stay excluded until migrated via
+        # scripts/migrate_legacy_timestamps.py (which refuses to guess).
+        ts = str(row.get("reconciled_at", "") or "").strip()
+        if ts:
+            probe = ts.replace("Z", "+00:00")
+            try:
+                from datetime import datetime as _dtcls
+
+                if _dtcls.fromisoformat(probe).tzinfo is None:
+                    temporal_uncertain += 1
+                    continue
+            except ValueError:
+                temporal_uncertain += 1
+                continue
         status = str(row.get("outcome_status", "") or "").strip().upper()
         if status == "WIN":
             wins += 1
@@ -173,6 +191,8 @@ def compute_score_calibration(
             "calibrating_max": CALIBRATING_MAX,
             "calibrated_min": CALIBRATED_MIN,
         },
+        # Pass 6 temporal hygiene: excluded naive/unparsable-timestamp rows.
+        "temporal_uncertain_excluded": temporal_uncertain,
     }
     summary.update(_ADVISORY_STAMPS)
     return summary

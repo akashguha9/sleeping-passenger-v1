@@ -171,6 +171,25 @@ def gate_shadow_ledger_contract() -> tuple[bool, str]:
         return True, "order-shaped ledger row refused"
 
 
+def gate_derived_score_ledger() -> tuple[bool, str]:
+    from scripts import derived_score_ledger as dsl
+
+    result = dsl.verify_chain()
+    return result["valid"], f"records: {result['records']}; errors: {len(result['errors'])}"
+
+
+def gate_trust_ladder() -> tuple[bool, str]:
+    from scripts import model_trust_ladder as ladder
+
+    result = ladder.evaluate(ladder.current_inputs())
+    # The gate fails if execution_ready is ever true, or if the ladder
+    # claims a level above L3 without real OOS evidence (anti-overclaim).
+    ok = (result["execution_ready"] is False
+          and (result["inputs"]["real_oos_outcomes"] >= 30
+               or result["level_index"] <= 2))
+    return ok, f"{result['level']}; execution_ready={result['execution_ready']}"
+
+
 GATES = (
     ("advisory_invariants", gate_invariants),
     ("model_registry", gate_registry),
@@ -184,6 +203,8 @@ GATES = (
     ("memo_banned_phrases", gate_memo_banned_phrases),
     ("scorecard_evidence_caps", gate_scorecard_caps),
     ("shadow_ledger_contract", gate_shadow_ledger_contract),
+    ("derived_score_ledger", gate_derived_score_ledger),
+    ("trust_ladder_anti_overclaim", gate_trust_ladder),
 )
 
 

@@ -67,6 +67,9 @@ CONTRACT: dict[str, str] = {
     # shadow-paper tournament ledger (Pass 5; hypothetical observations
     # only — order-shaped rows are refused; gitignored under runtime/)
     "MVP_SHADOW_LEDGER_PATH": _PLAIN,
+    # derived score ledger (Pass 6; hash-chained model outputs linked to
+    # evidence ids; execution-shaped fields refused; gitignored)
+    "MVP_DERIVED_SCORE_LEDGER_PATH": _PLAIN,
     # non-loopback exposure hard stop acknowledgements
     "MVP_PUBLIC_MODE": _PLAIN,
     "MVP_TLS_TERMINATED": _PLAIN,

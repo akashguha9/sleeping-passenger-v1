@@ -261,6 +261,15 @@ EXPLICIT_IN_SCOPE: frozenset[str] = frozenset({
     "evidence_bridge.py", "syndication_detector.py", "signal_tournament.py",
     "weight_sanity.py", "redteam_model.py", "explain_score_change.py",
     "run_model_readiness_gate.py",
+    # Pass-6 operating loop + honesty machinery: timestamp migration
+    # (guarded MIGRATION_WRITE), derived-score ledger + verifier, signal
+    # annotations, history bootstrap, daily loop (manual command, no
+    # daemon), external-readiness checker, trust ladder. All advisory-
+    # only; the ledgers structurally refuse order/execution shapes.
+    "migrate_legacy_timestamps.py", "derived_score_ledger.py",
+    "verify_derived_score_ledger.py", "signal_annotation.py",
+    "bootstrap_signal_history.py", "daily_model_operating_loop.py",
+    "final_external_readiness_check.py", "model_trust_ladder.py",
 })
 
 # Modules deliberately marked OUT_OF_SCOPE inside ``scripts/``.  This

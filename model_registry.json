@@ -874,7 +874,7 @@
     },
     {
       "name": "syndication_detector",
-      "version": "1.0-pass5",
+      "version": "2.0-pass6",
       "owner": "Akash Guha",
       "purpose": "advisory-only signal evaluation: collapse syndicated wire copies into effective independent confirmations",
       "inputs": [
@@ -892,7 +892,8 @@
         "tests/test_syndication_and_tournament.py"
       ],
       "known_limits": [
-        "text-similarity based (Jaccard 3-shingles, tau=0.55); non-text evidence stays independent"
+        "lexical Jaccard + canonical URL + wire lineage + entity/catalyst/figure fingerprint",
+        "semantic paraphrase without shared figures can still evade; clusters carry explanations for human review"
       ]
     },
     {
@@ -1005,6 +1006,164 @@
       "human_required": true,
       "tests": [
         "tests/test_redteam_and_readiness_gate.py"
+      ],
+      "known_limits": []
+    },
+    {
+      "name": "derived_score_ledger",
+      "version": "1.0-pass6",
+      "owner": "Akash Guha",
+      "purpose": "advisory-only signal evaluation: hash-chained ledger of every model output, evidence-linked or NO_EVIDENCE_ABSTAIN",
+      "inputs": [
+        "model scores + evidence ids"
+      ],
+      "outputs": [
+        "chained JSONL records"
+      ],
+      "uses_llm": false,
+      "uses_market_data": false,
+      "uses_future_data": false,
+      "execution_capable": false,
+      "human_required": true,
+      "tests": [
+        "tests/test_derived_score_ledger.py"
+      ],
+      "known_limits": [
+        "single-file local chain; keep verifier output with backups"
+      ]
+    },
+    {
+      "name": "signal_annotation",
+      "version": "1.0-pass6",
+      "owner": "Akash Guha",
+      "purpose": "advisory-only signal evaluation: advisory/evidence/temporal/grounding block on every inbox card",
+      "inputs": [
+        "inbox items",
+        "evidence ledger",
+        "derived score ledger"
+      ],
+      "outputs": [
+        "model_quality annotation"
+      ],
+      "uses_llm": false,
+      "uses_market_data": false,
+      "uses_future_data": false,
+      "execution_capable": false,
+      "human_required": true,
+      "tests": [
+        "tests/test_signal_annotation_ui.py"
+      ],
+      "known_limits": []
+    },
+    {
+      "name": "timestamp_migration",
+      "version": "1.0-pass6",
+      "owner": "Akash Guha",
+      "purpose": "advisory-only signal evaluation: guarded aware-UTC migration of legacy naive timestamps",
+      "inputs": [
+        "DB timestamp columns",
+        "--assume-timezone assertion"
+      ],
+      "outputs": [
+        "converted UTC stamps + temporal_uncertain report"
+      ],
+      "uses_llm": false,
+      "uses_market_data": false,
+      "uses_future_data": false,
+      "execution_capable": false,
+      "human_required": true,
+      "tests": [
+        "tests/test_timestamp_migration.py"
+      ],
+      "known_limits": [
+        "never converts without operator timezone assertion"
+      ]
+    },
+    {
+      "name": "daily_operating_loop",
+      "version": "1.0-pass6",
+      "owner": "Akash Guha",
+      "purpose": "advisory-only signal evaluation: manual 11-step daily command forcing honest history accumulation",
+      "inputs": [
+        "all ledgers + journal DB"
+      ],
+      "outputs": [
+        "daily report; abstain-only research scores"
+      ],
+      "uses_llm": false,
+      "uses_market_data": false,
+      "uses_future_data": false,
+      "execution_capable": false,
+      "human_required": true,
+      "tests": [
+        "tests/test_operating_loop_and_trust.py"
+      ],
+      "known_limits": [
+        "not a daemon; human decides everything outside the app"
+      ]
+    },
+    {
+      "name": "history_bootstrap",
+      "version": "1.0-pass6",
+      "owner": "Akash Guha",
+      "purpose": "advisory-only signal evaluation: normalize past human journal outcomes into shadow observations",
+      "inputs": [
+        "manual trades + reconciliations"
+      ],
+      "outputs": [
+        "shadow rows + exclusion report"
+      ],
+      "uses_llm": false,
+      "uses_market_data": false,
+      "uses_future_data": false,
+      "execution_capable": false,
+      "human_required": true,
+      "tests": [
+        "tests/test_operating_loop_and_trust.py"
+      ],
+      "known_limits": []
+    },
+    {
+      "name": "model_trust_ladder",
+      "version": "1.0-pass6",
+      "owner": "Akash Guha",
+      "purpose": "advisory-only signal evaluation: hard anti-overclaiming caps L0..L5; execution_ready always False",
+      "inputs": [
+        "oos counts, ECE, temporal violations, red-team, review status"
+      ],
+      "outputs": [
+        "trust level + binding caps report"
+      ],
+      "uses_llm": false,
+      "uses_market_data": false,
+      "uses_future_data": false,
+      "execution_capable": false,
+      "human_required": true,
+      "tests": [
+        "tests/test_operating_loop_and_trust.py"
+      ],
+      "known_limits": [
+        "L4+ unreachable until >=100 real OOS outcomes with good ECE"
+      ]
+    },
+    {
+      "name": "external_readiness_check",
+      "version": "1.0-pass6",
+      "owner": "Akash Guha",
+      "purpose": "advisory-only signal evaluation: VERIFIED/PENDING/UNSAFE reporting of owner-external tasks; never fakes verification",
+      "inputs": [
+        "artifacts + owner confirmation markers"
+      ],
+      "outputs": [
+        "readiness report"
+      ],
+      "uses_llm": false,
+      "uses_market_data": false,
+      "uses_future_data": false,
+      "execution_capable": false,
+      "human_required": true,
+      "tests": [
+        "tests/test_syndication_v2_and_external.py"
       ],
       "known_limits": []
     }

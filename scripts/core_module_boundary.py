@@ -131,6 +131,9 @@ _SUPPORT_EXPLICIT: frozenset[str] = frozenset({
     # Pass-5 integration/adversarial tooling.
     "signal_tournament", "weight_sanity", "redteam_model",
     "explain_score_change",
+    # Pass-6 operating-loop tooling.
+    "signal_annotation", "daily_model_operating_loop",
+    "model_trust_ladder", "migrate_legacy_timestamps",
 })
 
 
