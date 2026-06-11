@@ -1,0 +1,420 @@
+{
+  "advisory_note": "ADVISORY_ONLY \u2014 simulator output for journal review. No order is placed, sized, or routed. Human decision required.",
+  "advisory_status": "ADVISORY_ONLY",
+  "ai_execution_count": 0,
+  "breakdown": {
+    "aero": {
+      "aero_balance": "bull_dominant",
+      "aero_efficiency": 5.6607142857142865,
+      "aero_stall_warning": false,
+      "dirty_air": 0.7,
+      "drs_active": true,
+      "drs_status": "open",
+      "evidence_downforce": 0.7925,
+      "ground_effect": 0.48999999999999994,
+      "information_drag": 0.13999999999999999,
+      "porpoising_warning": false,
+      "raw_components": {
+        "bear_force": 0.3,
+        "bull_force": 0.7,
+        "data_quality": 0.9,
+        "regime_shift_level": 0.1,
+        "sector_momentum": 0.6
+      },
+      "reason_codes": [
+        "CLEAN_AIR_HIGH_EFFICIENCY",
+        "DIRTY_AIR_PENALTY",
+        "DRS_OPEN"
+      ],
+      "score_volatility": 0.0,
+      "slipstream": 0.5,
+      "stock_specific_thrust": 0.6
+    },
+    "circuit": {
+      "circuit": "mid_cap",
+      "profile": {
+        "allowed_signal_compounds": [
+          "soft",
+          "medium",
+          "hard",
+          "intermediate",
+          "wet"
+        ],
+        "crash_baseline": 0.3,
+        "data_quality_risk": 0.25,
+        "difficulty": 1.35,
+        "half_life_decay_multiplier": 0.9,
+        "liquidity_risk": 0.25,
+        "manipulation_risk": 0.2,
+        "name": "mid_cap",
+        "position_size_cap_pct": 7.5,
+        "reaction_time_requirement_hours": 96.0,
+        "required_driver_license": "rookie",
+        "threshold_multiplier": 1.1,
+        "volatility_risk": 0.35
+      },
+      "reason_codes": [
+        "CAP_SIZE_CLASSIFICATION"
+      ]
+    },
+    "crash": {
+      "crash_density": 0.0,
+      "crash_risk_raw": 0.8190624999999999,
+      "crash_risk_score": 0.24713204964037583,
+      "individual_risks": {
+        "high_valuation": 0.25,
+        "low_volume": 0.15,
+        "rising_rates": 0.3
+      },
+      "primary_crash_category": "macro_crash",
+      "primary_crash_vector": "rising_rates",
+      "reason_codes": [
+        "CRASH_SURVIVABLE"
+      ],
+      "safe_to_enter_conditions": [],
+      "severe_combination_count": 0,
+      "thesis_damage_triggers": [
+        "rising_rates worsening beyond 0.50 breaks the thesis",
+        "high_valuation worsening beyond 0.45 breaks the thesis",
+        "low_volume worsening beyond 0.35 breaks the thesis"
+      ],
+      "total_tested_combinations": 4,
+      "worst_combination_score": 0.8190624999999999,
+      "worst_crash_combination": [
+        "rising_rates",
+        "high_valuation",
+        "low_volume"
+      ]
+    },
+    "driver": {
+      "black_flag": false,
+      "danger_points": 0,
+      "discipline_score": 85.83333333333334,
+      "license_level": "pro_am",
+      "permission_multiplier": 1.0,
+      "raw_components": {
+        "calibration_honesty": 0.9,
+        "confirmation_patience": 0.8,
+        "danger_points": 0,
+        "invalidation_compliance": 0.9,
+        "override_penalty": 0.0,
+        "position_sizing_discipline": 0.85,
+        "replay_audit_completion": 0.8,
+        "revenge_penalty": 0.0,
+        "thesis_logging_quality": 0.9
+      },
+      "reason_codes": [
+        "DRIVER_STATUS_CLEAN",
+        "DISCIPLINED_DRIVER"
+      ],
+      "status": "clean",
+      "violations": []
+    },
+    "exposure": {
+      "backlog_linkage": 0.8,
+      "customer_linkage": 0.5,
+      "exposure_class": "direct_beneficiary",
+      "exposure_score": 0.6749999999999999,
+      "exposure_score_raw": 4.3999999999999995,
+      "geographic_fit": 0.6,
+      "margin_sensitivity": 0.5,
+      "policy_fit": 0.7,
+      "reason_codes": [
+        "EXPOSURE_DIRECT_BENEFICIARY",
+        "BACKLOG_LINKED",
+        "REVENUE_LINKED"
+      ],
+      "revenue_exposure": 0.7,
+      "supply_chain_position": 0.6,
+      "theme": "ai_grid_buildout",
+      "ticker": "GRIDCO",
+      "weak_evidence_penalty": 0.0
+    },
+    "inflection": {
+      "components": {
+        "delta_contradiction_pressure": 0.1,
+        "delta_estimate_revision": 0.4,
+        "delta_filing_evidence": 0.5,
+        "delta_narrative_velocity": 0.5,
+        "delta_source_diversity": 0.4,
+        "delta_volume_quality": 0.4
+      },
+      "reason_codes": [
+        "POSITIVE_INFLECTION"
+      ],
+      "score": 2.1
+    },
+    "meal_box": {
+      "catalyst_present": true,
+      "complete": true,
+      "evidence_present": true,
+      "invalidation_present": true,
+      "missing_items": [],
+      "reason_codes": [
+        "MEAL_BOX_COMPLETE"
+      ],
+      "thesis_present": true
+    },
+    "narrative": {
+      "contradiction_count": 0,
+      "contradiction_ratio": 0.0,
+      "dirty_air_score": 0.7,
+      "independent_confirmation_ratio": 0.3,
+      "independent_origin_count": 12,
+      "mention_count": 40,
+      "narrative": "AI datacenter grid strain",
+      "narrative_acceleration": 0.2,
+      "narrative_state": "accelerating",
+      "narrative_velocity": 0.4,
+      "origin_count": 14,
+      "reason_codes": [
+        "NARRATIVE_ACCELERATING",
+        "DIRTY_AIR_WARNING",
+        "INDEPENDENTLY_CONFIRMED"
+      ],
+      "source_quality": 0.8
+    },
+    "narrative_shock": {
+      "affected_sectors": [],
+      "affected_themes": [
+        "grid equipment",
+        "transformers"
+      ],
+      "cross_source_confirmation": 0.8,
+      "direction": "rising",
+      "market_importance": 0.9,
+      "market_liquidity": 0.7,
+      "market_name": "AI grid bill passes 2026",
+      "narrative_shock_score": 0.10886400000000002,
+      "probability_after": 0.54,
+      "probability_before": 0.27,
+      "probability_delta": 0.27,
+      "reason_codes": [
+        "STRONG_NARRATIVE_SHOCK",
+        "RADAR_NOT_TRADE"
+      ],
+      "velocity": 0.8
+    },
+    "theme": {
+      "candidate_sectors": [],
+      "crowding": 0.3,
+      "liquidity_support": 0.7,
+      "macro_fit": 0.7,
+      "policy_fit": 0.8,
+      "reason_codes": [
+        "TRACK_CONDITION_SUPPORTIVE"
+      ],
+      "regulatory_friction": 0.2,
+      "risk_appetite": 0.6,
+      "sector_momentum": 0.6,
+      "source_narrative": "AI datacenter grid strain",
+      "theme": "ai_grid_buildout",
+      "track_condition_raw": 2.65,
+      "track_condition_score": 0.70625,
+      "valuation_heat": 0.25
+    },
+    "triple_blind": {
+      "human_model_agreement": 0.3333333333333333,
+      "identity_blind_score": 0.6699999999999999,
+      "model_thesis": "Identity-blind thesis (score 0.67): the anonymized company shows durable revenue growth, improving margins, a resilient balance sheet. Key blinded risks: no outsized blinded risk detected. ADVISORY_ONLY \u2014 written before the human thesis was revealed.",
+      "model_thesis_written_before_user_thesis": true,
+      "optionality_human_found": [],
+      "reality_review_status": "pending",
+      "reason_codes": [
+        "MODEL_THESIS_FIRST"
+      ],
+      "risks_model_found": [],
+      "user_thesis_seen": true
+    },
+    "tyres": [
+      {
+        "adjusted_half_life_hours": 2184.57,
+        "allowed_reaction_window_hours": 720.0,
+        "base_half_life_hours": 2160.0,
+        "compound": "hard",
+        "confirmation_multiplier": 1.1,
+        "effective_signal_strength": 81.52189979964521,
+        "is_worn": false,
+        "raw_strength": 85.0,
+        "reaction_freshness": 1.0,
+        "reaction_lag_hours": 0.0,
+        "reason_codes": [
+          "HIGH_EFFECTIVE_STRENGTH"
+        ],
+        "signal_age_hours": 100.0,
+        "signal_grip_pct": 96.8768862740882,
+        "source_quality": 0.9
+      },
+      {
+        "adjusted_half_life_hours": 121.36500000000001,
+        "allowed_reaction_window_hours": 72.0,
+        "base_half_life_hours": 120.0,
+        "compound": "medium",
+        "confirmation_multiplier": 1.0,
+        "effective_signal_strength": 45.613514282454645,
+        "is_worn": false,
+        "raw_strength": 75.0,
+        "reaction_freshness": 1.0,
+        "reaction_lag_hours": 0.0,
+        "reason_codes": [],
+        "signal_age_hours": 48.0,
+        "signal_grip_pct": 76.02252380409107,
+        "source_quality": 0.8
+      }
+    ]
+  },
+  "broker_api_called": false,
+  "broker_order_id": "NONE",
+  "can_execute": false,
+  "decision": {
+    "advisory_note": "ADVISORY_ONLY \u2014 simulator output for journal review. No order is placed, sized, or routed. Human decision required.",
+    "aero_efficiency": 5.6607142857142865,
+    "circuit": "mid_cap",
+    "company_exposure": 0.6749999999999999,
+    "crash_density": 0.0,
+    "crash_risk": 0.24713204964037583,
+    "decision_reason": "Score 59.5/100 on circuit 'mid_cap' with all gates passed; state 'active_watch'. ADVISORY_ONLY \u2014 simulator output for journal review. No order is placed, sized, or routed. Human decision required.",
+    "dirty_air": 0.7,
+    "downforce": 0.7925,
+    "drag": 0.13999999999999999,
+    "driver_permission": 1.0,
+    "driver_status": "clean",
+    "exposure_class": "direct_beneficiary",
+    "final_candidate_score": 59.48988545436664,
+    "final_state": "active_watch",
+    "gate_results": {
+      "crash_gate": true,
+      "data_quality_gate": true,
+      "driver_license_gate": true,
+      "driver_not_black_flagged": true,
+      "grip_gate": true,
+      "hard_conviction_gate": true,
+      "meal_box_gate": true,
+      "stability_gate": true
+    },
+    "hard_conviction_ok": true,
+    "ladder": {
+      "eligible_state": "active_watch",
+      "gate_caps": [],
+      "previous_state": null,
+      "reason_codes": [
+        "STATE_ACTIVE_WATCH"
+      ],
+      "score": 59.48988545436664,
+      "state": "active_watch",
+      "thresholds_used": {
+        "active_watch": 55.00000000000001,
+        "archive": 16.5,
+        "buy_candidate": 71.5,
+        "high_conviction_candidate": 88.0,
+        "watchlist": 38.5
+      }
+    },
+    "license_ok_for_circuit": true,
+    "meal_box_status": {
+      "catalyst_present": true,
+      "complete": true,
+      "evidence_present": true,
+      "invalidation_present": true,
+      "missing_items": [],
+      "reason_codes": [
+        "MEAL_BOX_COMPLETE"
+      ],
+      "thesis_present": true
+    },
+    "narrative_shock": 0.10886400000000002,
+    "reason_codes": [
+      "HARD_CONVICTION_SUPPORTED",
+      "STATE_ACTIVE_WATCH"
+    ],
+    "score_components": {
+      "company_exposure": 10.124999999999998,
+      "confirmation": 4.0,
+      "crash_risk": -7.413961489211275,
+      "dirty_air": -7.0,
+      "driver_penalty": -0.0,
+      "evidence_downforce": 15.85,
+      "ground_effect": 4.8999999999999995,
+      "information_drag": -1.4,
+      "narrative_inflection": 7.363636363636363,
+      "opportunity_quality": 22.5,
+      "signal_grip": 13.065210579941557,
+      "valuation_heat": -2.5
+    },
+    "signal_compound": "hard",
+    "signal_grip": 87.10140386627704,
+    "theme": "ai_grid_buildout",
+    "ticker": "GRIDCO",
+    "track_condition": 0.70625,
+    "triple_blind": {
+      "human_model_agreement": 0.3333333333333333,
+      "identity_blind_score": 0.6699999999999999,
+      "model_thesis": "Identity-blind thesis (score 0.67): the anonymized company shows durable revenue growth, improving margins, a resilient balance sheet. Key blinded risks: no outsized blinded risk detected. ADVISORY_ONLY \u2014 written before the human thesis was revealed.",
+      "model_thesis_written_before_user_thesis": true,
+      "optionality_human_found": [],
+      "reality_review_status": "pending",
+      "reason_codes": [
+        "MODEL_THESIS_FIRST"
+      ],
+      "risks_model_found": [],
+      "user_thesis_seen": true
+    }
+  },
+  "doctrine": [
+    "No signal is immortal.",
+    "No score is naked.",
+    "No stale soft signal can support hard conviction.",
+    "No fire extinguisher, no trade.",
+    "No high opportunity score can override high crash density.",
+    "No candidate is promoted without telemetry.",
+    "No user action is allowed if driver discipline is dangerous.",
+    "Prediction markets are radar, not the trade.",
+    "Narratives are weather.",
+    "Signals are tyres.",
+    "Evidence is downforce.",
+    "Noise is drag.",
+    "The MVP is the chassis.",
+    "Crash cases are the wall.",
+    "Telemetry is truth."
+  ],
+  "execution_gate": "LOCKED",
+  "execution_permission": false,
+  "generated_at": "2026-06-11T00:00:00+00:00",
+  "human_review_required": true,
+  "telemetry": {
+    "actual_outcome_placeholder": null,
+    "advisory_status": "ADVISORY_ONLY",
+    "aero_metrics_at_decision": {
+      "aero_efficiency": 5.6607142857142865,
+      "dirty_air": 0.7,
+      "downforce": 0.7925,
+      "drag": 0.13999999999999999
+    },
+    "calibration_error": null,
+    "calibration_status": "pending",
+    "crash_density_at_decision": 0.0,
+    "crash_risk_at_decision": 0.24713204964037583,
+    "decision_reason": "Score 59.5/100 on circuit 'mid_cap' with all gates passed; state 'active_watch'. ADVISORY_ONLY \u2014 simulator output for journal review. No order is placed, sized, or routed. Human decision required.",
+    "decision_time": "2026-06-11T00:00:00+00:00",
+    "driver_permission_at_decision": 1.0,
+    "driver_score_at_decision": 85.83333333333334,
+    "expected_time_window_days": 90.0,
+    "final_state": "active_watch",
+    "meal_box_status": {
+      "catalyst_present": true,
+      "complete": true,
+      "evidence_present": true,
+      "invalidation_present": true,
+      "missing_items": [],
+      "reason_codes": [
+        "MEAL_BOX_COMPLETE"
+      ],
+      "thesis_present": true
+    },
+    "outcome_class": null,
+    "predicted_probability": 0.65,
+    "score_at_decision": 59.48988545436664,
+    "signal_grip_at_decision": 87.10140386627704,
+    "ticker": "GRIDCO"
+  }
+}

@@ -320,6 +320,22 @@ export async function postDecision(eventId: string, status: string): Promise<unk
   });
 }
 
+// Market-physics simulator (advisory-only scoring; stateless, no order path).
+// The response's `decision` field matches `SimulatorDecision` in
+// `@/components/SimulatorVerdictCard`.
+export async function postSimulatorEvaluate(
+  payload: Record<string, unknown>,
+): Promise<unknown> {
+  return apiFetch('/simulator/evaluate', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function getSimulatorDoctrine(): Promise<unknown> {
+  return apiFetch('/simulator/doctrine', { method: 'GET' });
+}
+
 export async function postManualTrade(body: {
   event_id: string;
   ticker: string;

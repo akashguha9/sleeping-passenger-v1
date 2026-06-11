@@ -24,6 +24,10 @@ discipline. It is not a hosted product, not multi-user, and not a broker.
   reconcile the outcome later.
 - Maintains a Moltbook — a self-correction journal of mistakes / biases /
   rule updates.
+- Stress-tests candidates through an advisory market-physics simulator
+  (signal half-life decay, crash-case permutations, dirty-air detection,
+  driver-discipline gates) — see
+  [docs/MARKET_PHYSICS_SIMULATOR.md](docs/MARKET_PHYSICS_SIMULATOR.md).
 - Exports every journal stream as CSV for offline analysis.
 
 ## What this MVP does NOT do
@@ -77,6 +81,7 @@ Open http://localhost:3000.
 | Doc | Purpose |
 |---|---|
 | [SHOWCASE.md](SHOWCASE.md) | One-stop product showcase (problem, workflow, safety, demo) |
+| [docs/MARKET_PHYSICS_SIMULATOR.md](docs/MARKET_PHYSICS_SIMULATOR.md) | Simulator layer: signal tyres, narrative radar, crash permutations, driver license, cherry-pick gates |
 | [SETUP.md](SETUP.md) | Install, env vars, start/stop, troubleshooting |
 | [DEMO.md](DEMO.md) | 5-minute scripted walkthrough |
 | [TESTING.md](TESTING.md) | What is and isn't tested, how to run |

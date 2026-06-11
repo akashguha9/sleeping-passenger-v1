@@ -1198,6 +1198,43 @@ def post_decision(
 
 
 # ---------------------------------------------------------------------------
+# Market-physics simulator (advisory-only scoring; never an order path)
+# ---------------------------------------------------------------------------
+
+
+@app.get("/simulator/doctrine")
+def get_simulator_doctrine(
+    _auth: None = Depends(require_api_token_for_reads),
+) -> dict:
+    """Static simulator doctrine, compound half-lives, and circuit profiles."""
+    try:
+        from scripts.simulator_api import simulator_doctrine
+    except ModuleNotFoundError:  # pragma: no cover
+        from simulator_api import simulator_doctrine  # type: ignore[no-redef]
+    return simulator_doctrine()
+
+
+@app.post("/simulator/evaluate")
+def post_simulator_evaluate(
+    body: dict,
+    _auth: None = Depends(require_api_token),
+) -> dict:
+    """Score one candidate through the full simulator chain.
+
+    Pure computation over the supplied payload: tyre decay, narrative
+    physics, crash permutations, gates, telemetry. Stateless, read-only,
+    ADVISORY_ONLY — no order is placed, sized, or routed.
+    """
+    try:
+        from scripts.simulator_api import evaluate_simulator_candidate
+    except ModuleNotFoundError:  # pragma: no cover
+        from simulator_api import (  # type: ignore[no-redef]
+            evaluate_simulator_candidate,
+        )
+    return evaluate_simulator_candidate(body)
+
+
+# ---------------------------------------------------------------------------
 # Manual trades
 # ---------------------------------------------------------------------------
 
