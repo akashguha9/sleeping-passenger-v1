@@ -71,6 +71,16 @@ from a real leak, so the rule is enforced at the source:
   positive must be suppressed, use a fingerprint-specific
   `.gitleaksignore` entry with a justification comment.
 
+Trust closure (the gates cannot silently drift):
+`scripts/audit_security_gate_integrity.py` verifies the whole scan
+pipeline in every workflow file and runs in pytest, pre-commit, the kante
+gate, and the dep-audit policy job. Historical findings are enumerated and
+verified synthetic in `docs/security/historical-secret-scan-ledger.md`
+(re-checkable via `scripts/audit_historical_secret_ledger.py` / the manual
+`history-audit` workflow). Every dep-audit run uploads a machine-readable
+attestation built by `scripts/build_security_evidence_bundle.py`; scores
+and residual risk live in `docs/security/security_scorecard.md`.
+
 ## Secret rotation
 
 If the owner token may have leaked:

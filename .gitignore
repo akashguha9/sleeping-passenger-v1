@@ -174,3 +174,6 @@ reports/daily_model_loop_*.md
 reports/history_bootstrap_*.md
 reports/model_trust_ladder_*.md
 reports/timestamp_migration_*.json
+
+# Scanner output (gitleaks SARIF/JSON reports) must never be committed.
+*.sarif

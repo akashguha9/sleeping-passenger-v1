@@ -108,3 +108,39 @@ def test_db_still_usable_after_hardening(tmp_path):
     }
     conn.close()
     assert "manual_trades" in tables
+
+
+@posix_only
+def test_db_created_under_permissive_umask_is_owner_only(tmp_path):
+    """Even umask 000 (world-writable default) cannot produce a loose DB."""
+    previous = os.umask(0o000)
+    try:
+        db = tmp_path / "mvp_local.db"
+        persistence.init_schema(db)
+        assert _mode(db) == 0o600
+    finally:
+        os.umask(previous)
+
+
+@posix_only
+def test_preexisting_world_readable_db_healed_before_audit(tmp_path, monkeypatch):
+    """A 0644 runtime DB left by an old run is healed by the next connect,
+    so the custody audit sees owner-only permissions."""
+    from scripts import audit_local_data_protection as adp
+
+    repo = tmp_path / "repo"
+    (repo / "runtime").mkdir(parents=True)
+    gitignore_lines = "\n".join(adp._REQUIRED_IGNORE_PATTERNS) + "\n"
+    (repo / ".gitignore").write_text(gitignore_lines, encoding="utf-8")
+    db = repo / "runtime" / "mvp_local.db"
+    monkeypatch.setattr(persistence, "RUNTIME_DIR", db.parent, raising=False)
+
+    # Simulate the legacy state: DB created world-readable by a raw
+    # sqlite3.connect under the default umask.
+    sqlite3.connect(str(db)).close()
+    os.chmod(db, 0o644)
+    assert [v for v in adp.audit(repo) if "world-accessible" in v]
+
+    persistence._get_conn(db).close()  # any persistence touch heals it
+    assert _mode(db) == 0o600
+    assert [v for v in adp.audit(repo) if "world-accessible" in v] == []

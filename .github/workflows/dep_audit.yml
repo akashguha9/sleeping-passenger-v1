@@ -111,6 +111,23 @@ jobs:
             results.sarif
             /tmp/results-tree.sarif
           if-no-files-found: ignore
+      - name: Build security evidence bundle
+        # Machine-readable record of what this job verified (exit codes +
+        # SHA-256 of every security-relevant file). --skip-pytest because
+        # test deps are not installed here; the bundle records that check
+        # as "skipped", never as passed (pytest has its own workflow).
+        # --allow-skips tolerates exactly that deliberate skip; any FAILED
+        # check still exits non-zero and fails this job.
+        run: |
+          python3 scripts/build_security_evidence_bundle.py \
+            --skip-pytest --allow-skips
+      - name: Upload security evidence bundle
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: security-evidence-bundle
+          path: runtime/reports/security_evidence_bundle.json
+          if-no-files-found: ignore
 
   policy:
     # Pass-2 supply-chain / data-protection policy gates. Stdlib-only
@@ -125,6 +142,8 @@ jobs:
           python-version: "3.13"
       - name: Actions SHA-pinning audit
         run: python scripts/audit_github_actions_pinning.py
+      - name: Security-gate integrity audit (gitleaks pipeline cannot drift)
+        run: python scripts/audit_security_gate_integrity.py
       - name: Dependency advisory register audit (review-window expiry)
         run: python scripts/audit_dependency_advisory_register.py
       - name: Local data-protection audit (tracked secrets/DBs/backups)
