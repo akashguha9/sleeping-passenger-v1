@@ -84,12 +84,94 @@ Circuit threshold multipliers (0.95 defensive → 1.6 biotech-event) scale
 every ladder rung, so the same score promotes on large-cap and dies on
 micro-cap. Hostile circuits also shorten signal half-lives.
 
+## Scrutineering bay (anti-fooling layer)
+
+`src/simulator/scrutineering.py` cross-examines every payload against the
+simulator's own physics invariants before a verdict is published — like
+post-race technical inspection. Conservation laws checked:
+
+1. **Confirmation without origins** — claimed confirmation must be carried
+   by absolute independent origin count, not echo volume.
+2. **Hard evidence without hard tyres** — a 0.9 hard-evidence claim with
+   only soft-compound signals supplied is a contradiction.
+3. **Clean crash on a dirty circuit** — claimed total risk cannot undercut
+   the circuit's own crash baseline.
+4. **Downforce without filings** — high aero evidence with an empty
+   meal-box evidence text is downforce with no wing.
+5. **Shock without narrative** — a large prediction-market delta with no
+   mentions on the wire is radar contact with an empty sky.
+6. **Uniform optimism** — many extreme favorable inputs with near-zero
+   variance; honest research is never that smooth.
+7. **Humility index** — confidence claims above the volume-supported
+   ceiling get dampened in the final score.
+
+A failed inspection caps the ladder at watchlist
+(`DISQUALIFIED_PENDING_EVIDENCE`) — the verdict survives, provisionally,
+until the evidence is real. This makes the simulator structurally hard to
+fool with self-consistent optimistic inputs.
+
+## Calibration bridge (recommendation-only)
+
+`src/simulator/calibration_bridge.py` reuses the journal's canonical
+Brier/ECE implementations (`scripts/calibration_map.py`) over decision
+telemetry, computes per-segment drift (circuit, compound, exposure class,
+crash-density bucket, license, narrative state), and proposes — never
+applies — parameter adjustments:
+
+```text
+D_s   = mean(error_s) - mean(error_global)
+h_new = clamp(h_old · exp(-λ·D_s), 0.25·h_old, 4·h_old)
+β_new = clamp(β_old + η·residual, 0.1, 1.5)
+```
+
+Calibration modes are never conflated: `insufficient_data`,
+`fixture_replay` (seeded data proves the machinery, not the market), and
+`empirical` (only real resolved decisions). `unsafe_to_autotune` defaults
+to True and clears only through a strict gate (empirical mode, n ≥ 50,
+ECE ≤ 0.10) — and even then nothing is applied without a human.
+A deterministic 48-row fixture lives at
+`tests/fixtures/simulator_replay_fixture.jsonl` (SIMULATED, labeled as such).
+
+## Reality replay (triple-blind stage 3)
+
+`src/simulator/reality_replay.py` replays resolved decisions against
+outcome and classifies them: `right_for_right_reason`,
+`right_for_wrong_reason`, `wrong_but_process_clean`,
+`wrong_due_to_stale_signal` / `missing_invalidation` /
+`exposure_mismatch` / `driver_violation`, `insufficient_data`. A failure
+is *knowable* when the decision-time snapshot already contained the
+warning. Knowable process failures convert into driver violations.
+
+## Derived driver state
+
+`src/simulator/driver_derivation.py` derives violations from the actual
+journal (manual trades + reconciliations) instead of self-report: missing
+thesis/invalidation, ignored block flags, leverage breaches, tailgating
+confidence, and revenge re-entry within 48h of a reconciled loss — all
+with the standard 30-day penalty decay.
+
+## Live adapter & exposure graph
+
+`src/simulator/live_adapter.py` transforms stored ingestion shapes
+(Polymarket/Kalshi snapshot pairs, source mention clusters, security
+metadata) into pipeline payload sections — fixture-tested, no network.
+`src/simulator/exposure_graph.py` resolves theme→ticker exposure through
+provenance-carrying edges (`1 - Π(1-c_i)`, fragility and lag decay); the
+pipeline falls back to the seed graph when the caller supplies no
+exposure section. The seed graph is illustrative, not a real
+supply-chain dataset.
+
 ## API
 
 * `GET /simulator/doctrine` — doctrine, compound half-lives, circuit table.
 * `POST /simulator/evaluate` — full evaluation of one candidate payload.
   Stateless and read-only; the response includes `decision`, `telemetry`,
   and per-engine `breakdown`, all stamped with the advisory contract.
+* `POST /simulator/evaluate-and-record` — evaluate and persist the verdict
+  (local SQLite) so threshold hysteresis survives across sessions.
+* `GET /simulator/history` — read-only persisted evaluation history.
+* `GET /simulator/calibration/report` — recommendation-only calibration
+  report over persisted telemetry (honest mode labeling, autotune locked).
 
 A committed example request/response lives at
 [`docs/examples/simulator_example_output.json`](examples/simulator_example_output.json)
@@ -130,11 +212,16 @@ preserved end to end.
 
 ## Known limits (honest)
 
-* All inputs are caller-supplied normalized scores; there is **no live
-  ingestion** wiring narratives/prediction markets into the pipeline yet.
-* Half-lives, interaction betas, weights, and thresholds are doctrine-derived
-  defaults, **not calibrated from historical outcomes**.
-* Theme→company exposure is scored, not resolved from a real supply-chain
-  graph.
-* Telemetry persists to local JSONL; replay/calibration analysis on top of
-  it is manual.
+* The live adapter is a tested boundary, but the 6-hour refresh job does
+  not yet call it automatically — assembling payloads from stored
+  ingestion is still operator-initiated.
+* Half-lives, betas, weights, and thresholds remain doctrine-derived
+  defaults. The calibration bridge can now measure drift and propose
+  adjustments, but **no empirical fitting has occurred** (no resolved
+  real-decision sample exists yet) and autotune is locked.
+* The exposure graph is a seeded v0 structure, not a real supply-chain
+  dataset.
+* Driver derivation reads the journal but the simulator does not yet
+  auto-inject derived violations into every evaluation; callers opt in.
+* UI: the simulator page runs fixtures against the live backend; free-form
+  payload editing is not built.

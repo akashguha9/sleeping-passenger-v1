@@ -56,6 +56,13 @@ class DecisionTelemetry:
     driver_permission_at_decision: float
     meal_box_status: dict[str, object] = field(default_factory=dict)
     aero_metrics_at_decision: dict[str, float] = field(default_factory=dict)
+    # Calibration segmentation keys captured at decision time so replay can
+    # compute error by circuit / compound / exposure class / crash bucket /
+    # license / narrative state.
+    segments: dict[str, str] = field(default_factory=dict)
+    # "caller_payload" for live use, "fixture_replay" for seeded test data —
+    # calibration must never present fixture replay as empirical evidence.
+    data_source: str = "caller_payload"
     expected_time_window_days: float = 90.0
     predicted_probability: float | None = None
     actual_outcome_placeholder: float | None = None
@@ -71,6 +78,17 @@ class DecisionTelemetry:
         return json.dumps(self.to_dict(), sort_keys=True)
 
 
+def crash_density_bucket(crash_density: float) -> str:
+    """Coarse crash-density bucket label for calibration segmentation."""
+    if crash_density < 0.10:
+        return "low"
+    if crash_density < 0.35:
+        return "moderate"
+    if crash_density < 0.60:
+        return "high"
+    return "extreme"
+
+
 def build_decision_telemetry(
     decision: CherryPickDecision,
     *,
@@ -78,9 +96,20 @@ def build_decision_telemetry(
     expected_time_window_days: float = 90.0,
     predicted_probability: float | None = None,
     decision_time: str | None = None,
+    driver_license_level: str = "",
+    narrative_state: str = "",
+    data_source: str = "caller_payload",
 ) -> DecisionTelemetry:
     """Snapshot a cherry-pick decision for later replay. No candidate is
     promoted without telemetry — the pipeline calls this unconditionally."""
+    segments = {
+        "circuit": decision.circuit,
+        "signal_compound": decision.signal_compound,
+        "exposure_class": decision.exposure_class,
+        "crash_density_bucket": crash_density_bucket(decision.crash_density),
+        "driver_license": driver_license_level,
+        "narrative_state": narrative_state,
+    }
     return DecisionTelemetry(
         ticker=decision.ticker,
         decision_time=decision_time or utc_now_iso(),
@@ -99,6 +128,8 @@ def build_decision_telemetry(
             "aero_efficiency": decision.aero_efficiency,
             "dirty_air": decision.dirty_air,
         },
+        segments=segments,
+        data_source=str(data_source),
         expected_time_window_days=float(expected_time_window_days),
         predicted_probability=(
             clamp01(predicted_probability)

@@ -31,6 +31,7 @@ from src.simulator.threshold_ladder import (
     LadderDecision,
     resolve_ladder_state,
 )
+from src.simulator.scrutineering import ScrutineeringReport
 from src.simulator.triple_blind import TripleBlindReview
 from src.utils.math_utils import clip
 from src.utils.validation_utils import normalized_score
@@ -91,6 +92,9 @@ class CherryPickDecision:
     gate_results: dict[str, bool] = field(default_factory=dict)
     reason_codes: list[str] = field(default_factory=list)
     triple_blind: dict[str, object] | None = None
+    scrutineering: dict[str, object] | None = None
+    suspicion_score: float = 0.0
+    humility_index: float = 1.0
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)
@@ -121,6 +125,7 @@ def evaluate_candidate(
     circuit: CircuitClassification,
     narrative_shock: NarrativeShock | None = None,
     triple_blind: TripleBlindReview | None = None,
+    scrutineering: ScrutineeringReport | None = None,
     confirmation_level: float = 0.0,
     previous_state: str | None = None,
     thesis_damaged: bool = False,
@@ -137,6 +142,10 @@ def evaluate_candidate(
     inflection_norm = clip((inflection.score + 6.0) / 11.0, 0.0, 1.0)
     driver_penalty = 1.0 - driver.permission_multiplier
 
+    # Humility: claimed confirmation is capped by what the evidence volume
+    # can actually carry (scrutineering's humility index in [0, 1]).
+    humility = scrutineering.humility_index if scrutineering else 1.0
+
     components = {
         "opportunity_quality": normalized_score(opportunity_quality),
         "narrative_inflection": inflection_norm,
@@ -144,7 +153,7 @@ def evaluate_candidate(
         "signal_grip": grip_fraction,
         "evidence_downforce": aero.evidence_downforce,
         "ground_effect": aero.ground_effect,
-        "confirmation": normalized_score(confirmation_level),
+        "confirmation": normalized_score(confirmation_level) * humility,
         "crash_risk": crash.crash_risk_score,
         "information_drag": aero.information_drag,
         "valuation_heat": normalized_score(valuation_heat),
@@ -166,6 +175,7 @@ def evaluate_candidate(
     license_ok = license_meets_circuit(
         driver.license_level, circuit.profile.required_driver_license
     )
+    scrutineering_ok = scrutineering.passed if scrutineering else True
 
     ladder: LadderDecision = resolve_ladder_state(
         score=final_score,
@@ -176,6 +186,7 @@ def evaluate_candidate(
         grip_gate_passed=grip_gate and stability_gate,
         data_quality_gate_passed=data_gate,
         hard_conviction_allowed=conviction_ok and license_ok,
+        scrutineering_passed=scrutineering_ok,
         thesis_damaged=thesis_damaged,
         driver_black_flag=driver.black_flag,
     )
@@ -189,10 +200,13 @@ def evaluate_candidate(
         "hard_conviction_gate": conviction_ok,
         "driver_license_gate": license_ok,
         "driver_not_black_flagged": not driver.black_flag,
+        "scrutineering_gate": scrutineering_ok,
     }
 
     reasons: list[str] = list(conviction_reasons)
     reasons.extend(ladder.reason_codes)
+    if scrutineering is not None:
+        reasons.extend(scrutineering.reason_codes)
     if not crash_gate:
         reasons.append("CRASH_GATE_BLOCKED")
     if not license_ok:
@@ -252,4 +266,7 @@ def evaluate_candidate(
         gate_results=gate_results,
         reason_codes=reasons,
         triple_blind=triple_blind.to_dict() if triple_blind else None,
+        scrutineering=scrutineering.to_dict() if scrutineering else None,
+        suspicion_score=scrutineering.suspicion_score if scrutineering else 0.0,
+        humility_index=humility,
     )

@@ -1234,6 +1234,53 @@ def post_simulator_evaluate(
     return evaluate_simulator_candidate(body)
 
 
+@app.post("/simulator/evaluate-and-record")
+def post_simulator_evaluate_and_record(
+    body: dict,
+    _auth: None = Depends(require_api_token),
+) -> dict:
+    """Evaluate AND persist the verdict so hysteresis survives sessions.
+
+    Local journal persistence only — nothing here touches a market or a
+    broker. ADVISORY_ONLY.
+    """
+    try:
+        from scripts.simulator_api import evaluate_and_record_candidate
+    except ModuleNotFoundError:  # pragma: no cover
+        from simulator_api import (  # type: ignore[no-redef]
+            evaluate_and_record_candidate,
+        )
+    return evaluate_and_record_candidate(body)
+
+
+@app.get("/simulator/history")
+def get_simulator_history(
+    ticker: str | None = None,
+    limit: int = 50,
+    _auth: None = Depends(require_api_token_for_reads),
+) -> dict:
+    """Read-only persisted evaluation history."""
+    try:
+        from scripts.simulator_api import simulator_history
+    except ModuleNotFoundError:  # pragma: no cover
+        from simulator_api import simulator_history  # type: ignore[no-redef]
+    return simulator_history(ticker=ticker, limit=limit)
+
+
+@app.get("/simulator/calibration/report")
+def get_simulator_calibration_report(
+    _auth: None = Depends(require_api_token_for_reads),
+) -> dict:
+    """Recommendation-only calibration report over persisted telemetry."""
+    try:
+        from scripts.simulator_api import simulator_calibration_report
+    except ModuleNotFoundError:  # pragma: no cover
+        from simulator_api import (  # type: ignore[no-redef]
+            simulator_calibration_report,
+        )
+    return simulator_calibration_report()
+
+
 # ---------------------------------------------------------------------------
 # Manual trades
 # ---------------------------------------------------------------------------

@@ -234,6 +234,12 @@ EXPLICIT_IN_SCOPE: frozenset[str] = frozenset({
     # operator_permission_guard.  In-scope record-keeping maintenance — it
     # never touches signal_events, brokers, or execution.
     "reset_local_logs.py",
+    # Market-physics simulator persistence: stores advisory evaluation
+    # snapshots in the local runtime DB so threshold hysteresis survives
+    # sessions and resolved outcomes accumulate into calibration evidence.
+    # Advisory-only stamps on every row; the schema has no broker fields.
+    # Serves /simulator/history and /simulator/calibration/report.
+    "simulator_store.py",
 })
 
 # Modules deliberately marked OUT_OF_SCOPE inside ``scripts/``.  This

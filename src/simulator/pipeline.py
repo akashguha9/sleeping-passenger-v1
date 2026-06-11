@@ -99,10 +99,20 @@ def evaluate_candidate_payload(payload: dict[str, Any]) -> dict[str, Any]:
         candidate_sectors=list(theme_section.get("candidate_sectors", []) or []),
     )
 
-    # 4. Company exposure.
+    # 4. Company exposure. When the caller supplies no exposure section,
+    # fall back to the deterministic exposure graph (seeded; clearly not a
+    # complete real supply-chain dataset) instead of silently scoring zero.
     from src.simulator.exposure_resolver import resolve_exposure
 
     exposure_section = _section(payload, "exposure")
+    graph_resolution: dict[str, Any] | None = None
+    if not exposure_section:
+        from src.simulator.exposure_graph import build_seed_graph
+
+        graph = build_seed_graph()
+        if ticker.upper() in graph.tickers_for_theme(theme_name):
+            exposure_section = graph.to_resolver_inputs(theme_name, ticker)
+            graph_resolution = graph.resolve(theme_name, ticker).to_dict()
     exposure = resolve_exposure(
         ticker=ticker,
         theme=theme_name,
@@ -263,6 +273,12 @@ def evaluate_candidate_payload(payload: dict[str, Any]) -> dict[str, Any]:
         ),
     )
 
+    # 12b. Scrutineering bay: cross-examine the raw payload against the
+    # simulator's own physics invariants before any verdict is published.
+    from src.simulator.scrutineering import inspect_payload
+
+    scrutineering = inspect_payload(payload)
+
     # 13. Final cherry-pick decision.
     decision = evaluate_candidate(
         ticker=ticker,
@@ -282,6 +298,7 @@ def evaluate_candidate_payload(payload: dict[str, Any]) -> dict[str, Any]:
         circuit=circuit,
         narrative_shock=shock,
         triple_blind=triple_blind,
+        scrutineering=scrutineering,
         confirmation_level=normalized_score(payload.get("confirmation_level", 0.0)),
         previous_state=(
             str(payload["previous_state"]) if payload.get("previous_state") else None
@@ -301,6 +318,9 @@ def evaluate_candidate_payload(payload: dict[str, Any]) -> dict[str, Any]:
             if payload.get("predicted_probability") is not None
             else None
         ),
+        driver_license_level=driver.license_level,
+        narrative_state=narrative.narrative_state,
+        data_source=str(payload.get("data_source", "caller_payload")),
     )
 
     return {
@@ -328,5 +348,7 @@ def evaluate_candidate_payload(payload: dict[str, Any]) -> dict[str, Any]:
             "triple_blind": triple_blind.to_dict(),
             "meal_box": meal_box.to_dict(),
             "driver": driver.to_dict(),
+            "scrutineering": scrutineering.to_dict(),
+            "exposure_graph_resolution": graph_resolution,
         },
     }

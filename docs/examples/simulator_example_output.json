@@ -130,6 +130,7 @@
       "ticker": "GRIDCO",
       "weak_evidence_penalty": 0.0
     },
+    "exposure_graph_resolution": null,
     "inflection": {
       "components": {
         "delta_contradiction_pressure": 0.1,
@@ -194,6 +195,16 @@
         "RADAR_NOT_TRADE"
       ],
       "velocity": 0.8
+    },
+    "scrutineering": {
+      "checks_run": 7,
+      "humility_index": 1.0,
+      "passed": true,
+      "reason_codes": [
+        "SCRUTINEERING_CLEAN"
+      ],
+      "suspicion_score": 0.0,
+      "violations": []
     },
     "theme": {
       "candidate_sectors": [],
@@ -290,9 +301,11 @@
       "grip_gate": true,
       "hard_conviction_gate": true,
       "meal_box_gate": true,
+      "scrutineering_gate": true,
       "stability_gate": true
     },
     "hard_conviction_ok": true,
+    "humility_index": 1.0,
     "ladder": {
       "eligible_state": "active_watch",
       "gate_caps": [],
@@ -325,7 +338,8 @@
     "narrative_shock": 0.10886400000000002,
     "reason_codes": [
       "HARD_CONVICTION_SUPPORTED",
-      "STATE_ACTIVE_WATCH"
+      "STATE_ACTIVE_WATCH",
+      "SCRUTINEERING_CLEAN"
     ],
     "score_components": {
       "company_exposure": 10.124999999999998,
@@ -341,8 +355,19 @@
       "signal_grip": 13.065210579941557,
       "valuation_heat": -2.5
     },
+    "scrutineering": {
+      "checks_run": 7,
+      "humility_index": 1.0,
+      "passed": true,
+      "reason_codes": [
+        "SCRUTINEERING_CLEAN"
+      ],
+      "suspicion_score": 0.0,
+      "violations": []
+    },
     "signal_compound": "hard",
     "signal_grip": 87.10140386627704,
+    "suspicion_score": 0.0,
     "theme": "ai_grid_buildout",
     "ticker": "GRIDCO",
     "track_condition": 0.70625,
@@ -394,6 +419,7 @@
     "calibration_status": "pending",
     "crash_density_at_decision": 0.0,
     "crash_risk_at_decision": 0.24713204964037583,
+    "data_source": "caller_payload",
     "decision_reason": "Score 59.5/100 on circuit 'mid_cap' with all gates passed; state 'active_watch'. ADVISORY_ONLY \u2014 simulator output for journal review. No order is placed, sized, or routed. Human decision required.",
     "decision_time": "2026-06-11T00:00:00+00:00",
     "driver_permission_at_decision": 1.0,
@@ -414,6 +440,14 @@
     "outcome_class": null,
     "predicted_probability": 0.65,
     "score_at_decision": 59.48988545436664,
+    "segments": {
+      "circuit": "mid_cap",
+      "crash_density_bucket": "low",
+      "driver_license": "pro_am",
+      "exposure_class": "direct_beneficiary",
+      "narrative_state": "accelerating",
+      "signal_compound": "hard"
+    },
     "signal_grip_at_decision": 87.10140386627704,
     "ticker": "GRIDCO"
   }

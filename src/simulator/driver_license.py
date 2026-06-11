@@ -46,6 +46,9 @@ VIOLATION_POINTS: dict[str, float] = {
     "driving_through_dirty_air": 5.0,
     "revenge_trading": 20.0,
     "override_abuse": 12.0,
+    # Derived from actual journal logs (driver_derivation.py).
+    "entered_without_invalidation": 12.0,
+    "ignored_black_flag": 15.0,
 }
 
 # (max_points_exclusive, status, permission_multiplier)

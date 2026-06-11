@@ -143,6 +143,7 @@ def resolve_ladder_state(
     grip_gate_passed: bool = True,
     data_quality_gate_passed: bool = True,
     hard_conviction_allowed: bool = True,
+    scrutineering_passed: bool = True,
     thesis_damaged: bool = False,
     driver_black_flag: bool = False,
     hysteresis_margin: float = HYSTERESIS_MARGIN,
@@ -154,6 +155,7 @@ def resolve_ladder_state(
       * crash gate failed                     -> at most watchlist
       * grip gate failed (stale signals)      -> at most watchlist
       * data quality failed                   -> at most watchlist
+      * scrutineering failed (input physics)  -> at most watchlist
       * hard conviction blocked               -> at most buy_candidate
       * thesis damaged                        -> pit_stop (interrupt)
       * driver black flag                     -> black_flag (interrupt)
@@ -224,6 +226,10 @@ def resolve_ladder_state(
         _cap(STATE_WATCHLIST, "grip_gate")
     if not crash_gate_passed:
         _cap(STATE_WATCHLIST, "crash_gate")
+    if not scrutineering_passed:
+        # A car that fails technical inspection holds a provisional result
+        # at best — no promotion past watchlist until evidence is real.
+        _cap(STATE_WATCHLIST, "scrutineering_gate")
     if not meal_box_complete:
         _cap(STATE_ACTIVE_WATCH, "meal_box_gate")
     if not hard_conviction_allowed:
