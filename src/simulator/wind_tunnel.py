@@ -234,6 +234,146 @@ def _cohort(decisions: list[WindTunnelDecision]) -> CohortStats:
     )
 
 
+@dataclass(slots=True)
+class GateExperimentReport:
+    """A/B walk-forward replay: self-fed adaptation gates ON vs OFF.
+
+    Answers the question a new gate must face before it earns trust:
+    do the bars where the gate changed the verdict actually carry worse
+    forward returns? Honest by construction — when the gate never
+    diverges on a series, the verdict is "insufficient evidence", not
+    success.
+    """
+
+    ticker: str
+    price_provenance: str
+    decision_count: int
+    divergent_count: int
+    capped_cohort: CohortStats | None = None
+    undiverged_cohort: CohortStats | None = None
+    capped_return_disadvantage: float | None = None
+    gates_helping: bool | None = None
+    divergent_bars: list[dict[str, object]] = field(default_factory=list)
+    rationale: list[str] = field(default_factory=list)
+    advisory_note: str = (
+        "ADVISORY_ONLY — counterfactual gate experiment on replayed "
+        "decisions; never a return promise, never clears autotune."
+    )
+    advisory_status: str = "ADVISORY_ONLY"
+
+    def to_dict(self) -> dict[str, object]:
+        return asdict(self)
+
+
+def run_gate_experiment(
+    *,
+    ticker: str,
+    bars: list[dict[str, Any]],
+    price_provenance: str,
+    horizon_days: int = 10,
+    every_n_bars: int = 5,
+    payload_builder: Callable[[str, list[dict[str, Any]]], dict[str, Any]]
+    | None = None,
+) -> GateExperimentReport:
+    """Replay the same bars twice — self-feed gates on, then off — and
+    compare forward returns on the bars where the gate changed the
+    verdict. A gate that caps bars with worse-than-average forward
+    returns is earning its keep; one that never fires has proven
+    nothing either way."""
+    builder = payload_builder or default_payload_builder
+
+    def ungated_builder(
+        tick: str, visible: list[dict[str, Any]]
+    ) -> dict[str, Any]:
+        payload = builder(tick, visible)
+        payload["self_feed"] = {"enabled": False}
+        return payload
+
+    gated = run_wind_tunnel(
+        ticker=ticker, bars=bars, price_provenance=price_provenance,
+        horizon_days=horizon_days, every_n_bars=every_n_bars,
+        payload_builder=builder,
+    )
+    ungated = run_wind_tunnel(
+        ticker=ticker, bars=bars, price_provenance=price_provenance,
+        horizon_days=horizon_days, every_n_bars=every_n_bars,
+        payload_builder=ungated_builder,
+    )
+
+    ungated_by_bar = {d.bar_index: d for d in ungated.decisions}
+    divergent: list[WindTunnelDecision] = []
+    undiverged: list[WindTunnelDecision] = []
+    divergent_bars: list[dict[str, object]] = []
+    for decision in gated.decisions:
+        control = ungated_by_bar.get(decision.bar_index)
+        if control is None:
+            continue
+        if decision.final_state != control.final_state:
+            divergent.append(decision)
+            divergent_bars.append({
+                "bar_index": decision.bar_index,
+                "date": decision.date,
+                "gated_state": decision.final_state,
+                "ungated_state": control.final_state,
+                "forward_return": decision.forward_return,
+            })
+        else:
+            undiverged.append(decision)
+
+    capped_stats = _cohort(divergent)
+    undiverged_stats = _cohort(undiverged)
+    disadvantage = (
+        undiverged_stats.mean_forward_return - capped_stats.mean_forward_return
+        if capped_stats.mean_forward_return is not None
+        and undiverged_stats.mean_forward_return is not None
+        else None
+    )
+    helping = disadvantage > 0 if disadvantage is not None else None
+
+    rationale = [
+        f"{len(gated.decisions)} gated vs {len(ungated.decisions)} ungated "
+        f"walk-forward decisions; gate diverged on {len(divergent)} bar(s)",
+    ]
+    if disadvantage is None:
+        rationale.append(
+            "insufficient evidence: the gate never changed a verdict on "
+            "this series — nothing proven, nothing disproven"
+            if not divergent
+            else f"gate diverged on all {len(divergent)} decision(s); no "
+            "undiverged baseline on this series — directional value "
+            "unmeasured"
+        )
+    else:
+        rationale.append(
+            f"capped bars mean forward return "
+            f"{capped_stats.mean_forward_return:+.4f} vs undiverged "
+            f"{undiverged_stats.mean_forward_return:+.4f} "
+            f"(disadvantage {disadvantage:+.4f}) — "
+            + (
+                "the gate is pointing at worse bars (helping)"
+                if helping
+                else "the gate is NOT yet avoiding losses on this series"
+            )
+        )
+    rationale.append(
+        "counterfactual A/B replay: measures gate value, never clears "
+        "autotune"
+    )
+
+    return GateExperimentReport(
+        ticker=str(ticker).upper(),
+        price_provenance=str(price_provenance).upper(),
+        decision_count=len(gated.decisions),
+        divergent_count=len(divergent),
+        capped_cohort=capped_stats,
+        undiverged_cohort=undiverged_stats,
+        capped_return_disadvantage=disadvantage,
+        gates_helping=helping,
+        divergent_bars=divergent_bars,
+        rationale=rationale,
+    )
+
+
 def run_wind_tunnel(
     *,
     ticker: str,

@@ -424,20 +424,62 @@ def evaluate_candidate_payload(payload: dict[str, Any]) -> dict[str, Any]:
             ),
         }
 
-    # 14a-pre. Adaptive opponent model (optional "opponent" section):
-    # the mentor's questions — weapon, weak side, niche, market
-    # adaptation, blind layer. An exhausted edge or fatal weak side caps
-    # the investment state at watchlist: the model must know when its own
-    # edge has become predictable.
+    # 14a-pre. Adaptive opponent model, SELF-FED: the engines above
+    # already computed crowding, repricing, saturation, signal grip, age,
+    # half-life, weaknesses, and strengths — the self-feed layer wires
+    # them into the opponent section automatically (with provenance), and
+    # cross-examines any more-optimistic caller override against the
+    # caller's own physics payload. An exhausted edge or fatal weak side
+    # caps the investment state at watchlist: the model must know when
+    # its own edge has become predictable — even when nobody asked.
     opponent_result = None
-    opponent_section = payload.get("opponent")
-    if isinstance(opponent_section, dict) and opponent_section:
+    opponent_caller_section = payload.get("opponent")
+    has_caller_opponent = (
+        isinstance(opponent_caller_section, dict) and opponent_caller_section
+    )
+    from src.strategy.self_feed import build_self_fed_opponent
+
+    self_feed = build_self_fed_opponent(
+        payload,
+        narrative=narrative,
+        theme=theme,
+        tyres=tyres,
+        exposure=exposure,
+    )
+    if self_feed.merged_section or has_caller_opponent:
         from src.strategy.adaptive_opponent import assess_adaptive_opponent
 
-        opponent_result = assess_adaptive_opponent(opponent_section)
+        opponent_result = assess_adaptive_opponent(self_feed.merged_section)
+        opponent_result["self_feed"] = self_feed.to_dict()
+        if self_feed.auto_derived and self_feed.enabled:
+            decision.reason_codes.append("OPPONENT_SELF_FED")
+        if self_feed.challenges:
+            decision.reason_codes.append("OPPONENT_OVERRIDE_CHALLENGED")
+            decision.decision_reason += (
+                " Self-feed cross-exam: "
+                f"{len(self_feed.challenges)} optimistic opponent "
+                "override(s) lost to engine-derived values (see "
+                "opponent.self_feed.challenges)."
+            )
         adaptation_state = opponent_result["adaptation"]["state"]
         weak_class = opponent_result["weak_side"]["classification"]
-        if adaptation_state == "exhausted_edge" or weak_class == "fatal":
+        # Exhaustion is a ratio over signal strength; capping on a
+        # DEFAULTED (unmeasured) signal would be an artifact, not a
+        # finding. The cap requires a measured/judged signal_strength.
+        signal_measured = "signal_strength" in (
+            self_feed.merged_section.get("adaptation") or {}
+        )
+        gate_breached = (
+            (adaptation_state == "exhausted_edge" and signal_measured)
+            or weak_class == "fatal"
+        )
+        if adaptation_state == "exhausted_edge" and not signal_measured:
+            decision.reason_codes.append("SELF_FEED_LOW_COVERAGE")
+        if gate_breached and not self_feed.gate_eligible:
+            # Thin self-fed coverage may warn but never cap the ladder.
+            decision.gate_results["adaptation_gate"] = True
+            decision.reason_codes.append("SELF_FEED_LOW_COVERAGE")
+        elif gate_breached:
             from src.simulator.threshold_ladder import LADDER_STATES
 
             decision.gate_results["adaptation_gate"] = False

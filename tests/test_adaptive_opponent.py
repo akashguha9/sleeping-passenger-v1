@@ -189,8 +189,26 @@ def _run(extra: dict | None = None) -> dict:
     return evaluate_candidate_payload(payload)
 
 
-def test_pipeline_without_opponent_section_is_passthrough() -> None:
+def test_pipeline_without_opponent_section_self_feeds() -> None:
+    # The model feeds itself: no opponent section, yet the engines that
+    # already computed crowding/grip/saturation wire one up — with
+    # provenance — and the gate runs. The strong payload still passes.
     out = _run()
+    opp = out["opponent"]
+    assert opp is not None
+    assert opp["self_feed"]["auto_derived"] is True
+    assert opp["self_feed"]["coverage"] == 1.0
+    assert (
+        opp["self_feed"]["provenance"]["adaptation.crowding"]
+        == "theme_mapper.crowding"
+    )
+    assert "OPPONENT_SELF_FED" in out["decision"]["reason_codes"]
+    assert out["decision"]["gate_results"]["adaptation_gate"] is True
+    assert out["decision"]["final_state"] == "active_watch"
+
+
+def test_self_feed_disabled_restores_passthrough() -> None:
+    out = _run({"self_feed": {"enabled": False}})
     assert out["opponent"] is None
     assert "adaptation_gate" not in out["decision"]["gate_results"]
 
@@ -222,7 +240,10 @@ def test_fatal_weak_side_caps_state() -> None:
 
 
 def test_fresh_edge_with_manageable_weakness_passes_gate() -> None:
-    out = _run({"opponent": {
+    # Caller-judgement path (self-feed disabled): the section is taken
+    # as supplied. The self-fed/merged variant of this scenario lives in
+    # tests/test_self_feed.py.
+    out = _run({"self_feed": {"enabled": False}, "opponent": {
         "strengths": {"supply_chain_position": 0.8},
         "weaknesses": {"geo_concentration": 0.4},
         "attack_probability": 0.3, "cost_to_exploit": 0.7,

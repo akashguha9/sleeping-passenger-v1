@@ -168,11 +168,67 @@ physics is reused, not rebuilt: edge decay = tyre half-life law,
 second-order nodes = exposure graph, bait-vs-breakout = underground +
 scrutineering, adaptive feedback = calibration bridge + dice audit.
 
+## Self-Feed — the model feeds itself (`self_feed.py`)
+
+The opponent model's biggest confessed limitation was that every input
+was a caller judgement — yet the pipeline's own engines had ALREADY
+computed most of them two steps earlier. `src/strategy/self_feed.py`
+wires those engines into the opponent section automatically, with
+provenance on every derived value (no hidden magic):
+
+| Opponent input | Derived from |
+|---|---|
+| `adaptation.crowding`, `crowding` | `theme_mapper.crowding` |
+| `adaptation.repricing_observed` | `theme_mapper.valuation_heat`, `risk_factors.price_already_ran` |
+| `adaptation.narrative_saturation` | narrative state base (ignored 0.05 … overheated 0.90) blended 60/40 with dirty-air score |
+| `adaptation.signal_strength` | strongest tyre `effective_signal_strength / 100` |
+| `adaptation.recognition_age_days` / `edge_half_life_days` | tyre `signal_age_hours` / adjusted half-life |
+| `weaknesses` | crash `risk_factors` (incl. the consent bridge's auto-injected fragilities) |
+| `strengths`, `capabilities`, `durability` | exposure-resolver components (+ narrative velocity) |
+| `attack_probability` | `0.5·crowding + 0.5·saturation` |
+| `evidence_reliability` | `narrative_tracker.source_quality` |
+
+**The adaptation gate now fires even when nobody asked.** A payload
+with no `opponent` section gets one auto-derived (`OPPONENT_SELF_FED`);
+a crowded, saturated, weak-signal trade is capped at watchlist on the
+caller's own physics numbers (verified end-to-end in
+`tests/test_self_feed.py::test_crowded_trade_capped_without_any_opponent_section`).
+
+**Cross-exam asymmetry (anti-gaming).** A caller override toward
+conservatism always wins, unchallenged. A more OPTIMISTIC override
+loses to the engine-derived value, and the rejected override is
+recorded in `opponent.self_feed.challenges` with its provenance
+(`OPPONENT_OVERRIDE_CHALLENGED`). Omitting an engine-evidenced weakness
+(severity ≥ 0.5) and claiming strengths above what exposure physics
+shows are challenged the same way. Gaming the opponent section can only
+make the verdict more conservative.
+
+**Honesty rules.** A value is derived only when the engine's inputs
+were genuinely present in the payload (an absent theme section proves
+nothing about crowding). Purely self-fed data may cap the ladder only
+when ≥ 3 of the 4 adaptation drivers are engine-backed; exhaustion is a
+ratio over signal strength, so the cap additionally requires a MEASURED
+signal — a defaulted denominator exploding the OAI is stamped
+`SELF_FEED_LOW_COVERAGE` and warns without capping.
+`{"self_feed": {"enabled": false}}` restores the caller-judgement-only
+path.
+
+**Wind-tunnel gate experiment.** New gates must earn trust:
+`run_gate_experiment` (in `src/simulator/wind_tunnel.py`) replays the
+same bars twice — self-feed on vs off — and compares forward returns on
+the bars where the gate changed the verdict. In the tested series the
+single capped bar carried a −11.1% forward return vs +6.1% on
+undiverged bars (the cap dodged the losing bar); when the gate never
+diverges the report says "insufficient evidence", not success. A/B
+counterfactual replay measures gate value and never clears autotune.
+
 ## Limitations (honest)
 
-* All trait scores, channel impacts, and probabilities are
-  caller-supplied research inputs — the engine structures judgement, it
-  does not source data.
+* Trait scores, channel impacts, and probabilities the engines do not
+  compute remain caller-supplied research inputs. The self-feed layer
+  closes this gap only for the opponent section, and its derived values
+  inherit the payload's own physics inputs — internally consistent, not
+  independently sourced.
 * Weights, bands, and thresholds are doctrine-derived, not empirically
   calibrated (no labeled outcome data exists).
 * Node classification is deterministic trait matching, not learned; the
