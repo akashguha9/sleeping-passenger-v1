@@ -472,6 +472,46 @@ wins on fixtures yield causal confidence ≤ 0.40 with
 `WINS_WITHOUT_ATTRIBUTION` + `HOT_HAND_RISK` — tested. The bridge
 `streak_inputs_from_outcomes` feeds imported outcomes straight in.
 
+## Risk Convergence — the doubt committee (`src/simulator/risk_convergence.py`)
+
+The system grew eleven layers that can each raise warn-only findings —
+signal redundancy, challenged overrides, calibration risk, fragile
+verdicts, marginal expiry clocks, over-hedges, fake-exponential
+ceilings, loaded dice. Each warned alone; none could see the others. A
+thesis carrying five sub-threshold doubts sailed to buy_candidate
+because no SINGLE gate fired: death by a thousand warns.
+
+The committee convenes them, with the signal refiner's doctrine turned
+inward — **doubts cluster like signals do; count root causes, not
+echoes**:
+
+* findings are grouped into root-cause families (`evidence_quality`,
+  `integrity_gaming`, `calibration`, `structural_fragility`,
+  `adaptation_pressure`, `timing_decay`); echoes within a family count
+  ONCE (two integrity findings are one disease, not two);
+* families a hard gate already adjudicated are excluded — no double
+  jeopardy (an `EDGE_EXHAUSTED` cap already priced the crowding-side
+  doubts);
+* informational codes (`OPPONENT_SELF_FED`, `CONSENT_EVIDENCE_*`,
+  `LIVE_UNDERPRICED_ACCELERATION`) are never doubts;
+* the convergence rule, conservative-only:
+
+```text
+1 independent family   -> a question, not a verdict (warn only)
+2 independent families -> cap at active_watch
+3+ independent families -> cap at watchlist   (RISK_CONVERGENCE_CAP)
+```
+
+No single doubt was disqualifying — but independent doubts that arrive
+together are not independent events for the thesis. The committee's
+minutes (`result["risk_convergence"]`: findings with sources, families,
+suppressed echo count, adjudicated exclusions, cap) ship with every
+evaluation; with zero findings it reports itself idle. Worked example
+(tested end-to-end): redundant backlog echoes + a challenged optimistic
+override + a fragile golden lifecycle = three families → watchlist,
+and the advisory router sees the post-cap state. ADVISORY_ONLY: the
+committee can only ever LOWER a verdict.
+
 ## Limitations (honest)
 
 * Trait scores, channel impacts, and probabilities the engines do not

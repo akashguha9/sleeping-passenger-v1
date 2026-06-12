@@ -690,6 +690,34 @@ def evaluate_candidate_payload(payload: dict[str, Any]) -> dict[str, Any]:
             "resolution required."
         )
 
+    # 14b-bis. Risk convergence — the doubt committee. Warn-level
+    # findings from every layer are deduplicated by root-cause family
+    # (doubts cluster like signals: count root causes, not echoes;
+    # families already adjudicated by a hard gate are excluded). Two
+    # independent families cap at active_watch, three or more at
+    # watchlist — no single doubt was disqualifying, but independent
+    # doubts that arrive together are not independent events.
+    from src.simulator.risk_convergence import converge_risk
+
+    risk_convergence = converge_risk(
+        reason_codes=decision.reason_codes,
+        final_state=decision.final_state,
+        opponent=opponent_result,
+        lifecycle=lifecycle_result,
+    )
+    if risk_convergence.cap_applied:
+        decision.gate_results["convergence_gate"] = False
+        decision.reason_codes.append("RISK_CONVERGENCE_CAP")
+        decision.final_state = risk_convergence.cap_applied
+        decision.decision_reason += (
+            f" Risk convergence: {risk_convergence.family_count} "
+            "independent doubt families "
+            f"({', '.join(risk_convergence.families)}) cap the state at "
+            f"{risk_convergence.cap_applied}."
+        )
+    elif risk_convergence.finding_count:
+        decision.gate_results["convergence_gate"] = True
+
     # 14c. Staged advisory action: the verdict translated into the
     # journal's action vocabulary (Reject … Exit Candidate), with
     # contradiction holds routing to Research More and the reality split
@@ -749,6 +777,7 @@ def evaluate_candidate_payload(payload: dict[str, Any]) -> dict[str, Any]:
             cross_exam_report.to_dict() if cross_exam_report else None
         ),
         "telemetry": telemetry.to_dict(),
+        "risk_convergence": risk_convergence.to_dict(),
         "counterfactual_wind_tunnel": None,
         "breakdown": {
             "narrative_shock": shock.to_dict() if shock else None,
