@@ -424,6 +424,40 @@ def evaluate_candidate_payload(payload: dict[str, Any]) -> dict[str, Any]:
             ),
         }
 
+    # 14a-pre. Adaptive opponent model (optional "opponent" section):
+    # the mentor's questions — weapon, weak side, niche, market
+    # adaptation, blind layer. An exhausted edge or fatal weak side caps
+    # the investment state at watchlist: the model must know when its own
+    # edge has become predictable.
+    opponent_result = None
+    opponent_section = payload.get("opponent")
+    if isinstance(opponent_section, dict) and opponent_section:
+        from src.strategy.adaptive_opponent import assess_adaptive_opponent
+
+        opponent_result = assess_adaptive_opponent(opponent_section)
+        adaptation_state = opponent_result["adaptation"]["state"]
+        weak_class = opponent_result["weak_side"]["classification"]
+        if adaptation_state == "exhausted_edge" or weak_class == "fatal":
+            from src.simulator.threshold_ladder import LADDER_STATES
+
+            decision.gate_results["adaptation_gate"] = False
+            decision.reason_codes.append(
+                "EDGE_EXHAUSTED" if adaptation_state == "exhausted_edge"
+                else "FATAL_WEAK_SIDE"
+            )
+            if decision.final_state in LADDER_STATES and (
+                LADDER_STATES.index(decision.final_state)
+                > LADDER_STATES.index("watchlist")
+            ):
+                decision.final_state = "watchlist"
+                decision.decision_reason += (
+                    " Adaptation gate: the market has adapted to this edge "
+                    "(or the weak side is fatal); investment state capped "
+                    "at watchlist."
+                )
+        else:
+            decision.gate_results["adaptation_gate"] = True
+
     # 14a-bis. Tempered Bayesian posterior (optional "bayes" section):
     # prior (typically a prediction-market probability — tradable belief,
     # never truth) updated by evidence items whose likelihood ratios are
@@ -547,6 +581,7 @@ def evaluate_candidate_payload(payload: dict[str, Any]) -> dict[str, Any]:
         "decision": decision.to_dict(),
         "advisory_action": advisory.to_dict(),
         "bayes": bayes_result.to_dict() if bayes_result else None,
+        "opponent": opponent_result,
         "games": games_result,
         "consent_ledger": consent_ledger.to_dict(),
         "unified_verdict": unified.to_dict(),

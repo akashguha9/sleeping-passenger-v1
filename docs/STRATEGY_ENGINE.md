@@ -131,6 +131,43 @@ with simulator hysteresis/telemetry; post-game = outcome resolution via
 the existing calibration bridge (weight changes are recommendation-only).
 The `lifecycle` block of every result records all four stages.
 
+## Adaptive Opponent Model (`adaptive_opponent.py`)
+
+Markets are adaptive opponents, not static scoreboards. The optional
+`opponent` payload section runs the mentor's questions inside the
+pipeline:
+
+* **Weapon Map** — `WeaponScore = strength × reliability × durability −
+  crowding/2`; a strong AND crowded weapon is flagged `overused`
+  (predictability is attack surface).
+* **Weak side + Minimum Viable Weakness** — `AttackROI = severity ×
+  attack probability − cost to exploit` (improving weaknesses raise the
+  attacker's cost): `fatal / exploitable_manageable / above_threshold`.
+  A weakness does not need to become a strength; it needs to become
+  expensive to attack.
+* **Niche classifier** — beachhead · profitable_cage ·
+  one_product_fragility · overvalued_niche_narrative ·
+  underpriced_expansion_platform. Good company ≠ good stock.
+* **Opponent Adaptation Index** — `OAI = (repricing + crowding +
+  saturation) / 3·signal`: fresh → partially_recognized → crowded →
+  exhausted, plus anti_consensus; `LiveEdge = 0.5^(age/half-life)`.
+* **Market-awareness blind layers** (distinct from the bias triple-blind
+  in `src/simulator/triple_blind.py`): 1 = hidden pattern, 2 = mutually
+  known (variation game), 3 = crowded obvious trade with a neglected
+  second/third-order node — bait the variation. Layer 0 = no edge.
+* **Catalyst + 1** — the serve creates a predictable return:
+  `PPV = p(first reaction) × E[lag repricing] − current lag reaction −
+  error risk/2`; pre-positioning value lives in the lagging node.
+* **Complete Game Score** — `mean(capabilities) − 1.5·variance`: a
+  complete opponent punishes segmented games.
+
+Pipeline gate: an `exhausted_edge` OAI or a `fatal` weak side caps the
+investment state at watchlist (`EDGE_EXHAUSTED` / `FATAL_WEAK_SIDE`) —
+the model must know when its own edge has become predictable. Existing
+physics is reused, not rebuilt: edge decay = tyre half-life law,
+second-order nodes = exposure graph, bait-vs-breakout = underground +
+scrutineering, adaptive feedback = calibration bridge + dice audit.
+
 ## Limitations (honest)
 
 * All trait scores, channel impacts, and probabilities are
