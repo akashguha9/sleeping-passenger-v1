@@ -41,3 +41,26 @@ CDN (or a vendored browser): `npx playwright install chromium && npm run
 test:e2e`. The runnable Vitest guard
 (`src/app/__tests__/no-execution-language.spec.tsx`) remains the executed
 fallback and asserts the same forbidden-CTA regex across rendered pages.
+
+## CI (2026-06-12)
+
+The suite now runs on every push/PR as the `frontend-e2e` job in
+`.github/workflows/pytest.yml` (npm ci → `playwright install --with-deps
+chromium` → build → `npm run test:e2e`). The day it was first executed it
+caught two production bugs the unit tests could not see:
+
+1. the S8 CSP (`script-src 'self'`) blocked Next's inline hydration
+   scripts — the entire client was static HTML in any real browser;
+2. the cockpit crashed on a partial diagnostics payload instead of
+   rendering the degraded-backend notice.
+
+## Sandbox runs
+
+Cloud sandboxes that block `cdn.playwright.dev` but pre-provision
+browsers under `/opt/pw-browsers` can use the checked-in
+`frontend/playwright.sandbox.config.ts`, which drives the provisioned
+chromium binary directly:
+
+```
+npx playwright test --config playwright.sandbox.config.ts
+```

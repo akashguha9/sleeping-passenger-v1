@@ -179,9 +179,13 @@ export default function CockpitPage() {
 
       {loading ? (
         <div className="text-center py-16 text-slate-500 text-sm">Loading cockpit…</div>
-      ) : !data ? (
+      ) : !data || !data.closed_loop || !data.truth_purity ||
+        !data.learning_efficiency || !data.source_independence ? (
+        // A partial payload (degraded backend, version skew) must render
+        // the offline notice — not crash the whole cockpit on a nested
+        // undefined read. The readiness badge above survives either way.
         <div className="bg-slate-900 border border-slate-700/60 rounded-lg px-4 py-3 text-xs text-slate-400">
-          Backend offline — start it with{' '}
+          Backend offline or degraded — start it with{' '}
           <span className="font-mono text-slate-300">python scripts/api_server.py</span>.
           These panels are advisory diagnostics; nothing is performed when offline.
         </div>

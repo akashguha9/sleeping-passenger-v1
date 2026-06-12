@@ -21,7 +21,14 @@ const csp = [
   // required for that.  Acceptable trade-off — we have no third-party
   // script load surface.
   "style-src 'self' 'unsafe-inline'",
-  "script-src 'self'",
+  // Next.js App Router bootstraps hydration through inline <script>
+  // tags; a bare script-src 'self' blocks them and the entire client
+  // becomes static HTML (no hydration, no fetches - the cockpit never
+  // loads data). Caught by the Playwright e2e suite the day it entered
+  // CI. 'unsafe-inline' is required until a nonce-based CSP middleware
+  // is added; third-party script ORIGINS remain blocked, and exfil is
+  // still constrained by the pinned connect-src below.
+  "script-src 'self' 'unsafe-inline'",
   `connect-src 'self' ${apiBase}`,
 ].join('; ');
 

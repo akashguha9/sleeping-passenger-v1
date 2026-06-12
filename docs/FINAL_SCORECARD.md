@@ -6,7 +6,7 @@
 > without validated hosted deployment, etc.
 >
 > Numbers prior to Day 26–35 are taken from the prompt's stated baseline
-> ("post-Day-25" estimates from `AUDIT_BRUTAL_MVP_ASSESSMENT.md` and the
+> ("post-Day-25" estimates from `archived_experimental/root_artifacts/AUDIT_BRUTAL_MVP_ASSESSMENT.md` and the
 > known repo state). Numbers as of Day 35 are based on what the repo
 > actually contains after this sprint.
 

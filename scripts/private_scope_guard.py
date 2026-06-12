@@ -229,6 +229,15 @@ EXPLICIT_IN_SCOPE: frozenset[str] = frozenset({
     "import_ohlcv_csv.py",
     "run_imported_backtest.py",
     "import_outcomes_csv.py",
+    # Live-surface census + guard input: computes which src/ modules are
+    # reachable from the API lane vs the documented batch CLIs, so dead
+    # code and fake coverage cannot regrow unnoticed. Read-only.
+    "live_surface_census.py",
+    # Calibration ledger import CLI: reads resolved-outcome JSONL rows,
+    # groups by truth-status tier (synthetic/backtest/empirical, never
+    # mixed), and prints calibration + streak summaries. Advisory-only;
+    # wires src/strategy/outcome_import into the batch lane.
+    "import_outcomes.py",
     # Local operator-journal reset (Manual Trade Log / Reconciliation /
     # Moltbook).  Dry-run by default; --apply is guarded by the central
     # operator_permission_guard.  In-scope record-keeping maintenance — it
