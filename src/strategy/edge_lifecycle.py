@@ -65,6 +65,8 @@ class CarryingCapacityReport:
     growth_quality: float  # r × (K − G)
     saturation_state: str
     fake_exponential: bool
+    binding_constraint: str = "blended_headroom"
+    ceilings: dict[str, float] = field(default_factory=dict)
     rationale: list[str] = field(default_factory=list)
     advisory_status: str = "ADVISORY_ONLY"
 
@@ -84,6 +86,7 @@ def estimate_carrying_capacity(
     claimed_growth_rate: float = 0.0,
     growth_rate_trend: list[float] | None = None,
     horizon_years: float = 3.0,
+    ceilings: dict[str, float] | None = None,
 ) -> CarryingCapacityReport:
     """G(t) ≤ K, never G(t) ≤ e: the ceiling is structural, not magic.
 
@@ -92,6 +95,13 @@ def estimate_carrying_capacity(
     company's present size relative to its addressable opportunity.
     A 60% grower at 0.8 utilization is worse than a 20% grower at 0.2:
     ``growth_quality = r × (K − G)``.
+
+    ``ceilings`` decomposes K into named bottlenecks (market, adoption,
+    pricing, margin, regulatory, capital, competition, execution,
+    attention…): growth does not hit one ceiling, it hits the TIGHTEST
+    bottleneck first — ``K_eff = min(K_blend, min_i(K_i))``, and the
+    binding constraint is named. An attention/narrative bottleneck is
+    a ceiling made of hype, and the report says so.
     """
     scale = normalized_score(current_scale)
     penetration = normalized_score(market_penetration)
@@ -112,6 +122,21 @@ def estimate_carrying_capacity(
         * (0.7 + 0.3 * regulation)
     )
     k_proxy = clamp01(scale + (1.0 - scale) * headroom_factor)
+    # Bottleneck decomposition: the tightest declared ceiling binds.
+    ceiling_map = {
+        str(name): clamp01(coerce_float(value))
+        for name, value in (ceilings or {}).items()
+    }
+    binding_constraint = "blended_headroom"
+    if ceiling_map:
+        tightest_name, tightest = min(
+            ceiling_map.items(), key=lambda kv: kv[1]
+        )
+        if tightest < k_proxy:
+            # A ceiling below current scale means fully saturated, not
+            # impossible: K_eff floors at the company's present size.
+            k_proxy = max(tightest, scale)
+            binding_constraint = tightest_name
     utilization = clamp01(safe_div(scale, max(k_proxy, 1e-9)))
     # Penetration is direct saturation evidence; trust the worse signal.
     utilization = max(utilization, penetration)
@@ -154,6 +179,17 @@ def estimate_carrying_capacity(
             "growth deceleration across 3 consecutive periods — the "
             "curve is bending"
         )
+    if binding_constraint != "blended_headroom":
+        rationale.append(
+            f"binding constraint: {binding_constraint} ceiling "
+            f"({ceiling_map[binding_constraint]:.2f}) — growth hits the "
+            "tightest bottleneck first, not the blended average"
+        )
+        if binding_constraint in ("attention", "narrative"):
+            rationale.append(
+                "the ceiling is made of attention, not revenue — a "
+                "hype-bound TAM saturates when the crowd moves on"
+            )
     return CarryingCapacityReport(
         k_proxy=round(k_proxy, 4),
         current_scale=scale,
@@ -162,6 +198,8 @@ def estimate_carrying_capacity(
         growth_quality=round(growth_quality, 4),
         saturation_state=state,
         fake_exponential=fake_exponential,
+        binding_constraint=binding_constraint,
+        ceilings=ceiling_map,
         rationale=rationale,
     )
 
@@ -278,9 +316,11 @@ class ArbitrageReport:
     """A mispricing gap is worthless unless it converges in time."""
 
     gap: float  # reality − priced belief
+    safe_gap: float  # gap after uncertainty, staleness, evidence quality
     convergence_probability: float
     net_edge: float
     value_trap: bool
+    gap_unsupported: bool
     gap_half_life_days: float
     rationale: list[str] = field(default_factory=list)
     advisory_status: str = "ADVISORY_ONLY"
@@ -299,16 +339,40 @@ def detect_arbitrage_gap(
     break_risk: float = 0.2,
     crowding: float = 0.0,
     gap_half_life_days: float = 45.0,
+    uncertainty_band: float = 0.0,
+    evidence_quality: float | None = None,
+    price_already_moved: float = 0.0,
 ) -> ArbitrageReport:
     """Net edge = gap × P(convergence) − friction − break risk.
 
     Arbitrage is mismatch capture, not free money: the gap must close
     before decay, friction, and crowding consume it. A gap without a
     named convergence catalyst is a value trap.
+
+    The SAFE gap is the disciplined version of P_model − P_market:
+
+        safe_gap = (gap − uncertainty_band − 0.5·price_already_moved·gap)
+                   × evidence_quality
+
+    A wide gap built on low-quality evidence, wide uncertainty, or a
+    price that already moved is heat, not edge (``gap_unsupported``).
+    With no discipline inputs supplied, safe_gap == gap (back-compat).
     """
     reality = normalized_score(reality_score)
     belief = normalized_score(priced_belief)
     gap = round(reality - belief, 4)
+    band = normalized_score(uncertainty_band)
+    moved = normalized_score(price_already_moved)
+    quality = (
+        normalized_score(evidence_quality, 1.0)
+        if evidence_quality is not None else 1.0
+    )
+    safe_gap = round(
+        clip((gap - band - 0.5 * moved * max(gap, 0.0)) * quality,
+             -1.0, 1.0),
+        4,
+    )
+    gap_unsupported = gap > 0.1 and safe_gap <= 0.02
     has_catalyst = bool(str(convergence_catalyst).strip())
     p_convergence = normalized_score(convergence_probability) if (
         has_catalyst
@@ -329,6 +393,16 @@ def detect_arbitrage_gap(
         f"− friction {fr:.2f} − ½·break {brk:.2f}; window "
         f"≈{effective_half_life:.0f}d",
     ]
+    if safe_gap != gap:
+        rationale.append(
+            f"safe gap {safe_gap:+.2f} = (gap − band {band:.2f} − "
+            f"½·moved {moved:.2f}·gap) × evidence quality {quality:.2f}"
+        )
+    if gap_unsupported:
+        rationale.append(
+            "the gap is heat, not edge: wide on paper, gone after "
+            "uncertainty, staleness, and evidence quality"
+        )
     if value_trap:
         rationale.append(
             "gap without a credible convergence path — cheap can stay "
@@ -340,9 +414,11 @@ def detect_arbitrage_gap(
         )
     return ArbitrageReport(
         gap=gap,
+        safe_gap=safe_gap,
         convergence_probability=p_convergence,
         net_edge=net_edge,
         value_trap=value_trap,
+        gap_unsupported=gap_unsupported,
         gap_half_life_days=round(effective_half_life, 2),
         rationale=rationale,
     )
@@ -645,7 +721,9 @@ def assess_edge_lifecycle(
         verdict = "potential_without_catalyst"
     elif (
         path.path_class == "controlled_acceleration"
-        and arbitrage.gap > 0.1
+        # The golden state demands the SAFE gap: edge that survives
+        # uncertainty, price staleness, and evidence-quality discipline.
+        and arbitrage.safe_gap > 0.1
         and capacity.remaining_runway >= 0.3
         and expiry.status == "live"
         and not capacity.fake_exponential

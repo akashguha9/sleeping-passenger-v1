@@ -210,6 +210,31 @@ thresholds; reaction lag reduces effective strength; triple-blind review is
 serializable; final state is never a naked score; advisory language is
 preserved end to end.
 
+## The Signal Refiner — count origins, not echoes
+
+The narrative tracker prices echo chambers for MENTIONS (dirty air) and
+the aero engine penalizes caller-judged duplication LEVELS — but the
+`signals` list itself was scored tyre by tyre as if every signal were
+independent. `src/simulator/signal_refiner.py` clusters the signals
+into evidence clusters:
+
+```text
+Independence       = unique clusters / raw signal count
+Redundancy penalty = 1 − Independence
+Adjusted strength  = strongest effective × (1 − 0.4 · redundancy)
+```
+
+Clustering is conservative by doctrine: same-type signals WITHOUT a
+declared distinct `origin` (or `evidence_basis`) are assumed correlated
+— three social spikes echoing one viral post collapse to ONE cluster
+(`SIGNAL_REDUNDANCY_HIGH` at ≥ 0.5), while two different signal types
+citing the same `origin` also collapse (circular evidence does not
+multiply by changing channels). The haircut only ever LOWERS derived
+optimism: it wins the conservative merge into the self-feed
+`signal_strength` (provenance `signal_refiner.adjusted_strength`) and
+thins the lifecycle live edge; the raw tyres are untouched everywhere
+else. Tested in `tests/test_signal_refiner.py`. ADVISORY_ONLY.
+
 ## The Wind Tunnel — walk-forward outcome evidence
 
 `src/simulator/wind_tunnel.py` connects the repo's walk-forward backtest

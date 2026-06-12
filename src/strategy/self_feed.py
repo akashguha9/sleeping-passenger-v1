@@ -135,6 +135,7 @@ def derive_opponent_inputs(
     theme_present: bool,
     exposure_present: bool,
     risk_factors_present: bool,
+    adjusted_signal_strength: float | None = None,
 ) -> tuple[dict[str, Any], dict[str, str], float]:
     """Derive opponent-section inputs from engines that already ran.
 
@@ -185,10 +186,17 @@ def derive_opponent_inputs(
 
     if tyres:
         strongest = max(t.effective_signal_strength for t in tyres)
-        adaptation["signal_strength"] = clamp01(strongest / 100.0)
-        provenance["adaptation.signal_strength"] = (
-            "signal_tyres.effective_signal_strength"
-        )
+        signal_strength = clamp01(strongest / 100.0)
+        signal_source = "signal_tyres.effective_signal_strength"
+        # The signal refiner's independence haircut wins when LOWER:
+        # echoes are not evidence, and the merge is conservative-only.
+        if adjusted_signal_strength is not None:
+            refined = clamp01(adjusted_signal_strength)
+            if refined < signal_strength:
+                signal_strength = refined
+                signal_source = "signal_refiner.adjusted_strength"
+        adaptation["signal_strength"] = signal_strength
+        provenance["adaptation.signal_strength"] = signal_source
         drivers_covered += 1
 
         oldest_age_hours = max(t.signal_age_hours for t in tyres)
@@ -410,6 +418,7 @@ def build_self_fed_opponent(
     theme: ThemeAssessment | None,
     tyres: list[TyreState],
     exposure: ExposureAssessment | None,
+    adjusted_signal_strength: float | None = None,
 ) -> SelfFeedReport:
     """Wire the opponent section from engine outputs + caller overrides."""
     caller_section = payload.get("opponent")
@@ -448,6 +457,7 @@ def build_self_fed_opponent(
         exposure_present=exposure is not None
         and exposure.exposure_score > 0,
         risk_factors_present=bool(risk_factors),
+        adjusted_signal_strength=adjusted_signal_strength,
     )
 
     auto_derived = not caller_section

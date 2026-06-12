@@ -170,6 +170,17 @@ def evaluate_candidate_payload(payload: dict[str, Any]) -> dict[str, Any]:
         if isinstance(s, dict)
     ]
 
+    # 6b. Signal refiner: count origins, not echoes — for the signals
+    # list itself. Same-type signals without declared distinct origins
+    # are assumed correlated; the independence haircut only ever lowers
+    # derived optimism downstream (self-feed, lifecycle live edge).
+    from src.simulator.signal_refiner import refine_signals
+
+    signal_refinement = refine_signals(
+        [s for s in payload.get("signals", []) or [] if isinstance(s, dict)],
+        tyres,
+    )
+
     # 7. Inflection.
     inflection_section = _section(payload, "inflection")
     inflection = score_inflection(
@@ -439,12 +450,26 @@ def evaluate_candidate_payload(payload: dict[str, Any]) -> dict[str, Any]:
     )
     from src.strategy.self_feed import build_self_fed_opponent
 
+    if signal_refinement.reason_codes:
+        decision.reason_codes.extend(signal_refinement.reason_codes)
+        decision.decision_reason += (
+            " Signal refiner: "
+            f"{signal_refinement.raw_signal_count} raw signal(s) collapse "
+            f"to {signal_refinement.effective_signal_count} independent "
+            "evidence cluster(s); echoes are not evidence."
+        )
+
     self_feed = build_self_fed_opponent(
         payload,
         narrative=narrative,
         theme=theme,
         tyres=tyres,
         exposure=exposure,
+        adjusted_signal_strength=(
+            signal_refinement.adjusted_strength / 100.0
+            if signal_refinement.raw_signal_count
+            else None
+        ),
     )
     if self_feed.merged_section or has_caller_opponent:
         from src.strategy.adaptive_opponent import assess_adaptive_opponent
@@ -536,7 +561,17 @@ def evaluate_candidate_payload(payload: dict[str, Any]) -> dict[str, Any]:
         ]:
             lifecycle_derived["crowding"] = theme.crowding
         if tyres:
-            lifecycle_derived["live_edge"] = blended_grip_pct(tyres) / 100.0
+            # Blended grip, haircut by the refiner's independence factor:
+            # an edge built on echoes is thinner than its grip suggests.
+            independence_factor = (
+                signal_refinement.adjusted_strength
+                / signal_refinement.strongest_effective_strength
+                if signal_refinement.strongest_effective_strength > 0
+                else 1.0
+            )
+            lifecycle_derived["live_edge"] = (
+                blended_grip_pct(tyres) / 100.0 * independence_factor
+            )
             lifecycle_derived["half_life_days"] = (
                 sum(t.adjusted_half_life_hours for t in tyres)
                 / len(tyres) / 24.0
@@ -722,6 +757,7 @@ def evaluate_candidate_payload(payload: dict[str, Any]) -> dict[str, Any]:
             "exposure": exposure.to_dict(),
             "circuit": circuit.to_dict(),
             "tyres": [t.to_dict() for t in tyres],
+            "signal_refinement": signal_refinement.to_dict(),
             "inflection": inflection.to_dict(),
             "aero": aero.to_dict(),
             "crash": {

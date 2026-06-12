@@ -347,6 +347,123 @@ def test_caller_conservative_edge_beats_engine_optimism() -> None:
     assert out["lifecycle"]["verdict"] == "decayed_below_threshold"
 
 
+# --- Carrying-capacity bottleneck decomposition --------------------------------
+def test_tightest_bottleneck_controls_k_effective() -> None:
+    report = estimate_carrying_capacity(
+        current_scale=0.2, tam_evidence=0.8, expansion_optionality=0.6,
+        ceilings={"market": 0.9, "regulatory": 0.35, "attention": 0.5},
+    )
+    assert report.binding_constraint == "regulatory"
+    assert report.k_proxy == pytest.approx(0.35)
+    assert any("tightest bottleneck" in r for r in report.rationale)
+
+
+def test_regulatory_bottleneck_caps_runway() -> None:
+    unconstrained = estimate_carrying_capacity(
+        current_scale=0.2, tam_evidence=0.8, expansion_optionality=0.6,
+    )
+    constrained = estimate_carrying_capacity(
+        current_scale=0.2, tam_evidence=0.8, expansion_optionality=0.6,
+        ceilings={"regulatory": 0.3},
+    )
+    assert constrained.remaining_runway < unconstrained.remaining_runway
+
+
+def test_competition_bottleneck_exposes_fake_exponential() -> None:
+    # 30%/yr for 3y from scale 0.3 fits a blended K but overruns a
+    # tight competitive ceiling: the bottleneck exposes the fake.
+    loose = estimate_carrying_capacity(
+        current_scale=0.3, tam_evidence=0.9, expansion_optionality=0.7,
+        claimed_growth_rate=0.3, horizon_years=3.0,
+    )
+    tight = estimate_carrying_capacity(
+        current_scale=0.3, tam_evidence=0.9, expansion_optionality=0.7,
+        claimed_growth_rate=0.3, horizon_years=3.0,
+        ceilings={"competition": 0.45},
+    )
+    assert not loose.fake_exponential
+    assert tight.fake_exponential
+    assert tight.binding_constraint == "competition"
+
+
+def test_attention_ceiling_names_the_hype() -> None:
+    report = estimate_carrying_capacity(
+        current_scale=0.3, tam_evidence=0.9,
+        ceilings={"attention": 0.35},
+    )
+    assert report.binding_constraint == "attention"
+    assert any("made of attention" in r for r in report.rationale)
+
+
+def test_ceiling_below_scale_means_saturated_not_impossible() -> None:
+    report = estimate_carrying_capacity(
+        current_scale=0.5, ceilings={"adoption": 0.3},
+    )
+    assert report.k_proxy == pytest.approx(0.5)  # floored at scale
+    assert report.ceiling_utilization == pytest.approx(1.0)
+    assert report.saturation_state == "saturated"
+
+
+def test_decomposed_k_flows_through_lifecycle_output() -> None:
+    section = golden_section()
+    section["capacity"]["ceilings"] = {"regulatory": 0.45}
+    report = assess_edge_lifecycle(section)
+    assert report.capacity["binding_constraint"] == "regulatory"
+    assert report.capacity["ceilings"] == {"regulatory": 0.45}
+    json.dumps(report.to_dict())
+
+
+# --- Safe belief gap -----------------------------------------------------------
+def test_wide_gap_dies_under_low_evidence_quality() -> None:
+    section = golden_section()
+    section["arbitrage"]["uncertainty_band"] = 0.1
+    section["arbitrage"]["evidence_quality"] = 0.3
+    report = assess_edge_lifecycle(section)
+    # Raw gap 0.30 survives nothing: safe gap (0.30-0.10)*0.3 = 0.06.
+    assert report.arbitrage["gap"] == pytest.approx(0.3)
+    assert report.arbitrage["safe_gap"] == pytest.approx(0.06)
+    assert report.verdict != "live_underpriced_acceleration"
+
+
+def test_fresh_independent_evidence_preserves_the_gap() -> None:
+    section = golden_section()
+    section["arbitrage"]["uncertainty_band"] = 0.05
+    section["arbitrage"]["evidence_quality"] = 0.9
+    report = assess_edge_lifecycle(section)
+    assert report.arbitrage["safe_gap"] > 0.1
+    assert report.verdict == "live_underpriced_acceleration"
+
+
+def test_price_already_moved_closes_the_gap() -> None:
+    from src.strategy.edge_lifecycle import detect_arbitrage_gap
+
+    fresh = detect_arbitrage_gap(
+        reality_score=0.8, priced_belief=0.5,
+        convergence_catalyst="earnings", convergence_probability=0.6,
+    )
+    moved = detect_arbitrage_gap(
+        reality_score=0.8, priced_belief=0.5,
+        convergence_catalyst="earnings", convergence_probability=0.6,
+        price_already_moved=0.9,
+    )
+    assert moved.safe_gap < fresh.safe_gap
+    assert fresh.safe_gap == pytest.approx(fresh.gap)  # no inputs, no change
+
+
+def test_heat_only_gap_is_flagged_unsupported() -> None:
+    from src.strategy.edge_lifecycle import detect_arbitrage_gap
+
+    report = detect_arbitrage_gap(
+        reality_score=0.8, priced_belief=0.5,
+        convergence_catalyst="earnings", convergence_probability=0.6,
+        uncertainty_band=0.2, evidence_quality=0.15,
+    )
+    assert report.gap > 0.1
+    assert report.safe_gap <= 0.02
+    assert report.gap_unsupported
+    assert any("heat, not edge" in r for r in report.rationale)
+
+
 def test_lifecycle_report_is_fully_serializable() -> None:
     payload = copy.deepcopy(STRONG_PAYLOAD)
     payload["lifecycle"] = golden_section()

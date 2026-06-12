@@ -421,6 +421,57 @@ tier present (one synthetic row keeps the whole summary
 model; lifecycle weights stay doctrine-derived until the ledger is
 scored on backtest or empirical tiers. ADVISORY_ONLY.
 
+## Harder to fool — bottleneck K, safe belief gaps, outcome import, streak audit
+
+Four discipline upgrades in one sprint (`edge_lifecycle.py` extensions
++ `outcome_import.py`):
+
+**Carrying-capacity bottleneck decomposition.** Growth does not hit one
+ceiling; it hits the TIGHTEST bottleneck first. An optional
+`capacity.ceilings` dict (market, adoption, pricing, margin,
+regulatory, capital, competition, execution, attention…) sets
+`K_eff = min(K_blend, min_i(K_i))` with the `binding_constraint` named;
+a ceiling below current scale means saturated, not impossible (K floors
+at scale, utilization 1.0). A binding `attention`/`narrative` ceiling
+is called what it is: a ceiling made of hype. Tested: a tight
+competition ceiling exposes a fake-exponential narrative that the
+blended K would have tolerated.
+
+**Safe belief gap.** The golden state now demands the disciplined gap:
+
+```text
+safe_gap = (gap − uncertainty_band − ½·price_already_moved·gap)
+           × evidence_quality
+```
+
+A 0.30 gap on 0.3-quality evidence with a 0.10 band is a 0.06 safe gap
+— heat, not edge (`gap_unsupported` when raw > 0.1 collapses to
+≤ 0.02). With no discipline inputs supplied, `safe_gap == gap`
+(backwards compatible); with them, a wide gap must survive uncertainty,
+price staleness, and evidence quality to reach
+`live_underpriced_acceleration`.
+
+**Resolved-outcome import** (`outcome_import.py`). The production
+contract for real outcomes — no live feeds, just an honest JSON row
+(entry/exit prices + benchmark + optional predictions):
+`realized_alpha = R_asset − R_benchmark`, `prediction_error =
+|predicted_edge − realized_alpha|`, `expiry_accuracy = |t_pred −
+t_actual|`. Invalid rows fail safely into an errors list; unknown data
+tiers collapse DOWNWARD to synthetic; < 10 rows reads
+`require_more_data`. The mission's worked example imports exactly:
+alpha +0.16, prediction error 0.02, expiry accuracy 13d.
+
+**Streak audit — streak is not edge.** `audit_streak` decomposes a run
+of resolved results: `streak_reliability = attributed wins / wins`
+(a win counts as attributed only with a named mechanism),
+`overconfidence_gap = stated confidence − win rate`, `hot_hand_risk =
+trailing-streak share × (1 − reliability) + overconfidence`. Causal
+confidence is capped by BOTH the realized record and the data tier
+(synthetic 0.40 / backtest 0.60 / empirical 0.90): three eyes-closed
+wins on fixtures yield causal confidence ≤ 0.40 with
+`WINS_WITHOUT_ATTRIBUTION` + `HOT_HAND_RISK` — tested. The bridge
+`streak_inputs_from_outcomes` feeds imported outcomes straight in.
+
 ## Limitations (honest)
 
 * Trait scores, channel impacts, and probabilities the engines do not
@@ -432,6 +483,10 @@ scored on backtest or empirical tiers. ADVISORY_ONLY.
   edge death, K realized, convergence) must come from the operator or
   a future outcome-ingestion path; today's records are synthetic
   fixtures and are labeled as such everywhere they appear.
+* Decomposed ceilings, uncertainty bands, and evidence quality are
+  caller-judged; the outcome importer accepts whatever the operator
+  resolves and can only label its tier honestly — it cannot verify
+  provenance.
 * Carrying capacity is a normalized proxy from caller-judged TAM
   evidence, not a fitted market-size model; the expiry clock inherits
   tyre half-life constants, which are doctrine-derived. Arbitrage
