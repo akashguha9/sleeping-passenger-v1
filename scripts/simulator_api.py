@@ -122,8 +122,13 @@ def simulator_calibration_report() -> dict[str, Any]:
 
     from src.simulator.calibration_bridge import build_calibration_report
 
+    from src.games.dice_audit import summarize_game_calibration
+
     rows = simulator_store.load_all_telemetry()
     report = build_calibration_report(rows).to_dict()
+    report["game_calibration_summaries"] = [
+        s.to_dict() for s in summarize_game_calibration(rows)
+    ]
     report["generated_at"] = utc_now_iso()
     report.update(advisory_safety_stamps())
     return report

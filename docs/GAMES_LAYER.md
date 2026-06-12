@@ -108,6 +108,53 @@ layers predate this module (see STRATEGY_ENGINE.md and
 MARKET_PHYSICS_SIMULATOR.md). The games layer adds classification and
 interpretation on top — it does not duplicate scoring.
 
+## Sprint 2 — Dice Audit Loop and tempered Bayesian calibration
+
+**The model now audits its own dice.** Dice profiles are assumptions;
+`src/games/dice_audit.py` points the calibration machinery inward,
+comparing each assumed profile's stated confidence against resolved
+outcomes (wind tunnel / simulator store rows):
+
+* statuses: `calibrated · overconfident · underconfident · drifted ·
+  loaded_suspected · require_more_data`;
+* drift is judged on **excess Brier above the calibrated baseline**
+  (`brier − mean(p(1−p))`) — a perfectly calibrated 0.7 forecaster has
+  raw Brier 0.21 by construction and must not be punished for it;
+* thin samples (< 20) never move assumptions; extreme one-sided gaps
+  (≥ 0.30) read `loaded_suspected` with confidence capped at 0.25;
+* every adjustment is recommendation-only — no profile is mutated by
+  an audit;
+* `audit_d100_buckets` checks probability-engine sources bucket by
+  bucket; `summarize_game_calibration` groups resolved telemetry by the
+  `dominant_game` segment (now also a calibration-bridge segment key) —
+  the first empirical test of game-conditional interpretation, served
+  through `GET /simulator/calibration/report`.
+
+**Tempered Bayesian posterior** (`src/games/bayesian_update.py`):
+
+```text
+trust  = reliability × reality_anchor × dice_confidence × (1 − manipulation)
+LR_eff = LR ^ trust            (power posterior)
+posterior_odds = prior_odds × Π LR_eff
+```
+
+Zero-trust evidence moves nothing — a loud, manipulated, hyperreal
+source is mathematically incapable of dragging belief. The prior is
+typically a prediction-market probability (tradable belief used as a
+prior, never as truth). An optional `bayes` payload section runs this in
+the pipeline; the posterior feeds telemetry's predicted probability when
+the caller supplied none, closing the loop into calibration.
+
+**Worked example (tested):** a narrative-heavy d20 source starts with
+high stated confidence; resolved telemetry shows avg confidence 0.85 vs
+hit rate 0.60 → the audit flags `overconfident`, cuts the multiplier
+below 0.6, and the advisory router downgrades Buy Candidate → Research
+More (`DICE_CALIBRATION_RISK`). See
+`tests/test_games_audit_bayes.py::test_docs_example_d20_overconfidence_downgrade`.
+
+Advisory-only is preserved throughout: audits recommend, humans decide,
+no orders exist.
+
 ## Limitations (honest)
 
 * Features, reliabilities, and reality components are caller-supplied

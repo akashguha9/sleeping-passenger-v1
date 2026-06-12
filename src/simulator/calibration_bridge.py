@@ -54,6 +54,7 @@ SEGMENT_KEYS: tuple[str, ...] = (
     "crash_density_bucket",
     "driver_license",
     "narrative_state",
+    "dominant_game",
 )
 
 MODE_INSUFFICIENT = "insufficient_data"

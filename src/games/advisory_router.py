@@ -65,6 +65,7 @@ def route_advisory_action(
     contradiction_hold: bool = False,
     previous_state: str | None = None,
     reality: RealityAssessment | None = None,
+    calibration_risk_severe: bool = False,
 ) -> AdvisoryAction:
     """Route the verdict to a staged advisory action with its reasons."""
     base_action = _STATE_TO_ACTION.get(str(final_state), "Reject")
@@ -104,6 +105,23 @@ def route_advisory_action(
                 "ADVISORY_ONLY."
             ),
             downgraded_from=base_action if base_action != "Research More" else "",
+            rationale=rationale,
+        )
+
+    if calibration_risk_severe and base_action in _INVESTMENT_ACTIONS:
+        rationale.append(
+            "dice audit reports severe calibration risk (overconfident or "
+            "loaded) on a load-bearing source"
+        )
+        return AdvisoryAction(
+            action="Research More",
+            explanation=(
+                "A dice audit flags severe calibration risk on the evidence "
+                "behind this verdict: the assumed uncertainty profile has "
+                "not matched realized outcomes. Investment-grade actions "
+                "are blocked until the source is re-audited. ADVISORY_ONLY."
+            ),
+            downgraded_from=base_action,
             rationale=rationale,
         )
 

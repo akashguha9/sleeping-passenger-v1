@@ -424,6 +424,35 @@ def evaluate_candidate_payload(payload: dict[str, Any]) -> dict[str, Any]:
             ),
         }
 
+    # 14a-bis. Tempered Bayesian posterior (optional "bayes" section):
+    # prior (typically a prediction-market probability — tradable belief,
+    # never truth) updated by evidence items whose likelihood ratios are
+    # tempered by trust = reliability x reality x dice x (1 - manipulation).
+    bayes_result = None
+    bayes_section = payload.get("bayes")
+    if isinstance(bayes_section, dict) and bayes_section.get("prior") is not None:
+        from src.games.bayesian_update import bayesian_update
+
+        bayes_result = bayesian_update(
+            prior=coerce_float(bayes_section.get("prior"), 0.5),
+            evidence=[
+                e for e in bayes_section.get("evidence", []) or []
+                if isinstance(e, dict)
+            ],
+        )
+
+    # 14a-ter. Dice audits supplied with the payload (from the audit loop):
+    # severe statuses on load-bearing sources block investment-grade
+    # advisory actions and stamp the decision.
+    dice_audit_severe = False
+    for audit in payload.get("games", {}).get("dice_audits", []) if isinstance(payload.get("games"), dict) else []:
+        if isinstance(audit, dict) and audit.get("calibration_status") in (
+            "overconfident", "loaded_suspected",
+        ):
+            dice_audit_severe = True
+            decision.reason_codes.append("DICE_CALIBRATION_RISK")
+            break
+
     # 14b. Strategy section + the Stewards' Room. When the payload carries
     # a "strategy" section, the strategy chain runs inside the pipeline,
     # its self-report is cross-examined against the rest of the payload,
@@ -483,6 +512,7 @@ def evaluate_candidate_payload(payload: dict[str, Any]) -> dict[str, Any]:
             else None
         ),
         reality=reality_assessment,
+        calibration_risk_severe=dice_audit_severe,
     )
 
     # 15. Telemetry — no candidate is promoted without it. Captures the
@@ -497,7 +527,7 @@ def evaluate_candidate_payload(payload: dict[str, Any]) -> dict[str, Any]:
         predicted_probability=(
             coerce_float(payload["predicted_probability"])
             if payload.get("predicted_probability") is not None
-            else None
+            else (bayes_result.posterior if bayes_result else None)
         ),
         driver_license_level=driver.license_level,
         narrative_state=narrative.narrative_state,
@@ -516,6 +546,7 @@ def evaluate_candidate_payload(payload: dict[str, Any]) -> dict[str, Any]:
         "doctrine": list(DOCTRINE),
         "decision": decision.to_dict(),
         "advisory_action": advisory.to_dict(),
+        "bayes": bayes_result.to_dict() if bayes_result else None,
         "games": games_result,
         "consent_ledger": consent_ledger.to_dict(),
         "unified_verdict": unified.to_dict(),
