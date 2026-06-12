@@ -14,9 +14,9 @@ answer.
 
 | Lane | Count (2026-06-12) | Meaning |
 |---|---|---|
-| **api_lane** | 71 modules | Transitively imported by `scripts/api_server.py`. The ONLY code that can influence user-facing API output. Every score in the UI traces here. |
+| **api_lane** | 72 modules | Transitively imported by `scripts/api_server.py`. The ONLY code that can influence user-facing API output. Every score in the UI traces here. |
 | **batch_lane** | 31 modules | Reachable only from the documented standalone CLIs (`run_scoring`, `run_paper_trading`, `run_ingestion`, `run_dashboard`, `run_live_refresh`, `refresh_live_signals`, `run_live_sources_phase1`, `kalshi_live_smoke`, `import_outcomes`; README "Run scoring"). Real, supported, operator-run code — not dead, not API. |
-| **quarantine** | 6 modules | Reachable from NO entry point. Pinned exactly; may not grow. |
+| **quarantine** | 4 modules | Reachable from NO entry point. Pinned exactly; may not grow. |
 
 **`src/scoring` verdict (formal):** batch lane. It is the prediction-
 market batch scorer behind `python scripts/run_scoring.py --summary`
@@ -29,14 +29,19 @@ Each entry is tested-but-unwired (or wholly unreferenced). The guard
 pins this set both ways: new entries fail CI, and resolving one
 requires updating the pin consciously.
 
+2026-06-12 resolution: `driver_derivation` **WIRED** (api_lane — the
+pipeline's `journal_records` section derives violations from the
+journal's own evidence; self-report can no longer hide them);
+`paper_position_tracker` **ARCHIVED** to
+`archived_experimental/src_quarantine/` (22 lines, zero importers,
+zero tests). Four remain, each deliberate:
+
 | Module | Status | Disposition |
 |---|---|---|
-| `src.simulator.driver_derivation` | imported only by its own test | wire into pipeline driver scoring, or retire module + test |
-| `src.simulator.live_adapter` | imported only by its own test | wire into live-refresh chain, or retire |
-| `src.simulator.reality_replay` | imported only by its own test | wire into wind-tunnel/backtest lane, or retire |
-| `src.paper.paper_position_tracker` | imported by nothing at all | retire (verify cross-branch first per REPO_DISCIPLINE_CENSUS §6) |
-| `src.ingestion.kalshi_public_client` | superseded legacy REST client | retire with `src.models.kalshi_market`, or wire if kalshi returns |
-| `src.models.kalshi_market` | used only by the above | follows its client |
+| `src.simulator.live_adapter` | pure ingestion→payload transforms, tested | KEEP QUARANTINED: wire target is the live-refresh lane; held until a live-lane sprint so the wire lands with its own e2e proof |
+| `src.simulator.reality_replay` | process-vs-outcome replay (triple-blind stage 3), tested | KEEP QUARANTINED: wire target is resolved simulator_store evaluations; consumes decision records the outcome importer does not yet persist |
+| `src.ingestion.kalshi_public_client` | mock-fallback public client, tested | KEEP QUARANTINED: parked kalshi ingestion lane — wire = add to `run_ingestion` when kalshi is re-enabled |
+| `src.models.kalshi_market` | model for the above | follows its client |
 
 ## Why this matters for coverage claims
 

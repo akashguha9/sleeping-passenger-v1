@@ -1,0 +1,17 @@
+# EMPIRICAL FIRST LIGHT — operator-attested resolved trades (data_tier: empirical).
+# Converted 1:1 from the operator's committed journal records; nothing fabricated:
+#   - moltbook/mw_direction_v1_2026_04_19.json  (resolved 4-trade pattern record)
+#   - moltbook/signal_ledger.json               (per-signal CE scores + statuses)
+#   - moltbook/fcg_2026q2_close.json            (full FCG close record)
+# Returns are imported as RECORDED (realized_return_pct) — raw prices were not
+# journaled for TLT/TIP/UNG, and fabricating price pairs would be dishonest.
+# No benchmark was journaled, so NO alpha is claimed (alpha_basis says so).
+# predicted_edge is deliberately ABSENT: the journal froze conviction (CE
+# scores), not return forecasts — mapping CE to an edge would be fabrication.
+# gate_interaction records the real CE-threshold/veto behaviour per trade:
+# TLT/TIP were approved (gate did not fire); UNG/FCG were CHAOS overrides
+# (gate fired, operator entered anyway).
+{"id": "mw_2026_tlt", "ticker": "TLT", "realized_return_pct": 1.23, "thesis_tags": ["high_ce_approved", "ce_0.62"], "gate_interaction": {"gate": "ce_threshold_veto", "fired": false, "overridden": false}, "source_record": "moltbook/mw_direction_v1_2026_04_19.json + moltbook/signal_ledger.json (SIG_2026_04_01_001)", "data_tier": "empirical"}
+{"id": "mw_2026_tip", "ticker": "TIP", "realized_return_pct": 4.19, "thesis_tags": ["high_ce_approved", "ce_0.68"], "gate_interaction": {"gate": "ce_threshold_veto", "fired": false, "overridden": false}, "source_record": "moltbook/mw_direction_v1_2026_04_19.json + moltbook/signal_ledger.json (SIG_2026_04_02_002)", "data_tier": "empirical"}
+{"id": "mw_2026_ung", "ticker": "UNG", "realized_return_pct": -4.49, "thesis_tags": [], "gate_interaction": {"gate": "ce_threshold_veto", "fired": true, "overridden": true}, "source_record": "moltbook/mw_direction_v1_2026_04_19.json + moltbook/signal_ledger.json (SIG_2026_04_03_003, EXECUTED_CHAOS)", "data_tier": "empirical"}
+{"id": "mw_2026_fcg", "ticker": "FCG", "realized_return_pct": -8.67, "exit_date": "2026-04-19", "thesis_tags": [], "gate_interaction": {"gate": "ce_threshold_veto", "fired": true, "overridden": true}, "narrative_phase_exit": "broken", "source_record": "moltbook/fcg_2026q2_close.json (entry 31.16, exit 28.46, veto_validated: true)", "data_tier": "empirical"}

@@ -23,13 +23,15 @@ REPO = Path(__file__).resolve().parents[1]
 # Tested-but-unwired (or wholly unreferenced) modules, pinned at the
 # 2026-06-12 census. Each must be either wired into a lane or retired —
 # see docs/LIVE_SURFACE.md. Nothing may join this list silently.
+# 2026-06-12 resolution sprint: driver_derivation WIRED into the
+# pipeline (journal_records section); paper_position_tracker ARCHIVED
+# (zero importers, zero tests). The four below are KEPT deliberately —
+# see docs/LIVE_SURFACE.md for each disposition.
 QUARANTINE: frozenset[str] = frozenset({
-    "src.ingestion.kalshi_public_client",   # legacy kalshi REST client
-    "src.models.kalshi_market",             # model used only by the above
-    "src.paper.paper_position_tracker",     # imported by nothing at all
-    "src.simulator.driver_derivation",      # tested, never wired
-    "src.simulator.live_adapter",           # tested, never wired
-    "src.simulator.reality_replay",         # tested, never wired
+    "src.ingestion.kalshi_public_client",   # parked kalshi ingestion lane
+    "src.models.kalshi_market",             # model for the above
+    "src.simulator.live_adapter",           # wire target: live-refresh lane
+    "src.simulator.reality_replay",         # wire target: resolved-eval replay
 })
 
 CORE_API_LANE = (
@@ -46,6 +48,15 @@ CORE_API_LANE = (
 
 def test_census_is_deterministic() -> None:
     assert build_census() == build_census()
+
+
+def test_driver_derivation_is_wired_now() -> None:
+    # Resolved out of quarantine 2026-06-12: the journal-evidence driver
+    # state is reachable from the API lane via the pipeline's
+    # journal_records section.
+    assert "src.simulator.driver_derivation" in set(
+        build_census()["api_lane"]
+    )
 
 
 def test_decision_engines_are_on_the_api_lane() -> None:

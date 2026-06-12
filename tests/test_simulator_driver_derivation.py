@@ -175,3 +175,33 @@ def test_violation_count_covers_at_least_five_types() -> None:
         "oversizing_under_crash_risk",
         "tailgating_hype",
     } <= {v["type"] for v in violations}
+
+
+# --- Pipeline wire: the journal beats self-report --------------------------------
+def test_pipeline_derives_violations_from_journal_records() -> None:
+    import copy
+
+    from src.simulator.pipeline import evaluate_candidate_payload
+    from tests.test_simulator_cherry_pick_pipeline import STRONG_PAYLOAD
+
+    clean = evaluate_candidate_payload(copy.deepcopy(STRONG_PAYLOAD))
+    assert clean["breakdown"]["driver_derivation"] is None
+
+    payload = copy.deepcopy(STRONG_PAYLOAD)
+    payload["journal_records"] = {
+        "trades": [
+            _trade(thesis="yolo", invalidation_level=""),  # 2 violations
+        ],
+        "reconciliations": [],
+    }
+    out = evaluate_candidate_payload(payload)
+    derivation = out["breakdown"]["driver_derivation"]
+    assert derivation is not None
+    assert derivation["trades_examined"] == 1
+    assert len(derivation["violations"]) >= 2
+    # The derived violations flow into the driver score: discipline can
+    # only get WORSE when the journal contradicts the self-report.
+    assert (
+        out["breakdown"]["driver"]["discipline_score"]
+        < clean["breakdown"]["driver"]["discipline_score"]
+    )

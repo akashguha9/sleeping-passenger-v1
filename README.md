@@ -84,6 +84,8 @@ Open http://localhost:3000.
 | [docs/MARKET_PHYSICS_SIMULATOR.md](docs/MARKET_PHYSICS_SIMULATOR.md) | Simulator layer: signal tyres, narrative radar, crash permutations, driver license, cherry-pick gates |
 | [docs/CUSTOMER_CONSENT_ENGINE.md](docs/CUSTOMER_CONSENT_ENGINE.md) | Consent & regulatory-fragility layer: revenue-quality stress testing, digital relief asymmetry, claims non-payment, friction tax |
 | [docs/STRATEGY_ENGINE.md](docs/STRATEGY_ENGINE.md) | Strategy layer: mechanism gate, predator nodes, node payoff matrix, chess promotion, underground breakout, distribution intelligence, backhand defence |
+| [docs/DEMO_GOLDEN_PATH.md](docs/DEMO_GOLDEN_PATH.md) | Fifteen-minute skeptical-reviewer path: run it, five proof points, where evidence lives, what is intentionally not claimed |
+| [docs/CALIBRATION_FIRST_LIGHT.md](docs/CALIBRATION_FIRST_LIGHT.md) | The calibration ledger's first non-synthetic rows (n=4, operator-attested, test-pinned) — what they prove and what they do not |
 | [docs/LIVE_SURFACE.md](docs/LIVE_SURFACE.md) | Which code can touch the user: api_lane vs batch_lane vs quarantine, pinned by `tests/test_live_surface.py` — the src/ counterpart to the scripts census |
 | [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md) | One-page verified threat model: assets, trust boundaries, adversaries, defenses with citations, residual risks |
 | [docs/GAMES_LAYER.md](docs/GAMES_LAYER.md) | Games layer: game-archetype stacks, dice/uncertainty profiles, loaded-die detection, simulacra reality anchoring, investment-vs-tradeability split, staged advisory actions |

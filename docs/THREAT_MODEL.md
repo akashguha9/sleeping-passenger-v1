@@ -66,3 +66,18 @@ If a change touches auth, routes, advisory stamps, or payload
 validation, it must keep `tests/test_adversarial_inputs.py`,
 the route-forbid tests, and the Kante defensive gate green — these are
 the contract, not decoration.
+
+## CSP status (2026-06-12)
+
+`script-src 'self' 'unsafe-inline'` is the current, deliberate setting.
+The stricter `script-src 'self'` shipped by the S8 sprint blocked
+Next.js App Router's inline hydration scripts and silently turned the
+entire client into static HTML — caught the day Playwright e2e entered
+CI. The hardening path back is **nonce-based CSP via Next middleware**
+(generate a per-request nonce in `middleware.ts`, emit it in the CSP
+header; Next ≥14 propagates it to its inline scripts automatically).
+That change must land WITH the e2e suite as its gate — never again a
+CSP change verified only by tests that don't execute a browser.
+Residual exposure until then: inline-script XSS would execute; exfil
+remains constrained by the pinned `connect-src` and the absence of any
+third-party script origin.

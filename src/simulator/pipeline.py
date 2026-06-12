@@ -267,13 +267,36 @@ def evaluate_candidate_payload(payload: dict[str, Any]) -> dict[str, Any]:
         invalidation=meal_section.get("invalidation"),
     )
 
-    # 12. Driver license.
+    # 12. Driver license. When the payload carries journal records
+    # (manual trades + reconciliations), violations are DERIVED from the
+    # journal's own evidence and appended to self-report — the self-feed
+    # asymmetry applied to discipline: confession is optional, the
+    # record is not.
     driver_section = _section(payload, "driver")
+    caller_violations = [
+        v for v in driver_section.get("violations", []) or []
+        if isinstance(v, dict)
+    ]
+    derived_driver = None
+    journal_section = _section(payload, "journal_records")
+    if journal_section:
+        from src.simulator.driver_derivation import derive_driver_state
+
+        derived_driver = derive_driver_state(
+            [t for t in journal_section.get("trades", []) or []
+             if isinstance(t, dict)],
+            [r for r in journal_section.get("reconciliations", []) or []
+             if isinstance(r, dict)],
+            license_level=str(
+                driver_section.get("license_level", "learner")
+            ),
+        )
+        caller_violations = caller_violations + list(
+            derived_driver.violations
+        )
     driver = score_driver(
         license_level=str(driver_section.get("license_level", "learner")),
-        violations=[
-            v for v in driver_section.get("violations", []) or [] if isinstance(v, dict)
-        ],
+        violations=caller_violations,
         thesis_logging_quality=coerce_float(
             driver_section.get("thesis_logging_quality")
         ),
@@ -800,6 +823,9 @@ def evaluate_candidate_payload(payload: dict[str, Any]) -> dict[str, Any]:
             "triple_blind": triple_blind.to_dict(),
             "meal_box": meal_box.to_dict(),
             "driver": driver.to_dict(),
+            "driver_derivation": (
+                derived_driver.to_dict() if derived_driver else None
+            ),
             "scrutineering": scrutineering.to_dict(),
             "exposure_graph_resolution": graph_resolution,
         },
