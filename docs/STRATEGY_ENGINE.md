@@ -222,6 +222,86 @@ undiverged bars (the cap dodged the losing bar); when the gate never
 diverges the report says "insufficient evidence", not success. A/B
 counterfactual replay measures gate value and never clears autotune.
 
+## Counterfactual Wind Tunnel — the model doubts itself (`counterfactual_wind_tunnel.py`)
+
+Self-feed made the model consistent with its own physics — but a gate
+that fires on one history proves nothing about WHY it fired or whether
+it would survive a different rally. `src/strategy/
+counterfactual_wind_tunnel.py` perturbs, ablates, delays, and
+regime-flips a payload's own evidence, then grades whether the verdict
+survives. Opt-in: `{"counterfactual_audit": true}` attaches the report
+at `result["counterfactual_wind_tunnel"]` (variants strip the flag —
+the audit never audits itself; the verdict itself is never changed).
+
+**Perturbation suite (graded, falsifiable).** 16 deterministic variants,
+each with a directional expectation: ablations of crowding / heat /
+weaknesses / exposure (`NOT_WORSE` — suppressing adverse evidence must
+never worsen), signal delay +168h and source-quality degradation
+(`NOT_BETTER` — stale or unreliable evidence must never read better),
+optimistic opponent override (`CHALLENGED_NOT_BETTER`), conservative
+override (`NOT_BETTER`, unchallenged), engines-dark fallback
+(`NO_UNMEASURED_CAP` — exhaustion needs measurement; a caller-judged
+FATAL_WEAK_SIDE cap may stand), and three regime probes: benign
+(`CAP_SILENT`), hostile (`CAP_FIRES`), noisy (`WARN_NOT_CAP`).
+Perturbations of absent sections are skipped, not graded.
+
+```text
+RobustnessScore = matched / graded
+                  − 0.1 · [gate hangs on one input]      (fragility)
+                  − 0.15 · anti-gaming breaches          (overconfidence)
+```
+
+**Causal gate attribution.** When the adaptation gate fired, each driver
+(theme crowding, valuation heat, narrative saturation, signal weakness,
+weak-side severity) is neutralized one at a time:
+`GateAttribution(input) = gate(original) − gate(ablated)`.
+
+* `NECESSARY_DRIVER` — ablation un-fires the gate;
+* `SUFFICIENT_DRIVER` — alone (all others neutralized) it still fires;
+* `REDUNDANT_SUPPORT` — gate holds, OAI moves;
+* `PASSENGER_SIGNAL` — gate holds, OAI moves < 0.05 (it was in the
+  explanation, not in the cause);
+* `FRAGILE_SINGLE_POINT` — exactly one necessary driver controls the
+  gate (flagged, warned, and charged the fragility penalty);
+* `MISSING_BUT_REQUIRED` — input absent, role untestable.
+
+**Worked example (tested verbatim,
+`tests/test_counterfactual_wind_tunnel.py`).** The crowded fixture's
+exhaustion cap: 14/14 graded counterfactuals matched → robustness 1.00,
+gate margin +0.15 (`GATE_MARGIN_THIN`), all four OAI inputs
+NECESSARY_DRIVER (a conjunction near the threshold), weak-side severity
+a named PASSENGER_SIGNAL. The fatal-weak-side fixture: 14/14 matched but
+the gate hangs on one input → robustness 0.90 after the
+FRAGILE_SINGLE_POINT penalty, `weak_side_severity` both necessary and
+sufficient.
+
+**Anti-gaming: exposed, not denied.** No internal layer can verify the
+world outside the payload. Optimistic opponent overrides are challenged
+and cannot rescue a verdict (tested); but suppressing theme crowding,
+valuation heat, or the narrative section, or inflating signals, DOES
+improve the verdict — so the audit publishes exactly those fields in
+`gameable_inputs` with `VERDICT_SENSITIVE_TO_CALLER_INPUT:*` warnings,
+and each gameable field raises `false_negative_risk` (+0.05, cap 0.4).
+Conservative-wins survives every probe: caller caution is honored,
+never rewarded.
+
+**Gate utility.** `classify_gate_utility` labels a wind-tunnel A/B
+experiment `helpful / harmful / over_conservative (≥50% divergence and
+capped win rate ≥0.6) / regime_dependent / neutral /
+insufficient_evidence`. GateUtility is the capped-vs-undiverged forward
+return difference; a gate that never diverged has proven nothing.
+
+**How to read the numbers.** `robustness_score` is the fraction of
+falsifiable counterfactual expectations that held, penalized for
+fragility and overconfidence — 1.0 means "survived every alternative
+history we constructed", not "true". `false_positive_risk` /
+`false_negative_risk` are deterministic heuristic indicators (benign
+regime capped → 0.85; thin gate margin → 0.25; gameable fields → +0.05
+each), never fitted probabilities. Every report carries its tier
+warnings (`SYNTHETIC_REPLAY_TIER`, `LOW_REAL_WORLD_CALIBRATION` until
+real imported data flows). ADVISORY_ONLY: the audit annotates analysis;
+it never changes the verdict, and no execution path exists anywhere.
+
 ## Limitations (honest)
 
 * Trait scores, channel impacts, and probabilities the engines do not
@@ -229,6 +309,10 @@ counterfactual replay measures gate value and never clears autotune.
   closes this gap only for the opponent section, and its derived values
   inherit the payload's own physics inputs — internally consistent, not
   independently sourced.
+* The counterfactual audit stresses the payload it was given; it cannot
+  detect evidence the caller withheld (it can only show which withheld
+  evidence WOULD have mattered). Its risk numbers are doctrine-derived
+  heuristics on synthetic/fixture-tier data.
 * Weights, bands, and thresholds are doctrine-derived, not empirically
   calibrated (no labeled outcome data exists).
 * Node classification is deterministic trait matching, not learned; the

@@ -617,7 +617,7 @@ def evaluate_candidate_payload(payload: dict[str, Any]) -> dict[str, Any]:
         data_source=str(payload.get("data_source", "caller_payload")),
     )
 
-    return {
+    result = {
         "advisory_note": ADVISORY_NOTE,
         "doctrine": list(DOCTRINE),
         "decision": decision.to_dict(),
@@ -632,6 +632,7 @@ def evaluate_candidate_payload(payload: dict[str, Any]) -> dict[str, Any]:
             cross_exam_report.to_dict() if cross_exam_report else None
         ),
         "telemetry": telemetry.to_dict(),
+        "counterfactual_wind_tunnel": None,
         "breakdown": {
             "narrative_shock": shock.to_dict() if shock else None,
             "narrative": narrative.to_dict(),
@@ -656,3 +657,19 @@ def evaluate_candidate_payload(payload: dict[str, Any]) -> dict[str, Any]:
             "exposure_graph_resolution": graph_resolution,
         },
     }
+
+    # 16. Counterfactual wind tunnel (opt-in: "counterfactual_audit"
+    # truthy). Perturbs, ablates, delays, and regime-flips this payload's
+    # own evidence to grade whether the verdict survives alternative
+    # histories, and attributes a fired adaptation gate to its causal
+    # drivers. Variants strip the flag — the audit never audits itself.
+    if payload.get("counterfactual_audit"):
+        from src.strategy.counterfactual_wind_tunnel import (
+            run_counterfactual_audit,
+        )
+
+        result["counterfactual_wind_tunnel"] = run_counterfactual_audit(
+            payload, original=result
+        ).to_dict()
+
+    return result
