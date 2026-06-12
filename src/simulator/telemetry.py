@@ -98,6 +98,7 @@ def build_decision_telemetry(
     decision_time: str | None = None,
     driver_license_level: str = "",
     narrative_state: str = "",
+    dominant_game: str = "",
     data_source: str = "caller_payload",
 ) -> DecisionTelemetry:
     """Snapshot a cherry-pick decision for later replay. No candidate is
@@ -109,6 +110,7 @@ def build_decision_telemetry(
         "crash_density_bucket": crash_density_bucket(decision.crash_density),
         "driver_license": driver_license_level,
         "narrative_state": narrative_state,
+        "dominant_game": dominant_game,
     }
     return DecisionTelemetry(
         ticker=decision.ticker,

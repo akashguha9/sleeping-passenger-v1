@@ -355,6 +355,75 @@ def evaluate_candidate_payload(payload: dict[str, Any]) -> dict[str, Any]:
         decision.gate_results["consent_gate"] = True
         decision.reason_codes.append("CONSENT_EVIDENCE_ABSENT")
 
+    # 14a. Games layer (optional "games" payload section): classify the
+    # decision environment (nested game stack), the dice (uncertainty
+    # profiles + loaded-die check), and the reality layer (simulacra +
+    # investment-vs-tradeability split). The same signal means different
+    # things in different games; the reality gate caps hyperreal,
+    # dangerous configurations at watchlist for investment purposes.
+    games_result: dict | None = None
+    reality_assessment = None
+    games_section = payload.get("games")
+    if isinstance(games_section, dict) and games_section:
+        from src.games.dice_profiles import classify_dice_profile, detect_loaded_die
+        from src.games.game_classifier import classify_game_stack
+        from src.games.reality_anchor import assess_reality
+
+        game_stack = classify_game_stack(
+            dict(games_section.get("layers") or {})
+        )
+        dice = [
+            classify_dice_profile(**{
+                k: v for k, v in spec.items()
+                if k in classify_dice_profile.__kwdefaults__ or k == "source"
+            })
+            for spec in games_section.get("dice", []) or []
+            if isinstance(spec, dict)
+        ]
+        loaded_report = None
+        observed = games_section.get("observed_outcomes")
+        if isinstance(observed, dict) and observed:
+            loaded_report = detect_loaded_die(
+                observed,
+                games_section.get("expected_probabilities"),
+            )
+        reality_section = games_section.get("reality")
+        if isinstance(reality_section, dict) and reality_section:
+            reality_assessment = assess_reality(**{
+                k: coerce_float(v) for k, v in reality_section.items()
+                if k in assess_reality.__kwdefaults__
+            })
+            if reality_assessment.danger_score >= 5.0:
+                decision.gate_results["reality_gate"] = False
+                from src.simulator.threshold_ladder import LADDER_STATES
+
+                if decision.final_state in LADDER_STATES and (
+                    LADDER_STATES.index(decision.final_state)
+                    > LADDER_STATES.index("watchlist")
+                ):
+                    decision.final_state = "watchlist"
+                    decision.reason_codes.append("REALITY_GATE_CAPPED")
+                    decision.decision_reason += (
+                        " Reality gate: hyperreal/dangerous configuration "
+                        f"(danger {reality_assessment.danger_score:.1f}/10) "
+                        "caps investment state at watchlist; tradeability "
+                        "is reported separately."
+                    )
+            else:
+                decision.gate_results["reality_gate"] = True
+        if any(d.profile == "loaded_possible" for d in dice) or (
+            loaded_report is not None and loaded_report.loaded
+        ):
+            decision.reason_codes.append("LOADED_DICE_SUSPECTED")
+        games_result = {
+            "game_stack": game_stack.to_dict(),
+            "dice_profiles": [d.to_dict() for d in dice],
+            "loaded_die": loaded_report.to_dict() if loaded_report else None,
+            "reality": (
+                reality_assessment.to_dict() if reality_assessment else None
+            ),
+        }
+
     # 14b. Strategy section + the Stewards' Room. When the payload carries
     # a "strategy" section, the strategy chain runs inside the pipeline,
     # its self-report is cross-examined against the rest of the payload,
@@ -400,6 +469,22 @@ def evaluate_candidate_payload(payload: dict[str, Any]) -> dict[str, Any]:
             "resolution required."
         )
 
+    # 14c. Staged advisory action: the verdict translated into the
+    # journal's action vocabulary (Reject … Exit Candidate), with
+    # contradiction holds routing to Research More and the reality split
+    # blocking investment-grade actions on tradeable-but-dangerous names.
+    from src.games.advisory_router import route_advisory_action
+
+    advisory = route_advisory_action(
+        final_state=decision.final_state,
+        contradiction_hold=unified.contradiction_hold,
+        previous_state=(
+            str(payload["previous_state"]) if payload.get("previous_state")
+            else None
+        ),
+        reality=reality_assessment,
+    )
+
     # 15. Telemetry — no candidate is promoted without it. Captures the
     # post-consent, post-unification decision so replay sees what the
     # operator saw.
@@ -416,6 +501,13 @@ def evaluate_candidate_payload(payload: dict[str, Any]) -> dict[str, Any]:
         ),
         driver_license_level=driver.license_level,
         narrative_state=narrative.narrative_state,
+        dominant_game=(
+            str((games_result or {}).get("game_stack", {}).get(
+                "dominant_game", ""
+            ))
+            if games_result
+            else ""
+        ),
         data_source=str(payload.get("data_source", "caller_payload")),
     )
 
@@ -423,6 +515,8 @@ def evaluate_candidate_payload(payload: dict[str, Any]) -> dict[str, Any]:
         "advisory_note": ADVISORY_NOTE,
         "doctrine": list(DOCTRINE),
         "decision": decision.to_dict(),
+        "advisory_action": advisory.to_dict(),
+        "games": games_result,
         "consent_ledger": consent_ledger.to_dict(),
         "unified_verdict": unified.to_dict(),
         "strategy": strategy_result,
