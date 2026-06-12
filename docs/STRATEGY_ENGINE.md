@@ -302,6 +302,68 @@ warnings (`SYNTHETIC_REPLAY_TIER`, `LOW_REAL_WORLD_CALIBRATION` until
 real imported data flows). ADVISORY_ONLY: the audit annotates analysis;
 it never changes the verdict, and no execution path exists anywhere.
 
+## Edge Lifecycle Engine — detect live, underpriced acceleration before decay (`edge_lifecycle.py`)
+
+The reflection's closing truth: *the MVP should not predict winners; it
+should detect live underpriced acceleration before the edge decays
+below threshold.* What already existed and is REUSED, not rebuilt:
+half-life physics (signal tyres), threshold gates (cherry-pick ladder),
+narrative phases (tracker), crowding (theme/OAI), belief gaps
+(net_signal_value + Bayes + prediction radar), friction
+(execution_friction), anti-streak discipline (dice audit + driver +
+outcome quadrants), self-doubt (counterfactual wind tunnel). What was
+genuinely missing — five components, one optional `lifecycle` payload
+section:
+
+* **Carrying capacity** — `G(t) ≤ K`, never `G(t) ≤ e`:
+  `K = scale + (1−scale) · headroom(TAM evidence, optionality, pricing
+  power, competition, regulation)`; states `early_runway → mid_curve →
+  bending_toward_saturation → saturated` (3-period growth deceleration
+  bends the curve early); `growth_quality = r × (K − G)` — tested: a
+  60% grower near its ceiling scores below a 20% grower with runway;
+  `fake_exponential` flags claimed growth that would overrun its own
+  evidenced ceiling inside the horizon (an e^rt story on a
+  K/(1+Ae^−rt) curve).
+* **Acceleration path (brachistochrone)** — `mgh → ½mv²`: Path B
+  `controlled_acceleration` (early conversion with evidence) beats
+  Path A `reckless_drop` (momentum without support) and Path C
+  `slow_straight_line`; `stalled_potential` is stored energy with no
+  catalyst. `AccelerationEdge = catalyst × proximity × momentum /
+  (friction + decay + crowding)`; `conversion = momentum / potential`.
+* **Arbitrage convergence** — `net edge = gap × P(convergence) −
+  friction − ½·break risk`; a gap > 0.1 with no named convergence
+  catalyst (or P < 0.25) is a **value trap**; crowding halves the gap's
+  half-life window.
+* **Hedged edge** — `hedged = thesis − ½·unwanted beta − cost`;
+  efficiency = risk reduced / cost; over-hedge (cost ≥ edge or
+  efficiency < 1) kills the edge it protects; survival gates upside
+  (`ruin_risk ≥ 0.5` → not viable). Structure recommendations only —
+  no instrument is ever traded.
+* **Thesis expiry clock** — `E(t) = E0·0.5^(t/h) > T ⇒ t_expiry =
+  h·log₂(E0/T)`. Worked example (tested): E0 0.8, T 0.2, h 30d →
+  **exactly 60 days to expiry**. Every thesis gets a death date.
+
+**The Opportunity equation** reconciles them:
+
+```text
+Opportunity = (Runway × Acceleration × Underpricing)
+              / (Decay + Crowding + Friction + Execution + Unhedged)
+Verdicts: live_underpriced_acceleration · potential_without_catalyst ·
+          priced_in · saturating_compounder · decayed_below_threshold ·
+          watch_and_revalidate
+```
+
+**Self-fed, conservative-wins** (mirroring the self-feed asymmetry):
+crowding from the theme mapper wins when higher than the caller's;
+live edge from blended tyre grip wins when LOWER (a caller claiming
+0.9 over a stale 120h social spike gets the tyre's ~0.01, with
+provenance `signal_tyres.blended_grip_pct/100` — tested end-to-end);
+priced belief defaults to the Bayes prior or prediction-market
+probability. **Gate:** `decayed_below_threshold` → `EDGE_EXPIRED`,
+`saturating_compounder` → `SATURATION_PRICED_IN`, both cap at
+watchlist; the golden `LIVE_UNDERPRICED_ACCELERATION` stamp is a
+research label that never promotes anything. ADVISORY_ONLY.
+
 ## Limitations (honest)
 
 * Trait scores, channel impacts, and probabilities the engines do not
@@ -309,6 +371,11 @@ it never changes the verdict, and no execution path exists anywhere.
   closes this gap only for the opponent section, and its derived values
   inherit the payload's own physics inputs — internally consistent, not
   independently sourced.
+* Carrying capacity is a normalized proxy from caller-judged TAM
+  evidence, not a fitted market-size model; the expiry clock inherits
+  tyre half-life constants, which are doctrine-derived. Arbitrage
+  convergence probabilities and hedge exposures are research judgements
+  the engine structures, never sources.
 * The counterfactual audit stresses the payload it was given; it cannot
   detect evidence the caller withheld (it can only show which withheld
   evidence WOULD have mattered). Its risk numbers are doctrine-derived

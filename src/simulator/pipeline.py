@@ -517,6 +517,72 @@ def evaluate_candidate_payload(payload: dict[str, Any]) -> dict[str, Any]:
             ],
         )
 
+    # 14a-quater. Edge lifecycle (optional "lifecycle" section): carrying
+    # capacity, acceleration path, arbitrage convergence, hedged edge, and
+    # the thesis expiry clock. Self-feeds crowding (theme), half-life and
+    # live edge (tyres), and priced belief (Bayes posterior / prediction
+    # market) with provenance. Conservative-only gate: an expired edge or
+    # a priced-in saturating compounder caps at watchlist; the golden
+    # "live_underpriced_acceleration" verdict never promotes anything.
+    lifecycle_result = None
+    lifecycle_section = payload.get("lifecycle")
+    if isinstance(lifecycle_section, dict) and lifecycle_section:
+        from src.simulator.signal_tyres import blended_grip_pct
+        from src.strategy.edge_lifecycle import assess_edge_lifecycle
+
+        lifecycle_derived: dict[str, Any] = {}
+        if isinstance(payload.get("theme_assessment"), dict) and payload[
+            "theme_assessment"
+        ]:
+            lifecycle_derived["crowding"] = theme.crowding
+        if tyres:
+            lifecycle_derived["live_edge"] = blended_grip_pct(tyres) / 100.0
+            lifecycle_derived["half_life_days"] = (
+                sum(t.adjusted_half_life_hours for t in tyres)
+                / len(tyres) / 24.0
+            )
+        if bayes_result is not None:
+            lifecycle_derived["priced_belief"] = bayes_result.prior
+            lifecycle_derived["priced_belief_source"] = "bayes.prior"
+        elif radar and radar.get("probability_after") is not None:
+            lifecycle_derived["priced_belief"] = coerce_float(
+                radar.get("probability_after")
+            )
+            lifecycle_derived["priced_belief_source"] = (
+                "prediction_market.probability_after"
+            )
+
+        lifecycle_report = assess_edge_lifecycle(
+            lifecycle_section, derived=lifecycle_derived
+        )
+        lifecycle_result = lifecycle_report.to_dict()
+        if lifecycle_report.verdict in (
+            "decayed_below_threshold", "saturating_compounder",
+        ):
+            from src.simulator.threshold_ladder import LADDER_STATES
+
+            decision.gate_results["lifecycle_gate"] = False
+            decision.reason_codes.append(
+                "EDGE_EXPIRED"
+                if lifecycle_report.verdict == "decayed_below_threshold"
+                else "SATURATION_PRICED_IN"
+            )
+            if decision.final_state in LADDER_STATES and (
+                LADDER_STATES.index(decision.final_state)
+                > LADDER_STATES.index("watchlist")
+            ):
+                decision.final_state = "watchlist"
+                decision.decision_reason += (
+                    " Lifecycle gate: the edge has decayed below "
+                    "threshold (or growth is saturating with nothing "
+                    "left to converge); investment state capped at "
+                    "watchlist."
+                )
+        else:
+            decision.gate_results["lifecycle_gate"] = True
+            if lifecycle_report.verdict == "live_underpriced_acceleration":
+                decision.reason_codes.append("LIVE_UNDERPRICED_ACCELERATION")
+
     # 14a-ter. Dice audits supplied with the payload (from the audit loop):
     # severe statuses on load-bearing sources block investment-grade
     # advisory actions and stamp the decision.
@@ -623,6 +689,7 @@ def evaluate_candidate_payload(payload: dict[str, Any]) -> dict[str, Any]:
         "decision": decision.to_dict(),
         "advisory_action": advisory.to_dict(),
         "bayes": bayes_result.to_dict() if bayes_result else None,
+        "lifecycle": lifecycle_result,
         "opponent": opponent_result,
         "games": games_result,
         "consent_ledger": consent_ledger.to_dict(),
