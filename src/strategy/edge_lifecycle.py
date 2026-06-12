@@ -43,7 +43,7 @@ import math
 from dataclasses import asdict, dataclass, field
 
 from src.utils.math_utils import clamp01, clip, safe_div
-from src.utils.validation_utils import coerce_float, normalized_score
+from src.utils.validation_utils import coerce_float, normalized_score, section_dict
 
 # ---------------------------------------------------------------------------
 # Carrying capacity
@@ -659,14 +659,14 @@ def assess_edge_lifecycle(
 
     capacity = estimate_carrying_capacity(
         **_kwargs_for(estimate_carrying_capacity,
-                      dict(section.get("capacity") or {}))
+                      section_dict(section.get("capacity")))
     )
-    path_section = dict(section.get("path") or {})
+    path_section = dict(section_dict(section.get("path")))
     path_section.setdefault("crowding", crowding)
     path = score_acceleration_path(
         **_kwargs_for(score_acceleration_path, path_section)
     )
-    arb_section = dict(section.get("arbitrage") or {})
+    arb_section = dict(section_dict(section.get("arbitrage")))
     arb_section.setdefault("crowding", crowding)
     if belief is not None:
         arb_section.setdefault("priced_belief", coerce_float(belief))
@@ -675,7 +675,7 @@ def assess_edge_lifecycle(
     )
     hedge = decompose_hedged_edge(
         **_kwargs_for(decompose_hedged_edge,
-                      dict(section.get("hedge") or {}))
+                      section_dict(section.get("hedge")))
     )
     expiry = compute_expiry_clock(
         live_edge=live_edge,
@@ -687,7 +687,7 @@ def assess_edge_lifecycle(
     )
 
     friction = normalized_score(
-        dict(section.get("arbitrage") or {}).get("friction", 0.1), 0.1
+        section_dict(section.get("arbitrage")).get("friction", 0.1), 0.1
     )
     execution_risk = normalized_score(section.get("execution_risk", 0.2),
                                       0.2)

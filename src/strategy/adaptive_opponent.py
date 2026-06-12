@@ -25,7 +25,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 
 from src.utils.math_utils import clamp01, clip, safe_div
-from src.utils.validation_utils import normalized_score
+from src.utils.validation_utils import normalized_score, section_dict
 
 # ---------------------------------------------------------------------------
 # Weapon Map
@@ -451,7 +451,7 @@ def complete_game_score(capabilities: dict[str, float]) -> dict[str, object]:
 def assess_adaptive_opponent(section: dict) -> dict[str, object]:
     """Run the mentor's questions over one ``opponent`` payload section."""
     weapons = map_weapons(
-        dict(section.get("strengths") or {}),
+        dict(section_dict(section.get("strengths"))),
         evidence_reliability=normalized_score(
             section.get("evidence_reliability", 0.5), 0.5
         ),
@@ -459,7 +459,7 @@ def assess_adaptive_opponent(section: dict) -> dict[str, object]:
         crowding=normalized_score(section.get("crowding", 0.0)),
     )
     weak_side = assess_weak_side(
-        dict(section.get("weaknesses") or {}),
+        dict(section_dict(section.get("weaknesses"))),
         attack_probability=normalized_score(
             section.get("attack_probability", 0.5), 0.5
         ),
@@ -468,17 +468,17 @@ def assess_adaptive_opponent(section: dict) -> dict[str, object]:
         ),
         improving=bool(section.get("weakness_improving", False)),
     )
-    niche_section = dict(section.get("niche") or {})
+    niche_section = dict(section_dict(section.get("niche")))
     niche = classify_niche(**{
         k: float(v) for k, v in niche_section.items()
         if k in classify_niche.__kwdefaults__
     })
-    adaptation_section = dict(section.get("adaptation") or {})
+    adaptation_section = dict(section_dict(section.get("adaptation")))
     adaptation = assess_adaptation(**{
         k: v for k, v in adaptation_section.items()
         if k in assess_adaptation.__kwdefaults__
     })
-    catalyst_section = dict(section.get("catalyst_plus_one") or {})
+    catalyst_section = dict(section_dict(section.get("catalyst_plus_one")))
     catalyst = (
         model_catalyst_plus_one(**{
             k: v for k, v in catalyst_section.items()
@@ -487,7 +487,7 @@ def assess_adaptive_opponent(section: dict) -> dict[str, object]:
         if catalyst_section.get("catalyst")
         else None
     )
-    game = complete_game_score(dict(section.get("capabilities") or {}))
+    game = complete_game_score(dict(section_dict(section.get("capabilities"))))
 
     return {
         "weapon_map": weapons.to_dict(),

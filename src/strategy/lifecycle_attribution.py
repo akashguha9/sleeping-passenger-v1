@@ -41,7 +41,11 @@ from typing import Any, Callable
 
 from src.strategy.edge_lifecycle import assess_edge_lifecycle
 from src.utils.math_utils import clamp01, safe_div
-from src.utils.validation_utils import coerce_float, normalized_score
+from src.utils.validation_utils import (
+    coerce_float,
+    normalized_score,
+    section_dict,
+)
 
 # Verdict ordering: higher rank = more actionable. Used only to sign
 # attribution deltas, never to promote anything.
@@ -111,7 +115,7 @@ def _set(path: str, value: Any) -> Callable[[dict], None]:
     def mutate(section: dict) -> None:
         if "." in path:
             sub_name, key = path.split(".", 1)
-            sub = dict(section.get(sub_name) or {})
+            sub = dict(section_dict(section.get(sub_name)))
             sub[key] = value
             section[sub_name] = sub
         else:
@@ -123,7 +127,7 @@ def _scale(path: str, factor: float, default: float) -> Callable[[dict], None]:
     def mutate(section: dict) -> None:
         if "." in path:
             sub_name, key = path.split(".", 1)
-            sub = dict(section.get(sub_name) or {})
+            sub = dict(section_dict(section.get(sub_name)))
             sub[key] = coerce_float(sub.get(key, default), default) * factor
             section[sub_name] = sub
         else:
@@ -142,33 +146,33 @@ def _perturbation_specs() -> list[dict[str, Any]]:
 
     def remove_capacity_penalty(section: dict) -> None:
         section["capacity"] = {
-            **(section.get("capacity") or {}),
+            **section_dict(section.get("capacity")),
             "current_scale": 0.15, "market_penetration": 0.0,
             "tam_evidence": 0.8, "claimed_growth_rate": 0.1,
             "growth_rate_trend": [],
         }
 
     def close_belief_gap(section: dict) -> None:
-        arb = dict(section.get("arbitrage") or {})
+        arb = dict(section_dict(section.get("arbitrage")))
         arb["priced_belief"] = coerce_float(arb.get("reality_score"))
         section["arbitrage"] = arb
 
     def widen_belief_gap(section: dict) -> None:
-        arb = dict(section.get("arbitrage") or {})
+        arb = dict(section_dict(section.get("arbitrage")))
         arb["priced_belief"] = max(
             coerce_float(arb.get("reality_score")) - 0.35, 0.0
         )
         section["arbitrage"] = arb
 
     def raise_hedge_cost(section: dict) -> None:
-        hedge = dict(section.get("hedge") or {})
+        hedge = dict(section_dict(section.get("hedge")))
         hedge["hedge_cost"] = min(
             coerce_float(hedge.get("thesis_edge"), 0.5) + 0.2, 1.0
         )
         section["hedge"] = hedge
 
     def delay_catalyst(section: dict) -> None:
-        path = dict(section.get("path") or {})
+        path = dict(section_dict(section.get("path")))
         path["catalyst_proximity_days"] = coerce_float(
             path.get("catalyst_proximity_days"), 30.0
         ) + 60.0

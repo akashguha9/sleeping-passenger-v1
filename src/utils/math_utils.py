@@ -4,8 +4,16 @@ from __future__ import annotations
 
 
 def clip(value: float, minimum: float, maximum: float) -> float:
-    """Clamp ``value`` to the inclusive ``[minimum, maximum]`` range."""
-    return max(minimum, min(maximum, float(value)))
+    """Clamp ``value`` to the inclusive ``[minimum, maximum]`` range.
+
+    NaN clamps to the MINIMUM (the conservative bound): NaN defeats
+    comparisons, so the naive ``max(lo, min(hi, x))`` resolves it to
+    the maximum — turning a poisoned input into maximal optimism.
+    """
+    number = float(value)
+    if number != number:  # NaN is the only value unequal to itself
+        return float(minimum)
+    return max(minimum, min(maximum, number))
 
 
 def clamp01(value: float) -> float:

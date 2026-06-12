@@ -22,6 +22,8 @@ must not be punished. Missing evidence stays neutral with a warning.
 
 from __future__ import annotations
 
+from src.utils.validation_utils import section_dict as _section
+
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
@@ -180,14 +182,14 @@ def prepare_consent_context(payload: dict[str, Any]) -> ConsentBridgeContext:
     texts = bundle.texts if bundle else []
     segment = str(
         payload.get("customer_segment")
-        or (payload.get("consent_inputs") or {}).get("segment")
+        or _section(payload.get("consent_inputs")).get("segment")
         or "general"
     )
 
     if has_precomputed:
         profile = dict(precomputed)
     else:
-        consent_inputs = dict(payload.get("consent_inputs") or {})
+        consent_inputs = dict(_section(payload.get("consent_inputs")))
         consent_inputs["complaint_texts"] = texts
         consent_inputs.setdefault("company", str(payload.get("ticker", "UNKNOWN")))
         consent_inputs.setdefault("segment", segment)
@@ -234,7 +236,7 @@ def prepare_consent_context(payload: dict[str, Any]) -> ConsentBridgeContext:
         vulnerable_segment=segment.lower()
         in VULNERABLE_SEGMENTS_FOR_JURISDICTION,
         collection_capabilities=(
-            (payload.get("consent_inputs") or {}).get("capabilities") or {}
+            _section(_section(payload.get("consent_inputs")).get("capabilities"))
         ).get("collection"),
     ) if texts else None
 

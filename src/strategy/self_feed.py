@@ -41,7 +41,7 @@ from src.simulator.narrative_tracker import NarrativeStatus
 from src.simulator.signal_tyres import TyreState, blended_grip_pct
 from src.simulator.theme_mapper import ThemeAssessment
 from src.utils.math_utils import clamp01
-from src.utils.validation_utils import coerce_float, normalized_score
+from src.utils.validation_utils import coerce_float, normalized_score, section_dict
 
 # Fraction of the four adaptation drivers (signal, repricing, crowding,
 # saturation) that must be engine-backed before self-fed data may gate.
@@ -340,7 +340,7 @@ def merge_with_caller(
     # Weaknesses: per-key max severity; an omitted engine-evidenced
     # weakness (severity >= 0.5) is itself an optimistic override.
     derived_weak = dict(derived.get("weaknesses") or {})
-    caller_weak = dict(caller_section.get("weaknesses") or {})
+    caller_weak = dict(section_dict(caller_section.get("weaknesses")))
     if derived_weak or caller_weak:
         merged_weak: dict[str, float] = {}
         for name in set(derived_weak) | set(caller_weak):
@@ -367,7 +367,7 @@ def merge_with_caller(
     # than the physics shows is optimistic); caller-only strengths pass
     # through as research judgement.
     derived_strong = dict(derived.get("strengths") or {})
-    caller_strong = dict(caller_section.get("strengths") or {})
+    caller_strong = dict(section_dict(caller_section.get("strengths")))
     if derived_strong or caller_strong:
         merged_strong = dict(caller_strong)
         for name, d_val in derived_strong.items():
@@ -394,7 +394,7 @@ def merge_with_caller(
 
     # Adaptation drivers: scalar conservative-wins inside the subsection.
     derived_adaptation = dict(derived.get("adaptation") or {})
-    caller_adaptation = dict(caller_section.get("adaptation") or {})
+    caller_adaptation = dict(section_dict(caller_section.get("adaptation")))
     if derived_adaptation or caller_adaptation:
         merged_adaptation = dict(caller_adaptation)
         for field_name, d_val in derived_adaptation.items():

@@ -23,7 +23,7 @@ The advisory contract is enforced everywhere:
 ## Prerequisites
 
 - Windows 10/11 with PowerShell 5+ (or PowerShell 7).
-- Python 3.11+ (CI uses 3.13).
+- Python 3.12+ (PEP 701 f-strings are a SyntaxError on 3.11 and earlier; CI uses 3.13).
 - Node.js 18+ and npm.
 - ~500 MB free disk for `runtime/`, `logs/`, and the dashboard build.
 

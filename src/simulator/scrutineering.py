@@ -32,7 +32,7 @@ import statistics
 from dataclasses import asdict, dataclass, field
 
 from src.utils.math_utils import clamp01
-from src.utils.validation_utils import coerce_float, normalized_score
+from src.utils.validation_utils import coerce_float, normalized_score, section_dict
 
 # Suspicion at or above this fails inspection.
 SUSPICION_FAIL_THRESHOLD = 0.50
@@ -85,19 +85,21 @@ def _favorable_inputs(payload: dict) -> list[float]:
         normalized_score(payload.get("hard_evidence_score", 0.0)),
         normalized_score(payload.get("confirmation_level", 0.0)),
     ]
-    theme = payload.get("theme_assessment") or {}
+    theme = section_dict(payload.get("theme_assessment"))
     for key in ("policy_fit", "macro_fit", "sector_momentum", "liquidity_support"):
         if key in theme:
             values.append(normalized_score(theme.get(key)))
-    exposure = payload.get("exposure") or {}
+    exposure = section_dict(payload.get("exposure"))
     for key in ("revenue_exposure", "backlog_linkage", "supply_chain_position"):
         if key in exposure:
             values.append(normalized_score(exposure.get(key)))
-    aero = payload.get("aero") or {}
+    aero = section_dict(payload.get("aero"))
     evidence = aero.get("evidence") or {}
     for value in evidence.values():
         values.append(normalized_score(value))
-    blind = (payload.get("triple_blind") or {}).get("blinded_metrics") or {}
+    blind = section_dict(
+        section_dict(payload.get("triple_blind")).get("blinded_metrics")
+    )
     for value in blind.values():
         values.append(normalized_score(value))
     return values
@@ -133,11 +135,11 @@ def inspect_payload(payload: dict) -> ScrutineeringReport:
     """Run every technical check against one raw candidate payload."""
     violations: list[ScrutineeringViolation] = []
     checks_run = 0
-    narrative = payload.get("narrative") or {}
+    narrative = section_dict(payload.get("narrative"))
     mentions = int(coerce_float(narrative.get("mention_count")))
     origins = int(coerce_float(narrative.get("independent_origin_count")))
     signals = [s for s in payload.get("signals", []) or [] if isinstance(s, dict)]
-    meal = payload.get("meal_box") or {}
+    meal = section_dict(payload.get("meal_box"))
     confirmation = normalized_score(payload.get("confirmation_level", 0.0))
     hard_evidence = normalized_score(payload.get("hard_evidence_score", 0.0))
 
@@ -185,9 +187,9 @@ def inspect_payload(payload: dict) -> ScrutineeringReport:
     # 3. Crash-risk conservation: claimed total risk cannot undercut the
     # circuit's own crash baseline.
     checks_run += 1
-    risk_factors = payload.get("risk_factors") or {}
+    risk_factors = section_dict(payload.get("risk_factors"))
     claimed_risk = sum(normalized_score(v) for v in risk_factors.values())
-    circuit_section = payload.get("circuit") or {}
+    circuit_section = section_dict(payload.get("circuit"))
     market_cap = coerce_float(circuit_section.get("market_cap_usd"))
     from src.simulator.circuit_classifier import classify_circuit
 
@@ -218,7 +220,7 @@ def inspect_payload(payload: dict) -> ScrutineeringReport:
 
     # 4. Downforce claims require a stocked meal box.
     checks_run += 1
-    aero_evidence = (payload.get("aero") or {}).get("evidence") or {}
+    aero_evidence = section_dict(section_dict(payload.get("aero")).get("evidence"))
     claimed_downforce = (
         max((normalized_score(v) for v in aero_evidence.values()), default=0.0)
     )
@@ -238,7 +240,7 @@ def inspect_payload(payload: dict) -> ScrutineeringReport:
 
     # 5. Narrative shock requires an actual narrative.
     checks_run += 1
-    radar = payload.get("prediction_market") or {}
+    radar = section_dict(payload.get("prediction_market"))
     delta = abs(
         coerce_float(radar.get("probability_after"))
         - coerce_float(radar.get("probability_before"))
