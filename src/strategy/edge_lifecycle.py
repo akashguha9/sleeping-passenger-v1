@@ -649,6 +649,9 @@ def assess_edge_lifecycle(
         and capacity.remaining_runway >= 0.3
         and expiry.status == "live"
         and not capacity.fake_exponential
+        # Survival before upside: a declared hedge structure that is not
+        # viable (over-hedged or ruin-exposed) blocks the golden state.
+        and (not section.get("hedge") or hedge.survival_viable)
     ):
         verdict = "live_underpriced_acceleration"
     else:

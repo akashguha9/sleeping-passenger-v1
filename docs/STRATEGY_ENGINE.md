@@ -364,6 +364,63 @@ probability. **Gate:** `decayed_below_threshold` → `EDGE_EXPIRED`,
 watchlist; the golden `LIVE_UNDERPRICED_ACCELERATION` stamp is a
 research label that never promotes anything. ADVISORY_ONLY.
 
+## Lifecycle Attribution + Calibration Ledger (`lifecycle_attribution.py`)
+
+The lifecycle verdict now explains itself and answers for itself: *here
+is the verdict, here is what caused it, here is what would change it,
+and here is how we will know later whether it was right.*
+
+**Attribution (causal sensitivity).** Sixteen single-assumption twists
+rerun the PURE `assess_edge_lifecycle` function (no pipeline re-runs —
+deliberately distinct from `counterfactual_wind_tunnel`, which perturbs
+the physics payload and attributes the adaptation gate). `Δ_verdict =
+rank(perturbed) − rank(baseline)` over the verdict ladder
+(decayed 0 → golden 4) classifies every input:
+
+* `VERDICT_CRITICAL` — removing the penalty promotes (it was binding);
+* `KILL_SWITCH` — an adverse twist demotes (the assumption must hold);
+* `SCORE_MOVER` — verdict holds, opportunity moves ≥ 0.5;
+* `COSMETIC` — in the explanation, not the cause: its weight is
+  unsupported by verdict evidence at this operating point.
+
+`Fragility = flips / 16`; `Concentration = max|Δrank| / 4`. Fragility
+≥ 0.25 stamps `LIFECYCLE_FRAGILE` (warn-only, never a cap): a golden
+state with four kill switches is a different animal from a robust one.
+Survival now gates the golden verdict — a declared hedge that is
+over-hedged or ruin-exposed blocks `live_underpriced_acceleration`.
+
+**Worked example (tested verbatim).** The golden fixture's kill
+switches: `close_belief_gap`, `shrink_carrying_capacity`,
+`weaken_convergence`, `raise_hedge_cost` (fragility 0.25 → stamped).
+On the decayed fixture, `restore_live_edge` jumps rank 0 → 4
+(concentration 1.0: one assumption controls the whole range) while
+`extend_half_life` is COSMETIC — `t = h·log₂(E₀/T)` is zero for any h
+once E₀ ≤ T; a longer half-life cannot rescue a dead edge. Honest audit
+finding: `break_risk` is verdict-cosmetic at every tested operating
+point — it moves the arbitrage net edge but never the verdict.
+
+**Calibration ledger (falsifiability).** `entry_from_lifecycle` freezes
+the prediction at entry (edge, expiry days, K, convergence probability,
+hedge structure, fragility, kill switches, data tier);
+`resolve_entry` scores it when the thesis resolves:
+
+```text
+CalibrationError = |E_pred − E_realized|
+ExpiryError      = |t_pred − t_actual_death|  (+ expired-before-
+                                               resolution flag)
+K_error          = |K_est − K_realized| / K_realized
+ConvergenceScore = P_pred − 1[converged]      (signed overconfidence)
+HedgeEffect.     = drawdown avoided / (upside sacrificed + cost)
+```
+
+Unobserved outcomes stay `None` — never "fine". `summarize_ledger`
+reports means, the expired-before-resolution rate, and the WORST data
+tier present (one synthetic row keeps the whole summary
+`synthetic_fixture`); below 10 records the status is
+`require_more_data`. Synthetic rows prove the plumbing, never the
+model; lifecycle weights stay doctrine-derived until the ledger is
+scored on backtest or empirical tiers. ADVISORY_ONLY.
+
 ## Limitations (honest)
 
 * Trait scores, channel impacts, and probabilities the engines do not
@@ -371,6 +428,10 @@ research label that never promotes anything. ADVISORY_ONLY.
   closes this gap only for the opponent section, and its derived values
   inherit the payload's own physics inputs — internally consistent, not
   independently sourced.
+* The calibration ledger's resolution inputs (realized edge, actual
+  edge death, K realized, convergence) must come from the operator or
+  a future outcome-ingestion path; today's records are synthetic
+  fixtures and are labeled as such everywhere they appear.
 * Carrying capacity is a normalized proxy from caller-judged TAM
   evidence, not a fitted market-size model; the expiry clock inherits
   tyre half-life constants, which are doctrine-derived. Arbitrage

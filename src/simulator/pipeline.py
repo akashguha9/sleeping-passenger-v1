@@ -556,6 +556,21 @@ def evaluate_candidate_payload(payload: dict[str, Any]) -> dict[str, Any]:
             lifecycle_section, derived=lifecycle_derived
         )
         lifecycle_result = lifecycle_report.to_dict()
+
+        # Attribution rides along (pure-function reruns, ~16 calls): the
+        # verdict names its own causes, kill switches, and cosmetic
+        # inputs. A fragile verdict is stamped — warn-only, never a cap.
+        from src.strategy.lifecycle_attribution import (
+            FRAGILITY_WARN,
+            attribute_lifecycle_verdict,
+        )
+
+        attribution = attribute_lifecycle_verdict(
+            lifecycle_section, derived=lifecycle_derived
+        )
+        lifecycle_result["attribution"] = attribution.to_dict()
+        if attribution.fragility >= FRAGILITY_WARN:
+            decision.reason_codes.append("LIFECYCLE_FRAGILE")
         if lifecycle_report.verdict in (
             "decayed_below_threshold", "saturating_compounder",
         ):
