@@ -1,0 +1,6 @@
+record_id,created_at_utc,signal_timestamp_utc,ticker,normalized_ticker,asset_class,country,source_snapshot_id,model_version,scoring_version,signal_class,model_probability,prediction_horizon_days,target_event_definition,entry_price,exit_price,outcome_label,realized_return_pct,r_multiple,max_adverse_excursion_pct,max_favorable_excursion_pct,trade_state,reconciliation_status,is_real_outcome,is_fixture,is_mock,is_synthetic,excluded_from_calibration_reason,advisory_status,execution_mode,execution_gate,broker_api_called,ai_execution_count,human_review_required,provenance_kind
+# DEMO_ONLY / EMPTY template — do NOT use any of these rows as evidence.
+# Real rows must be produced by scripts.curate_calibration_corpus from canonical SQLite.
+# Columns marked is_real_outcome=False MUST NOT count toward N_real.
+EMPTY_TEMPLATE_0001,,,,,,,,,,,,,,,,,,,,,,,False,False,False,False,template_row_no_outcome,ADVISORY_ONLY,ADVISORY_ONLY,LOCKED,False,0,True,EMPTY
+DEMO_ONLY_EXAMPLE_0001,2026-05-27T00:00:00Z,2026-05-20T12:00:00Z,EXAMPLE,EXAMPLE,equity,US,demo_snap_0001,demo,demo_v0,demo,0.55,7,target_event_demo_only_do_not_use,0.0,0.0,,,,,,,PENDING,False,False,False,True,demo_only_row_excluded_from_n_real,ADVISORY_ONLY,ADVISORY_ONLY,LOCKED,False,0,True,DEMO_ONLY

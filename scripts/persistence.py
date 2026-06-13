@@ -14,6 +14,7 @@ Advisory invariants enforced on every write and read:
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 from pathlib import Path
 from typing import Any
@@ -518,6 +519,25 @@ def _additive_migrations(conn: sqlite3.Connection) -> None:
             pass
 
 
+def _harden_db_permissions(db_path: Path) -> None:
+    """Make a freshly-created SQLite DB owner-only (0o600) on POSIX.
+
+    SQLite creates files honouring the process umask, which on CI/Linux is
+    typically 022 -> 0o644 (world-readable). The local-data-protection audit
+    (``audit_local_data_protection``) correctly flags any world-accessible
+    ``runtime/*.db`` as a secret-custody violation. Clamping the mode at the
+    single canonical creation point keeps runtime DBs private without
+    weakening that audit. No-op on Windows (NTFS ACLs, not POSIX bits) and
+    never fatal — a chmod failure must not break persistence.
+    """
+    if os.name != "posix":
+        return
+    try:
+        os.chmod(db_path, 0o600)
+    except OSError:
+        pass
+
+
 def init_schema(db_path: Path = DB_PATH) -> None:
     """Create runtime dir and initialize all tables. Idempotent."""
     db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -529,6 +549,7 @@ def init_schema(db_path: Path = DB_PATH) -> None:
         conn.commit()
     finally:
         conn.close()
+    _harden_db_permissions(db_path)
     _initialized.add(str(db_path.resolve()))
 
 

@@ -86,10 +86,17 @@ data/processed/*
 !data/processed/.gitkeep
 data/paper_trades/*
 !data/paper_trades/.gitkeep
+# Runtime forward-capture corpus: advisory decisions captured at runtime.
+# Local-only; committing it would pollute the calibration corpus with
+# non-canonical / synthetic-demo rows. The README + CSV template stay tracked.
+data/calibration_corpus/decisions.jsonl
+data/calibration_corpus/*.decisions.jsonl
 !data/logs/
 data/logs/*
 !data/logs/.gitkeep
 *.csv
+# Keep the empty manual-reconciliation template tracked despite the *.csv rule.
+!data/calibration_corpus/paper_trade_ledger_template.csv
 *.tsv
 *.parquet
 *.db
