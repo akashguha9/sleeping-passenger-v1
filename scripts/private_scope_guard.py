@@ -298,6 +298,13 @@ QUARANTINED_TOOL_DIRS: dict[str, str] = {
         "the private-operator MVP runtime; relocated from scripts/ to "
         "tools/ to remove it from the MVP surface."
     ),
+    "scrapling_smoke": (
+        "Scrapling web-fetcher smoke script (HTTP + headless browser "
+        "fetch of example.com) — a scraping-library connectivity check, "
+        "not part of the private-operator MVP runtime. Relocated from "
+        "scripts/ to tools/ so the crawler dependency stays off the MVP "
+        "signal-scoring surface."
+    ),
 }
 
 # Pre-existing baseline of scripts/ entries that do not match an approved
