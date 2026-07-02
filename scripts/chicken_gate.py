@@ -57,7 +57,7 @@ from scripts.crowding_detector import compute_crowding_context
 from scripts.late_adoption_lockout import LALO_SATURATION_WARNING
 from scripts.signal_decay_waste import compute_decay_factor
 
-SCORING_PROFILE_VERSION = "chicken-gate-v1.1"
+SCORING_PROFILE_VERSION = "chicken-gate-v1.2"
 
 # ---------------------------------------------------------------------------
 # Vocabulary

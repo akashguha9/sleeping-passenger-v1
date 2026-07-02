@@ -595,7 +595,7 @@ def test_audit_json_contains_v11_fields():
         "EVIDENCE_NOTES", "ADVISORY_ONLY_STAMP", "ONE_LINE_REASON",
     ):
         assert key in result, key
-    assert result["SCORING_PROFILE_VERSION"] == "chicken-gate-v1.1"
+    assert result["SCORING_PROFILE_VERSION"] == "chicken-gate-v1.2"
 
 
 def test_advisory_stamp_preserved():

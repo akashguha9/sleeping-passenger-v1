@@ -31,6 +31,7 @@ try:
     from scripts.advisory_contract import advisory_safety_stamps, human_only_stamp
     from scripts.anti_staleness import build_anti_staleness
     from scripts.candidate_executable_split import build_candidate_executable_split
+    from scripts.chicken_gate_daily_bridge import build_chicken_gate_integration
     from scripts.daily_payload import load_daily_payload, normalize_ticker
     from scripts.fresh_discovery_contract import assert_no_provenance_violation
     from scripts.fresh_market_discovery import build_fresh_market_discovery
@@ -41,6 +42,7 @@ except ModuleNotFoundError:  # pragma: no cover - script-style env
     from advisory_contract import advisory_safety_stamps, human_only_stamp
     from anti_staleness import build_anti_staleness
     from candidate_executable_split import build_candidate_executable_split
+    from chicken_gate_daily_bridge import build_chicken_gate_integration
     from daily_payload import load_daily_payload, normalize_ticker
     from fresh_discovery_contract import assert_no_provenance_violation
     from fresh_market_discovery import build_fresh_market_discovery
@@ -112,6 +114,9 @@ def run_daily_synthesis(
     features: dict[str, dict[str, Any]] | None = None,
     eqs_features: dict[str, dict[str, Any]] | None = None,
     change_explanations: dict[str, str] | None = None,
+    chicken_gate_enabled: bool = True,
+    chicken_gate_debug_bypass: bool = False,
+    chicken_thesis_overrides: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Run the corrected four-layer flow and return the full result object."""
     payload = load_daily_payload(payload_dir)
@@ -135,6 +140,19 @@ def run_daily_synthesis(
         change_explanations=change_explanations, cqs_by_ticker=cqs_by_ticker,
     )
 
+    # Final advisory layer: every buy-side classified candidate passes
+    # through the chicken gate.  Demote-only — the split decision above is
+    # never upgraded, never mutated.
+    chicken_integration = build_chicken_gate_integration(
+        split=split,
+        discovery=discovery,
+        payload=payload,
+        why_today_scores=why_today_scores,
+        enabled=chicken_gate_enabled,
+        debug_bypass=chicken_gate_debug_bypass,
+        thesis_overrides=chicken_thesis_overrides,
+    )
+
     return {
         "run_date": payload["verified_holdings"].get("run_date"),
         "payload": payload,
@@ -146,6 +164,7 @@ def run_daily_synthesis(
         "candidate_executable_split": split,
         "anti_staleness": anti_staleness,
         "why_today_scores": why_today_scores,
+        "chicken_gate_integration": chicken_integration,
         "safety": advisory_safety_stamps(),
         "execution": human_only_stamp(),
     }
@@ -267,6 +286,16 @@ def render_portfolio_truth_context(result: dict[str, Any]) -> str:
         "stay BUY-CANDIDATE / NOT-EXECUTABLE."
     )
     lines.append("")
+    chicken = result.get("chicken_gate_integration", {})
+    lines.append("CHICKEN GATE (final advisory freshness/asymmetry/node layer):")
+    lines.append(f"  mode: {chicken.get('mode')}")
+    lines.append(f"  scoring_profile: {chicken.get('scoring_profile_version')}")
+    lines.append(f"  final_gate_counts: {chicken.get('final_gate_counts')}")
+    lines.append(f"  demotions: {chicken.get('demotions') or 'NONE'}")
+    lines.append("  TICKER | existing -> chicken -> final | score | reason")
+    for audit_line in chicken.get("audit_lines", []):
+        lines.append(f"  {audit_line}")
+    lines.append("")
     lines.append("Reminder: advisory only. No broker action. No execution. Human review required.")
     lines.append("============================================================")
     return "\n".join(lines)
@@ -300,6 +329,17 @@ def _write_artifacts(result: dict[str, Any], context_md: str) -> None:
         "anti_staleness": {
             "novelty_ratio": result["anti_staleness"]["novelty_ratio"],
             "stale_discovery_warning": result["anti_staleness"]["stale_discovery_warning"],
+        },
+        "chicken_gate": {
+            "mode": result["chicken_gate_integration"].get("mode"),
+            "scoring_profile_version": result["chicken_gate_integration"].get(
+                "scoring_profile_version"
+            ),
+            "final_gate_counts": result["chicken_gate_integration"].get(
+                "final_gate_counts"
+            ),
+            "demotions": result["chicken_gate_integration"].get("demotions"),
+            "audit_lines": result["chicken_gate_integration"].get("audit_lines"),
         },
         "safety": result["safety"],
     }
