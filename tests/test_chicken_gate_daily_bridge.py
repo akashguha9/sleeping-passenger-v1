@@ -87,10 +87,14 @@ def test_daily_synthesis_calls_chicken_gate(monkeypatch):
 
     monkeypatch.setattr(bridge, "evaluate_chicken_gate", counting)
     result = pipeline.run_daily_synthesis()
-    rows = result["chicken_gate_integration"]["rows"]
-    assert len(calls) == len(rows) >= 1
-    assert len(calls) == len(set(calls))  # exactly once per candidate
-    assert result["chicken_gate_integration"]["mode"] == bridge.ENABLED_MODE
+    integration = result["chicken_gate_integration"]
+    rows = integration["rows"]
+    assert len(rows) >= 1
+    # Pass #1 once per candidate, pass #2 once per five-model roundtrip.
+    assert len(set(calls)) == len(rows)
+    roundtrips = sum(1 for r in rows if r.get("FIVE_MODEL_ROUNDTRIP"))
+    assert len(calls) == len(rows) + roundtrips
+    assert integration["mode"] == bridge.ENABLED_MODE
 
 
 # ---------------------------------------------------------------------------
@@ -186,7 +190,7 @@ def test_daily_output_contains_chicken_audit_block():
             "advisory_only_stamp",
         ):
             assert key in block, key
-        assert block["scoring_profile_version"] == "chicken-gate-v1.2"
+        assert block["scoring_profile_version"] == "chicken-gate-v1.3"
         for key in (
             "EXISTING_ACTION_GATE", "CHICKEN_ACTION_GATE", "FINAL_ACTION_GATE",
             "CHICKEN_FINAL_SCORE", "INTEGRATED_FINAL_SCORE",
@@ -298,7 +302,7 @@ def test_runtime_artifact_schema_not_broken(monkeypatch, tmp_path):
         assert key in summary, key
     # New nested block added:
     assert summary["chicken_gate"]["mode"] == bridge.ENABLED_MODE
-    assert summary["chicken_gate"]["scoring_profile_version"] == "chicken-gate-v1.2"
+    assert summary["chicken_gate"]["scoring_profile_version"] == "chicken-gate-v1.3"
     assert "final_gate_counts" in summary["chicken_gate"]
 
 

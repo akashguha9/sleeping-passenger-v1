@@ -48,6 +48,14 @@ try:
         SCORING_PROFILE_VERSION,
         evaluate_chicken_gate,
     )
+    from scripts.chicken_gate_repair_engine import (
+        build_evidence_repair_plan,
+        build_override_template,
+        build_payload_health,
+        build_v13_summary,
+        prioritize_repairs,
+        simulate_unlock,
+    )
     from scripts.daily_payload import normalize_ticker
     from scripts.runtime_common import REPO_ROOT
 except ModuleNotFoundError:  # pragma: no cover - script-style env
@@ -60,6 +68,14 @@ except ModuleNotFoundError:  # pragma: no cover - script-style env
         SCORING_PROFILE_VERSION,
         evaluate_chicken_gate,
     )
+    from chicken_gate_repair_engine import (
+        build_evidence_repair_plan,
+        build_override_template,
+        build_payload_health,
+        build_v13_summary,
+        prioritize_repairs,
+        simulate_unlock,
+    )
     from daily_payload import normalize_ticker
     from runtime_common import REPO_ROOT
 
@@ -70,6 +86,11 @@ DISABLED_MODE = "CHICKEN_GATE_DISABLED_DEBUG_ONLY"
 ENABLED_MODE = "CHICKEN_GATE_ENABLED"
 
 THESIS_OVERRIDES_PATH = REPO_ROOT / "runtime" / "chicken_gate_thesis_overrides.json"
+OVERRIDE_TEMPLATE_PATH = (
+    REPO_ROOT / "runtime" / "chicken_gate_thesis_overrides.template.json"
+)
+SYNTH_NOT_AUDITED_NOTE = "INSUFFICIENT_EVIDENCE_FIVE_MODEL_SYNTHESIS"
+SYNTH_NOT_AUDITED_CAP = "FIVE_MODEL_SYNTHESIS_NOT_AUDITED"
 
 GATE_RANK: dict[str, int] = {
     GATE_BUY_BLOCKED: 0,
@@ -137,6 +158,55 @@ def classify_source_channel(provider: Any, source: Any) -> float | None:
         if token in label:
             return premium
     return None
+
+
+def load_five_model_synthesis(
+    run_date: Any, repo_root: Path | None = None
+) -> dict[str, Any] | None:
+    """Load the five-model synthesized report for this exact run date.
+
+    Checks the isolated-lanes artifact first, then the moltbook report the
+    PowerShell orchestrator writes.  Strictly keyed by run_date — a stale
+    report is NOT silently reused (anti-staleness doctrine).  Returns
+    {"source", "text"} or None.
+    """
+    date_text = str(run_date or "").strip()
+    if not date_text:
+        return None
+    root = repo_root if repo_root is not None else REPO_ROOT
+    for rel in (
+        f"runtime/five_model_synthesis/{date_text}/final_synthesis.md",
+        f"moltbook/five_model_synthesis_report_{date_text}.txt",
+    ):
+        target = root / rel
+        try:
+            text = target.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        if text.strip():
+            return {"source": rel, "text": text}
+    return None
+
+
+def extract_ticker_section(report_text: str, ticker: str) -> str | None:
+    """Pull the synthesized-report lines discussing one ticker (+/- 2 lines).
+
+    Returns None when the report never mentions the ticker — that candidate
+    was not audited by the five models.
+    """
+    ticker = str(ticker or "").strip()
+    if not ticker or not report_text:
+        return None
+    lines = report_text.splitlines()
+    upper = ticker.upper()
+    keep: set[int] = set()
+    for i, line in enumerate(lines):
+        if upper in line.upper():
+            keep.update(range(max(0, i - 2), min(len(lines), i + 3)))
+    if not keep:
+        return None
+    section = "\n".join(lines[i] for i in sorted(keep))
+    return section[:2000]
 
 
 def load_thesis_overrides(path: Path | str | None = None) -> dict[str, dict[str, Any]]:
@@ -286,10 +356,15 @@ def build_chicken_gate_integration(
     enabled: bool = CHICKEN_GATE_ENABLED_DEFAULT,
     debug_bypass: bool = CHICKEN_GATE_DEBUG_BYPASS_DEFAULT,
     thesis_overrides: dict[str, dict[str, Any]] | None = None,
+    five_model_outputs: dict[str, dict[str, Any]] | None = None,
+    run_date: Any = None,
     now: datetime | None = None,
 ) -> dict[str, Any]:
     """Run every buy-side classified candidate through the chicken gate.
 
+    v1.3: additionally round-trips the five-model synthesized output
+    (pass #2) when available, generates an Evidence Repair Plan + unlock
+    simulation per row, and computes payload health + the v1.3 summary.
     Returns the integration object stored on the daily synthesis result.
     The existing split decision is read, never mutated.
     """
@@ -309,6 +384,12 @@ def build_chicken_gate_integration(
         thesis_overrides = load_thesis_overrides()
     holdings = payload.get("verified_holdings", {}).get("positions")
     holdings = holdings if isinstance(holdings, list) else None
+
+    if run_date is None:
+        run_date = payload.get("verified_holdings", {}).get("run_date")
+    synth_report = (
+        load_five_model_synthesis(run_date) if five_model_outputs is None else None
+    )
 
     bypassed = bool(debug_bypass) or not bool(enabled)
     mode = DISABLED_MODE if bypassed else ENABLED_MODE
@@ -357,15 +438,57 @@ def build_chicken_gate_integration(
         )
         gate_result = evaluate_chicken_gate(thesis, now=now, holdings=holdings)
 
+        # ---- Pass #2: five-model synthesized output roundtrip -------------
+        synth_gate_value: str | None = None
+        synth_final: float | None = None
+        synth_source: str | None = None
+        structured = (five_model_outputs or {}).get(ticker)
+        synth_thesis: dict[str, Any] | None = None
+        if isinstance(structured, dict) and structured:
+            synth_thesis = {**thesis, **structured}
+            synth_source = "structured_five_model_output"
+        elif synth_report is not None:
+            section = extract_ticker_section(synth_report["text"], ticker)
+            if section:
+                synth_thesis = {**thesis, "thesis_text": section}
+                synth_source = synth_report["source"]
+        if synth_thesis is not None:
+            synth_result = evaluate_chicken_gate(
+                synth_thesis, now=now, holdings=holdings
+            )
+            synth_gate_value = synth_result["FINAL_ACTION_GATE"]
+            synth_final = float(synth_result["FINAL_SCORE"])
+        else:
+            # Disclosed, never silent; never invented.
+            gate_result["EVIDENCE_NOTES"].append(SYNTH_NOT_AUDITED_NOTE)
+
+        # ---- Integrated gate: min rank across all available gates ---------
         chicken_gate_value = gate_result["FINAL_ACTION_GATE"]
         final_gate = integrate_final_gate(existing_gate, chicken_gate_value)
+        if synth_gate_value is not None:
+            final_gate = integrate_final_gate(final_gate, synth_gate_value)
+        elif GATE_RANK[final_gate] > GATE_RANK[GATE_BUY_LIMITED]:
+            # Unaudited synthesized thesis cannot reach BUY_ALLOWED.
+            final_gate = GATE_BUY_LIMITED
+            gate_result["CAP_RULES_TRIGGERED"].append(
+                {"rule": SYNTH_NOT_AUDITED_CAP, "cap": GATE_BUY_LIMITED}
+            )
+
+        # ---- Integrated score: min across available numeric scores --------
         chicken_final = float(gate_result["FINAL_SCORE"])
-        integrated_score = round(min(existing_score, chicken_final), 4)
+        score_pool = [existing_score, chicken_final]
+        if synth_final is not None:
+            score_pool.append(synth_final)
+        integrated_score = round(min(score_pool), 4)
 
         row_out = {
             "TICKER": ticker,
             "EXISTING_ACTION_GATE": existing_gate,
             "CHICKEN_ACTION_GATE": chicken_gate_value,
+            "CHICKEN_SYNTH_ACTION_GATE": synth_gate_value or "NOT_AVAILABLE",
+            "CHICKEN_SYNTH_FINAL_SCORE": synth_final,
+            "FIVE_MODEL_ROUNDTRIP": synth_gate_value is not None,
+            "FIVE_MODEL_SOURCE": synth_source,
             "FINAL_ACTION_GATE": final_gate,
             "EXISTING_SCORE": existing_score,
             "CHICKEN_FINAL_SCORE": chicken_final,
@@ -380,6 +503,19 @@ def build_chicken_gate_integration(
             "chicken_gate": _nested_audit_block(gate_result),
             "chicken_gate_thesis_inputs": thesis,
         }
+
+        # ---- Evidence Repair Loop (advisory; never changes the live gate) -
+        repair_plan = build_evidence_repair_plan(gate_result, thesis)
+        row_out["EVIDENCE_REPAIR_PLAN"] = repair_plan
+        row_out["TOP_REPAIRS"] = prioritize_repairs(
+            thesis, gate_result, existing_gate, repair_plan,
+            holdings=holdings, now=now,
+        )
+        row_out["UNLOCK_SIMULATION"] = simulate_unlock(
+            thesis, gate_result, existing_gate,
+            repair_plan=repair_plan, holdings=holdings, now=now,
+        )
+
         row_out["AUDIT_LINE"] = _audit_line(row_out)
         rows.append(row_out)
 
@@ -389,9 +525,11 @@ def build_chicken_gate_integration(
             gate_counts.get(row["FINAL_ACTION_GATE"], 0) + 1
         )
 
-    return {
+    integration = {
         "mode": mode,
         "scoring_profile_version": SCORING_PROFILE_VERSION,
+        "run_date": run_date,
+        "five_model_report": synth_report["source"] if synth_report else None,
         "rows": rows,
         "excluded_rows": excluded,
         "final_gate_counts": gate_counts,
@@ -403,6 +541,31 @@ def build_chicken_gate_integration(
         ],
         "safety": advisory_safety_stamps(),
     }
+    if not bypassed:
+        payload_health = build_payload_health(payload, rows)
+        integration["payload_health"] = payload_health
+        integration["override_template"] = build_override_template(rows)
+        integration["chicken_gate_v1_3_summary"] = build_v13_summary(
+            integration, payload_health,
+            version=SCORING_PROFILE_VERSION,
+            override_template_path=str(OVERRIDE_TEMPLATE_PATH),
+        )
+    return integration
+
+
+def write_override_template(
+    integration: dict[str, Any], path: Path | str | None = None
+) -> Path | None:
+    """Persist the autogenerated operator override template (advisory)."""
+    template = integration.get("override_template")
+    if not isinstance(template, dict) or not template:
+        return None
+    target = Path(path) if path is not None else OVERRIDE_TEMPLATE_PATH
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(
+        json.dumps(template, indent=2, default=str), encoding="utf-8"
+    )
+    return target
 
 
 def reevaluate_daily_decay(
@@ -443,10 +606,16 @@ __all__ = [
     "RANK_TO_GATE",
     "CLASSIFICATION_TO_GATE",
     "THESIS_OVERRIDES_PATH",
+    "OVERRIDE_TEMPLATE_PATH",
+    "SYNTH_NOT_AUDITED_NOTE",
+    "SYNTH_NOT_AUDITED_CAP",
     "integrate_final_gate",
     "classify_source_channel",
+    "load_five_model_synthesis",
+    "extract_ticker_section",
     "load_thesis_overrides",
     "map_candidate_to_thesis",
     "build_chicken_gate_integration",
+    "write_override_template",
     "reevaluate_daily_decay",
 ]
