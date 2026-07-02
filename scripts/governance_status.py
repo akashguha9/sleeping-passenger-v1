@@ -57,8 +57,14 @@ def build_governance_status_report() -> dict[str, Any]:
         str(mode_report.get("operating_mode") or "").strip().lower() == "seeded"
         and str(mode_report.get("truth_origin") or "").strip().lower() == "seeded"
     )
-    if not coherence_report["coherent"] and not legacy_artifacts and seeded_default_mode:
-        legacy_artifacts = list(SEEDED_LEGACY_ARTIFACT_FALLBACKS)
+    if not coherence_report["coherent"] and seeded_default_mode:
+        # Conservative merge: seeded known-legacy risks are ALWAYS disclosed
+        # in seeded mode, and newly detected legacy artifacts (e.g. the
+        # chicken-gate override template) are added — never allowed to
+        # erase the known seeded pollution.  Sorted for determinism.
+        legacy_artifacts = sorted(
+            set(legacy_artifacts) | set(SEEDED_LEGACY_ARTIFACT_FALLBACKS)
+        )
     if coherence_report["coherent"]:
         artifact_coherence_state = "coherent"
     elif legacy_artifacts:

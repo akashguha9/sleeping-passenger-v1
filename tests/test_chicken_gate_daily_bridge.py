@@ -290,6 +290,11 @@ def test_no_broker_execution_import_or_call():
 def test_runtime_artifact_schema_not_broken(monkeypatch, tmp_path):
     monkeypatch.setattr(pipeline, "CONTEXT_MD_PATH", tmp_path / "ctx.md")
     monkeypatch.setattr(pipeline, "CONTEXT_JSON_PATH", tmp_path / "ctx.json")
+    # _write_artifacts also writes the override template since v1.3 — keep
+    # test runs from polluting the real runtime/ (governance scans it).
+    monkeypatch.setattr(
+        bridge, "OVERRIDE_TEMPLATE_PATH", tmp_path / "overrides.template.json"
+    )
     result = pipeline.run_daily_synthesis()
     pipeline._write_artifacts(result, pipeline.render_portfolio_truth_context(result))
     summary = json.loads((tmp_path / "ctx.json").read_text(encoding="utf-8"))
