@@ -1,0 +1,43 @@
+{
+  "author": "operator",
+  "categories": {
+    "cloud_infra": {
+      "direction": "UP",
+      "tickers": [
+        "MSFT",
+        "AMZN"
+      ]
+    },
+    "elections": {
+      "direction": "UP",
+      "tickers": [
+        "SPY"
+      ]
+    },
+    "payments_rails": {
+      "direction": "UP",
+      "tickers": [
+        "V",
+        "MA"
+      ]
+    },
+    "policy_rates": {
+      "direction": "UP",
+      "tickers": [
+        "XLF",
+        "SOFI"
+      ]
+    },
+    "regulation_consumer": {
+      "direction": "UP",
+      "tickers": [
+        "WISE.L"
+      ]
+    }
+  },
+  "created_day": 2374,
+  "epoch": "day 0 = 2020-01-01",
+  "frozen": true,
+  "note": "Category-level rules for retrocast; frozen BEFORE any study. Fixture retrocast uses its own labeled fixture taxonomy.",
+  "schema": "event_taxonomy/v1"
+}

@@ -1,0 +1,76 @@
+{
+  "advisory_status": "ADVISORY_ONLY",
+  "beneficiary_map": {
+    "house": [
+      "V"
+    ],
+    "losers": [
+      "cash networks"
+    ],
+    "midstream": [
+      "issuers",
+      "acquirers"
+    ]
+  },
+  "board_scope": "CASE_STUDY_BOARD",
+  "case_study_disclaimer": "This contract validates MVP architecture only. It is not a buy candidate, not a recommendation, and cannot be used for trade selection unless separately promoted into a new INVESTABLE_CANDIDATE contract.",
+  "causal_path": [
+    "stablecoin adoption belief",
+    "rail substitution question",
+    "network take-rate",
+    "volume mix shift"
+  ],
+  "contract_purpose": "CASE_STUDY",
+  "created_day": 2374,
+  "data_mode": "FIXTURE_DEMONSTRATION",
+  "entity": "Visa Inc",
+  "evidence": [
+    {
+      "claim": "Network take-rate disclosed in filings (operator-classified)",
+      "ecology": "sec_filing",
+      "evidence_id": "cs-visa-hard",
+      "half_life_days": null,
+      "observed_day": 2250,
+      "provenance": "HARD_DATA",
+      "source": "EDGAR 10-K",
+      "stance": "FOR_THESIS"
+    },
+    {
+      "claim": "Stablecoin rails bypass the network entirely for cross-border settlement",
+      "ecology": "news",
+      "evidence_id": "cs-visa-null",
+      "half_life_days": null,
+      "observed_day": 2330,
+      "provenance": "ANALYST_PRIOR",
+      "source": "industry analysis",
+      "stance": "FOR_NULL"
+    }
+  ],
+  "expiry_day": 2464,
+  "falsification_observable": "Framework check: rail-coexistence null fails to construct",
+  "forced_null_thesis": "Stablecoins substitute rather than route through the network; take-rate compresses",
+  "horizon_days": 90,
+  "investment_eligibility": "NOT_ELIGIBLE",
+  "merit_inputs": {
+    "awareness_gap": 2.5,
+    "house_layer": 9.0,
+    "narrative_transmission": 8.0,
+    "rail_arbitrage": 6.0,
+    "transaction_certainty": 8.5
+  },
+  "narrative": "Validates: payment-rail logic and the substitution-vs-coexistence forced null (stablecoin rails as threat or as routed volume).",
+  "parent_case_study_id": "",
+  "parent_research_id": "",
+  "pm_link": null,
+  "predicted_direction": "UP",
+  "promotion_note": "",
+  "promotion_status": "NOT_PROMOTABLE",
+  "real_money": "PROHIBITED",
+  "risk_flags": {},
+  "status": "ACTIVE",
+  "thesis_id": "cs-visa-rail-coexistence",
+  "ticker": "V",
+  "title": "CASE STUDY: Visa \u2014 payment network / stablecoin coexistence archetype",
+  "trading_status": "DO_NOT_TRADE",
+  "trigger": "MVP validation: payment-rail logic + contradiction board"
+}

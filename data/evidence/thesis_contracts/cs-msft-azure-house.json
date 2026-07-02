@@ -1,0 +1,76 @@
+{
+  "advisory_status": "ADVISORY_ONLY",
+  "beneficiary_map": {
+    "house": [
+      "MSFT"
+    ],
+    "losers": [
+      "on-prem vendors"
+    ],
+    "midstream": [
+      "AI app vendors"
+    ]
+  },
+  "board_scope": "CASE_STUDY_BOARD",
+  "case_study_disclaimer": "This contract validates MVP architecture only. It is not a buy candidate, not a recommendation, and cannot be used for trade selection unless separately promoted into a new INVESTABLE_CANDIDATE contract.",
+  "causal_path": [
+    "AI workload belief",
+    "compute demand",
+    "usage-based revenue",
+    "segment disclosure",
+    "already-priced check"
+  ],
+  "contract_purpose": "CASE_STUDY",
+  "created_day": 2374,
+  "data_mode": "FIXTURE_DEMONSTRATION",
+  "entity": "Microsoft Corp",
+  "evidence": [
+    {
+      "claim": "10-K Intelligent Cloud segment share (operator-classified)",
+      "ecology": "sec_filing",
+      "evidence_id": "cs-msft-hard",
+      "half_life_days": null,
+      "observed_day": 2200,
+      "provenance": "HARD_DATA",
+      "source": "EDGAR 10-K",
+      "stance": "FOR_THESIS"
+    },
+    {
+      "claim": "Multiple already embeds house-layer quality",
+      "ecology": "prediction_market",
+      "evidence_id": "cs-msft-null",
+      "half_life_days": null,
+      "observed_day": 2370,
+      "provenance": "MARKET",
+      "source": "market pricing",
+      "stance": "FOR_NULL"
+    }
+  ],
+  "expiry_day": 2464,
+  "falsification_observable": "Framework check: house-layer archetype fails to render/score",
+  "forced_null_thesis": "Cloud growth is fully priced; house quality earns beta not alpha",
+  "horizon_days": 90,
+  "investment_eligibility": "NOT_ELIGIBLE",
+  "merit_inputs": {
+    "awareness_gap": 3.0,
+    "house_layer": 9.0,
+    "infra_capture": 8.0,
+    "narrative_transmission": 8.0,
+    "transaction_certainty": 8.0
+  },
+  "narrative": "Validates: house-layer detection (usage-based take-rate on ecosystem activity regardless of front-end winner) and the already-priced null.",
+  "parent_case_study_id": "",
+  "parent_research_id": "",
+  "pm_link": null,
+  "predicted_direction": "UP",
+  "promotion_note": "",
+  "promotion_status": "NOT_PROMOTABLE",
+  "real_money": "PROHIBITED",
+  "risk_flags": {},
+  "status": "ACTIVE",
+  "thesis_id": "cs-msft-azure-house",
+  "ticker": "MSFT",
+  "title": "CASE STUDY: Microsoft Azure \u2014 house-layer infrastructure archetype",
+  "trading_status": "DO_NOT_TRADE",
+  "trigger": "MVP validation: house_layer detection + forced-null construction"
+}

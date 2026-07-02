@@ -1,0 +1,75 @@
+{
+  "advisory_status": "ADVISORY_ONLY",
+  "beneficiary_map": {
+    "house": [
+      "AMZN (AWS)"
+    ],
+    "losers": [
+      "own-datacenter capex"
+    ],
+    "midstream": [
+      "SaaS on AWS"
+    ]
+  },
+  "board_scope": "CASE_STUDY_BOARD",
+  "case_study_disclaimer": "This contract validates MVP architecture only. It is not a buy candidate, not a recommendation, and cannot be used for trade selection unless separately promoted into a new INVESTABLE_CANDIDATE contract.",
+  "causal_path": [
+    "workload belief",
+    "AWS usage",
+    "take-rate revenue",
+    "segment disclosure"
+  ],
+  "contract_purpose": "CASE_STUDY",
+  "created_day": 2374,
+  "data_mode": "FIXTURE_DEMONSTRATION",
+  "entity": "Amazon.com Inc",
+  "evidence": [
+    {
+      "claim": "10-K AWS segment disclosure (operator-classified)",
+      "ecology": "sec_filing",
+      "evidence_id": "cs-amzn-hard",
+      "half_life_days": null,
+      "observed_day": 2210,
+      "provenance": "HARD_DATA",
+      "source": "EDGAR 10-K",
+      "stance": "FOR_THESIS"
+    },
+    {
+      "claim": "Retail segment drag dominates the equity story",
+      "ecology": "earnings_call",
+      "evidence_id": "cs-amzn-null",
+      "half_life_days": null,
+      "observed_day": 2340,
+      "provenance": "MARKET",
+      "source": "segment mix",
+      "stance": "FOR_NULL"
+    }
+  ],
+  "expiry_day": 2464,
+  "falsification_observable": "Framework check: second house-layer seat breaks top-2 aggregation",
+  "forced_null_thesis": "AWS strength is priced; the equity is a retail business with a cloud attachment",
+  "horizon_days": 90,
+  "investment_eligibility": "NOT_ELIGIBLE",
+  "merit_inputs": {
+    "awareness_gap": 3.0,
+    "house_layer": 8.5,
+    "infra_capture": 7.5,
+    "narrative_transmission": 7.5,
+    "transaction_certainty": 8.0
+  },
+  "narrative": "Validates: house-layer archetype generalizes beyond one issuer; moat-cluster top-2 aggregation must count the toll-booth thesis once, not twice.",
+  "parent_case_study_id": "",
+  "parent_research_id": "",
+  "pm_link": null,
+  "predicted_direction": "UP",
+  "promotion_note": "",
+  "promotion_status": "NOT_PROMOTABLE",
+  "real_money": "PROHIBITED",
+  "risk_flags": {},
+  "status": "ACTIVE",
+  "thesis_id": "cs-amzn-aws-house",
+  "ticker": "AMZN",
+  "title": "CASE STUDY: Amazon AWS \u2014 house-layer infrastructure archetype (second seat)",
+  "trading_status": "DO_NOT_TRADE",
+  "trigger": "MVP validation: moat cluster top-2 anti-double-count"
+}

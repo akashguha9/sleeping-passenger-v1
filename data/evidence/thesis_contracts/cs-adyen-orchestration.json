@@ -1,0 +1,76 @@
+{
+  "advisory_status": "ADVISORY_ONLY",
+  "beneficiary_map": {
+    "house": [
+      "ADYEN.AS"
+    ],
+    "losers": [
+      "legacy gateways",
+      "bank acquiring patchworks"
+    ],
+    "midstream": [
+      "enterprise merchants"
+    ]
+  },
+  "board_scope": "CASE_STUDY_BOARD",
+  "case_study_disclaimer": "This contract validates MVP architecture only. It is not a buy candidate, not a recommendation, and cannot be used for trade selection unless separately promoted into a new INVESTABLE_CANDIDATE contract.",
+  "causal_path": [
+    "enterprise consolidation belief",
+    "gateway patchwork pain",
+    "single-platform migration",
+    "net-revenue take-rate"
+  ],
+  "contract_purpose": "CASE_STUDY",
+  "created_day": 2374,
+  "data_mode": "FIXTURE_DEMONSTRATION",
+  "entity": "Adyen NV",
+  "evidence": [
+    {
+      "claim": "Net revenue / processed-volume take-rate disclosed (operator-classified)",
+      "ecology": "sec_filing",
+      "evidence_id": "cs-adyen-hard",
+      "half_life_days": null,
+      "observed_day": 2260,
+      "provenance": "HARD_DATA",
+      "source": "annual report",
+      "stance": "FOR_THESIS"
+    },
+    {
+      "claim": "Enterprise merchants multi-source processors to squeeze pricing; single-platform premium erodes",
+      "ecology": "news",
+      "evidence_id": "cs-adyen-null",
+      "half_life_days": null,
+      "observed_day": 2320,
+      "provenance": "ANALYST_PRIOR",
+      "source": "industry analysis",
+      "stance": "FOR_NULL"
+    }
+  ],
+  "expiry_day": 2464,
+  "falsification_observable": "Framework check: orchestration archetype fails to render/score",
+  "forced_null_thesis": "Orchestration is a commodity; take-rate competition erodes the premium",
+  "horizon_days": 90,
+  "investment_eligibility": "NOT_ELIGIBLE",
+  "merit_inputs": {
+    "awareness_gap": 4.0,
+    "house_layer": 7.5,
+    "infra_capture": 7.0,
+    "narrative_transmission": 7.5,
+    "transaction_certainty": 8.0
+  },
+  "narrative": "Validates: enterprise-orchestration archetype (single-platform full-stack vs bank/gateway patchwork) and merchant-migration causal path rendering.",
+  "parent_case_study_id": "",
+  "parent_research_id": "",
+  "pm_link": null,
+  "predicted_direction": "UP",
+  "promotion_note": "",
+  "promotion_status": "NOT_PROMOTABLE",
+  "real_money": "PROHIBITED",
+  "risk_flags": {},
+  "status": "ACTIVE",
+  "thesis_id": "cs-adyen-orchestration",
+  "ticker": "ADYEN.AS",
+  "title": "CASE STUDY: Adyen \u2014 enterprise payment orchestration archetype",
+  "trading_status": "DO_NOT_TRADE",
+  "trigger": "MVP validation: orchestration archetype + causal-path completeness"
+}

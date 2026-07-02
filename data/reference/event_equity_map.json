@@ -1,0 +1,110 @@
+{
+  "advisory_status": "ADVISORY_ONLY",
+  "author": "operator",
+  "content_hash": "355f12f2735549ab",
+  "created_day": 2374,
+  "entries": [
+    {
+      "capture_rate": 0.6,
+      "direction": "UP",
+      "event_id": "CLOUD-CAPEX-ACCEL-2026",
+      "exposure": 0.4,
+      "rationale": "AWS take-rate on aggregate workload growth",
+      "ticker": "AMZN"
+    },
+    {
+      "capture_rate": 0.7,
+      "direction": "UP",
+      "event_id": "CLOUD-CAPEX-ACCEL-2026",
+      "exposure": 0.4,
+      "rationale": "house-layer cloud: usage-based revenue on ecosystem activity",
+      "ticker": "MSFT"
+    },
+    {
+      "capture_rate": 0.5,
+      "direction": "DOWN",
+      "event_id": "EU-CONSUMER-FEE-SIMPLIFICATION",
+      "exposure": 0.3,
+      "rationale": "retail FX fee income at risk under fee-transparency rules",
+      "ticker": "DBK.DE"
+    },
+    {
+      "capture_rate": 0.6,
+      "direction": "UP",
+      "event_id": "EU-CONSUMER-FEE-SIMPLIFICATION",
+      "exposure": 0.5,
+      "rationale": "transparency regulation compresses incumbent confusion rent; price-leader gains share",
+      "ticker": "WISE.L"
+    },
+    {
+      "capture_rate": 0.5,
+      "direction": "UP",
+      "event_id": "INDIA-REMITTANCE-CORRIDOR-GROWTH",
+      "exposure": 0.6,
+      "rationale": "EU/UK->INR corridor volume, incl. embedded partner routing",
+      "ticker": "WISE.L"
+    },
+    {
+      "capture_rate": 0.5,
+      "direction": "DOWN",
+      "event_id": "INDIA-REMITTANCE-CORRIDOR-GROWTH",
+      "exposure": 0.5,
+      "rationale": "legacy cash-transfer network loses price-sensitive corridors",
+      "ticker": "WU"
+    },
+    {
+      "capture_rate": 0.4,
+      "direction": "UP",
+      "event_id": "RATE-CUT-US-2026H2",
+      "exposure": 0.6,
+      "rationale": "funding-cost relief + origination volume",
+      "ticker": "SOFI"
+    },
+    {
+      "capture_rate": 0.6,
+      "direction": "UP",
+      "event_id": "RATE-CUT-US-2026H2",
+      "exposure": 0.5,
+      "rationale": "rate-sensitive financials basket; sector-level beneficiary",
+      "ticker": "XLF"
+    },
+    {
+      "capture_rate": 0.4,
+      "direction": "UP",
+      "event_id": "STABLECOIN-RAIL-ADOPTION",
+      "exposure": 0.5,
+      "rationale": "stablecoin rail infrastructure beneficiary",
+      "ticker": "COIN"
+    },
+    {
+      "capture_rate": 0.5,
+      "direction": "DOWN",
+      "event_id": "STABLECOIN-RAIL-ADOPTION",
+      "exposure": 0.4,
+      "rationale": "cheapest-rail substitution pressure on legacy corridors",
+      "ticker": "WU"
+    },
+    {
+      "capture_rate": 0.5,
+      "direction": "DOWN",
+      "event_id": "US-CLICK-TO-CANCEL-ENFORCEMENT",
+      "exposure": 0.3,
+      "rationale": "subscription-friction revenue exposed to cancellation simplification enforcement",
+      "ticker": "PLNT"
+    },
+    {
+      "capture_rate": 0.3,
+      "direction": "UP",
+      "event_id": "US-CLICK-TO-CANCEL-ENFORCEMENT",
+      "exposure": 0.1,
+      "rationale": "weak second-order clarity beneficiary; low exposure on purpose",
+      "ticker": "WISE.L"
+    }
+  ],
+  "exposure_provenance": "ANALYST_PRIOR",
+  "prev_hash": null,
+  "real_money": "PROHIBITED",
+  "schema": "event_equity_map/v1",
+  "status": "FROZEN",
+  "version": 1
+}

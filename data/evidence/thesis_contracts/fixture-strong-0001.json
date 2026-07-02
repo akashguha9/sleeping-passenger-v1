@@ -1,0 +1,114 @@
+{
+  "advisory_status": "ADVISORY_ONLY",
+  "beneficiary_map": {
+    "house": [
+      "FIXR"
+    ],
+    "losers": [
+      "INCB"
+    ],
+    "midstream": [
+      "NEOB"
+    ]
+  },
+  "board_scope": "CASE_STUDY_BOARD",
+  "case_study_disclaimer": "This contract validates MVP architecture only. It is not a buy candidate, not a recommendation, and cannot be used for trade selection unless separately promoted into a new INVESTABLE_CANDIDATE contract.",
+  "causal_path": [
+    "belief: cheap transfers",
+    "neobanks embed rail",
+    "partner volume",
+    "take-rate revenue",
+    "repricing"
+  ],
+  "contract_purpose": "FIXTURE_TEST",
+  "created_day": 2344,
+  "data_mode": "FIXTURE_DEMONSTRATION",
+  "entity": "FixtureRail Plc",
+  "evidence": [
+    {
+      "claim": "10-K discloses take-rate revenue share 62%",
+      "ecology": "sec_filing",
+      "evidence_id": "ev-hard-1",
+      "half_life_days": null,
+      "observed_day": 2354,
+      "provenance": "HARD_DATA",
+      "source": "EDGAR 10-K",
+      "stance": "FOR_THESIS"
+    },
+    {
+      "claim": "Event market \u0394P +0.14 persisted 5 days",
+      "ecology": "prediction_market",
+      "evidence_id": "ev-mkt-1",
+      "half_life_days": null,
+      "observed_day": 2371,
+      "provenance": "MARKET",
+      "source": "prediction market",
+      "stance": "FOR_THESIS"
+    },
+    {
+      "claim": "Partner-corridor fee page cut 30bps",
+      "ecology": "pricing_page",
+      "evidence_id": "ev-mkt-2",
+      "half_life_days": null,
+      "observed_day": 2364,
+      "provenance": "MARKET",
+      "source": "pricing page diff",
+      "stance": "FOR_THESIS"
+    },
+    {
+      "claim": "Counterparty 10-K names provider as vendor",
+      "ecology": "regulatory",
+      "evidence_id": "ev-hard-2",
+      "half_life_days": null,
+      "observed_day": 2334,
+      "provenance": "HARD_DATA",
+      "source": "EDGAR FTS",
+      "stance": "FOR_THESIS"
+    },
+    {
+      "claim": "Operator field obs: transfer routed via rail",
+      "ecology": "field_observation",
+      "evidence_id": "ev-anec-1",
+      "half_life_days": null,
+      "observed_day": 2359,
+      "provenance": "ANECDOTE",
+      "source": "field observation",
+      "stance": "FOR_THESIS"
+    }
+  ],
+  "expiry_day": 2464,
+  "falsification_observable": "Two consecutive reports without partner-volume growth, or a top-3 partner insourcing the rail",
+  "forced_null_thesis": "Consumer growth explains all volume; partner-routed volume is flat",
+  "horizon_days": 120,
+  "investment_eligibility": "NOT_ELIGIBLE",
+  "merit_inputs": {
+    "awareness_gap": 6.5,
+    "house_layer": 8.0,
+    "infra_capture": 7.5,
+    "long_tail_demand": 5.5,
+    "narrative_transmission": 8.0,
+    "transaction_certainty": 7.5
+  },
+  "narrative": "Partner-routed volume grows without CAC while market prices the consumer brand only.",
+  "parent_case_study_id": "",
+  "parent_research_id": "",
+  "pm_link": {
+    "alignment": 8.0,
+    "category_validated": true,
+    "edge": 0.42,
+    "market_id": "FIX-PAY-ADOPT"
+  },
+  "predicted_direction": "UP",
+  "promotion_note": "",
+  "promotion_status": "NOT_PROMOTABLE",
+  "real_money": "PROHIBITED",
+  "risk_flags": {
+    "confusion_rent": 2.0
+  },
+  "status": "ACTIVE",
+  "thesis_id": "fixture-strong-0001",
+  "ticker": "FIXR",
+  "title": "Embedded rail volume compounding",
+  "trading_status": "DO_NOT_TRADE",
+  "trigger": "\u0394P shock on payments-adoption event market"
+}

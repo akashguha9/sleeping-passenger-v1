@@ -1,0 +1,87 @@
+{
+  "advisory_status": "ADVISORY_ONLY",
+  "beneficiary_map": {
+    "house": [
+      "WISE.L (Platform)"
+    ],
+    "losers": [
+      "incumbent FX desks",
+      "WU corridors"
+    ],
+    "midstream": [
+      "neobanks (private)"
+    ]
+  },
+  "board_scope": "CASE_STUDY_BOARD",
+  "case_study_disclaimer": "This contract validates MVP architecture only. It is not a buy candidate, not a recommendation, and cannot be used for trade selection unless separately promoted into a new INVESTABLE_CANDIDATE contract.",
+  "causal_path": [
+    "belief: cheap transfers",
+    "neobanks embed rail",
+    "partner volume",
+    "take-rate revenue",
+    "repricing"
+  ],
+  "contract_purpose": "CASE_STUDY",
+  "created_day": 2374,
+  "data_mode": "FIXTURE_DEMONSTRATION",
+  "entity": "Wise plc",
+  "evidence": [
+    {
+      "claim": "Operator field obs: bunq EUR->INR routed via Wise rail without Wise account",
+      "ecology": "field_observation",
+      "evidence_id": "cs-wise-anec",
+      "half_life_days": null,
+      "observed_day": 2350,
+      "provenance": "ANECDOTE",
+      "source": "field observation",
+      "stance": "FOR_THESIS"
+    },
+    {
+      "claim": "Published corridor fees below bank wire pricing",
+      "ecology": "pricing_page",
+      "evidence_id": "cs-wise-mkt",
+      "half_life_days": null,
+      "observed_day": 2360,
+      "provenance": "MARKET",
+      "source": "pricing pages",
+      "stance": "FOR_THESIS"
+    },
+    {
+      "claim": "Provider cuts own take rate, offsetting volume",
+      "ecology": "pricing_page",
+      "evidence_id": "cs-wise-null",
+      "half_life_days": null,
+      "observed_day": 2355,
+      "provenance": "MARKET",
+      "source": "pricing history",
+      "stance": "FOR_NULL"
+    }
+  ],
+  "expiry_day": 2464,
+  "falsification_observable": "Framework check: embedded-rail archetype fails to render/score",
+  "forced_null_thesis": "Consumer growth explains all volume; embedded routing is immaterial",
+  "horizon_days": 90,
+  "investment_eligibility": "NOT_ELIGIBLE",
+  "merit_inputs": {
+    "awareness_gap": 6.0,
+    "house_layer": 8.0,
+    "infra_capture": 7.0,
+    "narrative_transmission": 8.0,
+    "transaction_certainty": 7.5
+  },
+  "narrative": "Validates: embedded-infrastructure mapping, who-gets-paid graph, anecdote quarantine. Partner-routed volume compounds invisibly behind consumer front-ends (bunq pattern).",
+  "parent_case_study_id": "",
+  "parent_research_id": "",
+  "pm_link": null,
+  "predicted_direction": "UP",
+  "promotion_note": "",
+  "promotion_status": "NOT_PROMOTABLE",
+  "real_money": "PROHIBITED",
+  "risk_flags": {},
+  "status": "ACTIVE",
+  "thesis_id": "cs-wise-embedded-rail",
+  "ticker": "WISE.L",
+  "title": "CASE STUDY: Wise \u2014 embedded rail / invisible infrastructure archetype",
+  "trading_status": "DO_NOT_TRADE",
+  "trigger": "MVP validation: infra_capture + beneficiary_map + anecdote quarantine"
+}

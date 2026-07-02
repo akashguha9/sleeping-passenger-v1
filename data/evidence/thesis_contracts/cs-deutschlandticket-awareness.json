@@ -1,0 +1,70 @@
+{
+  "advisory_status": "ADVISORY_ONLY",
+  "beneficiary_map": {
+    "candidate_winners": [
+      "ticketing aggregators (unmapped)"
+    ],
+    "observed_losers": [
+      "confused consumers"
+    ]
+  },
+  "board_scope": "CASE_STUDY_BOARD",
+  "case_study_disclaimer": "This contract validates MVP architecture only. It is not a buy candidate, not a recommendation, and cannot be used for trade selection unless separately promoted into a new INVESTABLE_CANDIDATE contract.",
+  "causal_path": [
+    "street observation",
+    "awareness gap hypothesis",
+    "needs listed-proxy mapping",
+    "no tradable node"
+  ],
+  "contract_purpose": "CASE_STUDY",
+  "created_day": 2374,
+  "data_mode": "FIXTURE_DEMONSTRATION",
+  "entity": "Deutschlandticket ecosystem",
+  "evidence": [
+    {
+      "claim": "Tourist bought pricier 7-day ticket with less coverage",
+      "ecology": "field_observation",
+      "evidence_id": "cs-dt-anec1",
+      "half_life_days": null,
+      "observed_day": 2280,
+      "provenance": "ANECDOTE",
+      "source": "travel observation",
+      "stance": "FOR_THESIS"
+    },
+    {
+      "claim": "App cancellation not registered by billing; collection letter issued",
+      "ecology": "field_observation",
+      "evidence_id": "cs-dt-anec2",
+      "half_life_days": null,
+      "observed_day": 2300,
+      "provenance": "ANECDOTE",
+      "source": "operator experience",
+      "stance": "FOR_THESIS"
+    }
+  ],
+  "expiry_day": 2464,
+  "falsification_observable": "Framework check: non-tradable mechanism gets a ticker anyway",
+  "forced_null_thesis": "The confusion was idiosyncratic; no systematic demand leakage",
+  "horizon_days": 90,
+  "investment_eligibility": "NOT_ELIGIBLE",
+  "merit_inputs": {
+    "awareness_gap": 8.0,
+    "transaction_certainty": 3.0,
+    "use_case_clarity": 3.0
+  },
+  "narrative": "Validates: awareness-gap scoring, transaction-certainty gate, state-integrity risk flag, and the non-tradable-insight path (mechanism with no listed pure-play).",
+  "parent_case_study_id": "",
+  "parent_research_id": "",
+  "pm_link": null,
+  "predicted_direction": "UP",
+  "promotion_note": "",
+  "promotion_status": "NOT_PROMOTABLE",
+  "real_money": "PROHIBITED",
+  "risk_flags": {},
+  "status": "ACTIVE",
+  "thesis_id": "cs-deutschlandticket-awareness",
+  "ticker": "NONE",
+  "title": "CASE STUDY: Deutschlandticket \u2014 awareness arbitrage / transaction certainty / state integrity",
+  "trading_status": "DO_NOT_TRADE",
+  "trigger": "MVP validation: awareness_gap + g_txn + state_integrity flag"
+}
