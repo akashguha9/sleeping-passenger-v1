@@ -134,6 +134,15 @@ class Shock:
     delta_p_conv: float
     depth_available: bool
     data_mode: str
+    p_t: float = 0.0
+    p_prior: float = 0.0
+    depth_weight: float = 1.0
+    persistence: int = 1
+    source_mode: str = "FIXTURE"
+    adapter_name: str = ""
+    adapter_run_id: str = ""
+    fetch_timestamp: str = ""
+    source_hash: str = ""
 
 
 def detect_shock(market: dict[str, Any], *,
@@ -144,13 +153,22 @@ def detect_shock(market: dict[str, Any], *,
     if abs(dp) < threshold or not is_persistent(history, window):
         return None
     cw, depth_available = depth_conviction(market.get("depth_usd"))
-    day = int(sorted(history, key=lambda r: int(r["day"]))[-1]["day"])
+    pts = sorted(history, key=lambda r: int(r["day"]))
+    day = int(pts[-1]["day"])
     return Shock(
         market_id=str(market["market_id"]),
         event_id=str(market.get("event_id", market["market_id"])),
         day=day, delta_p=dp, delta_p_conv=round(dp * cw, 6),
         depth_available=depth_available,
-        data_mode=str(market.get("data_mode", FIXTURE_DEMONSTRATION)))
+        data_mode=str(market.get("data_mode", FIXTURE_DEMONSTRATION)),
+        p_t=float(pts[-1]["p"]),
+        p_prior=float(pts[-min(window, len(pts))]["p"]),
+        depth_weight=cw, persistence=1,
+        source_mode=str(market.get("source_mode", "FIXTURE")),
+        adapter_name=str(market.get("adapter_name", "")),
+        adapter_run_id=str(market.get("adapter_run_id", "")),
+        fetch_timestamp=str(market.get("fetch_timestamp", "")),
+        source_hash=str(market.get("source_hash", "")))
 
 
 # --- forward snapshots ----------------------------------------------------------
@@ -200,6 +218,15 @@ def build_forward_snapshots(shock: Shock, frozen_map: dict[str, Any],
                                        else "FIXTURE"),
                            "exposure_capture": "ANALYST_PRIOR"},
             "data_mode": shock.data_mode, "outcome": PENDING,
+            "status": "OPEN",
+            "P_t": shock.p_t, "P_prior": shock.p_prior,
+            "DepthWeight": shock.depth_weight,
+            "PersistenceIndicator": shock.persistence,
+            "source_mode": shock.source_mode,
+            "adapter_name": shock.adapter_name,
+            "adapter_run_id": shock.adapter_run_id,
+            "fetch_timestamp": shock.fetch_timestamp,
+            "source_hash": shock.source_hash,
             "advisory_status": ADVISORY_STATUS, "real_money": REAL_MONEY,
         })
     return rows
@@ -224,6 +251,181 @@ def append_snapshots(path: Path, rows: list[dict[str, Any]], *,
         len(fresh) if mode == "write" else 0),
         "would_write": len(fresh) if mode != "write" else 0,
         "skipped_duplicates": len(rows) - len(fresh)}
+
+
+# --- live read-only source (Kalshi public market data) --------------------------
+# Fail-closed: any live failure raises LiveSourceError; there is NO fixture
+# fallback on the live path. Read-only public endpoints; no auth, no orders.
+
+KALSHI_DEFAULT_BASE = "https://api.elections.kalshi.com/trade-api/v2"
+OBSERVATION_LEDGER_DEFAULT = Path(
+    "data/calibration_corpus/pm_probability_ledger.jsonl")
+
+
+class LiveSourceError(RuntimeError):
+    pass
+
+
+def fetch_kalshi_markets_live(*, base_url: str | None = None,
+                              limit: int = 200,
+                              status: str = "open") -> dict[str, Any]:
+    import os
+    import urllib.request
+    from datetime import datetime, timezone
+    base = (base_url or os.environ.get("KALSHI_API_BASE", "").strip()
+            or KALSHI_DEFAULT_BASE).rstrip("/")
+    url = f"{base}/markets?limit={int(limit)}&status={status}"
+    req = urllib.request.Request(
+        url, headers={"User-Agent": "sleeping-passenger advisory read-only"})
+    try:
+        raw = urllib.request.urlopen(req, timeout=25).read()
+        payload = json.loads(raw)
+        markets = payload["markets"]
+    except Exception as exc:
+        raise LiveSourceError(
+            f"KALSHI_LIVE_FETCH_FAILED: {type(exc).__name__}: {exc} "
+            f"(url={url}); failing closed — no fixture fallback.") from exc
+    now = datetime.now(timezone.utc)
+    return {
+        "markets": markets, "request_url": url,
+        "adapter_name": "kalshi_public_market_data",
+        "adapter_run_id": f"kalshi-{now.strftime('%Y%m%dT%H%M%SZ')}",
+        "fetch_timestamp": now.isoformat(),
+        "source_hash": hashlib.sha256(raw).hexdigest()[:32],
+        "source_mode": "LIVE",
+    }
+
+
+def _kalshi_prob(m: dict[str, Any]) -> float | None:
+    for key in ("last_price", "yes_bid"):          # integer cents
+        v = m.get(key)
+        if isinstance(v, (int, float)) and not isinstance(v, bool) and v > 0:
+            return float(v) / 100.0
+    for key in ("last_price_dollars", "yes_bid_dollars"):  # string dollars
+        v = m.get(key)
+        try:
+            f = float(v)
+        except (TypeError, ValueError):
+            continue
+        if 0.0 < f < 1.0:
+            return f
+    return None
+
+
+def ledger_live_observations(fetch: dict[str, Any], ledger_path: Path,
+                             *, mode: str = "dry_run") -> dict[str, Any]:
+    """Append one probability observation per market. ΔP is computed across
+    RUNS of this ledger — live shock detection needs history to accumulate;
+    a single snapshot honestly yields zero shocks."""
+    rows: list[dict[str, Any]] = []
+    for m in fetch["markets"]:
+        p = _kalshi_prob(m)
+        if p is None:
+            continue
+        liquidity = m.get("liquidity_dollars") or m.get("liquidity")
+        try:
+            depth = float(liquidity) if liquidity is not None else None
+        except (TypeError, ValueError):
+            depth = None
+        obs_id = hashlib.sha256(
+            f"{m.get('ticker')}|{fetch['fetch_timestamp']}".encode()
+        ).hexdigest()[:16]
+        rows.append({
+            "observation_id": obs_id, "market_ticker": str(m.get("ticker")),
+            "event_ticker": str(m.get("event_ticker", "")),
+            "series_ticker": str(m.get("ticker", "")).split("-")[0],
+            "p": round(p, 4), "depth_usd": depth,
+            "volume": m.get("volume"),
+            "open_interest": m.get("open_interest"),
+            "fetch_timestamp": fetch["fetch_timestamp"],
+            "adapter_name": fetch["adapter_name"],
+            "adapter_run_id": fetch["adapter_run_id"],
+            "source_hash": fetch["source_hash"],
+            "source_mode": "LIVE", "is_live_verified": True,
+            "advisory_status": ADVISORY_STATUS,
+        })
+    existing: set[str] = set()
+    if ledger_path.exists():
+        for line in ledger_path.read_text(encoding="utf-8").splitlines():
+            if line.strip():
+                existing.add(json.loads(line).get("observation_id", ""))
+    fresh = [r for r in rows if r["observation_id"] not in existing]
+    if mode == "write":
+        ledger_path.parent.mkdir(parents=True, exist_ok=True)
+        with ledger_path.open("a", encoding="utf-8") as fh:
+            for r in fresh:
+                fh.write(json.dumps(r, sort_keys=True) + "\n")
+    return {"mode": mode, "observations": len(rows),
+            "written": len(fresh) if mode == "write" else 0,
+            "skipped_duplicates": len(rows) - len(fresh)}
+
+
+def detect_shocks_from_ledger(ledger_path: Path, *,
+                              threshold: float = DEFAULT_SHOCK_THRESHOLD,
+                              lookback_obs: int = DEFAULT_WINDOW
+                              ) -> dict[str, Any]:
+    """Ledger-aware ΔP across RUNS: P_now = latest observation, P_prev = the
+    observation at (or nearest before) the lookback window. A market with a
+    single observation is LEDGER_WARMUP, never a failure. Persistence = the
+    intermediate steps are sign-consistent (two observations pass
+    trivially)."""
+    if not ledger_path.exists():
+        return {"shocks": [], "markets_seen": 0, "markets_with_prior": 0,
+                "markets_warming_up": 0}
+    by_market: dict[str, list[dict[str, Any]]] = {}
+    for line in ledger_path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        row = json.loads(line)
+        by_market.setdefault(row["market_ticker"], []).append(row)
+    shocks: list[Shock] = []
+    with_prior = 0
+    for ticker, obs in by_market.items():
+        obs.sort(key=lambda r: r["fetch_timestamp"])
+        # one observation per run per market: dedupe identical timestamps
+        if len(obs) < 2:
+            continue        # LEDGER_WARMUP for this market
+        with_prior += 1
+        tail = obs[-min(lookback_obs, len(obs)):]
+        p_now, p_prev = float(tail[-1]["p"]), float(tail[0]["p"])
+        dp = round(p_now - p_prev, 6)
+        steps = [float(tail[i + 1]["p"]) - float(tail[i]["p"])
+                 for i in range(len(tail) - 1)]
+        persistent = 1 if (dp != 0 and all(
+            s == 0 or (s > 0) == (dp > 0) for s in steps)) else 0
+        last = obs[-1]
+        cw, depth_available = depth_conviction(last.get("depth_usd"))
+        dp_conv = round(dp * cw * persistent, 6)
+        if abs(dp_conv) < threshold:
+            continue
+        shocks.append(Shock(
+            market_id=ticker, event_id=last.get("event_ticker", ticker),
+            day=_iso_day(last["fetch_timestamp"]), delta_p=dp,
+            delta_p_conv=dp_conv, depth_available=depth_available,
+            data_mode=LIVE, p_t=p_now, p_prior=p_prev, depth_weight=cw,
+            persistence=persistent, source_mode="LIVE",
+            adapter_name=last["adapter_name"],
+            adapter_run_id=last["adapter_run_id"],
+            fetch_timestamp=last["fetch_timestamp"],
+            source_hash=last["source_hash"]))
+    return {"shocks": shocks, "markets_seen": len(by_market),
+            "markets_with_prior": with_prior,
+            "markets_warming_up": len(by_market) - with_prior}
+
+
+def _iso_day(iso: str) -> int:
+    from datetime import datetime
+    try:
+        return int(datetime.fromisoformat(
+            iso.replace("Z", "+00:00")).timestamp()) // 86400
+    except ValueError:
+        return 0
+
+
+def write_shock_engine_status(path: Path, status: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(status, indent=2, sort_keys=True),
+                    encoding="utf-8")
 
 
 # --- deterministic fixtures -----------------------------------------------------
@@ -261,25 +463,99 @@ def fixture_frozen_map() -> dict[str, Any]:
 
 def _main() -> int:
     ap = argparse.ArgumentParser(
-        description="Detect PM shocks and write forward snapshots (advisory)")
-    ap.add_argument("--demo", action="store_true")
+        description="Detect PM shocks and write forward snapshots (advisory; "
+                    "live mode is read-only and NEVER falls back to fixture)")
+    ap.add_argument("--mode", choices=("fixture", "live"), required=True)
     ap.add_argument("--map", type=Path, help="frozen event_equity_map JSON")
     ap.add_argument("--out", type=Path,
                     default=Path("data/calibration_corpus/forward_snapshots.jsonl"))
-    ap.add_argument("--mode", choices=("dry_run", "write"), default="dry_run")
+    ap.add_argument("--ledger", type=Path, default=OBSERVATION_LEDGER_DEFAULT)
+    ap.add_argument("--write", choices=("dry_run", "write"),
+                    default="dry_run")
     args = ap.parse_args()
-    if not args.demo:
-        raise SystemExit("live adapter mode not wired in this sprint; use --demo")
-    frozen = load_frozen_map(args.map) if args.map else fixture_frozen_map()
-    shock = detect_shock(fixture_market())
-    if shock is None:
-        print(json.dumps({"shocks": 0}))
+    if args.mode == "fixture":
+        frozen = load_frozen_map(args.map) if args.map else fixture_frozen_map()
+        shock = detect_shock(fixture_market())
+        if shock is None:
+            print(json.dumps({"mode": "fixture", "shocks": 0}))
+            return 0
+        rows = build_forward_snapshots(shock, frozen, fixture_equity_prices())
+        report = append_snapshots(args.out, rows, mode=args.write)
+        report["data_mode"] = FIXTURE_DEMONSTRATION
+        report["shock"] = {"market_id": shock.market_id,
+                           "delta_p": shock.delta_p,
+                           "delta_p_conv": shock.delta_p_conv}
+        print(json.dumps(report, indent=2, sort_keys=True))
         return 0
-    rows = build_forward_snapshots(shock, frozen, fixture_equity_prices())
-    report = append_snapshots(args.out, rows, mode=args.mode)
-    report["shock"] = {"market_id": shock.market_id, "delta_p": shock.delta_p,
-                       "delta_p_conv": shock.delta_p_conv}
-    print(json.dumps(report, indent=2, sort_keys=True))
+    # --- live path: fail closed, no fixture fallback --------------------------
+    # Watch the macro series linked in the frozen taxonomy, plus the generic
+    # feed; junk zero-price markets are skipped by _kalshi_prob.
+    live_series = ("KXFEDDECISION", "KXCPIYOY", "KXFED")
+    try:
+        fetch = fetch_kalshi_markets_live()
+        import urllib.parse as _up
+        for series in live_series:
+            extra = fetch_kalshi_markets_live(
+                base_url=None, limit=100,
+                status=f"open&series_ticker={_up.quote(series)}")
+            fetch["markets"].extend(extra["markets"])
+    except LiveSourceError as exc:
+        print(json.dumps({"status": "BLOCKED_ADAPTER_LIMITATION",
+                          "blocker": str(exc)}))
+        return 3
+    ledger_report = ledger_live_observations(fetch, args.ledger,
+                                             mode=args.write)
+    detection = detect_shocks_from_ledger(args.ledger)
+    shocks = detection["shocks"]
+    snapshot_report: dict[str, Any] = {"shocks": len(shocks), "written": 0}
+    if shocks and args.map:
+        frozen = load_frozen_map(args.map)
+        wanted = {e["ticker"] for e in frozen["entries"]
+                  for s in shocks if e["event_id"] == s.event_id}
+        prices: dict[str, dict[int, float]] = {}
+        if wanted:
+            try:
+                import yfinance as yf
+                for t in sorted(wanted):
+                    hist = yf.Ticker(t).history(period="5d", interval="1d")
+                    if len(hist):
+                        day = int(hist.index[-1].timestamp()) // 86400
+                        prices[t] = {day: float(hist["Close"].iloc[-1])}
+                        for s in shocks:
+                            prices[t][s.day] = float(hist["Close"].iloc[-1])
+            except Exception as exc:
+                print(json.dumps({"status": "DEGRADED",
+                                  "blocker": f"EQUITY_PRICE_FETCH_FAILED: "
+                                             f"{type(exc).__name__}"}))
+        rows: list[dict[str, Any]] = []
+        for s in shocks:
+            rows.extend(build_forward_snapshots(s, frozen, prices))
+        snapshot_report = append_snapshots(args.out, rows, mode=args.write)
+        snapshot_report["shocks"] = len(shocks)
+    engine_status = ("ACTIVE" if detection["markets_with_prior"] > 0
+                     else "WARMING_UP")
+    status_doc = {
+        "run_id": fetch["adapter_run_id"],
+        "timestamp": fetch["fetch_timestamp"], "mode": "live",
+        "markets_observed": len(fetch["markets"]),
+        "observations_written": ledger_report.get("written", 0),
+        "markets_with_prior": detection["markets_with_prior"],
+        "markets_warming_up": detection["markets_warming_up"],
+        "shocks_emitted": len(shocks),
+        "status": engine_status, "blocker": None,
+        "advisory_status": ADVISORY_STATUS,
+    }
+    write_shock_engine_status(Path("runtime/shock_engine_status.json"),
+                              status_doc)
+    out = {"mode": "live", "adapter_run_id": fetch["adapter_run_id"],
+           "markets_observed": len(fetch["markets"]),
+           "ledger": ledger_report, "shock_detection": snapshot_report,
+           "engine_status": engine_status,
+           "markets_with_prior": detection["markets_with_prior"],
+           "note": ("live ΔP accumulates across runs of the observation "
+                    "ledger; WARMING_UP is expected until history exists"),
+           "advisory_status": ADVISORY_STATUS, "real_money": REAL_MONEY}
+    print(json.dumps(out, indent=2, sort_keys=True))
     return 0
 
 

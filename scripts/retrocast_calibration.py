@@ -22,6 +22,7 @@ clock). ADVISORY_ONLY — no broker execution, no order placement.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
 import random
@@ -267,27 +268,266 @@ def fixture_resolved_markets_and_prices(
     return markets, {"FIXA": fixa, "FIXB": fixb}
 
 
+# --- real resolved-market retrocast (Kalshi public + yfinance, read-only) -------
+# Fail-closed: any live failure raises LiveSourceError with the exact
+# blocker; the real path NEVER silently falls back to fixture data.
+
+class LiveSourceError(RuntimeError):
+    pass
+
+
+KALSHI_BASE = "https://api.elections.kalshi.com/trade-api/v2"
+# Frozen series->category links (category rules live in the frozen taxonomy).
+KALSHI_SERIES_CATEGORY_LINKS: dict[str, str] = {
+    "KXFEDDECISION": "policy_rates",
+    "KXFED": "policy_rates",
+    "KXCPIYOY": "policy_rates",
+}
+REAL_MIN_N = 30
+REAL_VALIDATE_P = 0.05
+REAL_BAN_P = 0.20
+
+
+def _kalshi_get(path: str, retries: int = 3) -> tuple[dict[str, Any], bytes]:
+    import time as _time
+    import urllib.request
+    url = f"{KALSHI_BASE}{path}"
+    last_exc: Exception | None = None
+    for attempt in range(retries):
+        req = urllib.request.Request(
+            url,
+            headers={"User-Agent": "sleeping-passenger advisory read-only"})
+        try:
+            raw = urllib.request.urlopen(req, timeout=25).read()
+            return json.loads(raw), raw
+        except Exception as exc:      # transient resets observed; back off
+            last_exc = exc
+            _time.sleep(1.5 * (attempt + 1))
+    raise LiveSourceError(
+        f"KALSHI_FETCH_FAILED after {retries} attempts: "
+        f"{type(last_exc).__name__}: {last_exc} (url={url})") from last_exc
+
+
+def _iso_to_day(iso: str) -> int:
+    from datetime import datetime
+    return int(datetime.fromisoformat(iso.replace("Z", "+00:00")).timestamp()
+               ) // 86400
+
+
+def fetch_real_resolved_markets(max_per_series: int = 60
+                                ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc)
+    run_id = f"retrocast-real-{now.strftime('%Y%m%dT%H%M%SZ')}"
+    markets: list[dict[str, Any]] = []
+    hashes: list[str] = []
+    for series, category in KALSHI_SERIES_CATEGORY_LINKS.items():
+        payload, raw = _kalshi_get(
+            f"/markets?limit={max_per_series}&status=settled"
+            f"&series_ticker={series}")
+        hashes.append(hashlib.sha256(raw).hexdigest()[:16])
+        for m in payload.get("markets", []):
+            open_t, close_t = m.get("open_time"), m.get("close_time")
+            if not open_t or not close_t:
+                continue
+            try:
+                open_ts = _iso_to_day(open_t) * 86400
+                close_ts = _iso_to_day(close_t) * 86400 + 86399
+            except ValueError:
+                continue
+            candles_payload, _craw = _kalshi_get(
+                f"/series/{series}/markets/{m['ticker']}/candlesticks"
+                f"?start_ts={open_ts}&end_ts={close_ts}"
+                "&period_interval=1440")
+            history = []
+            for c in candles_payload.get("candlesticks", []):
+                price = (c.get("price") or {})
+                close_cents = price.get("close")
+                if close_cents is None:
+                    close_cents = (c.get("yes_bid") or {}).get("close")
+                ts = c.get("end_period_ts")
+                if close_cents is None or ts is None:
+                    continue
+                history.append({"day": int(ts) // 86400,
+                                "p": round(float(close_cents) / 100.0, 4)})
+            if len(history) >= 6:
+                markets.append({
+                    "market_id": str(m["ticker"]), "category": category,
+                    "resolved_outcome": 1 if m.get("result") == "yes" else 0,
+                    "price_history": history,
+                })
+    meta = {"adapter_run_id": run_id, "fetch_timestamp": now.isoformat(),
+            "source_hash": hashlib.sha256(
+                "|".join(hashes).encode()).hexdigest()[:32],
+            "adapter_name": "kalshi_public_candlesticks"}
+    if not markets:
+        raise LiveSourceError(
+            "NO_USABLE_SETTLED_MARKETS: linked series "
+            f"{sorted(KALSHI_SERIES_CATEGORY_LINKS)} returned no settled "
+            "markets with >=6 daily candlesticks — real retrocast blocked; "
+            "widen series links or wait for more resolutions.")
+    return markets, meta
+
+
+def fetch_equity_closes_yf(tickers: list[str]) -> dict[str, dict[int, float]]:
+    try:
+        import yfinance as yf
+    except ImportError as exc:
+        raise LiveSourceError("YFINANCE_NOT_INSTALLED") from exc
+    out: dict[str, dict[int, float]] = {}
+    for t in tickers:
+        try:
+            hist = yf.Ticker(t).history(period="5y", interval="1d")
+        except Exception as exc:
+            raise LiveSourceError(
+                f"YFINANCE_FETCH_FAILED:{t}: {type(exc).__name__}") from exc
+        if hist is None or len(hist) == 0:
+            raise LiveSourceError(f"YFINANCE_EMPTY:{t}")
+        series: dict[int, float] = {}
+        for ts, close in hist["Close"].items():
+            series[int(ts.timestamp()) // 86400] = float(close)
+        out[t] = series
+    return out
+
+
+def _p_value(tstat: float, n: int) -> float:
+    if n < 2:
+        return 1.0
+    return round(2.0 * (1.0 - 0.5 * (1.0 + math.erf(abs(tstat)
+                                                    / math.sqrt(2.0)))), 5)
+
+
+def real_category_status(report: dict[str, dict[str, Any]]
+                         ) -> dict[str, dict[str, Any]]:
+    out: dict[str, dict[str, Any]] = {}
+    for cat, row in report.items():
+        p = _p_value(row["tstat"], row["n"])
+        if row["n"] < REAL_MIN_N:
+            status = "UNAVAILABLE_NEUTRAL"
+        elif p <= REAL_VALIDATE_P and row["hit_rate"] >= VALIDATE_HIT_RATE:
+            status = "VALIDATED"
+        elif p > REAL_BAN_P and row["hit_rate"] <= 0.50:
+            status = "BANNED_NO_TRANSMISSION"
+        else:
+            status = "UNAVAILABLE_NEUTRAL"
+        out[cat] = {**row, "p_value": p, "real_status": status}
+    return out
+
+
+def run_real_retrocast(taxonomy: dict[str, Any]) -> dict[str, Any]:
+    markets, meta = fetch_real_resolved_markets()
+    tickers = sorted({t for rule in taxonomy.get("categories", {}).values()
+                      for t in rule.get("tickers", [])})
+    equity = fetch_equity_closes_yf(tickers)
+    result = run_retrocast(markets, taxonomy, equity,
+                           data_mode="IMPORTED_BACKTEST")
+    for r in result["records"]:
+        r.update({"adapter_run_id": meta["adapter_run_id"],
+                  "source_hash": meta["source_hash"],
+                  "adapter_name": meta["adapter_name"],
+                  "fetch_timestamp": meta["fetch_timestamp"]})
+    result["real_category_status"] = real_category_status(
+        result["category_report"])
+    result["adapter_meta"] = meta
+    result["n_markets_used"] = len(markets)
+    return result
+
+
+def run_real_lite(taxonomy: dict[str, Any]) -> dict[str, Any]:
+    """real-lite: use only endpoints that work WITHOUT /series* (settled
+    market listings). Without candlestick probability paths no transmission
+    can be measured, so linked categories report UNAVAILABLE_NEUTRAL — an
+    honest neutral, never a fixture substitute."""
+    settled_counts: dict[str, int] = {}
+    blocker = None
+    try:
+        payload, _raw = _kalshi_get("/markets?limit=100&status=settled")
+        markets = payload.get("markets", [])
+        for m in markets:
+            series = str(m.get("ticker", "")).split("-")[0]
+            cat = KALSHI_SERIES_CATEGORY_LINKS.get(series)
+            if cat:
+                settled_counts[cat] = settled_counts.get(cat, 0) + 1
+    except LiveSourceError as exc:
+        blocker = str(exc)
+    status = {}
+    for cat in sorted(set(KALSHI_SERIES_CATEGORY_LINKS.values())):
+        status[cat] = {
+            "n": settled_counts.get(cat, 0), "hit_rate": None,
+            "tstat": None, "p_value": None,
+            "real_status": ("BLOCKED_ADAPTER_LIMITATION" if blocker
+                            else "UNAVAILABLE_NEUTRAL"),
+            "reason": (blocker or
+                       "probability history requires /series* candlesticks; "
+                       "settled listings alone cannot measure transmission"),
+        }
+    return {"real_category_status": status,
+            "mode": "real-lite", "blocker": blocker,
+            "advisory_status": ADVISORY_STATUS}
+
+
 def _main() -> int:
     ap = argparse.ArgumentParser(
-        description="Retrocast resolved-market fixture study (advisory)")
-    ap.add_argument("--demo", action="store_true")
-    ap.add_argument("--mode", choices=("dry_run", "write"), default="dry_run")
+        description="Retrocast resolved-market study (advisory; real mode "
+                    "is read-only and NEVER falls back to fixture)")
+    ap.add_argument("--mode", choices=("fixture", "real", "real-lite"),
+                    required=True)
+    ap.add_argument("--write", choices=("dry_run", "write"),
+                    default="dry_run")
     ap.add_argument("--records-out", type=Path,
                     default=Path("data/calibration_corpus/retrocast.jsonl"))
     ap.add_argument("--report-out", type=Path,
                     default=Path("runtime/retrocast_report.json"))
+    ap.add_argument("--category-status-out", type=Path,
+                    default=Path("runtime/retrocast_category_status.json"))
+    ap.add_argument("--taxonomy", type=Path,
+                    default=Path("data/reference/event_taxonomy.json"))
     ap.add_argument("--snapshots", type=Path,
                     default=Path("data/calibration_corpus/forward_snapshots.jsonl"))
     args = ap.parse_args()
-    if not args.demo:
-        raise SystemExit("live adapter mode not wired in this sprint; use --demo")
-    markets, prices = fixture_resolved_markets_and_prices()
-    result = run_retrocast(markets, fixture_taxonomy(), prices)
+    if args.mode == "fixture":
+        markets, prices = fixture_resolved_markets_and_prices()
+        result = run_retrocast(markets, fixture_taxonomy(), prices)
+    elif args.mode == "real-lite":
+        taxonomy = json.loads(args.taxonomy.read_text(encoding="utf-8"))
+        lite = run_real_lite(taxonomy)
+        if args.write == "write":
+            args.category_status_out.parent.mkdir(parents=True, exist_ok=True)
+            args.category_status_out.write_text(
+                json.dumps(lite, indent=2, sort_keys=True), encoding="utf-8")
+            Path("runtime/retrocast_real_attempt.json").write_text(
+                json.dumps({"status": ("BLOCKED_ADAPTER_LIMITATION"
+                                       if lite["blocker"] else
+                                       "UNAVAILABLE_NEUTRAL"),
+                            "mode": "real-lite",
+                            "blocker": lite["blocker"],
+                            "note": "no fixture fallback performed",
+                            "advisory_status": ADVISORY_STATUS},
+                           indent=2, sort_keys=True), encoding="utf-8")
+        print(json.dumps(lite, indent=2, sort_keys=True))
+        return 0 if lite["blocker"] is None else 3
+    else:
+        taxonomy = json.loads(args.taxonomy.read_text(encoding="utf-8"))
+        try:
+            result = run_real_retrocast(taxonomy)
+        except LiveSourceError as exc:
+            print(json.dumps({"status": "BLOCKED_ADAPTER_LIMITATION",
+                              "blocker": str(exc)}))
+            return 3
     out = write_outputs(result, records_path=args.records_out,
                         report_path=args.report_out,
-                        snapshots_path=args.snapshots, mode=args.mode)
+                        snapshots_path=args.snapshots, mode=args.write)
+    if args.mode == "real" and args.write == "write":
+        args.category_status_out.parent.mkdir(parents=True, exist_ok=True)
+        args.category_status_out.write_text(json.dumps(
+            {"real_category_status": result["real_category_status"],
+             "adapter_meta": result["adapter_meta"],
+             "n_markets_used": result["n_markets_used"],
+             "advisory_status": ADVISORY_STATUS},
+            indent=2, sort_keys=True), encoding="utf-8")
     print(json.dumps(out["report"], indent=2, sort_keys=True))
-    print(json.dumps({"mode": out["mode"], "n_records": out["n_records"]}))
+    print(json.dumps({"mode": out["mode"], "n_records": out["n_records"],
+                      "study_mode": args.mode}))
     return 0
 
 

@@ -9,7 +9,10 @@ This card validates MVP architecture and scoring logic. It is not a buy candidat
 
 | governance field | value |
 |---|---|
-| DATA MODE | `FIXTURE_DEMONSTRATION` |
+| DATA MODE (declared label) | `FIXTURE_DEMONSTRATION` |
+| DERIVED DATA MODE (from verified evidence) | `FIXTURE` |
+| AUTHENTICITY cap | `3.0` |
+| LINEAGE | `n/a (root contract)` |
 | CONTRACT PURPOSE | `CASE_STUDY` |
 | BOARD SCOPE | `CASE_STUDY_BOARD` |
 | INVESTMENT ELIGIBILITY | `NOT_ELIGIBLE` |
@@ -89,6 +92,12 @@ stablecoin adoption belief -> rail substitution question -> network take-rate ->
 
 ### Anecdote quarantine
 - none
+
+## BINDING GATE
+BindingGate = **EQS** (EQS = 0.080)
+
+## NEXT EVIDENCE ACTIONS
+- (none registered — add next_evidence_actions to the contract)
 
 ## NEXT ACTION
 None for investment: case studies are not promotable in place. To pursue the idea, clone via promote_case_study_to_research() with new expiry, new falsification observable, and live/hard evidence.

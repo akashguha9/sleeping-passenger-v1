@@ -27,16 +27,19 @@ from scripts.signal_thesis_contract import (
     ADVISORY_STATUS, ANECDOTE, CASE_STUDY, EXPIRED, FALSIFIED,
     FALSIFIED_PURPOSE, FIXTURE_TEST, FOR_NULL, FOR_THESIS,
     INVESTABLE_CANDIDATE, LIVE_RESEARCH, REAL_MONEY, RETIRED,
-    ThesisContract, grade, load_contract, validate_purpose_routing,
+    ThesisContract, binding_gate, grade, load_contract, load_contract_index,
+    validate_purpose_routing, verify_lineage_from_index,
 )
 
 REQUIRED_SECTIONS = (
-    "DATA MODE", "CONTRACT PURPOSE", "BOARD SCOPE", "INVESTMENT ELIGIBILITY",
+    "DATA MODE", "DERIVED DATA MODE", "AUTHENTICITY", "LINEAGE",
+    "CONTRACT PURPOSE", "BOARD SCOPE", "INVESTMENT ELIGIBILITY",
     "TRADING STATUS", "PROMOTION STATUS", "VERDICT", "FINAL SCORE",
     "FRAMEWORK VALIDATION", "RESEARCH QUALITY", "INVESTABILITY SCORE",
     "EVIDENCE QUALITY", "CONTRADICTION", "EXPIRY", "CAUSAL PATH",
     "WHO GETS PAID", "PREDICTION-MARKET LINK", "WOULD VALIDATE",
-    "WOULD FALSIFY", "SCORE BREAKDOWN", "PROVENANCE", "NEXT ACTION",
+    "WOULD FALSIFY", "SCORE BREAKDOWN", "PROVENANCE", "BINDING GATE",
+    "NEXT EVIDENCE ACTIONS", "NEXT ACTION",
 )
 
 CASE_STUDY_BANNER = (
@@ -109,7 +112,14 @@ def render_thesis_card(contract: ThesisContract, report: dict[str, Any],
     add(f"**Entity:** {contract.entity} ({contract.ticker})")
     add("")
     add("| governance field | value |\n|---|---|")
-    add(f"| DATA MODE | `{contract.data_mode}` |")
+    add(f"| DATA MODE (declared label) | `{contract.data_mode}` |")
+    add(f"| DERIVED DATA MODE (from verified evidence) | "
+        f"`{report['derived_data_mode']}` |")
+    add(f"| AUTHENTICITY cap | `{report['authenticity_cap']}` |")
+    lineage_txt = ("n/a (root contract)" if not contract.parent_hash else
+                   f"parent={contract.parent_case_study_id or contract.parent_research_id} "
+                   f"verified={report['lineage_valid']}")
+    add(f"| LINEAGE | `{lineage_txt}` |")
     add(f"| CONTRACT PURPOSE | `{contract.contract_purpose}` |")
     add(f"| BOARD SCOPE | `{contract.board_scope}` |")
     add(f"| INVESTMENT ELIGIBILITY | `{contract.investment_eligibility}` |")
@@ -229,6 +239,19 @@ def render_thesis_card(contract: ThesisContract, report: dict[str, Any],
     else:
         add("- none")
     add("")
+    add("## BINDING GATE")
+    gate = binding_gate(report)
+    add(f"BindingGate = **{gate}**"
+        + (f" (EQS = {report['evidence_quality']:.3f})" if gate == "EQS"
+           else ""))
+    add("")
+    add("## NEXT EVIDENCE ACTIONS")
+    if contract.next_evidence_actions:
+        for action in contract.next_evidence_actions:
+            add(f"- {action}")
+    else:
+        add("- (none registered — add next_evidence_actions to the contract)")
+    add("")
     add("## NEXT ACTION")
     add(_next_action(report, contract))
     add("")
@@ -239,8 +262,9 @@ def render_thesis_card(contract: ThesisContract, report: dict[str, Any],
     return card
 
 
-def write_card(contract: ThesisContract, as_of_day: int, out_dir: Path) -> Path:
-    report = grade(contract, as_of_day)
+def write_card(contract: ThesisContract, as_of_day: int, out_dir: Path,
+               lineage_valid: bool | None = None) -> Path:
+    report = grade(contract, as_of_day, lineage_valid=lineage_valid)
     card = render_thesis_card(contract, report, as_of_day)
     out_dir.mkdir(parents=True, exist_ok=True)
     path = out_dir / f"{contract.thesis_id}.md"
@@ -271,7 +295,8 @@ def _row(c: ThesisContract, r: dict[str, Any]) -> dict[str, Any]:
             "status": c.status}
 
 
-def build_boards(items: list[tuple[ThesisContract, dict[str, Any]]]
+def build_boards(items: list[tuple[ThesisContract, dict[str, Any]]],
+                 contract_index: dict[str, ThesisContract] | None = None
                  ) -> dict[str, list[dict[str, Any]]]:
     boards: dict[str, list[dict[str, Any]]] = {
         "CASE_STUDY_BOARD": [], "RESEARCH_BOARD": [],
@@ -280,13 +305,19 @@ def build_boards(items: list[tuple[ThesisContract, dict[str, Any]]]
         scope = route_board(c)
         if scope not in boards:
             raise ValueError(f"UNROUTABLE_BOARD_SCOPE: {scope}")
-        if (scope == "INVESTABLE_CANDIDATE_BOARD"
-                and (c.contract_purpose != INVESTABLE_CANDIDATE
-                     or c.promotion_status != "PROMOTED")):
-            raise ValueError(
-                f"BOARD_CONTAMINATION: {c.thesis_id} "
-                f"({c.contract_purpose}/{c.promotion_status}) may not appear "
-                "on INVESTABLE_CANDIDATE_BOARD")
+        if scope == "INVESTABLE_CANDIDATE_BOARD":
+            if (c.contract_purpose != INVESTABLE_CANDIDATE
+                    or c.promotion_status != "PROMOTED"):
+                raise ValueError(
+                    f"BOARD_CONTAMINATION: {c.thesis_id} "
+                    f"({c.contract_purpose}/{c.promotion_status}) may not "
+                    "appear on INVESTABLE_CANDIDATE_BOARD")
+            lineage = verify_lineage_from_index(c, contract_index or {})
+            if not lineage["valid"]:
+                raise ValueError(
+                    f"CONTRACT_LINEAGE_FAIL_CLOSED: {c.thesis_id} cannot sit "
+                    "on INVESTABLE_CANDIDATE_BOARD with unverified lineage: "
+                    f"{lineage['reasons']}")
         boards[scope].append(_row(c, r))
     return boards
 
@@ -391,8 +422,10 @@ def render_board(items: list[tuple[ThesisContract, dict[str, Any]]]) -> str:
 
 
 def write_all_boards(items: list[tuple[ThesisContract, dict[str, Any]]],
-                     md_dir: Path, json_dir: Path) -> dict[str, Any]:
-    boards = build_boards(items)
+                     md_dir: Path, json_dir: Path,
+                     contract_index: dict[str, ThesisContract] | None = None
+                     ) -> dict[str, Any]:
+    boards = build_boards(items, contract_index=contract_index)
     md = render_board_markdown(boards)
     md_dir.mkdir(parents=True, exist_ok=True)
     json_dir.mkdir(parents=True, exist_ok=True)
@@ -432,13 +465,19 @@ def _main() -> int:
     ap.add_argument("--json-dir", type=Path, default=Path("runtime"))
     ap.add_argument("--as-of-day", type=int, required=True)
     args = ap.parse_args()
+    contract_index = load_contract_index(args.contracts_dir)
     items: list[tuple[ThesisContract, dict[str, Any]]] = []
-    for path in sorted(args.contracts_dir.glob("*.json")):
-        contract = load_contract(path)
-        report = grade(contract, args.as_of_day)
-        write_card(contract, args.as_of_day, args.out_dir)
+    for contract in contract_index.values():
+        lineage_valid: bool | None = None
+        if contract.contract_purpose == INVESTABLE_CANDIDATE:
+            lineage_valid = verify_lineage_from_index(
+                contract, contract_index)["valid"]
+        report = grade(contract, args.as_of_day, lineage_valid=lineage_valid)
+        write_card(contract, args.as_of_day, args.out_dir,
+                   lineage_valid=lineage_valid)
         items.append((contract, report))
-    summary = write_all_boards(items, args.out_dir, args.json_dir)
+    summary = write_all_boards(items, args.out_dir, args.json_dir,
+                               contract_index=contract_index)
     summary["cards_written"] = len(items)
     print(json.dumps(summary, indent=2, sort_keys=True))
     return 0

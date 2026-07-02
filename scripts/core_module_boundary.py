@@ -99,6 +99,10 @@ _SUPPORT_SUFFIXES: tuple[str, ...] = (
     "_detectors", "_store", "_controller", "_bootstrap", "_lab", "_split",
     "_schema", "_ingestion", "_profile", "_signals", "_fitness", "_registers",
     "_value", "_engine_belief_extension", "_extension", "_purity_audit",
+    # Live Evidence Wiring sprint: read-only evidence miners (EDGAR FTS).
+    "_miner",
+    # Outcome Factory sprint: source-availability inventories.
+    "_inventory",
 )
 _SUPPORT_PREFIXES: tuple[str, ...] = (
     "build_", "run_", "apply_", "backfill_", "seed_", "import_", "export_",

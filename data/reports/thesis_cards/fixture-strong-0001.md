@@ -9,7 +9,10 @@ This card validates MVP architecture and scoring logic. It is not a buy candidat
 
 | governance field | value |
 |---|---|
-| DATA MODE | `FIXTURE_DEMONSTRATION` |
+| DATA MODE (declared label) | `FIXTURE_DEMONSTRATION` |
+| DERIVED DATA MODE (from verified evidence) | `FIXTURE` |
+| AUTHENTICITY cap | `3.0` |
+| LINEAGE | `n/a (root contract)` |
 | CONTRACT PURPOSE | `FIXTURE_TEST` |
 | BOARD SCOPE | `CASE_STUDY_BOARD` |
 | INVESTMENT ELIGIBILITY | `NOT_ELIGIBLE` |
@@ -33,7 +36,7 @@ Caps applied: none
 
 ## SCORE FAMILIES
 - FRAMEWORK VALIDATION score: 10.0 / 10 (praise for the framework, never the trade)
-- RESEARCH QUALITY score: 5.196 / 10
+- RESEARCH QUALITY score: 3.0 / 10
 - INVESTABILITY SCORE: 0.0 / 10 (eligibility multiplier = 0.0)
 
 ## EVIDENCE QUALITY: 0.574 (cap = 5.74)
@@ -94,6 +97,12 @@ belief: cheap transfers -> neobanks embed rail -> partner volume -> take-rate re
 
 ### Anecdote quarantine
 - Operator field obs: transfer routed via rail — weight 0.60 (corroborated)
+
+## BINDING GATE
+BindingGate = **EQS** (EQS = 0.574)
+
+## NEXT EVIDENCE ACTIONS
+- (none registered — add next_evidence_actions to the contract)
 
 ## NEXT ACTION
 None for investment: case studies are not promotable in place. To pursue the idea, clone via promote_case_study_to_research() with new expiry, new falsification observable, and live/hard evidence.

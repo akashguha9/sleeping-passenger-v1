@@ -28,16 +28,28 @@ def _case_study(**overrides) -> tc.ThesisContract:
     return tc.ThesisContract.from_dict(d)
 
 
+def _hard(eid: str, claim: str, source: str, ecology: str,
+          day: int) -> tc.EvidenceItem:
+    """HARD_FILING item with full authenticity metadata (accession + hash) so
+    it is hard-admissible under verified counting."""
+    return tc.EvidenceItem(
+        eid, claim, source, ecology, tc.HARD_DATA, tc.FOR_THESIS, day,
+        source_mode=tc.SM_HARD_FILING,
+        source_uri_or_adapter="https://www.sec.gov/fixture-filing",
+        fetch_timestamp="2026-07-02T00:00:00Z", adapter_name="test_fixture",
+        adapter_run_id="run-test-0001",
+        source_hash="deadbeef" * 4,
+        accession_or_filing_id=f"0000000000-26-{eid}", is_fixture=False)
+
+
 def _passing_research() -> tc.ThesisContract:
     ev = [
-        tc.EvidenceItem("r-h1", "filing discloses take-rate share", "EDGAR",
-                        "sec_filing", tc.HARD_DATA, tc.FOR_THESIS, AS_OF - 5),
-        tc.EvidenceItem("r-h2", "regulator record confirms license scope",
-                        "regulator", "regulatory", tc.HARD_DATA,
-                        tc.FOR_THESIS, AS_OF - 8),
-        tc.EvidenceItem("r-h3", "second filing names partner revenue",
-                        "EDGAR", "sec_filing", tc.HARD_DATA, tc.FOR_THESIS,
-                        AS_OF - 10),
+        _hard("r-h1", "filing discloses take-rate share", "EDGAR",
+              "sec_filing", AS_OF - 5),
+        _hard("r-h2", "regulator record confirms license scope",
+              "regulator", "regulatory", AS_OF - 8),
+        _hard("r-h3", "second filing names partner revenue", "EDGAR",
+              "sec_filing", AS_OF - 10),
         tc.EvidenceItem("r-m1", "transcript take-rate language",
                         "transcript", "earnings_call", tc.MARKET,
                         tc.FOR_THESIS, AS_OF - 6),
@@ -233,17 +245,25 @@ def test_promotion_fails_on_banned_retrocast_category():
 
 
 def test_promotion_succeeds_when_all_requirements_pass():
+    research = _passing_research()
     result = tc.promote_research_to_investable(
-        _passing_research(), approval_note="approved", as_of_day=AS_OF)
+        research, approval_note="approved", as_of_day=AS_OF)
     assert result["promoted"] is True, result
     cand = result["contract"]
     assert cand.contract_purpose == tc.INVESTABLE_CANDIDATE
     assert cand.promotion_status == "PROMOTED"
     assert cand.parent_research_id == "research-pass-0001"
     assert cand.thesis_id != "research-pass-0001"
-    r = tc.grade(cand, AS_OF)
-    assert r["investability_score"] == r["final_score"]  # multiplier 1.0
+    lineage = tc.verify_lineage(cand, research)
+    assert lineage["valid"] is True, lineage
+    r = tc.grade(cand, AS_OF, lineage_valid=lineage["valid"])
+    assert r["derived_data_mode"] == "HARD"
+    assert r["investability_score"] == r["research_quality_score"]  # mult 1.0
     assert r["investability_score"] >= 7.0
+    # without lineage verification the same candidate fails closed
+    r0 = tc.grade(cand, AS_OF)
+    assert r0["investability_score"] == 0.0
+    assert "LINEAGE_UNVERIFIED_FAIL_CLOSED" in r0["caps_applied"]
 
 
 # --- score invariant tests (24-29) -----------------------------------------------
@@ -287,12 +307,14 @@ def test_unpromoted_research_investability_is_quartered():
 
 # --- regression (32): live mode never silently falls back to fixture ------------
 
-def test_cli_refuses_silent_fixture_fallback():
+def test_cli_refuses_to_run_without_explicit_mode():
+    """--mode {fixture,live/real} is REQUIRED: there is no default mode, so
+    a live failure can never silently become a fixture run."""
     for module in ("scripts.retrocast_calibration",
                    "scripts.prediction_market_shock_engine"):
         proc = subprocess.run(
-            [sys.executable, "-m", module],  # no --demo
+            [sys.executable, "-m", module],  # no --mode
             capture_output=True, text=True,
             cwd=str(Path(__file__).resolve().parents[1]))
         assert proc.returncode != 0
-        assert "not wired" in (proc.stderr + proc.stdout)
+        assert "--mode" in (proc.stderr + proc.stdout)

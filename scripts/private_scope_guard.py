@@ -203,6 +203,15 @@ APPROVED_DOMAINS: tuple[str, ...] = (
     "decision_board",      # manual_decision_board.py — advisory-only human-review
                            # classifier; emits no order/execution instruction
     "mvp_readiness",       # mvp_readiness_report.py — single advisory truth surface
+    # Live Evidence Wiring sprint — read-only SEC EDGAR full-text counterparty
+    # miner producing HARD_FILING evidence edges (accession-number provenance).
+    # Fail-closed without SEC_USER_AGENT; no broker, no execution, no writes
+    # to any trading surface.
+    "edgar",               # edgar_counterparty_miner.py
+    # Outcome Factory sprint — advisory-only snapshot maturity harvesting:
+    # OPEN live snapshots -> matured outcome rows -> calibration ladder.
+    # Read-only price checks; no broker, no execution, no order surface.
+    "maturity",            # snapshot_maturity_scanner.py
 )
 
 # Explicit allowlist for individual files / directories whose name does

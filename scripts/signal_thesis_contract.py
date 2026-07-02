@@ -122,6 +122,7 @@ V_CASE_STUDY_VALIDATION = "CASE_STUDY_VALIDATION"
 V_FRAMEWORK_TEST_PASS = "FRAMEWORK_TEST_PASS"
 V_FRAMEWORK_TEST_FAIL = "FRAMEWORK_TEST_FAIL"
 V_RESEARCH_ONLY = "RESEARCH_ONLY"
+V_BLOCKED_FIXTURE_CONTAMINATION = "BLOCKED_FIXTURE_CONTAMINATION"
 
 # Investment-flavored verdicts: forbidden for CASE_STUDY/FIXTURE_TEST always,
 # and for LIVE_RESEARCH until promoted into a new INVESTABLE_CANDIDATE.
@@ -149,6 +150,17 @@ UNFALSIFIABLE_SCORE_CAP = 4.0
 EQS_INSUFFICIENT_FLOOR = 0.35
 
 
+# --- evidence source modes (authenticity, derived — never trusted) -------------
+SM_FIXTURE = "FIXTURE"
+SM_LIVE = "LIVE"
+SM_IMPORTED_BACKTEST = "IMPORTED_BACKTEST"
+SM_HARD_FILING = "HARD_FILING"
+SM_ANALYST_PRIOR = "ANALYST_PRIOR"
+SM_ANECDOTE = "ANECDOTE"
+SOURCE_MODES = (SM_FIXTURE, SM_LIVE, SM_IMPORTED_BACKTEST, SM_HARD_FILING,
+                SM_ANALYST_PRIOR, SM_ANECDOTE)
+
+
 @dataclass
 class EvidenceItem:
     evidence_id: str
@@ -159,6 +171,15 @@ class EvidenceItem:
     stance: str                      # FOR_THESIS | FOR_NULL | NEUTRAL
     observed_day: int
     half_life_days: float | None = None
+    # --- authenticity metadata (claims are verified, not trusted) --------------
+    source_mode: str = ""            # one of SOURCE_MODES; "" = undeclared
+    source_uri_or_adapter: str = ""
+    fetch_timestamp: str = ""
+    adapter_name: str = ""
+    adapter_run_id: str = ""
+    source_hash: str = ""
+    accession_or_filing_id: str = ""
+    is_fixture: bool | None = None   # None => derived from contract data_mode
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -167,6 +188,14 @@ class EvidenceItem:
             "provenance": self.provenance, "stance": self.stance,
             "observed_day": self.observed_day,
             "half_life_days": self.half_life_days,
+            "source_mode": self.source_mode,
+            "source_uri_or_adapter": self.source_uri_or_adapter,
+            "fetch_timestamp": self.fetch_timestamp,
+            "adapter_name": self.adapter_name,
+            "adapter_run_id": self.adapter_run_id,
+            "source_hash": self.source_hash,
+            "accession_or_filing_id": self.accession_or_filing_id,
+            "is_fixture": self.is_fixture,
         }
 
     @staticmethod
@@ -178,7 +207,36 @@ class EvidenceItem:
             observed_day=int(d["observed_day"]),
             half_life_days=(None if d.get("half_life_days") is None
                             else float(d["half_life_days"])),
+            source_mode=str(d.get("source_mode", "")),
+            source_uri_or_adapter=str(d.get("source_uri_or_adapter", "")),
+            fetch_timestamp=str(d.get("fetch_timestamp", "")),
+            adapter_name=str(d.get("adapter_name", "")),
+            adapter_run_id=str(d.get("adapter_run_id", "")),
+            source_hash=str(d.get("source_hash", "")),
+            accession_or_filing_id=str(d.get("accession_or_filing_id", "")),
+            is_fixture=d.get("is_fixture"),
         )
+
+
+def item_live_verified(item: EvidenceItem) -> bool:
+    """A LIVE claim counts only with full adapter metadata — self-declared
+    LIVE without proof is worth nothing."""
+    return (item.source_mode == SM_LIVE
+            and bool(item.source_uri_or_adapter)
+            and bool(item.fetch_timestamp)
+            and bool(item.adapter_run_id)
+            and bool(item.source_hash))
+
+
+def item_hard_admissible(item: EvidenceItem) -> bool:
+    return (item.source_mode == SM_HARD_FILING
+            and bool(item.accession_or_filing_id)
+            and bool(item.source_hash))
+
+
+def item_imported_verified(item: EvidenceItem) -> bool:
+    return (item.source_mode == SM_IMPORTED_BACKTEST
+            and bool(item.source_hash) and bool(item.adapter_run_id))
 
 
 @dataclass
@@ -213,6 +271,13 @@ class ThesisContract:
     parent_case_study_id: str = ""
     parent_research_id: str = ""
     promotion_note: str = ""
+    # --- lineage custody (anti-forgery) ---------------------------------------
+    promotion_day: int = 0
+    parent_hash: str = ""
+    lineage_hash: str = ""
+    # operator worklist: what evidence would move this contract (mutable,
+    # excluded from lineage identity)
+    next_evidence_actions: list[str] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         if self.contract_purpose not in PURPOSES:
@@ -263,6 +328,10 @@ class ThesisContract:
             "parent_case_study_id": self.parent_case_study_id,
             "parent_research_id": self.parent_research_id,
             "promotion_note": self.promotion_note,
+            "promotion_day": self.promotion_day,
+            "parent_hash": self.parent_hash,
+            "lineage_hash": self.lineage_hash,
+            "next_evidence_actions": list(self.next_evidence_actions),
             "advisory_status": ADVISORY_STATUS, "real_money": REAL_MONEY,
         }
         return d
@@ -303,7 +372,28 @@ class ThesisContract:
             parent_case_study_id=str(d.get("parent_case_study_id", "")),
             parent_research_id=str(d.get("parent_research_id", "")),
             promotion_note=str(d.get("promotion_note", "")),
+            promotion_day=int(d.get("promotion_day", 0)),
+            parent_hash=str(d.get("parent_hash", "")),
+            lineage_hash=str(d.get("lineage_hash", "")),
+            next_evidence_actions=[str(x) for x in
+                                   d.get("next_evidence_actions", [])],
         )
+
+
+def binding_gate(report: dict[str, Any]) -> str:
+    """Which single factor most binds the final score right now?"""
+    if not report["falsifiable"]:
+        return "FALSIFIABILITY"
+    candidates = {
+        "EQS": report["evidence_quality"] * 10.0 / 8.0,  # vs FIS scale
+        "g_txn": report["g_txn"] * 10.0,
+        "g_contra": report["discrimination"]["g_contra"] * 10.0,
+        "g_stale": report["g_stale"] * 10.0,
+        "AUTHENTICITY": report["authenticity_cap"],
+    }
+    if "EVIDENCE_QUALITY_CAP" in report["caps_applied"]:
+        return "EQS"
+    return min(candidates, key=lambda k: candidates[k])
 
 
 def _clamp(x: float, lo: float, hi: float) -> float:
@@ -425,6 +515,61 @@ def is_falsifiable(contract: ThesisContract) -> bool:
             and contract.expiry_day > contract.created_day)
 
 
+def item_is_fixture(item: EvidenceItem, contract: ThesisContract) -> bool:
+    if item.is_fixture is not None:
+        return bool(item.is_fixture)
+    if item.source_mode == SM_FIXTURE:
+        return True
+    return contract.data_mode == FIXTURE_DEMONSTRATION
+
+
+def evidence_mode_counts(contract: ThesisContract) -> dict[str, int]:
+    live = sum(1 for e in contract.evidence if item_live_verified(e))
+    hard = sum(1 for e in contract.evidence if item_hard_admissible(e))
+    imported = sum(1 for e in contract.evidence if item_imported_verified(e))
+    fixture_driving = sum(1 for e in contract.evidence
+                          if item_is_fixture(e, contract))
+    anecdotes = sum(1 for e in contract.evidence
+                    if e.provenance == ANECDOTE)
+    return {"live_verified": live, "hard_admissible": hard,
+            "imported_verified": imported,
+            "fixture_driving": fixture_driving,
+            "anecdote": anecdotes, "total": len(contract.evidence)}
+
+
+def derive_data_mode(contract: ThesisContract) -> str:
+    """ContractDataMode is DERIVED from verified evidence — the declared
+    data_mode string is a label, never a scoring input. No manual override."""
+    c = evidence_mode_counts(contract)
+    verified_kinds = sum(1 for k in ("live_verified", "hard_admissible",
+                                     "imported_verified") if c[k] > 0)
+    if verified_kinds >= 2:
+        return "MIXED"
+    if c["live_verified"] > 0:
+        return "LIVE"
+    if c["hard_admissible"] > 0:
+        return "HARD"
+    if c["imported_verified"] > 0:
+        return "IMPORTED_BACKTEST"
+    if c["fixture_driving"] > 0:
+        return "FIXTURE"
+    if c["total"] > 0 and c["anecdote"] == c["total"]:
+        return "ANECDOTE_ONLY"
+    return "ANALYST_PRIOR"
+
+
+def authenticity_cap(derived_mode: str, contract_purpose: str) -> float:
+    """ResearchQualityScore ceiling by evidence authenticity."""
+    if derived_mode in ("LIVE", "HARD", "MIXED", "IMPORTED_BACKTEST"):
+        return 10.0
+    if derived_mode == "ANALYST_PRIOR":
+        return 5.0
+    if derived_mode == "ANECDOTE_ONLY":
+        return 3.0
+    # FIXTURE: worthless for an investable candidate; demo-grade otherwise
+    return 0.0 if contract_purpose == INVESTABLE_CANDIDATE else 3.0
+
+
 def validate_purpose_routing(contract: ThesisContract) -> None:
     """Board routing invariant: a contract may only sit on the board its
     purpose mandates. Contamination raises — it never renders."""
@@ -450,16 +595,19 @@ def framework_validation_score(contract: ThesisContract) -> float:
                          + test_coverage + score_pipeline_coverage) / 5.0, 3)
 
 
-def eligibility_multiplier(contract: ThesisContract) -> float:
-    """InvestabilityScore = FIS x this. CASE_STUDY/FIXTURE_TEST => 0. No
-    exception."""
+def eligibility_multiplier(contract: ThesisContract,
+                           lineage_valid: bool | None = None) -> float:
+    """InvestabilityScore = ResearchQualityScore x this. CASE_STUDY /
+    FIXTURE_TEST => 0, no exception. An INVESTABLE_CANDIDATE earns 1.0 only
+    with promotion status AND verified lineage; unverified lineage fails
+    closed to 0."""
     p = contract.contract_purpose
     if p in (CASE_STUDY, FIXTURE_TEST, RETIRED, FALSIFIED_PURPOSE):
         return 0.0
     if p == LIVE_RESEARCH:
         return 1.0 if contract.promotion_status == "PROMOTED" else 0.25
     if p == INVESTABLE_CANDIDATE and contract.promotion_status == "PROMOTED":
-        return 1.0
+        return 1.0 if lineage_valid is True else 0.0
     return 0.0
 
 
@@ -488,11 +636,16 @@ def _purpose_scoped_verdict(contract: ThesisContract, base_verdict: str,
     return base_verdict, base_rule
 
 
-def grade(contract: ThesisContract, as_of_day: int) -> dict[str, Any]:
+def grade(contract: ThesisContract, as_of_day: int, *,
+          lineage_valid: bool | None = None) -> dict[str, Any]:
     """Full contract grading. Enforces invariants I1-I5 plus the governance
-    invariants (routing, purpose-scoped verdicts, investability zeroing) and
-    returns the verdict with its binding rule id so every classification is
-    auditable."""
+    invariants (routing, purpose-scoped verdicts, investability zeroing,
+    derived data-mode authenticity, lineage fail-closed) and returns the
+    verdict with its binding rule id so every classification is auditable.
+
+    For INVESTABLE_CANDIDATE contracts, pass lineage_valid from
+    verify_lineage()/verify_lineage_from_index(); omitting it fails closed
+    (multiplier 0)."""
     validate_purpose_routing(contract)
     eqs = evidence_quality(contract, as_of_day)
     disc = discrimination(contract, as_of_day)
@@ -514,11 +667,27 @@ def grade(contract: ThesisContract, as_of_day: int) -> dict[str, Any]:
     fis = round(fis, 3)
 
     fvs = framework_validation_score(contract)
-    mult = eligibility_multiplier(contract)
+    mode_counts = evidence_mode_counts(contract)
+    derived_mode = derive_data_mode(contract)
+    auth_cap = authenticity_cap(derived_mode, contract.contract_purpose)
+    mult = eligibility_multiplier(contract, lineage_valid)
+    if (contract.contract_purpose == INVESTABLE_CANDIDATE
+            and lineage_valid is not True):
+        caps_applied.append("LINEAGE_UNVERIFIED_FAIL_CLOSED")
+    research_quality = round(min(fis, auth_cap), 3)
+    investability = round(research_quality * mult, 3)
     base_verdict, base_rule = _verdict(contract, fis, eqs, disc, g_txn, m,
                                        falsifiable)
     verdict, rule_id = _purpose_scoped_verdict(contract, base_verdict,
                                                base_rule, fvs)
+    # Fixture contamination: an investable candidate with ANY fixture-driving
+    # evidence is blocked outright — plumbing data can never price a trade.
+    if (contract.contract_purpose == INVESTABLE_CANDIDATE
+            and mode_counts["fixture_driving"] > 0):
+        verdict, rule_id = (V_BLOCKED_FIXTURE_CONTAMINATION,
+                            "RA_FIXTURE_DRIVING_EVIDENCE_ON_CANDIDATE")
+        investability = 0.0
+        caps_applied.append("FIXTURE_CONTAMINATION_BLOCK")
     provenance_counts: dict[str, int] = {}
     for e in contract.evidence:
         provenance_counts[e.provenance] = provenance_counts.get(e.provenance, 0) + 1
@@ -542,9 +711,13 @@ def grade(contract: ThesisContract, as_of_day: int) -> dict[str, Any]:
         "board_scope": contract.board_scope,
         "trading_status": contract.trading_status,
         "framework_validation_score": fvs,
-        "research_quality_score": round(min(fis, 10.0 * eqs), 3),
+        "research_quality_score": research_quality,
         "eligibility_multiplier": mult,
-        "investability_score": round(fis * mult, 3),
+        "investability_score": investability,
+        "derived_data_mode": derived_mode,
+        "authenticity_cap": auth_cap,
+        "evidence_mode_counts": mode_counts,
+        "lineage_valid": lineage_valid,
         "provenance_counts": provenance_counts,
         "anecdotes_quarantined": [
             {"evidence_id": e.evidence_id,
@@ -643,6 +816,103 @@ def _reassign_purpose(contract: ThesisContract, new_purpose: str) -> None:
         setattr(contract, fieldname, value)
 
 
+# --- lineage custody (anti-forgery) ---------------------------------------------
+# A promoted contract must PROVE its lineage: the child stores a hash of its
+# parent's canonical payload plus a lineage hash binding parent, child,
+# promotion day, and rationale. A hand-written contract with a fake
+# parent_research_id fails verification and is fail-closed everywhere.
+
+ALLOWED_TRANSITIONS = frozenset({(CASE_STUDY, LIVE_RESEARCH),
+                                 (LIVE_RESEARCH, INVESTABLE_CANDIDATE)})
+
+# Lineage binds the IMMUTABLE escrow collateral — identity, purpose,
+# direction, expiry, falsification observable, forced null, and promotion
+# metadata. Evidence and merit inputs are deliberately excluded: research
+# contracts must accumulate evidence without breaking lineage, but weakening
+# the falsification contract or re-pointing the ticker post-promotion MUST
+# break it.
+_IDENTITY_FIELDS = (
+    "thesis_id", "entity", "ticker", "contract_purpose",
+    "predicted_direction", "created_day", "expiry_day",
+    "falsification_observable", "forced_null_thesis",
+    "parent_case_study_id", "parent_research_id",
+    "promotion_day", "promotion_note",
+)
+
+
+def contract_core_hash(contract: ThesisContract) -> str:
+    """Lineage identity hash: sha256 over the immutable escrow-collateral
+    fields only (see _IDENTITY_FIELDS)."""
+    d = contract.to_dict()
+    identity = {k: d.get(k) for k in _IDENTITY_FIELDS}
+    blob = json.dumps(identity, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:32]
+
+
+def make_lineage_hash(parent_hash: str, child_core_hash: str,
+                      promotion_day: int, promotion_note: str) -> str:
+    blob = f"{parent_hash}|{child_core_hash}|{promotion_day}|{promotion_note}"
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:32]
+
+
+def _stamp_lineage(child: ThesisContract, parent: ThesisContract) -> None:
+    child.parent_hash = contract_core_hash(parent)
+    child.lineage_hash = make_lineage_hash(
+        child.parent_hash, contract_core_hash(child),
+        child.promotion_day, child.promotion_note)
+
+
+def verify_lineage(child: ThesisContract,
+                   parent: ThesisContract | None) -> dict[str, Any]:
+    """LineageValid = 1 iff parent hash matches, lineage hash recomputes, and
+    the purpose transition is allowed. Anything else fails closed."""
+    reasons: list[str] = []
+    if parent is None:
+        return {"valid": False,
+                "reasons": ["CONTRACT_LINEAGE_FAIL_CLOSED:PARENT_NOT_FOUND"]}
+    expected_parent = (CASE_STUDY if child.contract_purpose == LIVE_RESEARCH
+                       else LIVE_RESEARCH)
+    if (parent.contract_purpose, child.contract_purpose) not in ALLOWED_TRANSITIONS:
+        # a RETIRED/FALSIFIED/FIXTURE_TEST parent can never mint children
+        reasons.append("TRANSITION_NOT_ALLOWED:"
+                       f"{parent.contract_purpose}->{child.contract_purpose}")
+    if parent.contract_purpose != expected_parent:
+        reasons.append(f"PARENT_PURPOSE_NOT_{expected_parent}")
+    if (child.contract_purpose == INVESTABLE_CANDIDATE
+            and parent.promotion_status not in
+            ("PROMOTION_REQUIRED", "PROMOTION_REQUESTED", "PROMOTED")):
+        reasons.append("PARENT_PROMOTION_STATUS_INVALID")
+    if contract_core_hash(parent) != child.parent_hash:
+        reasons.append("PARENT_HASH_MISMATCH")
+    expected_lineage = make_lineage_hash(
+        child.parent_hash, contract_core_hash(child),
+        child.promotion_day, child.promotion_note)
+    if expected_lineage != child.lineage_hash:
+        reasons.append("LINEAGE_HASH_MISMATCH")
+    return {"valid": not reasons, "reasons": reasons}
+
+
+def verify_lineage_from_index(child: ThesisContract,
+                              contract_index: dict[str, ThesisContract]
+                              ) -> dict[str, Any]:
+    parent_id = (child.parent_research_id
+                 if child.contract_purpose == INVESTABLE_CANDIDATE
+                 else child.parent_case_study_id)
+    return verify_lineage(child, contract_index.get(parent_id))
+
+
+def load_contract_index(store_dir: Path) -> dict[str, ThesisContract]:
+    index: dict[str, ThesisContract] = {}
+    if store_dir.exists():
+        for p in sorted(store_dir.glob("*.json")):
+            try:
+                c = load_contract(p)
+            except ValueError:
+                continue
+            index[c.thesis_id] = c
+    return index
+
+
 # --- promotion workflow ---------------------------------------------------------
 # A case study is never edited into a candidate. It is CLONED into a new
 # LIVE_RESEARCH contract, which may later be promoted into a NEW
@@ -661,7 +931,7 @@ def promote_case_study_to_research(
     ticker = new_ticker or case_study.ticker
     new_id = contract_id(case_study.entity,
                          f"research:{case_study.thesis_id}:{rationale}", day)
-    return ThesisContract(
+    research = ThesisContract(
         thesis_id=new_id,
         title=f"[RESEARCH] {case_study.title}",
         entity=case_study.entity, ticker=ticker,
@@ -680,7 +950,10 @@ def promote_case_study_to_research(
         contract_purpose=LIVE_RESEARCH,
         parent_case_study_id=case_study.thesis_id,
         promotion_note=rationale,
+        promotion_day=int(day),
     )
+    _stamp_lineage(research, case_study)
+    return research
 
 
 PROMOTION_MIN_EQS = 0.60
@@ -702,26 +975,29 @@ def promote_research_to_investable(
         blockers.append(f"SOURCE_NOT_LIVE_RESEARCH:{research.contract_purpose}")
     if evidence_check:
         report = grade(research, as_of_day)
+        # Verified counts — self-declared modes carry no weight here.
+        live_count = sum(1 for e in research.evidence if item_live_verified(e))
         hard_count = sum(1 for e in research.evidence
-                         if e.provenance == HARD_DATA)
+                         if item_hard_admissible(e))
         non_anecdote = sum(1 for e in research.evidence
                            if e.provenance != ANECDOTE)
+        derived_mode = report["derived_data_mode"]
         if report["evidence_quality"] < PROMOTION_MIN_EQS:
             blockers.append(f"EQS_BELOW_{PROMOTION_MIN_EQS}:"
                             f"{report['evidence_quality']}")
         if report["final_score"] < PROMOTION_MIN_FIS:
             blockers.append(f"FIS_BELOW_{PROMOTION_MIN_FIS}:"
                             f"{report['final_score']}")
-        if not (research.data_mode == LIVE
-                or hard_count >= PROMOTION_MIN_HARD_EVIDENCE):
-            blockers.append("NO_LIVE_FLAG_AND_HARD_EVIDENCE_COUNT_LT_2")
+        if not (live_count >= 1 or hard_count >= PROMOTION_MIN_HARD_EVIDENCE):
+            blockers.append("NO_VERIFIED_LIVE_AND_HARD_EVIDENCE_COUNT_LT_2")
         if report["discrimination"]["g_contra"] < PROMOTION_MIN_GCONTRA:
             blockers.append(f"CONTRADICTION_GATE_BELOW_{PROMOTION_MIN_GCONTRA}:"
                             f"{report['discrimination']['g_contra']}")
         if report["g_stale"] < PROMOTION_MIN_GSTALE:
             blockers.append(f"STALENESS_GATE_BELOW_{PROMOTION_MIN_GSTALE}:"
                             f"{report['g_stale']}")
-        if research.data_mode == FIXTURE_DEMONSTRATION:
+        if (research.data_mode == FIXTURE_DEMONSTRATION
+                or derived_mode == "FIXTURE"):
             blockers.append("FIXTURE_ONLY_EVIDENCE")
         if research.evidence and non_anecdote == 0:
             blockers.append("ANECDOTE_ONLY_EVIDENCE")
@@ -758,9 +1034,13 @@ def promote_research_to_investable(
         parent_case_study_id=research.parent_case_study_id,
         parent_research_id=research.thesis_id,
         promotion_note=approval_note,
+        promotion_day=int(as_of_day),
     )
+    _stamp_lineage(candidate, research)
     return {"promoted": True, "contract": candidate,
-            "parent_research_id": research.thesis_id}
+            "parent_research_id": research.thesis_id,
+            "lineage_hash": candidate.lineage_hash,
+            "parent_hash": candidate.parent_hash}
 
 
 # --- deterministic fixture builders (never calibration-eligible) --------------
