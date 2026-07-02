@@ -339,6 +339,26 @@ def mine_providers(providers: dict[str, list[str]], *, ua: str,
             "advisory_status": ADVISORY_STATUS, "real_money": REAL_MONEY}
 
 
+def summarize_edge_types(edges: list[dict[str, Any]]) -> dict[str, int]:
+    """Pure edge-type count aggregation shared by every report writer.
+    No network, no file I/O — deterministic on the edges passed in."""
+    by_type: dict[str, int] = {}
+    for e in edges:
+        etype = e.get("edge_type", UNKNOWN)
+        by_type[etype] = by_type.get(etype, 0) + 1
+    return {
+        "total_edges": len(edges),
+        "self_filing_count": by_type.get(SELF_FILING, 0),
+        "boilerplate_count": by_type.get(BOILERPLATE, 0),
+        "unknown_count": by_type.get(UNKNOWN, 0),
+        "counterparty_count": by_type.get(COUNTERPARTY_FILING, 0),
+        "partner_disclosure_count": by_type.get(PARTNER_DISCLOSURE, 0),
+        "client_dependency_count": by_type.get(CLIENT_DEPENDENCY, 0),
+        "hard_admissible_count": sum(
+            1 for e in edges if e.get("hard_filing_admissible")),
+    }
+
+
 def write_outputs(result: dict[str, Any], *, edges_path: Path,
                   report_path: Path, adapter_run_id: str,
                   fetch_timestamp: str) -> dict[str, Any]:
@@ -352,22 +372,10 @@ def write_outputs(result: dict[str, Any], *, edges_path: Path,
     with edges_path.open("a", encoding="utf-8") as fh:
         for e in fresh:
             fh.write(json.dumps(e, sort_keys=True) + "\n")
-    admissible = [e for e in result["edges"] if e["hard_filing_admissible"]]
-    by_type: dict[str, int] = {}
-    for e in result["edges"]:
-        by_type[e.get("edge_type", UNKNOWN)] = by_type.get(
-            e.get("edge_type", UNKNOWN), 0) + 1
     report = {
         "adapter_run_id": adapter_run_id, "fetch_timestamp": fetch_timestamp,
-        "total_edges": len(result["edges"]),
         "edges_found": len(result["edges"]), "edges_written_new": len(fresh),
-        "self_filing_count": by_type.get(SELF_FILING, 0),
-        "boilerplate_count": by_type.get(BOILERPLATE, 0),
-        "unknown_count": by_type.get(UNKNOWN, 0),
-        "counterparty_count": by_type.get(COUNTERPARTY_FILING, 0),
-        "partner_disclosure_count": by_type.get(PARTNER_DISCLOSURE, 0),
-        "client_dependency_count": by_type.get(CLIENT_DEPENDENCY, 0),
-        "hard_admissible_count": len(admissible),
+        **summarize_edge_types(result["edges"]),
         "providers": result["provider_summaries"],
         "materiality_note": "FTS returns no section context or snippet; "
                             "section/context weights use conservative "
@@ -402,22 +410,11 @@ def reclassify_edges(edges_path: Path, report_path: Path,
     with edges_path.open("w", encoding="utf-8") as fh:
         for e in edges:
             fh.write(json.dumps(e, sort_keys=True) + "\n")
-    by_type: dict[str, int] = {}
-    for e in edges:
-        by_type[e["edge_type"]] = by_type.get(e["edge_type"], 0) + 1
     report = {
         "adapter_run_id": "reclassify-offline",
         "fetch_timestamp": f"{today.isoformat()}T00:00:00Z",
-        "total_edges": len(edges), "edges_found": len(edges),
-        "edges_written_new": 0,
-        "self_filing_count": by_type.get(SELF_FILING, 0),
-        "boilerplate_count": by_type.get(BOILERPLATE, 0),
-        "unknown_count": by_type.get(UNKNOWN, 0),
-        "counterparty_count": by_type.get(COUNTERPARTY_FILING, 0),
-        "partner_disclosure_count": by_type.get(PARTNER_DISCLOSURE, 0),
-        "client_dependency_count": by_type.get(CLIENT_DEPENDENCY, 0),
-        "hard_admissible_count": sum(
-            1 for e in edges if e["hard_filing_admissible"]),
+        "edges_found": len(edges), "edges_written_new": 0,
+        **summarize_edge_types(edges),
         "materiality_note": "offline reclassification; FTS has no snippets, "
                             "so non-self edges default to "
                             "COUNTERPARTY_FILING pending snippet capture",

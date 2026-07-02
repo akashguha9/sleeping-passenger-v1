@@ -83,13 +83,51 @@ def test_self_filing_and_boilerplate_never_admissible():
     assert edg.edge_admissible(edg.CLIENT_DEPENDENCY, "", 0.99) is False
 
 
-def test_regenerated_report_counts_by_edge_type():
-    report = json.loads((_REPO / "runtime/edgar_counterparty_report.json"
-                         ).read_text(encoding="utf-8"))
+def _fixture_edge(edge_type: str, *, accession: str = "0001234567-26-000042",
+                  score: float = 0.75) -> dict:
+    return {"edge_id": f"{edge_type}-{accession}", "edge_type": edge_type,
+            "accession_number": accession, "materiality_score": score,
+            "hard_filing_admissible": edg.edge_admissible(
+                edge_type, accession, score)}
+
+
+def test_regenerated_report_counts_by_edge_type(tmp_path):
+    edges = [
+        _fixture_edge(edg.SELF_FILING),
+        _fixture_edge(edg.SELF_FILING),
+        _fixture_edge(edg.COUNTERPARTY_FILING),
+        _fixture_edge(edg.CLIENT_DEPENDENCY),
+        _fixture_edge(edg.PARTNER_DISCLOSURE),
+        _fixture_edge(edg.BOILERPLATE),
+        _fixture_edge(edg.UNKNOWN),
+    ]
+    summary = edg.summarize_edge_types(edges)
+    assert summary["total_edges"] == 7
+    assert summary["self_filing_count"] == 2
+    assert summary["counterparty_count"] == 1
+    assert summary["client_dependency_count"] == 1
+    assert summary["partner_disclosure_count"] == 1
+    assert summary["boilerplate_count"] == 1
+    assert summary["unknown_count"] == 1
+    # SELF_FILING and BOILERPLATE never count toward hard-admissible
+    assert summary["hard_admissible_count"] == 3
+    assert (summary["hard_admissible_count"]
+            <= summary["total_edges"] - summary["self_filing_count"]
+            - summary["boilerplate_count"])
+
+    # regenerating the on-disk report goes through the same aggregation
+    report_path = tmp_path / "edgar_counterparty_report.json"
+    edg.write_outputs(
+        {"edges": edges, "provider_summaries": {}},
+        edges_path=tmp_path / "edges.jsonl", report_path=report_path,
+        adapter_run_id="fixture-run",
+        fetch_timestamp="2026-07-02T00:00:00Z")
+    report = json.loads(report_path.read_text(encoding="utf-8"))
     for key in ("self_filing_count", "counterparty_count",
                 "hard_admissible_count", "total_edges"):
         assert key in report
-    assert report["self_filing_count"] > 0
+    assert report["self_filing_count"] == 2
+    assert report["hard_admissible_count"] == 3
     assert (report["hard_admissible_count"]
             <= report["total_edges"] - report["self_filing_count"])
 
