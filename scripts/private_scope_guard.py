@@ -212,6 +212,12 @@ APPROVED_DOMAINS: tuple[str, ...] = (
     # OPEN live snapshots -> matured outcome rows -> calibration ladder.
     # Read-only price checks; no broker, no execution, no order surface.
     "maturity",            # snapshot_maturity_scanner.py
+    # Chicken Gate sprint — canonical freshness + asymmetry + node-evidence
+    # gate consolidating signal_decay_waste / crowding_detector /
+    # late_adoption_lockout into one demote-only four-stage pipeline with
+    # hard flags and a value-extraction ledger.  Advisory-only; scores and
+    # gates only; no broker execution, no order placement, no API writes.
+    "chicken_gate",        # chicken_gate.py
 )
 
 # Explicit allowlist for individual files / directories whose name does
