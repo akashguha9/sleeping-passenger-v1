@@ -596,9 +596,16 @@ _TEMPLATE_FIELDS: dict[str, Any] = {
 }
 
 
-def build_override_template(rows: list[dict[str, Any]]) -> dict[str, Any]:
+def build_override_template(
+    rows: list[dict[str, Any]],
+    payload_health: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """One copy/fill template block per unlockable (repairable, sub-ALLOWED)
-    candidate, generated from the actual repair plans."""
+    candidate, generated from the actual repair plans.
+
+    The ``_meta`` block carries operator instructions and the payload-health
+    warning so a degraded data day is disclosed inside the template itself.
+    """
     template: dict[str, Any] = {}
     for row in rows:
         gate = row.get("FINAL_ACTION_GATE")
@@ -620,7 +627,26 @@ def build_override_template(rows: list[dict[str, Any]]) -> dict[str, Any]:
         non_repairable = [p["missing_or_weak_field"] for p in plan if not p["repairable"]]
         if non_repairable:
             block["_non_repairable_do_not_touch"] = non_repairable
+        sim = row.get("UNLOCK_SIMULATION") or {}
+        if sim.get("simulated_max_repairable_gate") is not None:
+            block["_max_simulated_repairable_gate"] = sim["simulated_max_repairable_gate"]
         template[row["TICKER"]] = block
+
+    if template:
+        meta: dict[str, Any] = {
+            "instructions": (
+                "Copy filled ticker blocks into "
+                "runtime/chicken_gate_thesis_overrides.json.  Only supply "
+                "evidence you can cite; declared confidence without evidence "
+                "is still haircut.  Advisory-only: overrides change a LATER "
+                "run's gate, never this one."
+            ),
+        }
+        if isinstance(payload_health, dict):
+            meta["payload_health_score"] = payload_health.get("payload_health_score")
+            if payload_health.get("system_note"):
+                meta["payload_health_warning"] = payload_health["system_note"]
+        template["_meta"] = meta
     return template
 
 

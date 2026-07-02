@@ -544,7 +544,9 @@ def build_chicken_gate_integration(
     if not bypassed:
         payload_health = build_payload_health(payload, rows)
         integration["payload_health"] = payload_health
-        integration["override_template"] = build_override_template(rows)
+        integration["override_template"] = build_override_template(
+            rows, payload_health=payload_health
+        )
         integration["chicken_gate_v1_3_summary"] = build_v13_summary(
             integration, payload_health,
             version=SCORING_PROFILE_VERSION,
