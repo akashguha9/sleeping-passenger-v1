@@ -38,6 +38,7 @@ try:
     from scripts.daily_payload import load_daily_payload, normalize_ticker
     from scripts.fresh_discovery_contract import assert_no_provenance_violation
     from scripts.fresh_market_discovery import build_fresh_market_discovery
+    from scripts.nbi_daily_bridge import build_nbi_daily
     from scripts.portfolio_truth_gate import build_portfolio_truth_gate
     from scripts.runtime_common import REPO_ROOT
     from scripts.why_today import why_today_score
@@ -52,6 +53,7 @@ except ModuleNotFoundError:  # pragma: no cover - script-style env
     from daily_payload import load_daily_payload, normalize_ticker
     from fresh_discovery_contract import assert_no_provenance_violation
     from fresh_market_discovery import build_fresh_market_discovery
+    from nbi_daily_bridge import build_nbi_daily
     from portfolio_truth_gate import build_portfolio_truth_gate
     from runtime_common import REPO_ROOT
     from why_today import why_today_score
@@ -158,6 +160,13 @@ def run_daily_synthesis(
         debug_bypass=chicken_gate_debug_bypass,
         thesis_overrides=chicken_thesis_overrides,
     )
+
+    # Narrative Branch Intelligence overlay: demote-only min() composition of
+    # persisted active event cards onto the chicken rows, plus the daily NBI
+    # section.  Fail-closed inside build_nbi_daily — with no active events
+    # (or any store error) the integration is returned behaviourally
+    # unchanged with a clean NO_ACTIVE_NBI_EVENTS block.
+    chicken_integration = build_nbi_daily(chicken_integration)
 
     return {
         "run_date": payload["verified_holdings"].get("run_date"),

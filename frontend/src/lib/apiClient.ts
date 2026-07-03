@@ -699,3 +699,53 @@ export function getCsvExportUrl(
 ): string {
   return `${API_BASE}/exports/${type}.csv`;
 }
+
+// Narrative Branch Intelligence operator cards (advisory-only artifact).
+// Loosely typed on purpose: the payload is the JSON artifact written by
+// `nbi_evidence_factory export-cards` and evolves with the NBI subsystem.
+export type NbiCardsResponse = Record<string, unknown> & {
+  status?: string;
+  artifact_present?: boolean;
+  advisory_status?: string;
+  section?: {
+    status?: string;
+    events?: Array<Record<string, unknown>>;
+  };
+  edge_claim?: {
+    edge_claim_allowed?: boolean;
+    missing_requirements?: string[];
+    current_case_count?: number;
+    required_case_count?: number;
+  };
+  calibration?: Record<string, unknown>;
+  backtest_readiness?: Record<string, unknown>;
+  last_scheduler_run?: Record<string, unknown> | null;
+  generated_at?: string;
+};
+
+export async function getNbiCards(): Promise<NbiCardsResponse | null> {
+  try {
+    return await apiFetch<NbiCardsResponse>('/nbi/cards');
+  } catch {
+    return null;
+  }
+}
+
+// Live-ops cockpit artifact (advisory-only; loosely typed on purpose).
+export type NbiCockpitResponse = Record<string, unknown> & {
+  status?: string;
+  artifact_present?: boolean;
+  health?: { LiveOpsHealth10?: number; status?: string };
+  state?: Record<string, unknown>;
+  next_actions?: string[];
+  edge_claim_allowed?: boolean;
+  generated_at?: string;
+};
+
+export async function getNbiCockpit(): Promise<NbiCockpitResponse | null> {
+  try {
+    return await apiFetch<NbiCockpitResponse>('/nbi/cockpit');
+  } catch {
+    return null;
+  }
+}

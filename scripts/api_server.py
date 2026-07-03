@@ -3132,6 +3132,74 @@ def get_model_disagreement_summary(_auth: None = Depends(require_api_token_for_r
     return _read_artifact_envelope("model_disagreement")
 
 
+@app.get("/nbi/cards")
+def get_nbi_operator_cards(_auth: None = Depends(require_api_token_for_reads)) -> dict:
+    """Narrative Branch Intelligence operator cards (read-only artifact).
+
+    Serves the JSON artifact written by ``nbi_evidence_factory export-cards``.
+    Advisory-only: branch probabilities, rumor verdicts, hedge suggestions and
+    the edge-claim gate — never an execution instruction.  Fail-closed: a
+    missing/invalid artifact returns a clean NO_ACTIVE_NBI_EVENTS envelope.
+    """
+    import json as _json
+    from pathlib import Path as _Path
+
+    artifact_path = (
+        _Path(__file__).resolve().parents[1] / "runtime"
+        / "nbi_operator_cards.json"
+    )
+    try:
+        payload = _json.loads(artifact_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        payload = None
+    if not isinstance(payload, dict):
+        return {
+            "status": "NO_ACTIVE_NBI_EVENTS",
+            "artifact_present": False,
+            "advisory_status": "ADVISORY_ONLY",
+            "execution_gate": "LOCKED",
+            "edge_claim": {"edge_claim_allowed": False,
+                           "reason": "no artifact: nothing measured"},
+            "hint": "run: python -m scripts.nbi_evidence_factory export-cards",
+        }
+    payload["artifact_present"] = True
+    return payload
+
+
+@app.get("/nbi/cockpit")
+def get_nbi_live_ops_cockpit(
+    _auth: None = Depends(require_api_token_for_reads),
+) -> dict:
+    """Live-ops cockpit artifact (read-only, advisory).
+
+    Serves runtime/nbi_live_ops_cockpit.json written by
+    ``nbi_live_ops_cockpit autopilot``.  Fail-closed empty envelope when no
+    autopilot run has happened yet.
+    """
+    import json as _json
+    from pathlib import Path as _Path
+
+    artifact_path = (
+        _Path(__file__).resolve().parents[1] / "runtime"
+        / "nbi_live_ops_cockpit.json"
+    )
+    try:
+        payload = _json.loads(artifact_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        payload = None
+    if not isinstance(payload, dict):
+        return {
+            "status": "NO_COCKPIT_RUN_RECORDED",
+            "artifact_present": False,
+            "advisory_status": "ADVISORY_ONLY",
+            "execution_gate": "LOCKED",
+            "edge_claim_allowed": False,
+            "hint": "run: python -m scripts.nbi_live_ops_cockpit autopilot",
+        }
+    payload["artifact_present"] = True
+    return payload
+
+
 @app.get("/api/signal-input-quality/summary")
 def get_signal_input_quality_summary(_auth: None = Depends(require_api_token_for_reads)) -> dict:
     return _read_artifact_envelope("signal_input_quality")

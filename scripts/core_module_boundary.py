@@ -103,6 +103,15 @@ _SUPPORT_SUFFIXES: tuple[str, ...] = (
     "_miner",
     # Outcome Factory sprint: source-availability inventories.
     "_inventory",
+    # NBI Evidence Factory sprint: the closed-loop ingestion->closeout->
+    # calibration orchestrator (nbi_evidence_factory.py). Advisory-only.
+    "_factory",
+    # NBI operational-alpha-loop sprint: Windows-task scheduler helper and
+    # the audited TEMPLATE->REAL promotion workshop. Advisory-only.
+    "_scheduler",
+    "_workshop",
+    # NBI v1.5 live-ops sprint: the self-supervising cockpit facade.
+    "_cockpit",
 )
 _SUPPORT_PREFIXES: tuple[str, ...] = (
     "build_", "run_", "apply_", "backfill_", "seed_", "import_", "export_",

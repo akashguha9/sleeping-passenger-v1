@@ -218,6 +218,22 @@ APPROVED_DOMAINS: tuple[str, ...] = (
     # hard flags and a value-extraction ledger.  Advisory-only; scores and
     # gates only; no broker execution, no order placement, no API writes.
     "chicken_gate",        # chicken_gate.py
+    # Narrative Branch Intelligence sprint — advisory-only claim -> source
+    # cluster -> narrative layer -> rumor/causal-leap -> event branch
+    # probability -> exposure rotation pipeline (narrative_branch_engine.py).
+    # Consolidates narrative_drift_monitor / consensus_formation_detector /
+    # hedge_ratio_engine behind one demote-only event card; composes with
+    # chicken_gate via min() only.  No broker execution, no order placement,
+    # no API writes, no real-money sizing.
+    "narrative_branch",    # narrative_branch_engine.py
+    # nbi-v1.1 live-wiring sprint — advisory-only NBI subsystem: claim
+    # ingestion (nbi_claim_ingestion), canonical SQLite persistence
+    # (nbi_store), calibration honesty report (nbi_calibration_report),
+    # value-chain graph (nbi_value_chain_mapper), price validation adapter
+    # (nbi_price_validation_adapter), daily demote-only bridge
+    # (nbi_daily_bridge).  Read-only over providers; scores/gates only; no
+    # broker execution, no order placement, no API trading writes.
+    "nbi_",                # nbi_*.py
 )
 
 # Explicit allowlist for individual files / directories whose name does

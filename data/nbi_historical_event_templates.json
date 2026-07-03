@@ -1,0 +1,169 @@
+{
+  "pack": "nbi_historical_event_templates",
+  "version": "nbi-templates-v1.0",
+  "doctrine": "TEMPLATES ONLY. These are retro-label SEEDS for well-known public events. Resolution fields are intentionally blank or low-confidence; none is calibration-eligible until an operator adds verified outcome labels, evidence URLs, and real price/benchmark returns. Importing this pack must never increase the real closed-case count and must never permit an edge claim.",
+  "calibration_eligible": false,
+  "is_template": true,
+  "templates": [
+    {
+      "event_id": "tpl-2019-caa-japan-summit-guwahati",
+      "event_name": "2019 Japan-India summit in Guwahati postponed amid CAA protests",
+      "category": "DIPLOMATIC_SUMMIT",
+      "initial_narrative": "Modi-Abe summit planned for Guwahati; protests raise venue doubts",
+      "rumor_or_contradiction": "social claims of cancellation before official postponement",
+      "required_evidence": "official MEA/MOFA statements, dated news URLs, Assam-exposed basket returns vs NIFTY"
+    },
+    {
+      "event_id": "tpl-2016-us-election-shock",
+      "event_name": "2016 US election outcome vs market expectation",
+      "category": "ELECTION_REGULATORY_SHOCK",
+      "initial_narrative": "consensus priced one outcome; overnight repricing on the other",
+      "rumor_or_contradiction": "exit-poll narratives vs realized count",
+      "required_evidence": "prediction-market odds series, index futures returns"
+    },
+    {
+      "event_id": "tpl-2016-brexit-referendum",
+      "event_name": "2016 Brexit referendum repricing",
+      "category": "ELECTION_REGULATORY_SHOCK",
+      "initial_narrative": "remain-favoured polls vs leave result; GBP and UK-exposed baskets",
+      "rumor_or_contradiction": "late poll narratives",
+      "required_evidence": "bookmaker/prediction odds, GBP and FTSE returns"
+    },
+    {
+      "event_id": "tpl-2018-us-china-tariff-round1",
+      "event_name": "2018 US-China tariff escalation round one",
+      "category": "TRADE_TARIFF_EPISODE",
+      "initial_narrative": "tariff list leaks; supply-chain-exposed names reprice in waves",
+      "rumor_or_contradiction": "leak-driven lists vs published lists",
+      "required_evidence": "USTR publication dates, exposed-basket vs SPX returns"
+    },
+    {
+      "event_id": "tpl-2019-aramco-attack",
+      "event_name": "2019 Abqaiq facility attack supply shock",
+      "category": "SANCTIONS_GEOPOLITICAL_SHOCK",
+      "initial_narrative": "initial reports of outage scale vs restoration timeline claims",
+      "rumor_or_contradiction": "restoration-speed rumors vs official updates",
+      "required_evidence": "official Aramco statements, Brent price path"
+    },
+    {
+      "event_id": "tpl-2021-suez-blockage",
+      "event_name": "2021 Suez Canal blockage",
+      "category": "SUPPLY_CHAIN_ANNOUNCEMENT",
+      "initial_narrative": "refloat-timeline rumors vs salvage updates; shipping rates",
+      "rumor_or_contradiction": "daily refloat rumor cycles",
+      "required_evidence": "SCA statements, container-rate and shipper returns"
+    },
+    {
+      "event_id": "tpl-2022-russia-sanctions-wave",
+      "event_name": "2022 sanctions wave scope escalation",
+      "category": "SANCTIONS_GEOPOLITICAL_SHOCK",
+      "initial_narrative": "sanction-scope rumors (SWIFT, energy carve-outs) vs enacted texts",
+      "rumor_or_contradiction": "carve-out speculation vs official OFAC/EU texts",
+      "required_evidence": "official sanction texts with dates, energy basket returns"
+    },
+    {
+      "event_id": "tpl-2020-opec-price-war",
+      "event_name": "2020 OPEC+ collapse and price war",
+      "category": "TRADE_TARIFF_EPISODE",
+      "initial_narrative": "deal-collapse headlines vs production-decision facts",
+      "rumor_or_contradiction": "meeting-outcome leaks",
+      "required_evidence": "OPEC communiques, crude and E&P basket returns"
+    },
+    {
+      "event_id": "tpl-2021-evergrande-default-fears",
+      "event_name": "2021 Evergrande default-contagion narrative",
+      "category": "CANCELLATION_RUMOR",
+      "initial_narrative": "systemic-contagion claims vs measured spillover",
+      "rumor_or_contradiction": "Lehman-analogy amplification",
+      "required_evidence": "official filings/defaults timeline, HK property basket returns"
+    },
+    {
+      "event_id": "tpl-2023-svb-collapse-cascade",
+      "event_name": "2023 SVB run and regional-bank rumor cascade",
+      "category": "CANCELLATION_RUMOR",
+      "initial_narrative": "solvency rumors vs FDIC/official actions per bank",
+      "rumor_or_contradiction": "social-velocity bank-run claims against solvent names",
+      "required_evidence": "FDIC statements, per-bank returns vs KRE"
+    },
+    {
+      "event_id": "tpl-2015-vw-emissions",
+      "event_name": "2015 Volkswagen emissions disclosure",
+      "category": "ELECTION_REGULATORY_SHOCK",
+      "initial_narrative": "scope-of-affected-vehicles claims expanding over days",
+      "rumor_or_contradiction": "early scope underestimates",
+      "required_evidence": "EPA notices, VW and supplier returns vs DAX"
+    },
+    {
+      "event_id": "tpl-2019-737max-grounding",
+      "event_name": "2019 737 MAX grounding wave",
+      "category": "ELECTION_REGULATORY_SHOCK",
+      "initial_narrative": "country-by-country grounding vs FAA holdout narrative",
+      "rumor_or_contradiction": "return-to-service timeline rumors",
+      "required_evidence": "regulator orders with dates, BA and supplier returns"
+    },
+    {
+      "event_id": "tpl-2021-taiwan-chip-drought",
+      "event_name": "2021 Taiwan drought vs fab output narrative",
+      "category": "SUPPLY_CHAIN_ANNOUNCEMENT",
+      "initial_narrative": "water-rationing claims mapped to wafer-output fears",
+      "rumor_or_contradiction": "output-cut rumors vs company statements",
+      "required_evidence": "TSMC statements, foundry basket returns"
+    },
+    {
+      "event_id": "tpl-2022-chips-act",
+      "event_name": "2022 CHIPS Act passage",
+      "category": "ELECTION_REGULATORY_SHOCK",
+      "initial_narrative": "passage-odds narrative vs vote schedule facts",
+      "rumor_or_contradiction": "stall rumors in reconciliation",
+      "required_evidence": "vote records, semis basket vs SOX returns"
+    },
+    {
+      "event_id": "tpl-2023-india-semiconductor-incentives",
+      "event_name": "2023 India semiconductor incentive announcements",
+      "category": "CORPORATE_INVESTMENT_SUMMIT",
+      "initial_narrative": "fab-commitment headlines vs signed-MoU substance",
+      "rumor_or_contradiction": "committed-vs-explored investment conflation",
+      "required_evidence": "official MoU texts, Indian electronics basket returns"
+    },
+    {
+      "event_id": "tpl-2019-japan-korea-export-controls",
+      "event_name": "2019 Japan-Korea export control dispute",
+      "category": "TRADE_TARIFF_EPISODE",
+      "initial_narrative": "material-cutoff fears vs licensed-shipment reality",
+      "rumor_or_contradiction": "total-embargo framing of a licensing regime",
+      "required_evidence": "METI notices, memory-maker returns"
+    },
+    {
+      "event_id": "tpl-2018-usmca-renegotiation",
+      "event_name": "2018 NAFTA to USMCA renegotiation endgame",
+      "category": "TRADE_TARIFF_EPISODE",
+      "initial_narrative": "collapse rumors vs deadline-driven agreement",
+      "rumor_or_contradiction": "walkout reports at multiple rounds",
+      "required_evidence": "official statements, MX/CA-exposed basket returns"
+    },
+    {
+      "event_id": "tpl-2022-pelosi-taiwan-visit",
+      "event_name": "2022 Pelosi Taiwan visit will-she-won't-she",
+      "category": "DIPLOMATIC_SUMMIT",
+      "initial_narrative": "unconfirmed itinerary vs realized visit; escalation pricing",
+      "rumor_or_contradiction": "itinerary leaks with official silence",
+      "required_evidence": "flight/itinerary confirmation timeline, TW basket returns"
+    },
+    {
+      "event_id": "tpl-2023-openai-board-crisis",
+      "event_name": "2023 OpenAI board crisis narrative whiplash",
+      "category": "CANCELLATION_RUMOR",
+      "initial_narrative": "hour-by-hour reversal rumors vs confirmed outcomes",
+      "rumor_or_contradiction": "multiple contradictory 'done deal' reports",
+      "required_evidence": "dated official statements, MSFT returns vs QQQ"
+    },
+    {
+      "event_id": "tpl-2024-red-sea-shipping",
+      "event_name": "2024 Red Sea shipping disruption rerouting",
+      "category": "SUPPLY_CHAIN_ANNOUNCEMENT",
+      "initial_narrative": "carrier-by-carrier suspension claims vs confirmed reroutes",
+      "rumor_or_contradiction": "blanket-closure framing vs selective transit",
+      "required_evidence": "carrier notices, container-rate series, shipper returns"
+    }
+  ]
+}

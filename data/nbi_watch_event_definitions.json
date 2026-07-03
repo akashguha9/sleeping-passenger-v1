@@ -1,0 +1,55 @@
+{
+  "pack": "nbi_watch_event_definitions",
+  "version": "nbi-watch-events-v1.0",
+  "doctrine": "OPERATOR-READY WATCH definitions, not evidence. These are real, ongoing public narrative arenas defined as WATCH_ONLY surfaces. The operator must review query terms, confirm current live relevance, and flip status to ACTIVE before treating any of them as a live tracked event. Definitions create no cases, no probabilities, and no edge progress.",
+  "events": [
+    {
+      "event_id": "watch-us-india-trade-track",
+      "name": "US-India trade/tariff negotiation track",
+      "category": "trade",
+      "status": "WATCH_ONLY",
+      "country_scope": ["US", "IN"],
+      "query_terms": ["us india trade deal", "india tariff", "ustr india"],
+      "official_sources": ["ustr.gov", "commerce.gov.in", "pib.gov.in"],
+      "prediction_market_queries": ["US India trade agreement"],
+      "sector_tags": ["pharma", "textiles", "it_services", "autos"],
+      "value_chain_graph_id": null,
+      "benchmark_tickers": ["NIFTYBEES", "SPY"],
+      "is_fixture": false,
+      "calibration_eligible": false,
+      "notes": "Operator: confirm the currently live negotiation round, refresh query terms, add exposures/graph before setting ACTIVE."
+    },
+    {
+      "event_id": "watch-semiconductor-export-controls",
+      "name": "Semiconductor export-control policy updates",
+      "category": "regulation",
+      "status": "WATCH_ONLY",
+      "country_scope": ["US", "CN", "JP", "NL"],
+      "query_terms": ["chip export controls", "semiconductor export rule", "bis entity list semiconductor"],
+      "official_sources": ["bis.doc.gov", "meti.go.jp"],
+      "prediction_market_queries": ["chip export restrictions"],
+      "sector_tags": ["semiconductors", "semicap_equipment"],
+      "value_chain_graph_id": null,
+      "benchmark_tickers": ["SOXX", "SPY"],
+      "is_fixture": false,
+      "calibration_eligible": false,
+      "notes": "Operator: rumor-heavy arena (leaked rule drafts vs published rules) — exactly the kernel/causal-leap pattern NBI scores. Add exposures before ACTIVE."
+    },
+    {
+      "event_id": "watch-red-sea-shipping-normalization",
+      "name": "Red Sea / Suez shipping route normalization",
+      "category": "supply_chain",
+      "status": "WATCH_ONLY",
+      "country_scope": ["EG", "GLOBAL"],
+      "query_terms": ["red sea shipping", "suez transits", "container reroute cape"],
+      "official_sources": ["suezcanal.gov.eg"],
+      "prediction_market_queries": ["red sea shipping resume"],
+      "sector_tags": ["shipping", "logistics", "retail_importers"],
+      "value_chain_graph_id": null,
+      "benchmark_tickers": ["BDRY", "SPY"],
+      "is_fixture": false,
+      "calibration_eligible": false,
+      "notes": "Operator: carrier-by-carrier claims vs confirmed transit data; venue-style partial outcomes (selective transit vs blanket closure)."
+    }
+  ]
+}
