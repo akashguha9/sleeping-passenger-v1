@@ -3203,10 +3203,17 @@ def get_nbi_live_ops_cockpit(
     autopilot run has happened yet.
     """
     import json as _json
+    import os as _os
     from pathlib import Path as _Path
 
+    # CI fix (2026-07-04): resolve the artifact honoring NBI_ARTIFACT_DIR —
+    # the same convention the cockpit WRITERS use — so hermetic tests and CI
+    # (where runtime/ is absent) read the same location the writers wrote.
+    _override = _os.environ.get("NBI_ARTIFACT_DIR")
     artifact_path = (
-        _Path(__file__).resolve().parents[1] / "runtime"
+        _Path(_override) / "nbi_live_ops_cockpit.json"
+        if _override
+        else _Path(__file__).resolve().parents[1] / "runtime"
         / "nbi_live_ops_cockpit.json"
     )
     try:
@@ -3214,9 +3221,17 @@ def get_nbi_live_ops_cockpit(
     except (OSError, ValueError):
         payload = None
     if not isinstance(payload, dict):
+        # CI fix (2026-07-04): the fail-closed envelope previously OMITTED
+        # artifact_age_minutes, so a fresh checkout (CI) failed the cockpit
+        # smoke while machines with a live artifact passed.  The truth key
+        # must exist on EVERY branch — honestly null when nothing exists,
+        # and never dressed up as fresh.
         return {
             "status": "NO_COCKPIT_RUN_RECORDED",
             "artifact_present": False,
+            "artifact_age_minutes": None,
+            "artifact_age_status": "MISSING",
+            "artifact_stale": True,
             "advisory_status": "ADVISORY_ONLY",
             "execution_gate": "LOCKED",
             "edge_claim_allowed": False,
@@ -3243,6 +3258,11 @@ def get_nbi_live_ops_cockpit(
             age_minutes = None
     payload["artifact_age_minutes"] = age_minutes
     payload["artifact_stale"] = bool(age_minutes is None or age_minutes > 26 * 60)
+    payload["artifact_age_status"] = (
+        "UNKNOWN" if age_minutes is None
+        else "STALE" if age_minutes > 26 * 60
+        else "FRESH"
+    )
     return payload
 
 
