@@ -1,3 +1,10 @@
+> **HISTORICAL DOCUMENT — SUPERSEDED (marked 2026-07-04).**
+> This self-assessment predates the June/July systems (NBI, chicken gate,
+> Mythos/signal-arbitrage, outcome maturation) and its counts/scores no
+> longer describe the repo. The current audited baseline is
+> `FORENSIC_AUDIT_SLEEPING_PASSENGER.md` (2026-07-04, overall 4.96/10) plus
+> `CLOSE_THE_LOOP_SPRINT_REPORT.md`. Kept for provenance only.
+
 # Final Scorecard — Day 35
 
 > Honest before/after readiness across the dimensions that matter for a

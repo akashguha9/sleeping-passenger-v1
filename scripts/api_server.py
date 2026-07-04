@@ -290,7 +290,33 @@ def _get_source_health_summary() -> dict:
     except Exception as exc:
         return _empty_source_health_summary(error=str(exc))
 
-    return _build_source_health_summary(latest_rows, event_counts)
+    # Close-the-Loop sprint (2026-07-04, forensic audit SP-016): supply the
+    # per-source last-persisted timestamps so ok-classified runs that persist
+    # nothing get demoted to ZERO_PERSISTED_DEGRADED instead of "healthy".
+    last_persisted_at: dict[str, str] = {}
+    try:
+        import sqlite3 as _sqlite3
+
+        try:
+            from scripts.persistence import DB_PATH as _DB_PATH
+        except ModuleNotFoundError:  # pragma: no cover
+            from persistence import DB_PATH as _DB_PATH  # type: ignore[no-redef]
+        _conn = _sqlite3.connect(f"file:{_DB_PATH}?mode=ro", uri=True)
+        try:
+            for _src, _ts in _conn.execute(
+                "SELECT source_name, MAX(fetched_at) FROM signal_events "
+                "GROUP BY source_name"
+            ).fetchall():
+                if _ts:
+                    last_persisted_at[str(_src)] = str(_ts)
+        finally:
+            _conn.close()
+    except Exception:  # noqa: BLE001 - demotion axis is best-effort
+        last_persisted_at = {}
+
+    return _build_source_health_summary(
+        latest_rows, event_counts, last_persisted_at=last_persisted_at or None
+    )
 
 
 # DB status helper — imported lazily so server starts even if persistence unavailable
@@ -3197,7 +3223,53 @@ def get_nbi_live_ops_cockpit(
             "hint": "run: python -m scripts.nbi_live_ops_cockpit autopilot",
         }
     payload["artifact_present"] = True
+    # Close-the-Loop sprint (2026-07-04, forensic audit SP: cockpit health was
+    # artifact-served with no staleness check — a dead scheduler rendered a
+    # stale HEALTHY 10/10 forever).  Age is computed server-side so every
+    # consumer gets it without duplicating clock logic.
+    from datetime import datetime as _dt, timezone as _tz
+
+    generated_at = payload.get("generated_at") or payload.get("timestamp")
+    age_minutes = None
+    if generated_at:
+        try:
+            _gen = _dt.fromisoformat(str(generated_at).replace("Z", "+00:00"))
+            if _gen.tzinfo is None:
+                _gen = _gen.replace(tzinfo=_tz.utc)
+            age_minutes = round(
+                (_dt.now(_tz.utc) - _gen).total_seconds() / 60.0, 1
+            )
+        except ValueError:
+            age_minutes = None
+    payload["artifact_age_minutes"] = age_minutes
+    payload["artifact_stale"] = bool(age_minutes is None or age_minutes > 26 * 60)
     return payload
+
+
+@app.get("/truth-surface")
+def get_truth_surface(
+    _auth: None = Depends(require_api_token_for_reads),
+) -> dict:
+    """Operational truth surface: one honest status object for the MVP.
+
+    Close-the-Loop sprint (2026-07-04).  Computed live (not artifact-served)
+    so it can never be stale itself.  Fail-closed: any computation error
+    returns overall_operational_state=BROKEN, never a fake healthy envelope.
+    """
+    try:
+        from scripts.truth_surface_report import compute_truth_surface
+
+        return compute_truth_surface()
+    except Exception as exc:  # noqa: BLE001 - fail closed, disclose class
+        return {
+            "report": "operational_truth_surface",
+            "overall_operational_state": "BROKEN",
+            "state_reasons": [
+                f"truth surface computation failed: {type(exc).__name__}"
+            ],
+            "advisory_status": "ADVISORY_ONLY",
+            "execution_gate": "LOCKED",
+        }
 
 
 @app.get("/api/signal-input-quality/summary")

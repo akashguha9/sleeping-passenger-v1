@@ -83,6 +83,29 @@ CARDS_HTML_PATH = REPO_ROOT / "runtime" / "nbi_operator_cards.html"
 CARDS_MD_PATH = REPO_ROOT / "runtime" / "nbi_operator_cards.md"
 CARDS_JSON_PATH = REPO_ROOT / "runtime" / "nbi_operator_cards.json"
 
+
+def _artifact_path(default: Path) -> Path:
+    """Resolve an operator-artifact path, honoring NBI_ARTIFACT_DIR.
+
+    Close-the-Loop sprint (2026-07-04), forensic audit SP-003: test runs
+    previously wrote fixture cards (MACRO1 / https://e/filing) into the
+    exact runtime/ files GET /nbi/cards serves.  conftest.py sets
+    NBI_ARTIFACT_DIR to a per-test tmp dir so exports land in throwaway
+    storage; production runs (env var unset) keep the canonical paths.
+    """
+    import os as _os
+
+    override = _os.environ.get("NBI_ARTIFACT_DIR")
+    if not override:
+        return default
+    try:
+        default.relative_to(REPO_ROOT / "runtime")
+    except (ValueError, TypeError):
+        return default  # already redirected (e.g. test monkeypatch) — honor it
+    target_dir = Path(override)
+    target_dir.mkdir(parents=True, exist_ok=True)
+    return target_dir / default.name
+
 STATUS_FEEDS_UNAVAILABLE = "FEEDS_UNAVAILABLE"
 STATUS_NO_EVENT_DEFINITIONS = "NO_EVENT_DEFINITIONS"
 STATUS_OK = "OK"
@@ -1013,9 +1036,9 @@ def export_cards(
         "last_scheduler_run": _read_json(SCHEDULER_LAST_RUN_PATH),
     }
 
-    html_path = Path(out_html) if out_html else CARDS_HTML_PATH
-    md_path = Path(out_md) if out_md else CARDS_MD_PATH
-    json_path = Path(out_json) if out_json else CARDS_JSON_PATH
+    html_path = Path(out_html) if out_html else _artifact_path(CARDS_HTML_PATH)
+    md_path = Path(out_md) if out_md else _artifact_path(CARDS_MD_PATH)
+    json_path = Path(out_json) if out_json else _artifact_path(CARDS_JSON_PATH)
     html_path.parent.mkdir(parents=True, exist_ok=True)
     html_path.write_text(html_text, encoding="utf-8")
     md_path.write_text(md_text, encoding="utf-8")

@@ -401,7 +401,68 @@ def build_action_report(
     )
     if experience_mode_advisory is None and use_default_advisory_artifacts:
         experience_mode_advisory = _default_seeded_experience_mode_advisory()
-    open_positions, validation = load_open_positions(open_positions_path)
+    # Close-the-Loop sprint (2026-07-04), forensic audit SP-001: the default
+    # position source is the CANONICAL holdings truth gate, never the demoted
+    # moltbook ledger.  An explicit open_positions_path (tests, drills) is
+    # honored but stamped, so the report always says what it watched.
+    holdings_truth: dict[str, Any]
+    position_risk_alerts: list[dict[str, Any]] = []
+    if open_positions_path is None:
+        from scripts.holdings_truth_gate import (
+            load_holdings_truth_gate,
+            to_action_engine_position,
+        )
+
+        gate = load_holdings_truth_gate()
+        open_positions = [
+            to_action_engine_position(p) for p in gate["positions"]
+        ]
+        for blocked in gate["blocked_positions"]:
+            position_risk_alerts.append(
+                {
+                    "ticker": blocked["ticker"],
+                    "risk_monitoring": blocked["risk_monitoring"],
+                    "blocks": blocked["risk_monitoring_blocks"],
+                    "leverage": blocked["leverage"],
+                    "severity": (
+                        "CRITICAL"
+                        if blocked["leverage"] > 1
+                        and blocked["stop_loss"] is None
+                        else "HIGH"
+                    ),
+                    "operator_action_required": (
+                        "record stop_loss (and refresh holdings truth) before "
+                        "this position can be risk-monitored"
+                    ),
+                }
+            )
+        validation = {
+            "path": gate["path"],
+            "file_exists": gate["status"] != "HOLDINGS_TRUTH_MISSING",
+            "valid": gate["status"] == "OK",
+            "position_count": len(open_positions),
+            "states": {"OPEN": len(open_positions)},
+            "errors": list(gate["issues"]),
+        }
+        holdings_truth = {
+            "source": gate["source"],
+            "status": gate["status"],
+            "run_date": gate["run_date"],
+            "age_days": gate["age_days"],
+            "canonical_holding_count": gate["canonical_holding_count"],
+            "monitorable_position_count": gate["monitorable_position_count"],
+            "missing_stop_count": gate["missing_stop_count"],
+            "leveraged_without_stop_count": gate["leveraged_without_stop_count"],
+            "risk_engine_ready": gate["risk_engine_ready"],
+        }
+    else:
+        open_positions, validation = load_open_positions(open_positions_path)
+        holdings_truth = {
+            "source": "EXPLICIT_PATH",
+            "status": "EXPLICIT_PATH",
+            "path": str(open_positions_path),
+            "risk_engine_ready": False,
+        }
     positions_by_ticker: dict[str, dict[str, Any]] = {}
     for position in open_positions:
         ticker = str(position["ticker"]).upper()
@@ -492,6 +553,8 @@ def build_action_report(
         "execution_governance_summary": summarize_action_governance(actions),
         "actions": actions,
         "open_positions_validation": validation,
+        "position_source": holdings_truth,
+        "position_risk_alerts": position_risk_alerts,
         "external_observation_context": external_observation_context,
     }
     if write_runtime:

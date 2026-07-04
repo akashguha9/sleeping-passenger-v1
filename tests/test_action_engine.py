@@ -16,7 +16,16 @@ def _write_json(path: Path, payload: dict) -> None:
 
 
 def test_build_action_report_from_live_seed_state() -> None:
-    report = build_action_report(write_runtime=False)
+    # Close-the-Loop sprint (2026-07-04, forensic audit SP-001): the moltbook
+    # ledger is no longer the DEFAULT position source — it is passed here as
+    # an EXPLICIT legacy fixture so the stop-breach/EXIT_NOW mechanics stay
+    # covered.  Default-source behavior (canonical holdings truth gate,
+    # fail-closed) is covered by test_action_engine_canonical_source.py.
+    report = build_action_report(
+        write_runtime=False,
+        open_positions_path=REPO_ROOT / "moltbook" / "open_positions.json",
+    )
+    assert report["position_source"]["source"] == "EXPLICIT_PATH"
 
     assert report["policy_state"] == "RESTRICTED"
     assert report["active_blockers"] == ["GSCE_PHASE_LOCK", "REALM_BIS"]
@@ -72,8 +81,15 @@ def test_action_engine_cli_json_shape() -> None:
     )
     payload = json.loads(result.stdout)
 
+    # Close-the-Loop sprint (2026-07-04): the default source is the canonical
+    # holdings truth gate.  The old expectation EXIT_NOW == 2 was produced by
+    # phantom moltbook rows (forensic audit SP-001).  Under the hermetic test
+    # env the holdings truth is absent, so the engine fails closed: no
+    # position-driven exits, and the source/status are stamped in the report.
     assert payload["summary_by_action"]["BLOCK_ENTRY"] == 3
-    assert payload["summary_by_action"]["EXIT_NOW"] == 2
+    assert payload["summary_by_action"]["EXIT_NOW"] == 0
+    assert payload["position_source"]["source"] == "verified_current_holdings"
+    assert payload["position_source"]["status"] == "HOLDINGS_TRUTH_MISSING"
 
 
 def test_action_engine_summary_cli() -> None:
@@ -85,11 +101,13 @@ def test_action_engine_summary_cli() -> None:
         check=True,
     )
 
+    # Close-the-Loop sprint (2026-07-04): fail-closed default source — the
+    # legacy EXIT_NOW=2/REDUCE=1 line came from phantom moltbook positions.
     assert result.stdout.strip().splitlines() == [
         "Action Engine",
         "policy_state=RESTRICTED",
         "active_blockers=GSCE_PHASE_LOCK, REALM_BIS",
-        "summary=EXIT_NOW=2, REDUCE=1, HOLD=0, MONITOR=1, BLOCK_ENTRY=3",
+        "summary=EXIT_NOW=0, REDUCE=0, HOLD=0, MONITOR=4, BLOCK_ENTRY=3",
     ]
 
 

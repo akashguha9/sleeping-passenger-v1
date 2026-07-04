@@ -15,7 +15,11 @@ from pathlib import Path
 
 # Pinned ceiling = current ACTIVE count (today's number + 0). See
 # docs/module_census.md. Raising this is a deliberate act, not an accident.
-ACTIVE_CEILING = 70
+# 70 -> 80 (2026-07-04, Close-the-Loop sprint): the action engine and signal
+# refinery now import the canonical holdings gate (scripts/holdings_truth_gate)
+# and its dependency closure — the forensic audit's SP-001 fix deliberately
+# pulls the risk-truth path onto the diagnostics pipeline.
+ACTIVE_CEILING = 80
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS_DIR = REPO_ROOT / "scripts"

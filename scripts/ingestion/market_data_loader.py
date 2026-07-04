@@ -30,6 +30,30 @@ _OPTIONAL_PROVIDERS: dict[str, str] = {
 }
 
 
+def _default_ticker_universe() -> list[str]:
+    """Default fetch list: index ETFs PLUS the canonical open holdings.
+
+    Close-the-Loop sprint (2026-07-04), forensic audit SP-017: the scheduled
+    refresh fetched only the 4 default ETFs, so the operator's actual
+    holdings had no live prices and could not be marked to market.  The
+    canonical holdings truth (when present and readable) now drives the
+    list; failure to read it falls back to the ETF defaults — visibly, since
+    holdings symbols simply won't appear in the run.
+    """
+    tickers = list(_DEFAULT_TICKERS)
+    try:
+        from scripts.holdings_truth_gate import load_holdings_truth_gate
+
+        gate = load_holdings_truth_gate(attach_prices=False)
+        for row in gate["positions"] + gate["blocked_positions"]:
+            sym = str(row.get("symbol") or "").upper()
+            if sym and sym not in tickers:
+                tickers.append(sym)
+    except Exception:  # noqa: BLE001 - fail-soft to the ETF defaults
+        pass
+    return tickers
+
+
 def _compute_market_confirmation_score(
     price_change_pct: float | None,
     volume_change_ratio: float | None,
@@ -62,7 +86,7 @@ class MarketDataLoader(BaseSourceLoader):
         interval: str = _DEFAULT_INTERVAL,
         provider: str = _PROVIDER_YAHOO,
     ) -> None:
-        self._tickers = tickers or list(_DEFAULT_TICKERS)
+        self._tickers = tickers or _default_ticker_universe()
         self._period = period
         self._interval = interval
         self._provider = provider

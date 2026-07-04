@@ -6,7 +6,14 @@
 python -m pytest tests -q
 ```
 
-Runs ~100 test files. CI runs this on every push (`.github/workflows/pytest.yml`).
+Runs 460+ test files / 7,800+ tests (last full verified run: 7,567 passed,
+3 platform skips, 14m14s on 2026-07-03; ~290 tests added by the
+Close-the-Loop sprint on 2026-07-04). CI runs the full suite on every push
+(`.github/workflows/pytest.yml`).
+
+> **Last verified: 2026-07-04.** If the counts above drift from
+> `python -m pytest tests -q` reality, fix THIS file — stale testing docs
+> were a forensic-audit finding (segment L).
 
 ### Survival-critical coverage
 
@@ -64,16 +71,19 @@ a fallback slice with canonical state. Verified by
 
 ### What is not tested
 
-- **The frontend.** No Vitest/Jest/Playwright installed -- `frontend/package.json`
-  ships only Next.js + React + TypeScript + Tailwind. `next lint` is the only
-  automated frontend check today.
-- **End-to-end.** No Playwright/Cypress. The canonical click-through in
-  `DEMO.md` is the manual smoke test today.
-- **The frontend test stack is planned, not run.** See
-  `docs/E2E_TEST_PLAN.md` for the exact Vitest + Playwright spec, the
-  install commands, the canonical 10-step e2e journey, and the
-  definition-of-done. No packages were installed during the Day 1-10
-  sprint -- doing so requires explicit user approval.
+- ~~The frontend~~ **CORRECTED 2026-07-04:** the frontend IS tested —
+  Vitest runs 36 spec files / 207 tests (`cd frontend; npm test`), Playwright
+  e2e specs exist (`frontend/e2e/`, weekly CI cron), and `next build`
+  compiles all 16 routes. The prior claim that no frontend test stack was
+  installed was stale and wrong (forensic-audit finding).
+- **Frontend lint is BLOCKED, documented, not silent:** Next 16 removed
+  `next lint`; `npm run lint` now prints the exact migration required
+  (`npm i -D eslint eslint-config-next`, add `eslint.config.js`, script
+  becomes `eslint .`). Until migrated there is no frontend lint gate.
+- **End-to-end against a REAL backend.** Playwright specs mock backend
+  routes; no CI job boots the FastAPI server and drives the UI unstubbed.
+  Contract drift between backend payloads and frontend stubs would pass
+  both suites green.
 - **Live source adapters against real APIs.** Tests mock the network. Real
   Polymarket / NewsAPI / SEC behavior is verified only by running ingestion
   manually (`python scripts\run_live_sources_phase1.py --dry-run --json`).

@@ -147,6 +147,19 @@ _SUPPORT_EXPLICIT: frozenset[str] = frozenset({
     # Pass-6 operating-loop tooling.
     "signal_annotation", "daily_model_operating_loop",
     "model_trust_ladder", "migrate_legacy_timestamps",
+    # Close-the-Loop sprint (2026-07-04): real-forward outcome maturation
+    # loop ported from branch chore/real-forward-outcome-maturation (forensic
+    # audit SP-002). Evidence backbone — candidates for CORE promotion once
+    # the loop has run scheduled for a full cohort; kept SUPPORT for now so
+    # CORE closure math stays a deliberate decision, not a side effect.
+    "probability_snapshot", "decision_probability_snapshot",
+    "outcome_labeling_flow", "attach_due_outcomes",
+    "real_calibration_evidence", "real_price_outcome_evidence",
+    "real_evidence_bundle", "real_evidence_canary",
+    "real_signal_score_vector", "score_real_signal_events",
+    "ensure_ohlcv_for_scored_tickers", "ticker_resolution",
+    "live_decision_path", "admission_gates", "moltbook_adjustment",
+    "leverage_policy",
 })
 
 

@@ -39,7 +39,7 @@ active runtime path from silently growing.
 
 | Tier | Count |
 |---|---|
-| ACTIVE | 70 |
+| ACTIVE | 80 |
 | API_REACHED | 55 |
 | TEST_ONLY | 136 |
 | ORPHAN | 69 |
@@ -50,7 +50,13 @@ is HTTP-only, ~40% is exercised solely by tests, and ~21% is unreachable from
 the two entrypoints and the test suite **on this branch** (down from the
 previously-reported 45%).
 
-## 2. ACTIVE set — canonical runtime path (70 modules)
+## 2. ACTIVE set — canonical runtime path (80 modules)
+
+> 2026-07-04 (Close-the-Loop sprint): 70 → 80. `action_engine` and
+> `signal_refinery` now source positions/capacity from the canonical
+> holdings gate (`holdings_truth_gate`), pulling it and its closure
+> (persistence-adjacent evidence modules) onto the diagnostics path.
+> Deliberate: the risk engine reading canonical truth IS the runtime path.
 
 Reachable from `run_diagnostics_pipeline.py`. Sorted by line count. `tag_engine`
 (168) entered the ACTIVE set this round (canonical tag producer, wired into

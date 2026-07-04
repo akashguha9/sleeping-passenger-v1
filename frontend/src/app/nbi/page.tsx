@@ -45,6 +45,51 @@ function branchUncertainty(p: number): number {
   return 1 - Math.abs(2 * p - 1);
 }
 
+// Close-the-Loop sprint (2026-07-04): artifact freshness must be visible.
+// A dead daily loop previously rendered a stale HEALTHY 10/10 forever.
+const STALE_AMBER_MINUTES = 26 * 60;
+const STALE_RED_MINUTES = 50 * 60;
+
+function ageMinutesFrom(iso: string): number | null {
+  const t = Date.parse(iso);
+  if (Number.isNaN(t)) return null;
+  return Math.round((Date.now() - t) / 60000);
+}
+
+function formatAge(mins: number): string {
+  if (mins < 90) return `${mins}m`;
+  return `${(mins / 60).toFixed(1)}h`;
+}
+
+function FreshnessBadge({
+  ageMinutes,
+  testId,
+}: {
+  ageMinutes: number | null;
+  testId: string;
+}) {
+  if (ageMinutes === null) {
+    return (
+      <span data-testid={testId} style={{ color: '#f87171', fontWeight: 600 }}>
+        AGE UNKNOWN — treat as stale
+      </span>
+    );
+  }
+  const stale = ageMinutes > STALE_AMBER_MINUTES;
+  const dead = ageMinutes > STALE_RED_MINUTES;
+  const color = dead ? '#f87171' : stale ? '#fbbf24' : undefined;
+  return (
+    <span data-testid={testId} style={{ color, fontWeight: stale ? 600 : 400 }}>
+      {formatAge(ageMinutes)} old
+      {dead
+        ? ' — STALE: daily loop looks dead, investigate the scheduler'
+        : stale
+          ? ' — STALE: expected a fresh run by now'
+          : ''}
+    </span>
+  );
+}
+
 const cardStyle: React.CSSProperties = {
   border: '1px solid rgba(148, 163, 184, 0.35)',
   borderRadius: 8,
@@ -81,6 +126,11 @@ function CockpitPanel({ cockpit }: { cockpit: NbiCockpitResponse | null }) {
     ? ((st.events ?? {}).active as string[])
     : [];
   const nextActions = asStringArray(cockpit.next_actions);
+  const cockpitAny = cockpit as Record<string, unknown>;
+  const serverAge = asNumber(cockpitAny.artifact_age_minutes);
+  const generatedAt = asString(cockpitAny.generated_at);
+  const cockpitAge =
+    serverAge ?? (generatedAt ? ageMinutesFrom(generatedAt) : null);
   return (
     <section style={cardStyle} data-testid="nbi-cockpit">
       <div style={labelStyle}>Live-ops cockpit</div>
@@ -88,6 +138,11 @@ function CockpitPanel({ cockpit }: { cockpit: NbiCockpitResponse | null }) {
         Status: <strong>{asString(health.status) || '—'}</strong> · Health:{' '}
         {asNumber(health.LiveOpsHealth10) ?? '—'}/10 · Scheduler installed:{' '}
         <strong>{scheduler.task_installed === true ? 'yes' : 'no'}</strong>
+      </p>
+      <p style={{ margin: '0.2rem 0' }} data-testid="nbi-cockpit-freshness">
+        Cockpit artifact:{' '}
+        <FreshnessBadge ageMinutes={cockpitAge} testId="nbi-cockpit-age" />
+        {generatedAt ? ` (generated ${generatedAt})` : ''}
       </p>
       <p style={{ margin: '0.2rem 0', opacity: 0.85 }}>
         Active events: {activeEvents.length}{' '}
@@ -185,7 +240,39 @@ export default function NbiOperatorCardsPage() {
             lastRun.timestamp,
           )}` : 'none recorded'}
         </p>
+        {(asNumber(calibration.n_closed_real_cases) ?? 0) < 50 && (
+          <p
+            style={{ margin: '0.3rem 0 0', color: '#fbbf24' }}
+            data-testid="nbi-uncalibrated-note"
+          >
+            Scores on this page are uncalibrated model output (
+            {asNumber(calibration.n_closed_real_cases) ?? 0} closed real cases
+            &lt; 50). Do not read them as probabilities of anything.
+          </p>
+        )}
       </section>
+
+      {payload?.generated_at &&
+        (() => {
+          const cardsAge = ageMinutesFrom(asString(payload.generated_at));
+          if (cardsAge !== null && cardsAge <= STALE_AMBER_MINUTES) return null;
+          return (
+            <section
+              style={{
+                ...cardStyle,
+                borderColor: '#f87171',
+              }}
+              data-testid="nbi-cards-stale-banner"
+            >
+              <strong style={{ color: '#f87171' }}>
+                CARDS ARTIFACT STALE
+              </strong>{' '}
+              — <FreshnessBadge ageMinutes={cardsAge} testId="nbi-cards-age" />.
+              The daily loop may not be running; check{' '}
+              <code>python -m scripts.nbi_scheduler status</code>.
+            </section>
+          );
+        })()}
 
       {state === 'loading' && <p>Loading NBI cards…</p>}
       {state === 'offline' && (

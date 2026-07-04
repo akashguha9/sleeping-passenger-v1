@@ -54,6 +54,39 @@ os.environ.setdefault(
 
 
 @pytest.fixture(autouse=True)
+def _isolate_holdings_truth(tmp_path, monkeypatch):
+    """No test may silently read the operator's REAL holdings truth file.
+
+    Close-the-Loop sprint (2026-07-04): scripts/holdings_truth_gate.py is the
+    canonical position source for the risk engine and honors the
+    HOLDINGS_TRUTH_PATH env override.  Redirect it to a per-test missing file
+    so hermetic tests see HOLDINGS_TRUTH_MISSING (fail-closed, zero
+    positions) instead of the operator's live portfolio.  Tests that want a
+    holdings fixture set HOLDINGS_TRUTH_PATH themselves or pass ``path=``.
+    """
+    monkeypatch.setenv(
+        "HOLDINGS_TRUTH_PATH", str(tmp_path / "holdings_truth_absent.json")
+    )
+    yield
+
+
+@pytest.fixture(autouse=True)
+def _isolate_runtime_artifacts(tmp_path, monkeypatch):
+    """No test may write the runtime/ artifacts the API serves to the operator.
+
+    Close-the-Loop sprint (2026-07-04), forensic audit SP-003: a test run
+    left a fixture NBI card (ticker MACRO1, evidence URL https://e/filing) in
+    runtime/nbi_operator_cards.* which GET /nbi/cards then served verbatim to
+    the live /nbi page for ~14 hours.  Tests must export operator artifacts
+    to a throwaway directory.  Modules that honor NBI_ARTIFACT_DIR write
+    there; a repo-level guard test asserts served artifacts stay
+    fixture-free.
+    """
+    monkeypatch.setenv("NBI_ARTIFACT_DIR", str(tmp_path / "nbi_artifacts"))
+    yield
+
+
+@pytest.fixture(autouse=True)
 def _isolate_runtime_db(tmp_path, monkeypatch):
     """Session-wide safety net: no test may write the operator's runtime DB.
 

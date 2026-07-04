@@ -208,12 +208,45 @@ def _placeholder_message(label: str) -> str:
 def build_source_health_summary(
     latest_rows: list[dict[str, Any]],
     event_counts: dict[str, int],
+    last_persisted_at: dict[str, str] | None = None,
+    now_utc: str | None = None,
+    max_silent_days: float = 7.0,
 ) -> dict[str, Any]:
     """Build the /source-health/summary payload from persisted rows.
 
     Pure function — no DB access here.  Callers fetch rows from persistence
     and feed them in; that makes the function trivially unit-testable.
+
+    Close-the-Loop sprint (2026-07-04), forensic audit SP-016: when
+    ``last_persisted_at`` (per-source max signal_events.fetched_at) is
+    supplied, a source whose run status is ok-family but which has persisted
+    ZERO rows for more than ``max_silent_days`` is demoted to severity
+    ``warning`` / category ``ZERO_PERSISTED_DEGRADED``.  Kalshi/Polymarket
+    ran "healthy (filtered)" for 11 days while persisting nothing — that
+    silence is now impossible to classify as healthy.
     """
+    from datetime import datetime as _dt, timezone as _tz
+
+    def _persist_age_days(source: str) -> float | None:
+        if last_persisted_at is None:
+            return None
+        ts = last_persisted_at.get(source)
+        if not ts:
+            return float("inf")  # never persisted anything
+        try:
+            dt = _dt.fromisoformat(str(ts).replace("Z", "+00:00"))
+        except ValueError:
+            return None
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=_tz.utc)
+        ref = (
+            _dt.fromisoformat(str(now_utc).replace("Z", "+00:00"))
+            if now_utc
+            else _dt.now(_tz.utc)
+        )
+        if ref.tzinfo is None:
+            ref = ref.replace(tzinfo=_tz.utc)
+        return (ref - dt).total_seconds() / 86400.0
     sources: list[dict[str, Any]] = []
     warning_count = 0
     error_count = 0
@@ -235,6 +268,28 @@ def build_source_health_summary(
         if classification["category"] == "PLACEHOLDER":
             human_message = _placeholder_message(label)
 
+        persist_age = _persist_age_days(source_name)
+        zero_persisted_degraded = (
+            classification["severity"] == "ok"
+            and persist_age is not None
+            and persist_age > max_silent_days
+        )
+        if zero_persisted_degraded:
+            classification = {
+                "severity": "warning",
+                "category": "ZERO_PERSISTED_DEGRADED",
+                "human_message": (
+                    "DEGRADED: runs report ok but no rows have persisted "
+                    + (
+                        f"for {persist_age:.1f} days"
+                        if persist_age != float("inf")
+                        else "ever"
+                    )
+                    + " — filter drift or upstream schema change likely."
+                ),
+            }
+            human_message = classification["human_message"]
+
         if classification["severity"] == "warning":
             warning_count += 1
         elif classification["severity"] == "error":
@@ -254,6 +309,14 @@ def build_source_health_summary(
             "duration_ms": int(row.get("duration_ms", 0) or 0),
             "last_run_at": str(row.get("timestamp_utc", "")),
             "event_row_count": int(event_counts.get(source_name, 0)),
+            "last_persisted_at": (
+                (last_persisted_at or {}).get(source_name)
+            ),
+            "persist_age_days": (
+                round(persist_age, 2)
+                if isinstance(persist_age, float) and persist_age != float("inf")
+                else None
+            ),
             "suggested_command": _phase_command_for(source_name),
         })
 

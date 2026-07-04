@@ -260,6 +260,43 @@ EXPLICIT_IN_SCOPE: frozenset[str] = frozenset({
     "import_ohlcv_csv.py",
     "run_imported_backtest.py",
     "import_outcomes_csv.py",
+    # Close-the-Loop sprint (2026-07-04): the real-forward outcome maturation
+    # loop, ported from branch chore/real-forward-outcome-maturation onto the
+    # canonical branch (forensic audit SP-002 — branch-stranded evidence loop).
+    # All advisory-only: snapshot production, maturity scanning, append-only
+    # outcome attachment, real calibration evidence, honest evidence bundle.
+    "probability_snapshot.py",
+    "decision_probability_snapshot.py",
+    "forward_snapshot_contract.py",
+    "outcome_labeling_flow.py",
+    "attach_due_outcomes.py",
+    "forward_outcome_maturity_scanner.py",
+    "run_daily_outcome_maturation.py",
+    "real_calibration_evidence.py",
+    "real_price_outcome_evidence.py",
+    "real_evidence_bundle.py",
+    "real_evidence_canary.py",
+    "forward_eligibility_diagnostics.py",
+    "ensure_ohlcv_for_scored_tickers.py",
+    "ticker_resolution.py",
+    "live_decision_path.py",
+    "run_daily_live_advisory_decisions.py",
+    "admission_gates.py",
+    "capital_rotation_guard.py",
+    "moltbook_adjustment.py",
+    "portfolio_correlation_guard.py",
+    "leverage_policy.py",
+    "score_real_signal_events.py",
+    "real_signal_score_vector.py",
+    "source_freshness_contract.py",
+    "snapshot_calibration_bridge.py",
+    "calibration_report.py",
+    "refresh_real_evidence.py",
+    # Close-the-Loop sprint new modules: canonical risk gate, post-hoc
+    # benchmark analytics, and the unified operational truth surface.
+    "holdings_truth_gate.py",
+    "benchmark_outcome_report.py",
+    "truth_surface_report.py",
     # Local operator-journal reset (Manual Trade Log / Reconciliation /
     # Moltbook).  Dry-run by default; --apply is guarded by the central
     # operator_permission_guard.  In-scope record-keeping maintenance — it

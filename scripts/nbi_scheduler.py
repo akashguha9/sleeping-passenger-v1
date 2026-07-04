@@ -60,6 +60,23 @@ STATUS_INSTALLED = "INSTALLED"
 
 SCORE_REPORT_ARTIFACT_PATH = REPO_ROOT / "runtime" / "nbi_score_report.json"
 
+
+def _artifact_path(default):
+    """Honor NBI_ARTIFACT_DIR (test isolation; forensic audit SP-003)."""
+    import os as _os
+    from pathlib import Path as _Path
+
+    override = _os.environ.get("NBI_ARTIFACT_DIR")
+    if not override:
+        return default
+    try:
+        default.relative_to(REPO_ROOT / "runtime")
+    except (ValueError, TypeError):
+        return default  # already redirected (e.g. test monkeypatch) — honor it
+    d = _Path(override)
+    d.mkdir(parents=True, exist_ok=True)
+    return d / default.name
+
 # Tokens that must never appear in the scheduled action.  Checked by the
 # per-run safety check AND by doctor.  (Shares intent with
 # advisory_contract.FORBIDDEN_EXECUTION_TOKENS; kept explicit here so the
@@ -84,7 +101,7 @@ def _now_iso(now_iso: str | None = None) -> str:
 
 
 def _log(line: str, log_path: Path | None = None) -> None:
-    target = log_path or LOG_PATH
+    target = log_path or _artifact_path(LOG_PATH)
     target.parent.mkdir(parents=True, exist_ok=True)
     with open(target, "a", encoding="utf-8") as fh:
         fh.write(line.rstrip() + "\n")
@@ -241,19 +258,48 @@ def run_once(
         except Exception:  # noqa: BLE001 - disclosed via health, never hidden
             cards_exported = 0
         try:
-            SCORE_REPORT_ARTIFACT_PATH.parent.mkdir(parents=True, exist_ok=True)
-            SCORE_REPORT_ARTIFACT_PATH.write_text(
+            _score_report_path = _artifact_path(SCORE_REPORT_ARTIFACT_PATH)
+            _score_report_path.parent.mkdir(parents=True, exist_ok=True)
+            _score_report_path.write_text(
                 json.dumps(build_score_report(db_path), indent=2, default=str),
                 encoding="utf-8",
             )
             score_report_written = 1
         except Exception:  # noqa: BLE001
             score_report_written = 0
+        # Close-the-Loop sprint (2026-07-04, forensic audit SP-013): the daily
+        # loop must CLOSE outcomes, not just ingest.  A cycle that cannot run
+        # the maturation step is not healthy — maturation_ok participates in
+        # SchedulerHealth below.  "Nothing due today" is still maturation_ok=1.
+        try:
+            from scripts.run_daily_outcome_maturation import (
+                run_daily_outcome_maturation,
+            )
+
+            maturation_result = run_daily_outcome_maturation(
+                db_path=db_path, now_utc=now_iso, write=True,
+                benchmark_symbol="SPY",
+            )
+            maturation_ok = 1
+            outcomes_closed = int(maturation_result.get("outcomes_attached") or 0)
+            n_real_forward = maturation_result.get("n_real_forward_after")
+            maturation_status = maturation_result.get(
+                "calibration_status", "UNKNOWN"
+            )
+        except Exception as exc:  # noqa: BLE001 - disclosed via health record
+            maturation_ok = 0
+            outcomes_closed = 0
+            n_real_forward = None
+            maturation_status = f"MATURATION_CRASHED:{type(exc).__name__}"
     except Exception as exc:  # noqa: BLE001
         run_success = 0
         fail_closed_correctly = 0
         feed_available = 0
         report_persisted = 0
+        maturation_ok = 0
+        outcomes_closed = 0
+        n_real_forward = None
+        maturation_status = "NOT_RUN"
         run_result = {"status": "CRASHED", "error": type(exc).__name__}
 
     # v1.4 health model.  Two numbers:
@@ -264,7 +310,7 @@ def run_once(
     # a clean fail-closed cycle is DEGRADED_BUT_SAFE, never HEALTHY.
     scheduler_health = (
         run_success * report_persisted * cards_exported
-        * score_report_written * safety_check_passed
+        * score_report_written * safety_check_passed * maturation_ok
     )
     if feed_available:
         safe_operational = scheduler_health
@@ -299,13 +345,17 @@ def run_once(
             "score_report_written": score_report_written,
             "safety_check_passed": safety_check_passed,
             "fail_closed_correctly": fail_closed_correctly,
+            "maturation_ok": maturation_ok,
         },
+        "outcomes_closed": outcomes_closed,
+        "n_real_forward": n_real_forward,
+        "maturation_status": maturation_status,
         "ingested_events": run_result.get("ingested_events", []),
         "edge_claim": run_result.get("edge_claim"),
         "db_mutated": bool(run_success),
         "safety": advisory_safety_stamps(),
     }
-    target = Path(last_run_path) if last_run_path else LAST_RUN_PATH
+    target = Path(last_run_path) if last_run_path else _artifact_path(LAST_RUN_PATH)
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(json.dumps(record, indent=2, default=str), encoding="utf-8")
     _log(
@@ -570,7 +620,19 @@ def main(argv: list[str] | None = None) -> int:
     elif args.command == "run-once":
         record = run_once(dry_run=args.dry_run, db_path=args.db)
         print(json.dumps(record, indent=2, default=str))
-        return 0 if record.get("status") != STATUS_FAILED else 1
+        # Close-the-Loop sprint (2026-07-04, forensic audit finding: BROKEN
+        # exited 0 because run_once never emits legacy STATUS_FAILED).  Exit
+        # semantics are now explicit:
+        #   HEALTHY            -> 0
+        #   DEGRADED_BUT_SAFE  -> 0  (designed non-blocking: fail-closed cycle,
+        #                             visible in the record, log, and cockpit)
+        #   BROKEN / BROKEN_UNSAFE / FAILED / anything else -> 1
+        # so Task Scheduler's Last Result is nonzero on every broken run.
+        status = record.get("status")
+        if status in (STATUS_HEALTHY, STATUS_DEGRADED_BUT_SAFE):
+            return 0
+        print(f"NBI SCHEDULER RUN FAILED: status={status}", file=sys.stderr)
+        return 1
     elif args.command == "cron":
         print(build_cron_line(args.time))
     else:

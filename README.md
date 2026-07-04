@@ -4,6 +4,30 @@
 > signals into a SQLite store, surfaces them in a Next.js dashboard, and lets
 > a human reflect, log a manual trade, and reconcile the outcome.
 
+## Current state (last verified 2026-07-04)
+
+**Classification: functional MVP, fragile — audited 4.96/10 on 2026-07-03**
+(`FORENSIC_AUDIT_SLEEPING_PASSENGER.md`), lifted by the Close-the-Loop
+sprint (`CLOSE_THE_LOOP_SPRINT_REPORT.md`). Advisory-only; broker execution
+is machine-locked out (`configs/no_execution_policy.yaml`).
+
+- **Evidence:** N = 56 real, timestamp-locked forward outcomes matured;
+  first honest calibration numbers exist (Brier 0.2794 — currently **no
+  demonstrated edge** vs reference predictors; see
+  `docs/OPERATIONAL_TRUTH.md` §3). `predictive_claim_allowed` remains false
+  until N ≥ 200 with Brier ≤ 0.25 and ECE ≤ 0.10.
+- **Risk engine:** reads canonical holdings via `scripts/holdings_truth_gate.py`
+  (fail-closed on staleness/missing stops). Currently **BLOCKED** until the
+  operator records stops for the 10 open positions.
+- **Ops:** 6-hourly live refresh + daily 08:30 NBI loop with outcome
+  maturation; broken runs exit non-zero; `GET /truth-surface` is the single
+  honest status object.
+- **Recent subsystems** (June–July 2026): NBI narrative-branch lane
+  (`/nbi`), chicken gate (demote-only candidate gate), Mythos/signal-
+  arbitrage interpretation layers, outcome-maturation loop. Glossary:
+  `docs/OPERATIONAL_TRUTH.md` §9.
+
+
 ## Ownership & security posture
 
 **Proprietary — All Rights Reserved.** This repository and MVP are owned and
@@ -770,16 +794,24 @@ npm run start
 
 ### Pages
 
+_Last verified against `next build` output: 2026-07-04 (16 routes)._
+
 | Route | Description |
 |---|---|
 | `/` | Dashboard — fabric state, status breakdown, top signals |
 | `/signal-inbox` | Filterable signal list with state badges |
 | `/signal-inbox/[id]` | Signal detail, score panel, evidence timeline, reflection |
+| `/live-signals` | Live source health + latest ingested signals |
+| `/nbi` | Narrative Branch Intelligence cards + live-ops cockpit (artifact age shown) |
+| `/chart-structure` | Chart structure engine with freshness gate |
+| `/securities` | Security master coverage |
 | `/reflection-desk` | Human reflections and AI advisory context per signal |
-| `/moltbook` | Self-correction and mistake-learning entries |
+| `/moltbook` | Self-correction and mistake-learning entries (historical-only ledger) |
 | `/manual-trade-log` | Record trades placed manually (HUMAN_ONLY) |
 | `/reconciliation` | Match logged trades to actual outcomes |
+| `/cockpit` | Operational cockpit — subsystem health with recovery commands |
 | `/exports` | Download JSON/CSV exports of all advisory data |
+| `/help` | In-app operator help |
 | `/settings` | System constants and safety information |
 
 ### Safety rules enforced in the UI

@@ -18,6 +18,7 @@ const NAV_GROUPS: NavGroup[] = [
       { href: '/', label: 'Dashboard', icon: '⬡' },
       { href: '/signal-inbox', label: 'Signal Inbox', icon: '◈' },
       { href: '/live-signals', label: 'Live Signals', icon: '◆' },
+      { href: '/nbi', label: 'Narrative Branches', icon: '◬' },
       { href: '/chart-structure', label: 'Chart Structure', icon: '◫' },
       { href: '/securities', label: 'Securities', icon: '◐' },
     ],

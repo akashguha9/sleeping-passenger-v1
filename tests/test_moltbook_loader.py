@@ -307,7 +307,10 @@ def test_pipeline_health_report_builder_shape() -> None:
     assert payload["truth_origin"] == "seeded"
     assert payload["system_readiness_state"] == "DO_NOT_DEPLOY"
     assert payload["can_deploy_capital"] is False
-    assert payload["what_should_i_do_next"] == "EXIT_NOW: UNG, FCG | CLEAR_GSCE_PHASE_LOCK_FOR: RTX, ZIM | DO NOT ADD NEW RISK"
+    # Close-the-Loop sprint (2026-07-04, forensic audit SP-001): the phantom
+    # moltbook EXIT_NOW advice (UNG/FCG) is gone — the action engine now
+    # fail-closes on canonical holdings truth under the hermetic test env.
+    assert payload["what_should_i_do_next"] == "CLEAR_GSCE_PHASE_LOCK_FOR: RTX, ZIM | DO NOT ADD NEW RISK"
     assert payload["entry_review_packets"] == []
     assert payload["transition_review_packets"] == []
     assert payload["packet_summary"] == {
@@ -337,20 +340,25 @@ def test_pipeline_health_report_builder_shape() -> None:
         "states": {"OPEN": 3, "EXIT_PENDING": 1},
         "errors": [],
     }
+    # Close-the-Loop sprint (2026-07-04, forensic audit SP-001): the action
+    # summary no longer contains phantom moltbook positions (UNG/FCG EXIT_NOW
+    # at 0.91/0.88 came from the demoted ledger). Under the hermetic test env
+    # the canonical holdings truth is absent, so the engine fail-closes and
+    # only signal-driven actions remain.
     assert payload["per_ticker_action_summary"] == {
         "summary_by_action": {
-            "EXIT_NOW": 2,
-            "REDUCE": 1,
+            "EXIT_NOW": 0,
+            "REDUCE": 0,
             "HOLD": 0,
-            "MONITOR": 1,
+            "MONITOR": 4,
             "BLOCK_ENTRY": 3,
         },
         "highest_priority_actions": [
-            {"ticker": "UNG", "action": "EXIT_NOW", "priority_score": 0.91},
-            {"ticker": "FCG", "action": "EXIT_NOW", "priority_score": 0.88},
-            {"ticker": "TLT", "action": "MONITOR", "priority_score": 0.82},
-            {"ticker": "TIP", "action": "REDUCE", "priority_score": 0.79},
             {"ticker": "RTX", "action": "BLOCK_ENTRY", "priority_score": 0.71},
+            {"ticker": "TIP", "action": "MONITOR", "priority_score": 0.68},
+            {"ticker": "ZIM", "action": "BLOCK_ENTRY", "priority_score": 0.66},
+            {"ticker": "TLT", "action": "MONITOR", "priority_score": 0.62},
+            {"ticker": "GLD", "action": "BLOCK_ENTRY", "priority_score": 0.6},
         ],
     }
     assert payload["scorecard"] == {
@@ -637,7 +645,7 @@ def test_run_diagnostics_pipeline_simulated_realm_bis_clear_preview() -> None:
     assert payload["entry_review_packets"] == []
     assert payload["transition_review_packets"] == []
     assert payload["packet_summary"]["packet_state"] == "NONE"
-    assert payload["what_should_i_do_next"] == "EXIT_NOW: UNG, FCG | CLEAR_GSCE_PHASE_LOCK_FOR: RTX, ZIM | DO NOT ADD NEW RISK"
+    assert payload["what_should_i_do_next"] == "CLEAR_GSCE_PHASE_LOCK_FOR: RTX, ZIM | DO NOT ADD NEW RISK"
 
 
 def test_run_diagnostics_pipeline_simulated_all_clear_preview() -> None:
@@ -652,7 +660,7 @@ def test_run_diagnostics_pipeline_simulated_all_clear_preview() -> None:
     assert payload["scenario_transition_trends"]["ALL_CLEAR"]["packet_entry_state"] == "ENTRY_REVIEW_READY"
     assert payload["packet_summary"]["packet_state"] == "ENTRY_REVIEW_READY"
     assert payload["decision_review_state"] == "ENTRY_REVIEW_READY"
-    assert payload["what_should_i_do_next"] == "EXIT_NOW: UNG, FCG | REVIEW_FOR_ENTRY: RTX, ZIM | REVIEW_PROMOTABLE_CANDIDATES"
+    assert payload["what_should_i_do_next"] == "REVIEW_FOR_ENTRY: RTX, ZIM | REVIEW_PROMOTABLE_CANDIDATES"
     assert [packet["ticker"] for packet in payload["entry_review_packets"]] == ["RTX", "ZIM"]
 
 
@@ -956,7 +964,7 @@ def test_pipeline_health_report_summary_cli() -> None:
     assert "bridge_mode_safety_state=paper_safe_only" in lines
     assert any(line.startswith("suggested_feedback_adjustments=") for line in lines)
     assert (
-        "what_should_i_do_next=EXIT_NOW: UNG, FCG | CLEAR_GSCE_PHASE_LOCK_FOR: RTX, ZIM | DO NOT ADD NEW RISK"
+        "what_should_i_do_next=CLEAR_GSCE_PHASE_LOCK_FOR: RTX, ZIM | DO NOT ADD NEW RISK"
         in lines
     )
     assert any(line.startswith("scorecard=") for line in lines)
@@ -998,7 +1006,7 @@ def test_pipeline_health_report_summary_cli_gsce_clear_includes_transition_candi
     assert "system_readiness_state=DO_NOT_DEPLOY" in lines
     assert "can_deploy_capital=false" in lines
     assert "policy_state=RESTRICTED" in lines
-    assert "what_should_i_do_next=EXIT_NOW: UNG, FCG | ELIMINATE_REALM_BIS | DO NOT ADD NEW RISK" in lines
+    assert "what_should_i_do_next=ELIMINATE_REALM_BIS | DO NOT ADD NEW RISK" in lines
     assert any(line.startswith("scorecard=") for line in lines)
     assert "transition_review_candidates=RTX, ZIM" in lines
     assert "decision_review_state=TRANSITION_REVIEW_READY" in lines
@@ -1028,7 +1036,7 @@ def test_pipeline_health_report_summary_cli_all_clear_includes_entry_candidates(
     assert "system_readiness_state=LIMITED_DEPLOY" in lines
     assert "can_deploy_capital=false" in lines
     assert "policy_state=REVIEW_READY" in lines
-    assert "what_should_i_do_next=EXIT_NOW: UNG, FCG | REVIEW_FOR_ENTRY: RTX, ZIM | REVIEW_PROMOTABLE_CANDIDATES" in lines
+    assert "what_should_i_do_next=REVIEW_FOR_ENTRY: RTX, ZIM | REVIEW_PROMOTABLE_CANDIDATES" in lines
     assert any(line.startswith("scorecard=") for line in lines)
     assert "entry_review_candidates=RTX, ZIM" in lines
     assert "decision_review_state=ENTRY_REVIEW_READY" in lines

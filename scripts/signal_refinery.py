@@ -623,7 +623,22 @@ def _build_thermal_battery_manager(
     as_of: datetime,
 ) -> dict[str, Any]:
     thermal_config = config["thermal_battery"]
-    open_position_count = len(open_positions)
+    # Close-the-Loop sprint (2026-07-04), forensic audit SP-011: the capacity
+    # gate must never undercount the real book.  The effective count is the
+    # MAX of the pipeline-supplied positions and the canonical holdings truth
+    # (10 real positions vs a cap of 6 was previously invisible because the
+    # counted set came from a different, stale source).
+    input_position_count = len(open_positions)
+    canonical_position_count: int | None = None
+    try:
+        from scripts.holdings_truth_gate import canonical_open_position_count
+
+        canonical_position_count = canonical_open_position_count()
+    except Exception:  # noqa: BLE001 - fail-soft: fall back to input count
+        canonical_position_count = None
+    open_position_count = max(
+        input_position_count, canonical_position_count or 0
+    )
     chaos_open_position_count = sum(
         1
         for row in open_positions
@@ -683,6 +698,8 @@ def _build_thermal_battery_manager(
     return {
         "thermal_state": thermal_state,
         "open_position_count": open_position_count,
+        "open_position_count_input": input_position_count,
+        "open_position_count_canonical": canonical_position_count,
         "position_headroom": max(0, max_open_positions - open_position_count),
         "chaos_open_position_count": chaos_open_position_count,
         "max_open_positions": max_open_positions,

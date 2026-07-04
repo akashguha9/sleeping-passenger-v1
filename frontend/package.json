@@ -7,7 +7,7 @@
     "dev:sleepingpassenger": "next dev -H 127.0.0.1 -p 80",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint",
+    "lint": "node -e \"console.error('LINT BLOCKED: Next 16 removed next-lint. Migration required: npm i -D eslint eslint-config-next, add eslint.config.js, then set this script to eslint . (see TESTING.md, Close-the-Loop sprint 2026-07-04).'); process.exit(1)\"",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test"

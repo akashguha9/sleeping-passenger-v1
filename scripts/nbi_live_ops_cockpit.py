@@ -49,6 +49,23 @@ COCKPIT_VERSION = "nbi-cockpit-v1.0"
 COCKPIT_JSON_PATH = REPO_ROOT / "runtime" / "nbi_live_ops_cockpit.json"
 COCKPIT_MD_PATH = REPO_ROOT / "runtime" / "nbi_live_ops_cockpit.md"
 
+
+def _artifact_path(default):
+    """Honor NBI_ARTIFACT_DIR (test isolation; forensic audit SP-003)."""
+    import os as _os
+    from pathlib import Path as _Path
+
+    override = _os.environ.get("NBI_ARTIFACT_DIR")
+    if not override:
+        return default
+    try:
+        default.relative_to(REPO_ROOT / "runtime")
+    except (ValueError, TypeError):
+        return default  # already redirected (e.g. test monkeypatch) — honor it
+    d = _Path(override)
+    d.mkdir(parents=True, exist_ok=True)
+    return d / default.name
+
 STATUS_READY_RUNNING = "READY_RUNNING"
 STATUS_DEGRADED_BUT_SAFE = "DEGRADED_BUT_SAFE"
 STATUS_BLOCKED_OPERATOR = "BLOCKED_OPERATOR_ACTION"
@@ -284,8 +301,8 @@ def run_autopilot(
         "safety": advisory_safety_stamps(),
     }
     if not dry_run:
-        json_target = Path(out_json) if out_json else COCKPIT_JSON_PATH
-        md_target = Path(out_md) if out_md else COCKPIT_MD_PATH
+        json_target = Path(out_json) if out_json else _artifact_path(COCKPIT_JSON_PATH)
+        md_target = Path(out_md) if out_md else _artifact_path(COCKPIT_MD_PATH)
         json_target.parent.mkdir(parents=True, exist_ok=True)
         json_target.write_text(
             json.dumps(payload, indent=2, default=str), encoding="utf-8"
