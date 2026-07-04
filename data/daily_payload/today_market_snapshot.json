@@ -1,6 +1,6 @@
 {
-  "run_date": "2026-05-24",
-  "generated_at_utc": "2026-05-24T07:41:59+00:00",
+  "run_date": "2026-07-04",
+  "generated_at_utc": "2026-07-04T13:47:34Z",
   "snapshot_timestamp_utc": null,
   "source_health": "UNVERIFIED",
   "provider": "STATIC_UNIVERSE_FALLBACK",
@@ -71,5 +71,27 @@
       "note": "Market snapshot generated from static fallback universe; live data not yet verified.",
       "freshness": "UNVERIFIED"
     }
-  ]
+  ],
+  "artifact_created_at": "2026-07-04T13:47:34Z",
+  "provider_canary": {
+    "canary_symbol": "SPY",
+    "checked_at_utc": "2026-07-04T13:47:34Z",
+    "max_provider_age_minutes": 1560.0,
+    "provider_age_minutes": null,
+    "latest_close": null,
+    "status": "FAIL",
+    "reason": "NO_BARS_FOR_CANARY_SYMBOL"
+  },
+  "run_id": "b4458265171e",
+  "source_mode": "SYNTHETIC_RUNTIME_FALLBACK",
+  "run_started_at": "2026-07-04T13:45:03+00:00",
+  "artifact_written_at": "2026-07-04T13:47:34+00:00",
+  "operating_mode": "seeded",
+  "truth_origin": "seeded",
+  "truth_origin_tags": [
+    "seeded",
+    "placeholder"
+  ],
+  "commit_hash": "d809d97",
+  "config_fingerprint": "401f0d8f1975"
 }

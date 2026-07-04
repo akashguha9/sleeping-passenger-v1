@@ -66,7 +66,7 @@ def test_missing_file_fails_closed(tmp_path: Path) -> None:
 
 
 def test_stale_run_date_fails_closed(tmp_path: Path) -> None:
-    f = _write_holdings(tmp_path / "h.json", "2026-05-22", [_pos(stop_loss=90.0)])
+    f = _write_holdings(tmp_path / "h.json", "2026-05-22", [_pos(stop_loss=90.0, stop_loss_source="operator", stop_loss_confirmed=True, stop_loss_confirmed_at="2026-07-03T10:00:00Z")])
     gate = load_holdings_truth_gate(
         path=f, now_utc=NOW, attach_prices=False
     )
@@ -107,7 +107,7 @@ def test_leveraged_without_stop_escalates(tmp_path: Path) -> None:
 
 def test_stop_present_but_no_price_still_blocked(tmp_path: Path) -> None:
     f = _write_holdings(
-        tmp_path / "h.json", "2026-07-03", [_pos(stop_loss=90.0)]
+        tmp_path / "h.json", "2026-07-03", [_pos(stop_loss=90.0, stop_loss_source="operator", stop_loss_confirmed=True, stop_loss_confirmed_at="2026-07-03T10:00:00Z")]
     )
     gate = load_holdings_truth_gate(path=f, now_utc=NOW, attach_prices=True,
                                     db_path=tmp_path / "no.db")
@@ -132,7 +132,7 @@ def test_fully_specified_fresh_position_is_ready(tmp_path: Path) -> None:
     )
     conn.commit()
     conn.close()
-    f = _write_holdings(tmp_path / "h.json", "2026-07-03", [_pos(stop_loss=90.0)])
+    f = _write_holdings(tmp_path / "h.json", "2026-07-03", [_pos(stop_loss=90.0, stop_loss_source="operator", stop_loss_confirmed=True, stop_loss_confirmed_at="2026-07-03T10:00:00Z")])
     gate = load_holdings_truth_gate(path=f, now_utc=NOW, db_path=db)
     assert gate["status"] == STATUS_OK
     ready = gate["positions"][0]
@@ -165,7 +165,7 @@ def test_stale_price_blocks(tmp_path: Path) -> None:
     )
     conn.commit()
     conn.close()
-    f = _write_holdings(tmp_path / "h.json", "2026-07-03", [_pos(stop_loss=90.0)])
+    f = _write_holdings(tmp_path / "h.json", "2026-07-03", [_pos(stop_loss=90.0, stop_loss_source="operator", stop_loss_confirmed=True, stop_loss_confirmed_at="2026-07-03T10:00:00Z")])
     gate = load_holdings_truth_gate(path=f, now_utc=NOW, db_path=db)
     blocked = gate["blocked_positions"][0]
     assert blocked["risk_monitoring"] == "BLOCKED_STALE_PRICE"
@@ -189,7 +189,7 @@ def test_canonical_count_for_capacity_gate(tmp_path: Path) -> None:
 
 def test_env_override_is_honored(tmp_path: Path, monkeypatch) -> None:
     f = _write_holdings(tmp_path / "env.json", "2026-07-03",
-                        [_pos(stop_loss=90.0)])
+                        [_pos(stop_loss=90.0, stop_loss_source="operator", stop_loss_confirmed=True, stop_loss_confirmed_at="2026-07-03T10:00:00Z")])
     monkeypatch.setenv("HOLDINGS_TRUTH_PATH", str(f))
     gate = load_holdings_truth_gate(now_utc=NOW, attach_prices=False)
     assert gate["canonical_holding_count"] == 1

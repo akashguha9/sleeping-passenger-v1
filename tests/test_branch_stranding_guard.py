@@ -38,6 +38,11 @@ REQUIRED_MODULES: dict[str, tuple[str, ...]] = {
     "scripts.benchmark_outcome_report": ("build_benchmark_comparison",),
     "scripts.holdings_truth_gate": ("load_holdings_truth_gate",),
     "scripts.truth_surface_report": ("compute_truth_surface",),
+    # Feed-the-Loop sprint (2026-07-04): the compounding loop's new organs.
+    "scripts.run_daily_live_advisory_decisions": ("run_daily_decision_batch",),
+    "scripts.refresh_fresh_discovery_live": ("refresh_fresh_discovery",),
+    "scripts.operator_alert_bridge": ("build_alerts_from_surface", "dispatch_alerts"),
+    "scripts.kalshi_settlement_reconciliation": ("reconcile_settlements",),
 }
 
 # DB tables written by the evidence loop -> at least one working-tree module
@@ -79,6 +84,13 @@ def test_daily_scheduler_references_maturation() -> None:
     assert "run_daily_outcome_maturation" in src, (
         "the installed daily loop no longer closes outcomes (audit SP-013)"
     )
+    assert "run_daily_decision_batch" in src, (
+        "the installed daily loop no longer PRODUCES snapshots — N stops "
+        "compounding (Feed-the-Loop regression)"
+    )
+    assert "refresh_fresh_discovery" in src
+    assert "reconcile_settlements" in src
+    assert "dispatch_alerts" in src
 
 
 def test_action_engine_references_canonical_holdings() -> None:

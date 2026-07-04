@@ -67,6 +67,11 @@ def _isolate_holdings_truth(tmp_path, monkeypatch):
     monkeypatch.setenv(
         "HOLDINGS_TRUTH_PATH", str(tmp_path / "holdings_truth_absent.json")
     )
+    # Feed-the-Loop sprint: same isolation for the discovery snapshot the
+    # truth surface age-gates — hermetic tests must not read the real payload.
+    monkeypatch.setenv(
+        "DISCOVERY_SNAPSHOT_PATH", str(tmp_path / "discovery_snapshot_absent.json")
+    )
     yield
 
 

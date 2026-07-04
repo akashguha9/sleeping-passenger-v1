@@ -742,6 +742,49 @@ export type NbiCockpitResponse = Record<string, unknown> & {
   generated_at?: string;
 };
 
+
+// Feed-the-Loop sprint (2026-07-04): the one honest status object.
+export type TruthSurfaceResponse = {
+  overall_operational_state?: string;
+  state_reasons?: string[];
+  calibration_status?: string;
+  calibration_display_note?: string;
+  matured_real_outcome_count?: number;
+  brier_real_forward?: number | null;
+  evidence_velocity_7d?: number;
+  maturation_velocity_7d?: number;
+  pending_horizon_count?: number;
+  due_unmatured_count?: number;
+  canonical_holding_count?: number;
+  active_holding_count?: number;
+  missing_stop_count?: number;
+  unconfirmed_stop_count?: number;
+  leveraged_position_count?: number;
+  leveraged_without_stop_count?: number;
+  holdings_truth_status?: string;
+  holdings_freshness_age_minutes?: number | null;
+  portfolio_stop_exposure?: number | null;
+  portfolio_stop_exposure_fraction?: number | null;
+  fresh_discovery_status?: string;
+  provider_canary_status?: string | null;
+  rows_persisted_status?: {
+    status?: string;
+    sources?: Record<string, { status?: string; age_days?: number | null }>;
+  };
+  scheduler_status?: string;
+  latest_alerts?: Array<Record<string, unknown>>;
+  next_required_operator_action?: string;
+  [key: string]: unknown;
+};
+
+export async function getTruthSurface(): Promise<TruthSurfaceResponse | null> {
+  try {
+    return await apiFetch<TruthSurfaceResponse>('/truth-surface');
+  } catch {
+    return null;
+  }
+}
+
 export async function getNbiCockpit(): Promise<NbiCockpitResponse | null> {
   try {
     return await apiFetch<NbiCockpitResponse>('/nbi/cockpit');

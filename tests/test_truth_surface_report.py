@@ -78,8 +78,21 @@ def _holdings(tmp_path: Path, *, run_date: str = "2026-07-04",
     }
     if with_stop:
         pos["stop_loss"] = 90.0
+        pos["stop_loss_source"] = "operator"
+        pos["stop_loss_confirmed"] = True
+        pos["stop_loss_confirmed_at"] = "2026-07-04T09:00:00Z"
     f.write_text(json.dumps({"run_date": run_date, "positions": [pos]}),
                  encoding="utf-8")
+    return f
+
+
+def _discovery(tmp_path: Path, ts: str, *, live: bool = True,
+               canary: str = "PASS") -> Path:
+    f = tmp_path / "today_market_snapshot.json"
+    f.write_text(json.dumps({
+        "artifact_created_at": ts, "generated_at_utc": ts,
+        "is_live": live, "provider_canary": {"status": canary},
+    }), encoding="utf-8")
     return f
 
 
@@ -117,12 +130,13 @@ def test_all_axes_clean_with_outcomes_is_healthy(tmp_path: Path) -> None:
         scheduler_last_run_path=_artifact(
             tmp_path, "sched.json", "2026-07-04T11:00:00Z", "HEALTHY"
         ),
+        discovery_snapshot_path=_discovery(tmp_path, "2026-07-04T11:00:00Z"),
         now_utc=NOW,
     )
-    # one holding with stop but no price -> missing stop count is 0, but the
-    # position is not monitorable; that alone must not block HEALTHY? No:
-    # stops present, holdings fresh, sources fresh, artifacts fresh, N>0.
+    # stops present AND confirmed, holdings fresh, sources fresh, artifacts
+    # fresh, discovery live, N>0 -> HEALTHY is finally reachable.
     assert surface["missing_stop_count"] == 0
+    assert surface["unconfirmed_stop_count"] == 0
     assert surface["overall_operational_state"] == STATE_HEALTHY
     assert surface["matured_real_outcome_count"] == 56
     # 56 >= 50 but the repo gate (N>=200, Brier<=0.25) fails -> measured, not calibrated

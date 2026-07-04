@@ -22,6 +22,8 @@ declare const expect: any;
 declare const beforeEach: any;
 
 vi.mock('@/lib/apiClient', () => ({
+  // Feed-the-Loop sprint: the cockpit now embeds TruthSurfacePanel.
+  getTruthSurface: vi.fn().mockResolvedValue(null),
   getDiagnosticsCockpit: vi.fn(),
   // Cockpit also fetches the real-money readiness mode. Mock to a safe no-op.
   getRealMoneyReadiness: vi.fn().mockResolvedValue(null),

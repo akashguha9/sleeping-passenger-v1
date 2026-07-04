@@ -2053,3 +2053,56 @@ unmet (N=56 < 200, Brier 0.2794 > 0.25), 10/10 positions missing stops
 stale pending operator re-verification, no drawdown monitor, no alerting.
 Advisory-only execution lock unchanged and re-verified
 (`tests/test_no_execution_guard_repowide.py` passing).
+
+
+---
+
+## Post-Sprint Appendix: Feed the Loop / Gap Closer (2026-07-04)
+
+Same-day follow-up to Close-the-Loop, executed on branch
+`sprint/feed-the-loop-gap-closer`. Full detail:
+`FEED_THE_LOOP_SPRINT_REPORT.md`. The audit body and the first appendix are
+preserved unmodified.
+
+**Score movement (same weights):**
+
+| | Overall | A | B | C | D | E | F | G | H | I | J | K | L |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| Audit (07-03) | 4.96 | 4.7 | 4.8 | 3.8 | 3.6 | 4.8 | 4.7 | 6.7 | 4.4 | 4.4 | 7.4 | 7.8 | 5.4 |
+| Close-the-Loop | 5.78 | 5.2 | 5.1 | 5.4 | 5.6 | 5.6 | 4.8 | 7.2 | 4.4 | 5.8 | 7.7 | 7.8 | 7.0 |
+| Feed-the-Loop | **6.30** | 6.0 | 5.2 | 6.2 | 6.3 | 6.3 | 4.9 | 7.6 | 5.4 | 6.8 | 7.9 | 7.8 | 7.2 |
+
+Gap-closure ratio vs the 6.70 near-term ceiling: ρ = (6.30−5.78)/0.92 =
+**0.565 — minimum success**, honestly not the 6.50 strong target: the
+remaining lift is operator action (stop confirmation) and elapsed calendar
+time (horizons, unattended runs), not missing code. New near-term ceiling
+≈ 6.75; new ultimate ceiling ≈ 8.20.
+
+**What now compounds daily** (`nbi_scheduler run-once`, six stages, each
+with recorded health): discovery refresh (canary-gated, VERIFIED_LIVE
+payloads — first live discovery data since 2026-05-22) → snapshot producer
+(25 timestamp-locked forward predictions/day, same-day idempotent; 25
+locked live on 2026-07-04 → forward-eligible cohort 56→81, maturing
+2026-07-09) → Kalshi settlement harvest (846-row ledger; provider OK; all
+polled markets honestly UNSETTLED) → NBI ingest/cards → outcome maturation
+→ operator alert dispatch (append-only queue; 5 real alerts on day one,
+2 CRITICAL).
+
+**Risk truth became operator-actionable without faking anything:** the stop
+compiler generated `data/daily_payload/stop_loss_backfill_template.json`
+(10 suggestions, named policy, `requires_operator_confirmation: true`);
+`--apply-confirmed --write` activates ONLY operator-confirmed stops with
+provenance and can refresh `run_date` only via an explicit
+`holdings_confirmed_current` confirmation. Until then the system stays
+BLOCKED and says so on every surface (validator exit 1, truth surface,
+cockpit panel, CRITICAL alerts).
+
+**Validation:** backend 7,935 passed / 3 skipped / 0 failed (17m26s);
+targeted subset 869 passed; frontend 37 files / 213 tests, zero unhandled
+errors; build 16 routes. Execution lock unchanged
+(`tests/test_no_execution_guard_repowide.py` green).
+
+**Still true:** NOT real-money ready (N=56<200, Brier 0.2794 — no
+demonstrated edge; stops unconfirmed; <30 days unattended evidence);
+investor-demo-able only as an honesty story. The system remains advisory-
+only with the execution gate machine-locked.

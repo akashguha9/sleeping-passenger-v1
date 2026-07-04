@@ -143,6 +143,8 @@ def test_ready_position_flows_into_stop_monitoring(
             "status": "OPEN", "quantity": 1.0, "entry_price": 141.97,
             "currency": "USD", "leverage": 1,
             "stop_loss": 120.0,  # current 100 < stop 120: breached
+            "stop_loss_source": "operator", "stop_loss_confirmed": True,
+            "stop_loss_confirmed_at": "2026-07-04T09:00:00Z",
             "opened_at": "2026-05-18T00:00:00Z",
             "created_via": "manual_trade_log",
             "broker_confirmed": False, "human_confirmed": True,

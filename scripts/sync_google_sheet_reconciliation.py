@@ -444,7 +444,16 @@ def _post_to_mvp(endpoint: str, payload: dict[str, Any], timeout: int = 20):
             "Missing dependency: requests.  "
             "Install with: python -m pip install requests"
         ) from exc
-    return requests.post(endpoint, json=payload, timeout=timeout)
+    # Feed-the-Loop sprint (2026-07-04, forensic audit segment H): the sync
+    # client previously sent no Authorization header, so security
+    # (MVP_API_TOKEN) and sheet sync could not be on at the same time.
+    headers = {}
+    token = os.environ.get("MVP_API_TOKEN", "").strip()
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    if payload.get("dedupe_key"):
+        headers["Idempotency-Key"] = str(payload["dedupe_key"])
+    return requests.post(endpoint, json=payload, timeout=timeout, headers=headers)
 
 
 # ---------------------------------------------------------------------------
@@ -521,6 +530,38 @@ def run_once(
     )
 
 
+
+def _header_row_looks_like_data(row: list[Any]) -> bool:
+    """True when sheet row 1 resembles a trade row instead of a header.
+
+    Heuristic contract (no live headers are hardcoded): a header row's D
+    column (buy price) is NOT parseable as a number while carrying a
+    non-empty C column.  If C is ticker-like and D parses numeric, the
+    header has been deleted or the columns shifted — schema drift.
+    """
+    padded = _pad_row(row)
+    c = str(padded[COL_TICKER] or "").strip()
+    d = str(padded[COL_BUY_PRICE] or "").strip()
+    if not c or not d:
+        return False
+    try:
+        float(d.replace(",", ""))
+    except ValueError:
+        return False
+    return True
+
+
+def _client_dedupe_key(decision) -> str:
+    """Deterministic per-(row, action, day) key so replays are detectable."""
+    import hashlib
+    from datetime import datetime as _dt, timezone as _tz
+
+    raw = (
+        f"{decision.sheet_row_number}|{decision.ticker}|{decision.action}|"
+        f"{_dt.now(_tz.utc).strftime('%Y-%m-%d')}"
+    )
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:32]
+
 def _process_rows(
     rows: list[list[Any]],
     *,
@@ -550,9 +591,36 @@ def _process_rows(
     for idx, row in enumerate(rows, start=1):
         counts["scanned"] += 1
         if idx == 1:
+            # Feed-the-Loop sprint: row 1 was previously skipped BLINDLY.
+            # If it looks like DATA (schema drift: the header row vanished
+            # or columns shifted), abort the whole run fail-closed instead
+            # of silently dropping a real trade row.
+            if _header_row_looks_like_data(row):
+                counts["schema_drift"] = 1
+                logger.error(
+                    "SCHEMA_DRIFT: sheet row 1 looks like trade data, not a "
+                    "header (ticker-like C column with numeric D). Aborting "
+                    "the sync run — verify the sheet layout (A:Z, header in "
+                    "row 1) before rerunning."
+                )
+                return counts
             counts["skipped"] += 1
             continue
         decision = decide_row(row, sheet_row_number=idx)
+        # Feed-the-Loop sprint: idempotency for ALL actions, not just
+        # LOG_PARTIAL_TP — a row whose Y column already carries this
+        # action's _SYNCED marker re-fires no POST.
+        if decision.is_actionable():
+            last_action_cell = str(
+                _pad_row(row)[COL_LAST_ACTION] or ""
+            ).upper()
+            if f"{decision.action}_SYNCED" in last_action_cell:
+                counts["skipped"] += 1
+                logger.info(
+                    "row %d (%s) skipped: %s already synced (column Y)",
+                    idx, decision.ticker, decision.action,
+                )
+                continue
         if not decision.is_actionable():
             counts["skipped"] += 1
             if decision.skip_reason and decision.ticker:
@@ -565,6 +633,7 @@ def _process_rows(
             continue
 
         payload = decision.to_payload()
+        payload["dedupe_key"] = _client_dedupe_key(decision)
         logger.info(
             "row %d (%s) -> %s | dry_run=%s",
             idx,

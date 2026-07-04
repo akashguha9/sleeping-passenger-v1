@@ -1,6 +1,6 @@
 # OPERATIONAL TRUTH — how this MVP reports on itself
 
-**Last verified: 2026-07-04 (Close-the-Loop sprint).**
+**Last verified: 2026-07-04 (Feed-the-Loop sprint).**
 This is the canonical reference for what the system's status words mean,
 where truth lives, and what is still blocked. If code and this document
 disagree, the code is the bug or this file is — fix one the same day.
@@ -165,3 +165,60 @@ is enforced culturally by this doc and mechanically by the truth surface:
 | **Mythos / Fable (signal_arbitrage)** | Interpretation/meaning-routing layers feeding multiplicative reality gating (`scripts/signal_arbitrage/`) |
 | **Truth surface** | `scripts/truth_surface_report.py` / `GET /truth-surface` — the one honest status object |
 | **Maturation** | Closing a locked forward prediction into a real outcome after its horizon elapses |
+
+## 10. Feed-the-Loop additions (2026-07-04, same day)
+
+**Stop confirmation loop (operator-in-the-loop, fail-closed):**
+
+```powershell
+python scripts/holdings_truth_gate.py --validate         # exit 1 while BLOCKED
+python scripts/holdings_truth_gate.py --write-template   # suggestions only
+# ... edit data/daily_payload/stop_loss_backfill_template.json:
+#     set stop_loss_confirmed=true + stop_loss_confirmed_at per entry,
+#     optionally holdings_confirmed_current=true (+timestamp) to refresh run_date
+python scripts/holdings_truth_gate.py --apply-confirmed --write
+```
+
+Suggested stops use the named policy (5% hard stop 1x / 2.5% leveraged) and
+are NEVER active until confirmed: an unconfirmed stop is
+`BLOCKED_UNCONFIRMED_STOP`, exactly like a missing one.  Confirmed stops
+unlock `loss_at_stop`, `portfolio_stop_exposure`, and the
+`portfolio_stop_exposure_fraction` (computed against cost-basis equity,
+labeled as such).
+
+**The daily loop now compounds** (`python -m scripts.nbi_scheduler run-once`):
+discovery refresh (canary-gated) -> snapshot producer (25 locked/day max,
+same-day idempotent) -> Kalshi settlement harvest (append-only) -> NBI
+ingest/cards -> outcome maturation -> alert dispatch.  Health axes:
+`producer_ok`/`maturation_ok` multiply into SchedulerHealth;
+`discovery_status`/`settlement_provider_state`/`alerts_dispatched` are
+recorded per run.
+
+**Velocities** (truth surface): `evidence_velocity_7d` = locked forward
+predictions/day, `maturation_velocity_7d` = matured outcomes/day.  Zero
+evidence velocity with a scheduled producer, or any due-unmatured
+prediction, degrades the overall state.
+
+**Provider canary** (`scripts/refresh_fresh_discovery_live.py`): PASS when
+the newest SPY bar is fresh (<=26h) OR inside the 4-day weekend/holiday
+window WITH a successful provider run <=26h old (mode
+`MARKET_CLOSED_WINDOW`) — distinguishing "markets closed" from "provider
+dead".  Discovery payloads carry `artifact_created_at` + the canary; the
+truth surface age-gates them (>26h DEGRADED, >50h BLOCKED).
+
+**Alert channel** (`scripts/operator_alert_bridge.py`): append-only JSONL
+queue (`runtime/alerts/operator_alerts.jsonl`) + latest snapshot + console.
+SHA-256 dedupe per condition per day.  Dispatched by every daily cycle;
+rendered in the cockpit truth panel.
+
+**Kalshi settlement loop**
+(`scripts/kalshi_settlement_reconciliation.py --poll --write`): resolves the
+846-row live probability ledger against the public market endpoint,
+append-only settlements with per-row Brier/logloss; unknown settlements stay
+UNKNOWN — never faked.  As of 2026-07-04 all polled markets are honestly
+UNSETTLED (they resolve months out).
+
+**Cockpit copy rules (pinned by tests):** N<50 -> "UNCALIBRATED SCORE — not
+a calibrated probability"; 50<=N<200 -> "MEASURED BUT NOT DECISION-GRADE
+CALIBRATED"; the phrase "CALIBRATION GATE PASSED" is only reachable when the
+backend gate (N>=200, Brier<=0.25, ECE<=0.10) actually passes.

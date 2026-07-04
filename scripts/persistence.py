@@ -2548,3 +2548,71 @@ __all__ = [
     "resolve_alias",
     "get_security_coverage",
 ]
+
+
+# Feed-the-Loop sprint (2026-07-04): ported additively from branch
+# chore/real-forward-outcome-maturation — the snapshot producer
+# (run_daily_live_advisory_decisions) needs per-source freshness stats.
+def count_fresh_signal_events_by_source(
+    source_name: str,
+    ttl_hours: float = 6.0,
+    now_iso: str | None = None,
+    db_path: Path | None = None,
+) -> dict[str, Any]:
+    """Return canonical freshness stats for a single source.
+
+    Returns ``{"fresh_count": int, "latest_fetched_at": str|None,
+    "latest_age_hours": float|None}``.  ``fresh_count`` counts rows whose
+    ``fetched_at`` is within the TTL window relative to ``now`` (UTC).
+    Unparsable timestamps are treated as infinitely old.
+    """
+    import datetime as _dt
+
+    target = db_path if db_path is not None else DB_PATH
+    if now_iso:
+        now_dt = _dt.datetime.fromisoformat(str(now_iso).replace("Z", "+00:00"))
+        if now_dt.tzinfo is None:
+            now_dt = now_dt.replace(tzinfo=_dt.timezone.utc)
+    else:
+        now_dt = _dt.datetime.now(_dt.timezone.utc)
+    ttl_seconds = max(0.0, float(ttl_hours)) * 3600.0
+    cutoff_dt = now_dt - _dt.timedelta(seconds=ttl_seconds)
+    cutoff_iso = cutoff_dt.isoformat()
+
+    conn = _get_conn(target)
+    try:
+        row = conn.execute(
+            "SELECT COUNT(*) AS n, MAX(fetched_at) AS latest"
+            "  FROM signal_events"
+            " WHERE lower(source_name)=lower(?)",
+            (source_name,),
+        ).fetchone()
+        fresh_row = conn.execute(
+            "SELECT COUNT(*) AS n FROM signal_events"
+            " WHERE lower(source_name)=lower(?) AND fetched_at >= ?",
+            (source_name, cutoff_iso),
+        ).fetchone()
+    finally:
+        conn.close()
+
+    total = int(row["n"] if row and row["n"] is not None else 0)
+    latest = row["latest"] if row else None
+    latest_age_hours: float | None = None
+    if latest:
+        try:
+            ldt = _dt.datetime.fromisoformat(str(latest).replace("Z", "+00:00"))
+            if ldt.tzinfo is None:
+                ldt = ldt.replace(tzinfo=_dt.timezone.utc)
+            latest_age_hours = max(0.0, (now_dt - ldt).total_seconds() / 3600.0)
+        except ValueError:
+            latest_age_hours = None
+    fresh_count = int(fresh_row["n"] if fresh_row and fresh_row["n"] is not None else 0)
+    return {
+        "total_count": total,
+        "fresh_count": fresh_count,
+        "latest_fetched_at": str(latest) if latest else None,
+        "latest_age_hours": latest_age_hours,
+        "ttl_hours": float(ttl_hours),
+    }
+
+

@@ -267,6 +267,87 @@ def run_once(
             score_report_written = 1
         except Exception:  # noqa: BLE001
             score_report_written = 0
+        # Feed-the-Loop sprint (2026-07-04): refresh the fresh-discovery
+        # payloads from ingested live bars (canary-gated, fail-closed).  A
+        # failed refresh degrades but never breaks the loop — the truth
+        # surface age-gates the artifacts regardless.
+        try:
+            from scripts.refresh_fresh_discovery_live import (
+                refresh_fresh_discovery,
+            )
+
+            _disc = refresh_fresh_discovery(db_path=db_path, write=True)
+            discovery_status = _disc.get("discovery_state", "UNKNOWN")
+            discovery_live_records = int(_disc.get("live_record_count") or 0)
+        except Exception as exc:  # noqa: BLE001 - disclosed via record
+            discovery_status = f"DISCOVERY_CRASHED:{type(exc).__name__}"
+            discovery_live_records = 0
+        # Feed-the-Loop sprint (2026-07-04): the daily loop must PRODUCE new
+        # timestamp-locked forward predictions, or N stops compounding at 56.
+        # Steps mirror refresh_real_evidence: score canonical rows, then run
+        # the decision batch (prioritize_scored -> only rows that can carry a
+        # forward outcome).  Same-day rerun is idempotent: if snapshots were
+        # already locked today, the step reports SKIPPED_ALREADY_RAN_TODAY.
+        try:
+            import sqlite3 as _sqlite3
+
+            from scripts import persistence as _persistence
+            from scripts.run_daily_live_advisory_decisions import (
+                run_daily_decision_batch,
+            )
+            from scripts.score_real_signal_events import (
+                score_real_signal_events,
+            )
+
+            _db = db_path if db_path is not None else _persistence.DB_PATH
+            _today = stamp[:10]
+            _conn = _sqlite3.connect(str(_db))
+            try:
+                _already = _conn.execute(
+                    "SELECT COUNT(*) FROM decision_probability_snapshots "
+                    "WHERE substr(timestamp_utc, 1, 10) = ?",
+                    (_today,),
+                ).fetchone()[0]
+            except _sqlite3.Error:
+                _already = 0
+            finally:
+                _conn.close()
+            if _already:
+                producer_ok = 1
+                producer_status = "SKIPPED_ALREADY_RAN_TODAY"
+                snapshots_locked = 0
+                forward_eligible_locked = 0
+            else:
+                score_real_signal_events(db_path=db_path, now_iso=now_iso, write=True)
+                batch = run_daily_decision_batch(
+                    db_path=db_path, now_iso=now_iso, write=True,
+                    prioritize_scored=True, max_decisions=25,
+                )
+                producer_ok = 1
+                producer_status = "OK"
+                snapshots_locked = int(batch.get("decisions_recorded") or 0)
+                forward_eligible_locked = int(
+                    batch.get("forward_outcome_eligible_count") or 0
+                )
+        except Exception as exc:  # noqa: BLE001 - disclosed via health record
+            producer_ok = 0
+            producer_status = f"PRODUCER_CRASHED:{type(exc).__name__}"
+            snapshots_locked = 0
+            forward_eligible_locked = 0
+        # Feed-the-Loop sprint (2026-07-04): harvest Kalshi settlements from
+        # the live probability ledger (read-only public endpoint, append-only
+        # settlements).  Fail-soft: a blocked provider is recorded, not fatal.
+        try:
+            from scripts.kalshi_settlement_reconciliation import (
+                reconcile_settlements,
+            )
+
+            _settle = reconcile_settlements(poll=True, write=True, limit=200)
+            settlements_persisted = int(_settle.get("rows_persisted") or 0)
+            settlement_provider_state = _settle.get("provider_state")
+        except Exception as exc:  # noqa: BLE001 - disclosed via record
+            settlements_persisted = 0
+            settlement_provider_state = f"CRASHED:{type(exc).__name__}"
         # Close-the-Loop sprint (2026-07-04, forensic audit SP-013): the daily
         # loop must CLOSE outcomes, not just ingest.  A cycle that cannot run
         # the maturation step is not healthy — maturation_ok participates in
@@ -300,6 +381,14 @@ def run_once(
         outcomes_closed = 0
         n_real_forward = None
         maturation_status = "NOT_RUN"
+        producer_ok = 0
+        producer_status = "NOT_RUN"
+        snapshots_locked = 0
+        forward_eligible_locked = 0
+        discovery_status = "NOT_RUN"
+        discovery_live_records = 0
+        settlements_persisted = 0
+        settlement_provider_state = "NOT_RUN"
         run_result = {"status": "CRASHED", "error": type(exc).__name__}
 
     # v1.4 health model.  Two numbers:
@@ -311,6 +400,7 @@ def run_once(
     scheduler_health = (
         run_success * report_persisted * cards_exported
         * score_report_written * safety_check_passed * maturation_ok
+        * producer_ok
     )
     if feed_available:
         safe_operational = scheduler_health
@@ -346,7 +436,15 @@ def run_once(
             "safety_check_passed": safety_check_passed,
             "fail_closed_correctly": fail_closed_correctly,
             "maturation_ok": maturation_ok,
+            "producer_ok": producer_ok,
         },
+        "producer_status": producer_status,
+        "discovery_status": discovery_status,
+        "discovery_live_records": discovery_live_records,
+        "settlements_persisted": settlements_persisted,
+        "settlement_provider_state": settlement_provider_state,
+        "snapshots_locked": snapshots_locked,
+        "forward_eligible_locked": forward_eligible_locked,
         "outcomes_closed": outcomes_closed,
         "n_real_forward": n_real_forward,
         "maturation_status": maturation_status,
@@ -355,6 +453,27 @@ def run_once(
         "db_mutated": bool(run_success),
         "safety": advisory_safety_stamps(),
     }
+    # Feed-the-Loop sprint (2026-07-04): every daily cycle dispatches operator
+    # alerts from the live truth surface (dedup-per-day; console + JSONL
+    # queue).  Fail-soft: a broken alert bridge is recorded, never fatal.
+    alerts_dispatched = None
+    if not dry_run:
+        try:
+            from scripts.operator_alert_bridge import (
+                build_alerts_from_surface,
+                dispatch_alerts,
+            )
+            from scripts.truth_surface_report import compute_truth_surface
+
+            _surface = compute_truth_surface(db_path=db_path)
+            _dispatch = dispatch_alerts(
+                build_alerts_from_surface(_surface), write=True,
+            )
+            alerts_dispatched = _dispatch.get("alerts_new")
+        except Exception:  # noqa: BLE001 - alerting must never kill the loop
+            alerts_dispatched = None
+    record["alerts_dispatched"] = alerts_dispatched
+
     target = Path(last_run_path) if last_run_path else _artifact_path(LAST_RUN_PATH)
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(json.dumps(record, indent=2, default=str), encoding="utf-8")

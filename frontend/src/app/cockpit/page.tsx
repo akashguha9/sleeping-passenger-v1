@@ -8,6 +8,7 @@ import {
   type CockpitResponse,
 } from '@/lib/apiClient';
 import { AdvisoryOnlyBadge } from '@/components/AdvisoryOnlyBadge';
+import { TruthSurfacePanel } from '@/components/TruthSurfacePanel';
 import { ReadinessModeBadge } from '@/components/ReadinessModeBadge';
 import { ReliabilityBadge } from '@/components/ReliabilityBadge';
 import type { RealMoneyReadiness } from '@/lib/realMoneyReadiness';
@@ -170,6 +171,9 @@ export default function CockpitPage() {
         Human execution required. No broker action is performed. AI execution count is always{' '}
         <span className="text-emerald-400 font-mono font-bold">0</span>.
       </div>
+
+      {/* Operational truth surface — Feed-the-Loop sprint (2026-07-04). */}
+      <TruthSurfacePanel />
 
       {/* Manual real-money readiness mode — plain language, advisory-only. */}
       {readiness && <ReadinessModeBadge readiness={readiness} />}

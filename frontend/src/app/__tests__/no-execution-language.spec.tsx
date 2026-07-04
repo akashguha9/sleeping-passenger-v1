@@ -20,6 +20,7 @@ declare const beforeEach: any;
 const FORBIDDEN = /\b(execute order|place order|auto-buy|auto-sell|broker trade|send order|trade now)\b/i;
 
 vi.mock('@/lib/apiClient', () => ({
+  getTruthSurface: vi.fn().mockResolvedValue(null),
   getDiagnosticsCockpit: vi.fn().mockResolvedValue(null),
   getRealMoneyReadiness: vi.fn().mockResolvedValue({
     allowed_mode: 'TINY_MANUAL_PROBE_ONLY', readiness_score: 6.5, readiness_max: 8,

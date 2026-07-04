@@ -8,10 +8,10 @@ python -m pytest tests -q
 
 Runs 460+ test files / 7,800+ tests (last full verified run: 7,567 passed,
 3 platform skips, 14m14s on 2026-07-03; ~290 tests added by the
-Close-the-Loop sprint on 2026-07-04). CI runs the full suite on every push
+Close-the-Loop sprint and 42 more by the Feed-the-Loop sprint, both 2026-07-04; verified total 7,935 passed). CI runs the full suite on every push
 (`.github/workflows/pytest.yml`).
 
-> **Last verified: 2026-07-04.** If the counts above drift from
+> **Last verified: 2026-07-04 (Feed-the-Loop).** If the counts above drift from
 > `python -m pytest tests -q` reality, fix THIS file — stale testing docs
 > were a forensic-audit finding (segment L).
 
