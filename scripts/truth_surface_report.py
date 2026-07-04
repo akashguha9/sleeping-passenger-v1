@@ -371,6 +371,12 @@ def compute_truth_surface(
     elif gate["status"] in ("HOLDINGS_TRUTH_STALE", "HOLDINGS_TRUTH_INVALID"):
         state = _worst(state, STATE_DEGRADED)
         reasons.append(f"holdings truth is {gate['status']} (age {gate['age_days']} days)")
+    elif gate.get("freshness_state") == "DEGRADED":
+        state = _worst(state, STATE_DEGRADED)
+        reasons.append(
+            f"holdings freshness DEGRADED (age {gate['age_days']} days; "
+            "re-verify within 1 day for FRESH)"
+        )
 
     if gate["canonical_holding_count"] > 0 and gate["missing_stop_count"] > 0:
         state = _worst(state, STATE_BLOCKED)

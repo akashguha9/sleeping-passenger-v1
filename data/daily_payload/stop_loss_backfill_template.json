@@ -1,6 +1,6 @@
 {
  "report": "stop_loss_backfill_template",
- "generated_at_utc": "2026-07-04T12:57:22Z",
+ "generated_at_utc": "2026-07-04T14:00:01Z",
  "holdings_run_date": "2026-05-22",
  "policy": {
   "default_hard_stop_pct": 0.05,
@@ -25,8 +25,12 @@
    "stop_loss_source": "policy_suggested",
    "stop_loss_confirmed": false,
    "stop_loss_confirmed_at": null,
+   "operator_confirmation_id": null,
+   "operator_confirmation_text": null,
+   "risk_acknowledgement": false,
+   "leverage_risk_acknowledged": null,
    "requires_operator_confirmation": true,
-   "operator_instructions": "Review stop_loss (edit the number if you prefer your own level), then set stop_loss_confirmed=true and stop_loss_confirmed_at to the current UTC timestamp. Unconfirmed entries are IGNORED by --apply-confirmed."
+   "operator_instructions": "Review stop_loss (edit the number if you prefer your own level). To activate: set stop_loss_confirmed=true, stop_loss_confirmed_at to the current UTC timestamp, operator_confirmation_id to any identifier you choose, risk_acknowledgement=true, operator_confirmation_text to the EXACT string 'I_CONFIRM_THESE_STOPS_ARE_MY_OPERATOR_RISK_LIMITS'. Entries missing ANY of these are rejected by --apply-confirmed."
   },
   {
    "ticker": "NYSE:XOM",
@@ -42,8 +46,12 @@
    "stop_loss_source": "policy_suggested",
    "stop_loss_confirmed": false,
    "stop_loss_confirmed_at": null,
+   "operator_confirmation_id": null,
+   "operator_confirmation_text": null,
+   "risk_acknowledgement": false,
+   "leverage_risk_acknowledged": null,
    "requires_operator_confirmation": true,
-   "operator_instructions": "Review stop_loss (edit the number if you prefer your own level), then set stop_loss_confirmed=true and stop_loss_confirmed_at to the current UTC timestamp. Unconfirmed entries are IGNORED by --apply-confirmed."
+   "operator_instructions": "Review stop_loss (edit the number if you prefer your own level). To activate: set stop_loss_confirmed=true, stop_loss_confirmed_at to the current UTC timestamp, operator_confirmation_id to any identifier you choose, risk_acknowledgement=true, operator_confirmation_text to the EXACT string 'I_CONFIRM_THESE_STOPS_ARE_MY_OPERATOR_RISK_LIMITS'. Entries missing ANY of these are rejected by --apply-confirmed."
   },
   {
    "ticker": "NYSE:RTX",
@@ -59,8 +67,12 @@
    "stop_loss_source": "policy_suggested",
    "stop_loss_confirmed": false,
    "stop_loss_confirmed_at": null,
+   "operator_confirmation_id": null,
+   "operator_confirmation_text": null,
+   "risk_acknowledgement": false,
+   "leverage_risk_acknowledged": null,
    "requires_operator_confirmation": true,
-   "operator_instructions": "Review stop_loss (edit the number if you prefer your own level), then set stop_loss_confirmed=true and stop_loss_confirmed_at to the current UTC timestamp. Unconfirmed entries are IGNORED by --apply-confirmed."
+   "operator_instructions": "Review stop_loss (edit the number if you prefer your own level). To activate: set stop_loss_confirmed=true, stop_loss_confirmed_at to the current UTC timestamp, operator_confirmation_id to any identifier you choose, risk_acknowledgement=true, operator_confirmation_text to the EXACT string 'I_CONFIRM_THESE_STOPS_ARE_MY_OPERATOR_RISK_LIMITS'. Entries missing ANY of these are rejected by --apply-confirmed."
   },
   {
    "ticker": "NYSE:LMT",
@@ -76,8 +88,12 @@
    "stop_loss_source": "policy_suggested",
    "stop_loss_confirmed": false,
    "stop_loss_confirmed_at": null,
+   "operator_confirmation_id": null,
+   "operator_confirmation_text": null,
+   "risk_acknowledgement": false,
+   "leverage_risk_acknowledged": null,
    "requires_operator_confirmation": true,
-   "operator_instructions": "Review stop_loss (edit the number if you prefer your own level), then set stop_loss_confirmed=true and stop_loss_confirmed_at to the current UTC timestamp. Unconfirmed entries are IGNORED by --apply-confirmed."
+   "operator_instructions": "Review stop_loss (edit the number if you prefer your own level). To activate: set stop_loss_confirmed=true, stop_loss_confirmed_at to the current UTC timestamp, operator_confirmation_id to any identifier you choose, risk_acknowledgement=true, operator_confirmation_text to the EXACT string 'I_CONFIRM_THESE_STOPS_ARE_MY_OPERATOR_RISK_LIMITS'. Entries missing ANY of these are rejected by --apply-confirmed."
   },
   {
    "ticker": "NYSE:CVX",
@@ -93,8 +109,12 @@
    "stop_loss_source": "policy_suggested",
    "stop_loss_confirmed": false,
    "stop_loss_confirmed_at": null,
+   "operator_confirmation_id": null,
+   "operator_confirmation_text": null,
+   "risk_acknowledgement": false,
+   "leverage_risk_acknowledged": null,
    "requires_operator_confirmation": true,
-   "operator_instructions": "Review stop_loss (edit the number if you prefer your own level), then set stop_loss_confirmed=true and stop_loss_confirmed_at to the current UTC timestamp. Unconfirmed entries are IGNORED by --apply-confirmed."
+   "operator_instructions": "Review stop_loss (edit the number if you prefer your own level). To activate: set stop_loss_confirmed=true, stop_loss_confirmed_at to the current UTC timestamp, operator_confirmation_id to any identifier you choose, risk_acknowledgement=true, operator_confirmation_text to the EXACT string 'I_CONFIRM_THESE_STOPS_ARE_MY_OPERATOR_RISK_LIMITS'. Entries missing ANY of these are rejected by --apply-confirmed."
   },
   {
    "ticker": "NASDAQ:MSFT",
@@ -110,8 +130,12 @@
    "stop_loss_source": "policy_suggested",
    "stop_loss_confirmed": false,
    "stop_loss_confirmed_at": null,
+   "operator_confirmation_id": null,
+   "operator_confirmation_text": null,
+   "risk_acknowledgement": false,
+   "leverage_risk_acknowledged": null,
    "requires_operator_confirmation": true,
-   "operator_instructions": "Review stop_loss (edit the number if you prefer your own level), then set stop_loss_confirmed=true and stop_loss_confirmed_at to the current UTC timestamp. Unconfirmed entries are IGNORED by --apply-confirmed."
+   "operator_instructions": "Review stop_loss (edit the number if you prefer your own level). To activate: set stop_loss_confirmed=true, stop_loss_confirmed_at to the current UTC timestamp, operator_confirmation_id to any identifier you choose, risk_acknowledgement=true, operator_confirmation_text to the EXACT string 'I_CONFIRM_THESE_STOPS_ARE_MY_OPERATOR_RISK_LIMITS'. Entries missing ANY of these are rejected by --apply-confirmed."
   },
   {
    "ticker": "NSE:HDFCBANK",
@@ -127,8 +151,12 @@
    "stop_loss_source": "policy_suggested",
    "stop_loss_confirmed": false,
    "stop_loss_confirmed_at": null,
+   "operator_confirmation_id": null,
+   "operator_confirmation_text": null,
+   "risk_acknowledgement": false,
+   "leverage_risk_acknowledged": false,
    "requires_operator_confirmation": true,
-   "operator_instructions": "Review stop_loss (edit the number if you prefer your own level), then set stop_loss_confirmed=true and stop_loss_confirmed_at to the current UTC timestamp. Unconfirmed entries are IGNORED by --apply-confirmed."
+   "operator_instructions": "Review stop_loss (edit the number if you prefer your own level). To activate: set stop_loss_confirmed=true, stop_loss_confirmed_at to the current UTC timestamp, operator_confirmation_id to any identifier you choose, risk_acknowledgement=true, operator_confirmation_text to the EXACT string 'I_CONFIRM_THESE_STOPS_ARE_MY_OPERATOR_RISK_LIMITS' and leverage_risk_acknowledged=true (THIS POSITION IS LEVERAGED). Entries missing ANY of these are rejected by --apply-confirmed."
   },
   {
    "ticker": "NSE:RELIANCE",
@@ -144,8 +172,12 @@
    "stop_loss_source": "policy_suggested",
    "stop_loss_confirmed": false,
    "stop_loss_confirmed_at": null,
+   "operator_confirmation_id": null,
+   "operator_confirmation_text": null,
+   "risk_acknowledgement": false,
+   "leverage_risk_acknowledged": false,
    "requires_operator_confirmation": true,
-   "operator_instructions": "Review stop_loss (edit the number if you prefer your own level), then set stop_loss_confirmed=true and stop_loss_confirmed_at to the current UTC timestamp. Unconfirmed entries are IGNORED by --apply-confirmed."
+   "operator_instructions": "Review stop_loss (edit the number if you prefer your own level). To activate: set stop_loss_confirmed=true, stop_loss_confirmed_at to the current UTC timestamp, operator_confirmation_id to any identifier you choose, risk_acknowledgement=true, operator_confirmation_text to the EXACT string 'I_CONFIRM_THESE_STOPS_ARE_MY_OPERATOR_RISK_LIMITS' and leverage_risk_acknowledged=true (THIS POSITION IS LEVERAGED). Entries missing ANY of these are rejected by --apply-confirmed."
   },
   {
    "ticker": "NASDAQ:ASML",
@@ -161,8 +193,12 @@
    "stop_loss_source": "policy_suggested",
    "stop_loss_confirmed": false,
    "stop_loss_confirmed_at": null,
+   "operator_confirmation_id": null,
+   "operator_confirmation_text": null,
+   "risk_acknowledgement": false,
+   "leverage_risk_acknowledged": null,
    "requires_operator_confirmation": true,
-   "operator_instructions": "Review stop_loss (edit the number if you prefer your own level), then set stop_loss_confirmed=true and stop_loss_confirmed_at to the current UTC timestamp. Unconfirmed entries are IGNORED by --apply-confirmed."
+   "operator_instructions": "Review stop_loss (edit the number if you prefer your own level). To activate: set stop_loss_confirmed=true, stop_loss_confirmed_at to the current UTC timestamp, operator_confirmation_id to any identifier you choose, risk_acknowledgement=true, operator_confirmation_text to the EXACT string 'I_CONFIRM_THESE_STOPS_ARE_MY_OPERATOR_RISK_LIMITS'. Entries missing ANY of these are rejected by --apply-confirmed."
   },
   {
    "ticker": "NYSE:TSM",
@@ -178,8 +214,12 @@
    "stop_loss_source": "policy_suggested",
    "stop_loss_confirmed": false,
    "stop_loss_confirmed_at": null,
+   "operator_confirmation_id": null,
+   "operator_confirmation_text": null,
+   "risk_acknowledgement": false,
+   "leverage_risk_acknowledged": null,
    "requires_operator_confirmation": true,
-   "operator_instructions": "Review stop_loss (edit the number if you prefer your own level), then set stop_loss_confirmed=true and stop_loss_confirmed_at to the current UTC timestamp. Unconfirmed entries are IGNORED by --apply-confirmed."
+   "operator_instructions": "Review stop_loss (edit the number if you prefer your own level). To activate: set stop_loss_confirmed=true, stop_loss_confirmed_at to the current UTC timestamp, operator_confirmation_id to any identifier you choose, risk_acknowledgement=true, operator_confirmation_text to the EXACT string 'I_CONFIRM_THESE_STOPS_ARE_MY_OPERATOR_RISK_LIMITS'. Entries missing ANY of these are rejected by --apply-confirmed."
   }
  ],
  "advisory_status": "ADVISORY_ONLY",

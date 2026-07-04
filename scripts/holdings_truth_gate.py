@@ -80,6 +80,25 @@ CONFIRMED_STOP_SOURCES = frozenset(
     {"operator", "policy_confirmed", "sheet_import_confirmed"}
 )
 
+# Open-the-Gate sprint (2026-07-04): stop activation additionally requires an
+# explicit, typed operator acknowledgement.  The exact text below must appear
+# in the template — an agent or script can never produce it "by accident".
+OPERATOR_ACK_TEXT = "I_CONFIRM_THESE_STOPS_ARE_MY_OPERATOR_RISK_LIMITS"
+
+CONFIRMATION_REQUIRED_JSON = (
+    REPO_ROOT / "data" / "daily_payload"
+    / "stop_loss_operator_confirmation_required.json"
+)
+CONFIRMATION_REQUIRED_MD = REPO_ROOT / "STOP_LOSS_CONFIRMATION_REQUIRED.md"
+HOLDINGS_ARCHIVE_DIR = REPO_ROOT / "data" / "daily_payload" / "archive"
+
+# Freshness three-tier gate (minutes).
+FRESHNESS_FRESH_MAX_MIN = 1440.0      # <= 1 day  -> FRESH
+FRESHNESS_DEGRADED_MAX_MIN = 4320.0   # <= 3 days -> DEGRADED
+FRESH_FRESH = "FRESH"
+FRESH_DEGRADED = "DEGRADED"
+FRESH_BLOCKED = "BLOCKED"
+
 # Deterministic suggested-stop policy (SUGGESTIONS ONLY — never activated
 # without operator confirmation): 5% hard stop for 1x positions, 2.5% for
 # leveraged positions (tighter price stop ≈ comparable capital-at-risk once
@@ -184,6 +203,8 @@ def load_holdings_truth_gate(
         "status": STATUS_OK,
         "run_date": None,
         "age_days": None,
+        "holdings_age_minutes": None,
+        "freshness_state": FRESH_BLOCKED,
         "canonical_holding_count": 0,
         "monitorable_position_count": 0,
         "missing_stop_count": 0,
@@ -223,6 +244,13 @@ def load_holdings_truth_gate(
         return gate
     age_days = (now - run_date).total_seconds() / 86400.0
     gate["age_days"] = round(age_days, 2)
+    age_minutes = age_days * 1440.0
+    gate["holdings_age_minutes"] = round(age_minutes, 1)
+    gate["freshness_state"] = (
+        FRESH_FRESH if age_minutes <= FRESHNESS_FRESH_MAX_MIN
+        else FRESH_DEGRADED if age_minutes <= FRESHNESS_DEGRADED_MAX_MIN
+        else FRESH_BLOCKED
+    )
     if age_days > max_age_days:
         gate["status"] = STATUS_STALE
         gate["issues"].append(
@@ -264,11 +292,15 @@ def load_holdings_truth_gate(
         stop_confirmed = bool(row.get("stop_loss_confirmed", False))
         stop_confirmed_at = row.get("stop_loss_confirmed_at")
         stop_updated_at = row.get("stop_loss_updated_at")
+        leverage_ack = bool(row.get("leverage_risk_acknowledged", False))
         stop_usable = (
             stop_loss is not None
             and stop_confirmed
             and bool(stop_confirmed_at)
             and str(stop_source or "") in CONFIRMED_STOP_SOURCES
+            # Open-the-Gate: a leveraged position's stop is only usable with
+            # an explicit leverage-risk acknowledgement on the position.
+            and (leverage <= 1 or leverage_ack)
         )
         stop_directionally_valid = (
             stop_loss is not None
@@ -307,6 +339,7 @@ def load_holdings_truth_gate(
             "stop_loss_confirmed_at": stop_confirmed_at,
             "stop_loss_updated_at": stop_updated_at,
             "stop_usable": stop_usable,
+            "leverage_risk_acknowledged": leverage_ack,
             "loss_at_stop": (
                 round(loss_at_stop, 4) if loss_at_stop is not None else None
             ),
@@ -392,7 +425,10 @@ def load_holdings_truth_gate(
         gate["operational_state"] = OP_BROKEN
     elif gate["missing_stop_count"] or gate["unconfirmed_stop_count"]:
         gate["operational_state"] = OP_BLOCKED
-    elif gate["status"] == STATUS_STALE:
+    elif gate["freshness_state"] == FRESH_BLOCKED:
+        # >3 days without operator re-verification blocks the risk gate
+        gate["operational_state"] = OP_BLOCKED
+    elif gate["freshness_state"] == FRESH_DEGRADED or gate["status"] == STATUS_STALE:
         gate["operational_state"] = OP_DEGRADED
     elif gate["canonical_holding_count"] > 0 and gate["portfolio_stop_exposure"] is None:
         gate["operational_state"] = OP_BLOCKED  # exposure unknown -> blocked
@@ -493,12 +529,22 @@ def build_stop_loss_template(
                 "stop_loss_source": "policy_suggested",
                 "stop_loss_confirmed": False,
                 "stop_loss_confirmed_at": None,
+                "operator_confirmation_id": None,
+                "operator_confirmation_text": None,
+                "risk_acknowledgement": False,
+                "leverage_risk_acknowledged": (False if leverage > 1 else None),
                 "requires_operator_confirmation": True,
                 "operator_instructions": (
                     "Review stop_loss (edit the number if you prefer your own "
-                    "level), then set stop_loss_confirmed=true and "
-                    "stop_loss_confirmed_at to the current UTC timestamp. "
-                    "Unconfirmed entries are IGNORED by --apply-confirmed."
+                    "level). To activate: set stop_loss_confirmed=true, "
+                    "stop_loss_confirmed_at to the current UTC timestamp, "
+                    "operator_confirmation_id to any identifier you choose, "
+                    "risk_acknowledgement=true, operator_confirmation_text to "
+                    f"the EXACT string {OPERATOR_ACK_TEXT!r}"
+                    + (" and leverage_risk_acknowledged=true (THIS POSITION "
+                       "IS LEVERAGED)" if leverage > 1 else "")
+                    + ". Entries missing ANY of these are rejected by "
+                    "--apply-confirmed."
                 ),
             }
         )
@@ -527,6 +573,207 @@ def build_stop_loss_template(
         "entries": entries,
         **advisory_safety_stamps(),
     }
+
+
+def validate_stop_template(
+    *, template_path: Any = None, holdings_path: Any = None,
+    now_utc: datetime | None = None,
+) -> dict[str, Any]:
+    """Validate every template entry against the strict confirmation contract.
+
+    Rejects (per spec): missing stop, non-numeric stop, directionally invalid
+    stop (>= entry for longs), unconfirmed suggestion, missing confirmation
+    timestamp, missing/incorrect acknowledgement text, missing confirmation
+    id, missing risk acknowledgement, missing leverage acknowledgement on
+    leveraged positions, missing/zero leverage on the holding.
+    """
+    now = now_utc or datetime.now(timezone.utc)
+    tpath = Path(template_path) if template_path else STOP_TEMPLATE_PATH
+    hpath = Path(
+        holdings_path
+        if holdings_path is not None
+        else os.environ.get(ENV_PATH_OVERRIDE) or HOLDINGS_TRUTH_PATH
+    )
+    result: dict[str, Any] = {
+        "report": "stop_template_validation",
+        "checked_at_utc": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "template_path": str(tpath),
+        "entries": [],
+        "confirmed_valid": 0,
+        "unconfirmed": 0,
+        "invalid": 0,
+        "holdings_refresh_confirmed": False,
+        **advisory_safety_stamps(),
+    }
+    if not tpath.exists():
+        result["status"] = "TEMPLATE_MISSING"
+        return result
+    template = json.loads(tpath.read_text(encoding="utf-8"))
+    holdings = {}
+    if hpath.exists():
+        payload = json.loads(hpath.read_text(encoding="utf-8"))
+        holdings = {
+            str(p.get("ticker") or "").upper(): p
+            for p in payload.get("positions", [])
+        }
+    for entry in template.get("entries", []):
+        ticker = str(entry.get("ticker") or "").upper()
+        pos = holdings.get(ticker, {})
+        entry_price = _num(pos.get("entry_price")) or _num(entry.get("entry_price"))
+        leverage = _num(pos.get("leverage")) or _num(entry.get("leverage"))
+        stop = _num(entry.get("stop_loss"))
+        reasons: list[str] = []
+        if entry.get("stop_loss") is None:
+            reasons.append("missing stop_loss")
+        elif stop is None:
+            reasons.append("stop_loss not numeric")
+        elif entry_price is None:
+            reasons.append("holding entry_price unknown")
+        elif stop >= entry_price:
+            reasons.append(
+                "directionally invalid: stop >= entry for a long position"
+            )
+        elif stop <= 0:
+            reasons.append("stop must be positive")
+        if leverage is None or leverage <= 0:
+            reasons.append("leverage missing or zero on the holding")
+        confirmed = bool(entry.get("stop_loss_confirmed", False))
+        if not confirmed:
+            reasons.append("not confirmed (stop_loss_confirmed != true)")
+        else:
+            if not entry.get("stop_loss_confirmed_at"):
+                reasons.append("missing stop_loss_confirmed_at timestamp")
+            if not entry.get("operator_confirmation_id"):
+                reasons.append("missing operator_confirmation_id")
+            if entry.get("operator_confirmation_text") != OPERATOR_ACK_TEXT:
+                reasons.append(
+                    "operator_confirmation_text must be exactly "
+                    + repr(OPERATOR_ACK_TEXT)
+                )
+            if entry.get("risk_acknowledgement") is not True:
+                reasons.append("risk_acknowledgement must be true")
+            if (leverage or 1) > 1 and entry.get(
+                "leverage_risk_acknowledged"
+            ) is not True:
+                reasons.append(
+                    "leverage_risk_acknowledged must be true for a "
+                    "LEVERAGED position"
+                )
+        verdict = (
+            "CONFIRMED_VALID" if confirmed and not reasons
+            else "INVALID" if confirmed and reasons
+            else "UNCONFIRMED"
+        )
+        result["entries"].append({
+            "ticker": ticker, "verdict": verdict, "reasons": reasons,
+            "stop_loss": stop, "leverage": leverage,
+        })
+        key = {"CONFIRMED_VALID": "confirmed_valid",
+               "INVALID": "invalid"}.get(verdict, "unconfirmed")
+        result[key] += 1
+    result["holdings_refresh_confirmed"] = bool(
+        template.get("holdings_confirmed_current") is True
+        and template.get("holdings_confirmed_current_at")
+    )
+    result["status"] = (
+        "ALL_CONFIRMED_VALID"
+        if result["confirmed_valid"] == len(result["entries"]) and result["entries"]
+        else "CONFIRMATION_REQUIRED"
+    )
+    return result
+
+
+def write_confirmation_required_artifacts(
+    validation: dict[str, Any], *, json_path: Any = None, md_path: Any = None,
+) -> dict[str, str]:
+    """Persist the operator-facing confirmation-required artifacts.
+
+    Never sets confirmation fields itself — it documents exactly what the
+    operator must do, and the risk state stays BLOCKED until they do it.
+    """
+    jpath = Path(json_path) if json_path else CONFIRMATION_REQUIRED_JSON
+    mpath = Path(md_path) if md_path else CONFIRMATION_REQUIRED_MD
+    jpath.parent.mkdir(parents=True, exist_ok=True)
+    jpath.write_text(
+        json.dumps(validation, indent=1, ensure_ascii=False), encoding="utf-8"
+    )
+    pending = [e for e in validation.get("entries", [])
+               if e["verdict"] != "CONFIRMED_VALID"]
+    lines = [
+        "# STOP-LOSS OPERATOR CONFIRMATION REQUIRED",
+        "",
+        "_Generated " + str(validation.get("checked_at_utc"))
+        + " - the risk engine is **BLOCKED** until every entry below is "
+        "confirmed by YOU._",
+        "",
+        "Template: `" + str(validation.get("template_path")) + "`",
+        "",
+        "For each entry set ALL of:",
+        "",
+        "- `stop_loss` (review/edit the suggested level)",
+        "- `stop_loss_confirmed: true`",
+        "- `stop_loss_confirmed_at`: current UTC timestamp",
+        "- `operator_confirmation_id`: any identifier you choose",
+        "- `risk_acknowledgement: true`",
+        "- `operator_confirmation_text`: exactly `" + OPERATOR_ACK_TEXT + "`",
+        "- `leverage_risk_acknowledged: true` on LEVERAGED entries",
+        "",
+        "Then run:",
+        "",
+        "```powershell",
+        "python scripts/holdings_truth_gate.py --validate-template",
+        "python scripts/holdings_truth_gate.py --apply-confirmed --dry-run",
+        "python scripts/holdings_truth_gate.py --apply-confirmed --write",
+        "```",
+        "",
+        "## Pending entries",
+        "",
+    ]
+    for e in pending:
+        lev = e["leverage"] or 1
+        lines.append(
+            "- **" + e["ticker"] + "** (leverage " + f"{lev:g}"
+            + "x, suggested stop " + str(e["stop_loss"]) + ") - "
+            + e["verdict"] + ": "
+            + ("; ".join(e["reasons"]) or "awaiting confirmation")
+        )
+    lines += [
+        "",
+        "_No stop becomes active until confirmed. Nothing in this repo can",
+        "confirm on your behalf._",
+        "",
+    ]
+    mpath.write_text("\n".join(lines), encoding="utf-8")
+    return {"json_path": str(jpath), "md_path": str(mpath)}
+
+
+def show_summary(*, path: Any = None, db_path: Any = None) -> str:
+    """Operator-readable one-screen summary of the risk gate."""
+    gate = load_holdings_truth_gate(path=path, db_path=db_path)
+    lines = [
+        "RISK GATE: " + gate["operational_state"]
+        + "  (holdings " + gate["status"]
+        + ", freshness " + gate["freshness_state"] + ")",
+        "holdings: " + str(gate["canonical_holding_count"]) + " open | "
+        "monitorable " + str(gate["monitorable_position_count"]) + " | "
+        "missing stops " + str(gate["missing_stop_count"]) + " | "
+        "unconfirmed " + str(gate["unconfirmed_stop_count"]) + " | "
+        "leveraged w/o usable stop "
+        + str(gate["leveraged_without_stop_count"]),
+        "age: " + str(gate["age_days"]) + " days | exposure: "
+        + str(gate["portfolio_stop_exposure"]) + " (fraction "
+        + str(gate["portfolio_stop_exposure_fraction"]) + ")",
+    ]
+    for issue in gate["issues"]:
+        lines.append("  ! " + issue)
+    for pos in gate["blocked_positions"]:
+        extra = (
+            " (leverage " + f"{pos['leverage']:g}" + "x)"
+            if pos["leverage"] > 1 else ""
+        )
+        lines.append("  - " + pos["ticker"] + ": "
+                     + pos["risk_monitoring"] + extra)
+    return "\n".join(lines)
 
 
 def apply_confirmed_template(
@@ -581,18 +828,31 @@ def apply_confirmed_template(
         confirmed_at = entry.get("stop_loss_confirmed_at")
         pos = by_ticker.get(ticker)
         why = None
+        lev = _num(pos.get("leverage")) if pos else None
         if pos is None:
             why = "ticker not in canonical holdings"
         elif not confirmed:
             why = "not confirmed by operator (stop_loss_confirmed != true)"
         elif not confirmed_at:
             why = "missing stop_loss_confirmed_at timestamp"
+        elif not entry.get("operator_confirmation_id"):
+            why = "missing operator_confirmation_id"
+        elif entry.get("operator_confirmation_text") != OPERATOR_ACK_TEXT:
+            why = ("operator_confirmation_text must be exactly "
+                   + repr(OPERATOR_ACK_TEXT))
+        elif entry.get("risk_acknowledgement") is not True:
+            why = "risk_acknowledgement must be true"
         elif stop is None:
             why = "stop_loss not numeric"
         elif not (
             _num(pos.get("entry_price")) and 0 < stop < float(pos["entry_price"])
         ):
             why = "stop not directionally valid for a long position"
+        elif lev is None or lev <= 0:
+            why = "leverage missing or zero on the holding"
+        elif lev > 1 and entry.get("leverage_risk_acknowledged") is not True:
+            why = ("leverage_risk_acknowledged must be true for a LEVERAGED "
+                   "position")
         if why:
             result["skipped"].append({"ticker": ticker, "reason": why})
             continue
@@ -607,6 +867,10 @@ def apply_confirmed_template(
         pos["stop_loss_confirmed"] = True
         pos["stop_loss_confirmed_at"] = confirmed_at
         pos["stop_loss_updated_at"] = confirmed_at
+        pos["operator_confirmation_id"] = entry.get("operator_confirmation_id")
+        pos["risk_acknowledgement"] = True
+        if (lev or 1) > 1:
+            pos["leverage_risk_acknowledged"] = True
         result["applied"].append(
             {"ticker": ticker, "stop_loss": stop, "stop_loss_source": source_out}
         )
@@ -616,6 +880,13 @@ def apply_confirmed_template(
     ):
         confirmed_date = str(template["holdings_confirmed_current_at"])[:10]
         holdings["run_date"] = confirmed_date
+        holdings["holdings_confirmed_at"] = template[
+            "holdings_confirmed_current_at"
+        ]
+        holdings["holdings_confirmation_source"] = "operator_template"
+        holdings["operator_confirmation_id"] = template.get(
+            "operator_confirmation_id"
+        )
         holdings["run_date_provenance"] = (
             f"operator confirmed holdings current at "
             f"{template['holdings_confirmed_current_at']} via "
@@ -624,8 +895,10 @@ def apply_confirmed_template(
         result["run_date_refreshed"] = True
     result["status"] = "OK" if result["applied"] or result["run_date_refreshed"] else "NOTHING_CONFIRMED"
     if write and result["status"] == "OK":
-        backup = hpath.with_suffix(
-            f".pre_apply_{now.strftime('%Y%m%dT%H%M%SZ')}.json.bak"
+        HOLDINGS_ARCHIVE_DIR.mkdir(parents=True, exist_ok=True)
+        backup = HOLDINGS_ARCHIVE_DIR / (
+            "verified_current_holdings_"
+            + now.strftime("%Y%m%d_%H%M%S") + ".json"
         )
         backup.write_text(hpath.read_text(encoding="utf-8"), encoding="utf-8")
         hpath.write_text(
@@ -672,6 +945,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     p.add_argument("--full", action="store_true", help="print the full gate")
     p.add_argument("--write-template", action="store_true",
                    help="write the stop-loss backfill template (suggestions only)")
+    p.add_argument("--validate-template", nargs="?", const="__default__",
+                   metavar="PATH",
+                   help="validate the confirmation template against the "
+                        "strict contract; writes the confirmation-required "
+                        "artifacts when anything is pending")
+    p.add_argument("--show-summary", action="store_true",
+                   help="one-screen operator summary of the risk gate")
+    p.add_argument("--dry-run", action="store_true",
+                   help="alias: with --apply-confirmed, force dry-run")
     p.add_argument("--apply-confirmed", action="store_true",
                    help="apply operator-CONFIRMED template entries to holdings")
     p.add_argument("--template")
@@ -679,6 +961,27 @@ def main(argv: Sequence[str] | None = None) -> int:
                    help="with --apply-confirmed: persist (dry-run otherwise)")
     args = p.parse_args(argv)
     now = datetime.now(timezone.utc)
+
+    if args.show_summary:
+        print(show_summary(path=args.path, db_path=args.db))
+        gate = load_holdings_truth_gate(
+            path=args.path, db_path=args.db, now_utc=now
+        )
+        return 0 if gate["operational_state"] in (OP_HEALTHY, OP_DEGRADED) else 1
+
+    if args.validate_template is not None:
+        tpl = (
+            None if args.validate_template == "__default__"
+            else args.validate_template
+        )
+        validation = validate_stop_template(
+            template_path=tpl, holdings_path=args.path, now_utc=now
+        )
+        if validation["status"] != "ALL_CONFIRMED_VALID":
+            paths = write_confirmation_required_artifacts(validation)
+            validation["confirmation_required_artifacts"] = paths
+        print(json.dumps(validation, indent=2, default=str))
+        return 0 if validation["status"] == "ALL_CONFIRMED_VALID" else 1
 
     if args.write_template:
         template = build_stop_loss_template(path=args.path, now_utc=now)
@@ -697,7 +1000,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.apply_confirmed:
         result = apply_confirmed_template(
             template_path=args.template, holdings_path=args.path,
-            now_utc=now, write=args.write,
+            now_utc=now, write=args.write and not args.dry_run,
         )
         print(json.dumps(result, indent=2, default=str))
         return 0 if result["status"] in ("OK", "NOTHING_CONFIRMED") else 1

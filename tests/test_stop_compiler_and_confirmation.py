@@ -60,6 +60,8 @@ CONFIRMED = {
     "stop_loss_confirmed_at": "2026-07-04T10:00:00Z",
     "stop_loss_updated_at": "2026-07-04T10:00:00Z",
 }
+# Open-the-Gate: leveraged positions additionally need the explicit ack.
+CONFIRMED_LEV = {**CONFIRMED, "leverage_risk_acknowledged": True}
 
 
 def test_missing_stop_blocked_exit_1(tmp_path: Path, capsys) -> None:
@@ -100,7 +102,7 @@ def test_confirmed_stop_is_usable_and_exposure_computed(tmp_path: Path) -> None:
 
 
 def test_leverage_multiplies_loss_at_stop(tmp_path: Path) -> None:
-    f = _write(tmp_path / "h.json", [_pos(leverage=4, **CONFIRMED)])
+    f = _write(tmp_path / "h.json", [_pos(leverage=4, **CONFIRMED_LEV)])
     gate = load_holdings_truth_gate(path=f, now_utc=NOW, attach_prices=False)
     # (100 - 90) * 2 * 4 = 80
     assert gate["portfolio_stop_exposure"] == pytest.approx(80.0)
@@ -130,11 +132,24 @@ def test_directionally_invalid_stop_blocks(tmp_path: Path) -> None:
     assert gate["operational_state"] == OP_BLOCKED
 
 
-def test_stale_holdings_degraded_when_stops_fine(tmp_path: Path) -> None:
+def test_freshness_three_tier_gate(tmp_path: Path) -> None:
+    """Open-the-Gate: <=1d FRESH, 1-3d DEGRADED, >3d BLOCKED (spec Item 2)."""
+    # 43-day-old holdings: BLOCKED, zero monitorable positions
     f = _write(tmp_path / "h.json", [_pos(**CONFIRMED)], run_date="2026-05-22")
     gate = load_holdings_truth_gate(path=f, now_utc=NOW, attach_prices=False)
-    assert gate["operational_state"] == OP_DEGRADED
+    assert gate["freshness_state"] == "BLOCKED"
+    assert gate["operational_state"] == OP_BLOCKED
     assert gate["positions"] == []  # stale truth never feeds monitoring
+    # 2-day-old holdings: DEGRADED (not blocked, not healthy)
+    f2 = _write(tmp_path / "h2.json", [_pos(**CONFIRMED)], run_date="2026-07-02")
+    gate2 = load_holdings_truth_gate(path=f2, now_utc=NOW, attach_prices=False)
+    assert gate2["freshness_state"] == "DEGRADED"
+    assert gate2["operational_state"] == OP_DEGRADED
+    # same-day holdings: FRESH
+    f3 = _write(tmp_path / "h3.json", [_pos(**CONFIRMED)], run_date="2026-07-04")
+    gate3 = load_holdings_truth_gate(path=f3, now_utc=NOW, attach_prices=False)
+    assert gate3["freshness_state"] == "FRESH"
+    assert gate3["operational_state"] == OP_HEALTHY
 
 
 def test_template_policy_and_confirmation_flags(tmp_path: Path) -> None:
@@ -175,6 +190,11 @@ def test_apply_confirmed_skips_unconfirmed_and_applies_confirmed(
                 "stop_loss_source": "policy_suggested",
                 "stop_loss_confirmed": True,
                 "stop_loss_confirmed_at": "2026-07-04T11:00:00Z",
+                "operator_confirmation_id": "op-test-1",
+                "operator_confirmation_text": (
+                    "I_CONFIRM_THESE_STOPS_ARE_MY_OPERATOR_RISK_LIMITS"
+                ),
+                "risk_acknowledgement": True,
             },
         ],
     }
@@ -205,6 +225,11 @@ def test_apply_confirmed_rejects_invalid_direction(tmp_path: Path) -> None:
         "ticker": "NASDAQ:ANET", "stop_loss": 120.0,  # above entry: invalid
         "stop_loss_confirmed": True,
         "stop_loss_confirmed_at": "2026-07-04T11:00:00Z",
+        "operator_confirmation_id": "op-test-2",
+        "operator_confirmation_text": (
+            "I_CONFIRM_THESE_STOPS_ARE_MY_OPERATOR_RISK_LIMITS"
+        ),
+        "risk_acknowledgement": True,
     }]}), encoding="utf-8")
     result = apply_confirmed_template(
         template_path=tpath, holdings_path=holdings, now_utc=NOW, write=True,
@@ -254,6 +279,11 @@ def test_full_confirmation_loop_unblocks_risk_gate(tmp_path: Path) -> None:
     # operator confirms the suggestion and holdings currency
     template["entries"][0]["stop_loss_confirmed"] = True
     template["entries"][0]["stop_loss_confirmed_at"] = "2026-07-04T11:00:00Z"
+    template["entries"][0]["operator_confirmation_id"] = "op-loop-1"
+    template["entries"][0]["operator_confirmation_text"] = (
+        "I_CONFIRM_THESE_STOPS_ARE_MY_OPERATOR_RISK_LIMITS"
+    )
+    template["entries"][0]["risk_acknowledgement"] = True
     template["holdings_confirmed_current"] = True
     template["holdings_confirmed_current_at"] = "2026-07-04T11:00:00Z"
     tpath = tmp_path / "template.json"

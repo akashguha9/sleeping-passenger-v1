@@ -268,6 +268,187 @@ def latest_alerts(
     return alerts[:limit] if isinstance(alerts, list) else []
 
 
+# ---------------------------------------------------------------------------
+# Open-the-Gate sprint (2026-07-04): escalation + operator checklist
+# ---------------------------------------------------------------------------
+
+ESCALATE_L2_HOURS = 24.0
+ESCALATE_L3_HOURS = 72.0
+
+CHECKLIST_PATH = REPO_ROOT / "OPERATOR_ACTION_CHECKLIST.md"
+
+
+def compute_escalations(
+    *, queue_path: Any = None, now_utc: datetime | None = None,
+) -> list[dict[str, Any]]:
+    """Escalate CRITICAL conditions that persist across days.
+
+    A CRITICAL category first seen more than 24h ago that is STILL being
+    raised today escalates to level 2; more than 72h -> level 3.  A BLOCKED
+    truth surface persisting >24h raises a persistent_blocker alert.
+    Resolution is implicit: a condition that stops being raised stops
+    escalating (its dedupe key no longer appears in today's alerts).
+    """
+    now = _now(now_utc)
+    qpath = Path(queue_path) if queue_path else _resolved(QUEUE_PATH)
+    if not qpath.exists():
+        return []
+    today = now.strftime("%Y-%m-%d")
+    first_seen: dict[str, str] = {}
+    active_today: dict[str, dict[str, Any]] = {}
+    for line in qpath.read_text(encoding="utf-8").splitlines():
+        try:
+            row = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if row.get("severity") != SEV_CRITICAL:
+            continue
+        cat = str(row.get("category"))
+        created = str(row.get("created_at") or "")
+        if cat not in first_seen or created < first_seen[cat]:
+            first_seen[cat] = created
+        if created.startswith(today):
+            active_today[cat] = row
+    out: list[dict[str, Any]] = []
+    for cat, row in active_today.items():
+        try:
+            first_dt = datetime.fromisoformat(
+                first_seen[cat].replace("Z", "+00:00")
+            )
+        except ValueError:
+            continue
+        age_h = (now - first_dt).total_seconds() / 3600.0
+        level = 3 if age_h > ESCALATE_L3_HOURS else 2 if age_h > ESCALATE_L2_HOURS else 1
+        if level == 1:
+            continue
+        title = (
+            f"ESCALATION L{level}: {row.get('title')}"
+            if cat != "operational_state"
+            else f"PERSISTENT BLOCKER (L{level}): system not HEALTHY for "
+            f"{age_h:.0f}h"
+        )
+        out.append(_alert(
+            now=now, severity=SEV_CRITICAL,
+            category=f"escalation_{cat}",
+            title=title,
+            message=(
+                f"CRITICAL condition '{cat}' unresolved for {age_h:.0f} hours "
+                f"(first seen {first_seen[cat]}). Escalation level {level}."
+            ),
+            source="alert_escalation",
+            requires_operator_action=True, run_id=None,
+        ) | {"escalation_level": level, "unresolved_hours": round(age_h, 1)})
+    return out
+
+
+def generate_operator_checklist(
+    surface: dict[str, Any],
+    *,
+    calendar: dict[str, Any] | None = None,
+    now_utc: datetime | None = None,
+) -> str:
+    """Truth-surface-driven operator checklist (markdown)."""
+    now = _now(now_utc)
+    state = surface.get("overall_operational_state", "UNKNOWN")
+    missing = int(surface.get("missing_stop_count") or 0)
+    unconfirmed = int(surface.get("unconfirmed_stop_count") or 0)
+    lev = int(surface.get("leveraged_without_stop_count") or 0)
+    lines = [
+        "# OPERATOR ACTION CHECKLIST",
+        "",
+        f"_Generated {now.strftime('%Y-%m-%dT%H:%M:%SZ')} from the live "
+        f"truth surface. State: **{state}**._",
+        "",
+        "Work top to bottom; each item names its command.",
+        "",
+    ]
+    n = 0
+
+    def item(text: str, done: bool = False) -> None:
+        nonlocal n
+        n += 1
+        mark = "x" if done else " "
+        lines.append(f"{n}. [{mark}] {text}")
+
+    stops_done = missing + unconfirmed == 0
+    item(
+        "Confirm stop-losses for every position "
+        f"({missing} missing, {unconfirmed} unconfirmed): edit "
+        "`data/daily_payload/stop_loss_backfill_template.json` per "
+        "`STOP_LOSS_CONFIRMATION_REQUIRED.md`, then run "
+        "`python scripts/holdings_truth_gate.py --apply-confirmed --write`",
+        done=stops_done,
+    )
+    if lev:
+        item(
+            f"Review the {lev} LEVERAGED position(s) and set "
+            "`leverage_risk_acknowledged: true` only after reading the "
+            "max-loss-at-stop numbers in the template",
+        )
+    item(
+        "Refresh holdings truth (set `holdings_confirmed_current: true` + "
+        "timestamp in the template before --apply-confirmed) — current "
+        f"freshness: {surface.get('holdings_truth_status')}",
+        done=surface.get("holdings_truth_status") == "OK",
+    )
+    item(
+        "Re-run the risk gate and read the summary: "
+        "`python scripts/holdings_truth_gate.py --show-summary`",
+    )
+    item(
+        "Let the daily loop run (or force one): "
+        "`python -m scripts.nbi_scheduler run-once` — it produces locked "
+        "predictions, matures due outcomes, harvests settlements, refreshes "
+        "discovery, and dispatches alerts",
+    )
+    item(
+        "Prove the Sheets loop when you configure it: "
+        "`python scripts/sheets_roundtrip_probe.py --fixture` (logic proof) "
+        "or `--live-safe` with SHEETS_PROBE_SHEET_ID set",
+    )
+    item(
+        "Inspect alerts: `runtime/alerts/operator_alerts.jsonl` (or the "
+        "cockpit panel) — "
+        f"{len(surface.get('latest_alerts') or [])} in the latest snapshot",
+    )
+    next_maturity = (calendar or {}).get("next_maturity_date")
+    projected = (calendar or {}).get("projected_n_end_of_window")
+    item(
+        "Wait for the next maturity date "
+        + (f"({next_maturity}; projected N -> {projected})"
+           if next_maturity else "(none pending — produce more predictions)")
+        + " — do NOT try to shortcut outcomes",
+    )
+    lines += [
+        "",
+        "---",
+        "",
+        "**DO NOT use real money.** The readiness gates are not passed: "
+        f"calibration is {surface.get('calibration_status')} "
+        f"(N={surface.get('matured_real_outcome_count')}), risk state is "
+        f"{state}. The execution lock stays LOCKED regardless.",
+        "",
+        f"Next required action (truth surface): "
+        f"{surface.get('next_required_operator_action')}",
+        "",
+    ]
+    return "\n".join(lines)
+
+
+def write_operator_checklist(
+    surface: dict[str, Any], *,
+    calendar: dict[str, Any] | None = None,
+    path: Any = None, now_utc: datetime | None = None,
+) -> str:
+    target = Path(path) if path else _resolved(CHECKLIST_PATH)
+    target.write_text(
+        generate_operator_checklist(surface, calendar=calendar,
+                                    now_utc=now_utc),
+        encoding="utf-8",
+    )
+    return str(target)
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     p.add_argument("--dispatch", action="store_true",
@@ -280,7 +461,18 @@ def main(argv: Sequence[str] | None = None) -> int:
         from truth_surface_report import compute_truth_surface  # type: ignore
     surface = compute_truth_surface()
     alerts = build_alerts_from_surface(surface)
+    alerts += compute_escalations()
     result = dispatch_alerts(alerts, write=args.dispatch and not args.dry_run)
+    if args.dispatch and not args.dry_run:
+        try:
+            from scripts.evidence_calendar import build_evidence_calendar
+
+            calendar = build_evidence_calendar()
+        except Exception:  # noqa: BLE001
+            calendar = None
+        result["checklist_path"] = write_operator_checklist(
+            surface, calendar=calendar
+        )
     print(json.dumps(result, indent=2, default=str))
     return 0
 

@@ -1,0 +1,1 @@
+{"run_date": "2026-07-04", "positions": [{"ticker": "NASDAQ:ANET", "normalized_ticker": "ANET", "status": "OPEN", "quantity": 2.0, "entry_price": 100.0, "currency": "USD", "leverage": 1, "opened_at": "2026-07-01T00:00:00Z", "created_via": "manual_trade_log", "broker_confirmed": false, "human_confirmed": true}]}

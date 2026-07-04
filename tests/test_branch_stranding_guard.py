@@ -43,6 +43,11 @@ REQUIRED_MODULES: dict[str, tuple[str, ...]] = {
     "scripts.refresh_fresh_discovery_live": ("refresh_fresh_discovery",),
     "scripts.operator_alert_bridge": ("build_alerts_from_surface", "dispatch_alerts"),
     "scripts.kalshi_settlement_reconciliation": ("reconcile_settlements",),
+    # Open-the-Gate sprint (2026-07-04): risk monitoring + proof organs.
+    "scripts.drawdown_stop_monitor": ("run_drawdown_monitor",),
+    "scripts.sheets_roundtrip_probe": ("run_roundtrip_probe",),
+    "scripts.evidence_calendar": ("build_evidence_calendar",),
+    "scripts.smoke_cockpit_truth": ("run_smoke",),
 }
 
 # DB tables written by the evidence loop -> at least one working-tree module
@@ -91,6 +96,10 @@ def test_daily_scheduler_references_maturation() -> None:
     assert "refresh_fresh_discovery" in src
     assert "reconcile_settlements" in src
     assert "dispatch_alerts" in src
+    assert "run_drawdown_monitor" in src, (
+        "the daily loop lost the drawdown/stop-breach monitor "
+        "(Open-the-Gate regression)"
+    )
 
 
 def test_action_engine_references_canonical_holdings() -> None:

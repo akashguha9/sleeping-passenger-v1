@@ -297,6 +297,12 @@ EXPLICIT_IN_SCOPE: frozenset[str] = frozenset({
     "holdings_truth_gate.py",
     "benchmark_outcome_report.py",
     "truth_surface_report.py",
+    # Open-the-Gate sprint (2026-07-04): risk monitoring, sheets proof,
+    # evidence calendar, cockpit smoke — all advisory-only.
+    "drawdown_stop_monitor.py",
+    "sheets_roundtrip_probe.py",
+    "evidence_calendar.py",
+    "smoke_cockpit_truth.py",
     # Local operator-journal reset (Manual Trade Log / Reconciliation /
     # Moltbook).  Dry-run by default; --apply is guarded by the central
     # operator_permission_guard.  In-scope record-keeping maintenance — it

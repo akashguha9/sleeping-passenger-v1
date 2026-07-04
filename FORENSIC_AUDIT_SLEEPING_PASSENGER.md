@@ -2106,3 +2106,34 @@ errors; build 16 routes. Execution lock unchanged
 demonstrated edge; stops unconfirmed; <30 days unattended evidence);
 investor-demo-able only as an honesty story. The system remains advisory-
 only with the execution gate machine-locked.
+
+
+---
+
+## Post-Sprint Appendix: Open the Gate / Second Gap Closer (2026-07-04)
+
+Third same-day sprint (`sprint/open-the-gate-gap-closer`); full detail in
+`OPEN_THE_GATE_SPRINT_REPORT.md`.
+
+**Scores:** 6.30 -> **6.45** unconditional (A 6.3, C 6.4, D 6.4, G 7.7,
+H 5.9, I 7.0, J 8.1, L 7.4; B/E/F/K unchanged). Gap-closure ratio 0.333 —
+**below the 0.4444 minimum, reported without excuse**: the remaining lift
+is the operator's stop confirmation (S_conditional ≈ 6.54, zero further
+code) plus five calendar days (N=81 matures 2026-07-09; evidence calendar
+projects the N=200 calibration gate ~33 days out at current velocity).
+
+**What shipped:** strict stop-confirmation contract (typed acknowledgement
+`I_CONFIRM_THESE_STOPS_ARE_MY_OPERATOR_RISK_LIMITS`, confirmation id, risk
+ack, leveraged ack — six rejection tests prove fake confirmation is
+structurally impossible); confirmation-required artifacts + generated
+`OPERATOR_ACTION_CHECKLIST.md`; three-tier holdings freshness (1d/3d);
+archive provenance backups; drawdown/stop-breach monitor in the (now
+8-stage) daily loop — live run honestly reports NO_MONITORABLE_POSITIONS;
+Sheets round-trip proof (fixture PASS: schema, idempotency, SHA-256
+read-back; --live-safe DEGRADED pending sheet config); real-app cockpit
+honesty smoke (PASSED live: BLOCKED state, no overclaims) + Playwright
+spec; evidence maturity calendar; alert escalation (L2 >24h, L3 >72h).
+
+**Validation:** backend 7,976 passed / 3 skipped / 0 failed (14m51s);
+targeted 442 passed; frontend 213/213 + build green. Execution lock intact; no stop was
+confirmed by software; the state remains **BLOCKED and says so**.

@@ -1,6 +1,6 @@
 # OPERATIONAL TRUTH — how this MVP reports on itself
 
-**Last verified: 2026-07-04 (Feed-the-Loop sprint).**
+**Last verified: 2026-07-04 (Open-the-Gate sprint).**
 This is the canonical reference for what the system's status words mean,
 where truth lives, and what is still blocked. If code and this document
 disagree, the code is the bug or this file is — fix one the same day.
@@ -222,3 +222,38 @@ UNSETTLED (they resolve months out).
 a calibrated probability"; 50<=N<200 -> "MEASURED BUT NOT DECISION-GRADE
 CALIBRATED"; the phrase "CALIBRATION GATE PASSED" is only reachable when the
 backend gate (N>=200, Brier<=0.25, ECE<=0.10) actually passes.
+
+## 11. Open-the-Gate additions (2026-07-04, same day)
+
+**Strict stop-confirmation contract.** A stop only becomes active when the
+template entry carries ALL of: `stop_loss_confirmed: true`,
+`stop_loss_confirmed_at`, `operator_confirmation_id`,
+`risk_acknowledgement: true`, `operator_confirmation_text` equal to the
+EXACT string `I_CONFIRM_THESE_STOPS_ARE_MY_OPERATOR_RISK_LIMITS`, and — on
+leveraged positions — `leverage_risk_acknowledged: true`.  Anything less is
+rejected by `--apply-confirmed` and the risk gate stays BLOCKED.  Pending
+confirmations are documented in `STOP_LOSS_CONFIRMATION_REQUIRED.md` +
+`data/daily_payload/stop_loss_operator_confirmation_required.json`.
+Workflow: `--write-template` -> edit/confirm -> `--validate-template` ->
+`--apply-confirmed --dry-run` -> `--apply-confirmed --write` (archives the
+prior holdings file to `data/daily_payload/archive/` first).
+
+**Freshness is three-tier:** holdings age <=1 day FRESH, <=3 days DEGRADED,
+>3 days BLOCKED (`freshness_state` on the gate; HEALTHY requires FRESH).
+
+**Drawdown/stop-breach monitor** (`scripts/drawdown_stop_monitor.py`, in the
+daily loop): distance-to-stop, breach detection, leveraged unrealized
+return, portfolio drawdown fraction; CRITICAL at breach or <=1% distance or
+<=-10% drawdown; WARNING at <=3% / <=-5%.  Positions without a usable
+confirmed stop are UNMONITORABLE — surfaced, never skipped.
+
+**Escalation:** a CRITICAL condition still firing after 24h escalates to
+level 2, after 72h to level 3 (persistent-blocker alert for a non-HEALTHY
+truth surface).  `OPERATOR_ACTION_CHECKLIST.md` is regenerated from the
+truth surface every daily cycle.
+
+**Proof commands:** `scripts/sheets_roundtrip_probe.py --fixture|--live-safe`
+(round-trip hash + idempotency + schema-drift; DEGRADED without
+credentials), `scripts/smoke_cockpit_truth.py` (real-app honesty smoke),
+`scripts/evidence_calendar.py --next 14` (when N grows; projections never
+touch real N).

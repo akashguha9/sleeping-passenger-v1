@@ -334,6 +334,18 @@ def run_once(
             producer_status = f"PRODUCER_CRASHED:{type(exc).__name__}"
             snapshots_locked = 0
             forward_eligible_locked = 0
+        # Open-the-Gate sprint (2026-07-04): drawdown/stop-breach monitor
+        # pass every cycle (advisory alerts only; append-only artifacts).
+        try:
+            from scripts.drawdown_stop_monitor import run_drawdown_monitor
+
+            _dd = run_drawdown_monitor(db_path=db_path, write=True,
+                                       dispatch=True)
+            drawdown_status = _dd.get("status", "UNKNOWN")
+            stop_breach_count = int(_dd.get("stop_breach_count") or 0)
+        except Exception as exc:  # noqa: BLE001 - disclosed via record
+            drawdown_status = f"MONITOR_CRASHED:{type(exc).__name__}"
+            stop_breach_count = 0
         # Feed-the-Loop sprint (2026-07-04): harvest Kalshi settlements from
         # the live probability ledger (read-only public endpoint, append-only
         # settlements).  Fail-soft: a blocked provider is recorded, not fatal.
@@ -389,6 +401,8 @@ def run_once(
         discovery_live_records = 0
         settlements_persisted = 0
         settlement_provider_state = "NOT_RUN"
+        drawdown_status = "NOT_RUN"
+        stop_breach_count = 0
         run_result = {"status": "CRASHED", "error": type(exc).__name__}
 
     # v1.4 health model.  Two numbers:
@@ -443,6 +457,8 @@ def run_once(
         "discovery_live_records": discovery_live_records,
         "settlements_persisted": settlements_persisted,
         "settlement_provider_state": settlement_provider_state,
+        "drawdown_status": drawdown_status,
+        "stop_breach_count": stop_breach_count,
         "snapshots_locked": snapshots_locked,
         "forward_eligible_locked": forward_eligible_locked,
         "outcomes_closed": outcomes_closed,
@@ -461,15 +477,25 @@ def run_once(
         try:
             from scripts.operator_alert_bridge import (
                 build_alerts_from_surface,
+                compute_escalations,
                 dispatch_alerts,
+                write_operator_checklist,
             )
             from scripts.truth_surface_report import compute_truth_surface
 
             _surface = compute_truth_surface(db_path=db_path)
-            _dispatch = dispatch_alerts(
-                build_alerts_from_surface(_surface), write=True,
-            )
+            _alerts = build_alerts_from_surface(_surface)
+            _alerts += compute_escalations()
+            _dispatch = dispatch_alerts(_alerts, write=True)
             alerts_dispatched = _dispatch.get("alerts_new")
+            try:
+                from scripts.evidence_calendar import build_evidence_calendar
+
+                write_operator_checklist(
+                    _surface, calendar=build_evidence_calendar(db_path=db_path)
+                )
+            except Exception:  # noqa: BLE001 - checklist is best-effort
+                pass
         except Exception:  # noqa: BLE001 - alerting must never kill the loop
             alerts_dispatched = None
     record["alerts_dispatched"] = alerts_dispatched

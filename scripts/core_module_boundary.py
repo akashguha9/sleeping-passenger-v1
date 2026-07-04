@@ -160,6 +160,8 @@ _SUPPORT_EXPLICIT: frozenset[str] = frozenset({
     "ensure_ohlcv_for_scored_tickers", "ticker_resolution",
     "live_decision_path", "admission_gates", "moltbook_adjustment",
     "leverage_policy",
+    # Open-the-Gate sprint (2026-07-04): evidence calendar + cockpit smoke.
+    "evidence_calendar", "smoke_cockpit_truth",
 })
 
 

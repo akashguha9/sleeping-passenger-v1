@@ -185,3 +185,16 @@ not a performance story.
 5. Frontend-vs-real-backend integration test (one uvicorn-backed Playwright
    spec) — closes the last test-theater gap.
 Projected: 6.30 → ~6.75 (the new near-term ceiling).
+
+---
+
+## Follow-up Sprint: Open the Gate (2026-07-04, same day)
+
+Executed as `sprint/open-the-gate-gap-closer` — see
+`OPEN_THE_GATE_SPRINT_REPORT.md`.  Headline: the stop-confirmation path is
+now strict (typed operator acknowledgement, impossible to fake), the
+drawdown/stop-breach monitor is in the daily loop, the Sheets round-trip
+logic is proven (fixture PASS; live pending sheet configuration), the
+cockpit is smoke-proven against the real app, and the evidence calendar
+shows N->81 on 2026-07-09 and an ~33-day path to the N=200 gate.  Score
+6.30 -> 6.45 unconditional (~6.54 the moment the operator confirms stops).

@@ -1,0 +1,110 @@
+{
+ "report": "stop_template_validation",
+ "checked_at_utc": "2026-07-04T14:00:01Z",
+ "template_path": "C:\\Users\\akash\\sleeping-passenger-v1\\data\\daily_payload\\stop_loss_backfill_template.json",
+ "entries": [
+  {
+   "ticker": "NASDAQ:ANET",
+   "verdict": "UNCONFIRMED",
+   "reasons": [
+    "not confirmed (stop_loss_confirmed != true)"
+   ],
+   "stop_loss": 134.8715,
+   "leverage": 1.0
+  },
+  {
+   "ticker": "NYSE:XOM",
+   "verdict": "UNCONFIRMED",
+   "reasons": [
+    "not confirmed (stop_loss_confirmed != true)"
+   ],
+   "stop_loss": 150.024,
+   "leverage": 1.0
+  },
+  {
+   "ticker": "NYSE:RTX",
+   "verdict": "UNCONFIRMED",
+   "reasons": [
+    "not confirmed (stop_loss_confirmed != true)"
+   ],
+   "stop_loss": 162.621,
+   "leverage": 1.0
+  },
+  {
+   "ticker": "NYSE:LMT",
+   "verdict": "UNCONFIRMED",
+   "reasons": [
+    "not confirmed (stop_loss_confirmed != true)"
+   ],
+   "stop_loss": 496.375,
+   "leverage": 1.0
+  },
+  {
+   "ticker": "NYSE:CVX",
+   "verdict": "UNCONFIRMED",
+   "reasons": [
+    "not confirmed (stop_loss_confirmed != true)"
+   ],
+   "stop_loss": 185.4115,
+   "leverage": 1.0
+  },
+  {
+   "ticker": "NASDAQ:MSFT",
+   "verdict": "UNCONFIRMED",
+   "reasons": [
+    "not confirmed (stop_loss_confirmed != true)"
+   ],
+   "stop_loss": 397.1475,
+   "leverage": 1.0
+  },
+  {
+   "ticker": "NSE:HDFCBANK",
+   "verdict": "UNCONFIRMED",
+   "reasons": [
+    "not confirmed (stop_loss_confirmed != true)"
+   ],
+   "stop_loss": 749.3362,
+   "leverage": 4.0
+  },
+  {
+   "ticker": "NSE:RELIANCE",
+   "verdict": "UNCONFIRMED",
+   "reasons": [
+    "not confirmed (stop_loss_confirmed != true)"
+   ],
+   "stop_loss": 1301.82,
+   "leverage": 4.0
+  },
+  {
+   "ticker": "NASDAQ:ASML",
+   "verdict": "UNCONFIRMED",
+   "reasons": [
+    "not confirmed (stop_loss_confirmed != true)"
+   ],
+   "stop_loss": 1387.3705,
+   "leverage": 1.0
+  },
+  {
+   "ticker": "NYSE:TSM",
+   "verdict": "UNCONFIRMED",
+   "reasons": [
+    "not confirmed (stop_loss_confirmed != true)"
+   ],
+   "stop_loss": 373.597,
+   "leverage": 1.0
+  }
+ ],
+ "confirmed_valid": 0,
+ "unconfirmed": 10,
+ "invalid": 0,
+ "holdings_refresh_confirmed": false,
+ "advisory_status": "ADVISORY_ONLY",
+ "execution_gate": "LOCKED",
+ "broker_api_called": false,
+ "ai_execution_count": 0,
+ "execution_permission": false,
+ "can_execute": false,
+ "broker_order_id": "NONE",
+ "human_review_required": true,
+ "status": "CONFIRMATION_REQUIRED"
+}
