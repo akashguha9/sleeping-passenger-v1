@@ -83,6 +83,7 @@ Open http://localhost:3000.
 | [DEPLOYMENT.md](DEPLOYMENT.md) | Current status and the path to production |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | System / workflow / safety / persistence / refresh diagrams |
 | [docs/MARKET_TITRATION_ENGINE.md](docs/MARKET_TITRATION_ENGINE.md) | Pre-alpha titration layer: evidence decay, readiness vs recognition, titration states |
+| [docs/TITRATION_RESPONSE_CALIBRATION.md](docs/TITRATION_RESPONSE_CALIBRATION.md) | Evidence→response measurement: transition outcomes, measured susceptibility, refusal-first calibration |
 | [docs/AI_OUTPUT_VALIDATION.md](docs/AI_OUTPUT_VALIDATION.md) | AI payload schema, malformed handling, safety overrides |
 | [docs/LIVE_SIGNALS_REFRESH_MODEL.md](docs/LIVE_SIGNALS_REFRESH_MODEL.md) | 6-hour refresh model and source-health contract |
 | [docs/LIVE_SIGNALS_SCHEDULING.md](docs/LIVE_SIGNALS_SCHEDULING.md) | Windows Task Scheduler / cron recipes |

@@ -152,11 +152,15 @@ Every assignment carries a `state_rule_trace` (the exact comparisons that
 fired) and an `explanation` block (`supporting_factors`, `penalties`,
 `invalidation_conditions`).
 
-**Reserved, designed but NOT operational:** `BUFFER_DEPLETING`,
-`ENDPOINT_CROSSING`, `REPRICING`. They require true evidence→response
-susceptibility (price-reaction observations) that the data layer does not
-collect yet. They are exported as `RESERVED_STATES` and asserted
-unreachable in tests, so designed-vs-operational stays honest.
+**titration_v2 update:** `BUFFER_DEPLETING` and `ENDPOINT_CROSSING` are now
+OPERATIONAL — but they can activate **only** when a sample-gated
+measured/shrunk susceptibility estimate exists (fallback level ≤ 4); the
+heuristic proxy can never trigger them (test-enforced). `REPRICING` remains
+RESERVED: it needs post-state realized-response attribution that the
+runtime read path cannot yet prove. See
+docs/TITRATION_RESPONSE_CALIBRATION.md for the measurement layer
+(evidence→response observations, measured susceptibility, calibration
+report).
 
 ## Runtime wiring
 

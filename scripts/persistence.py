@@ -334,6 +334,93 @@ CREATE TABLE IF NOT EXISTS imported_outcomes (
     broker_api_called INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_imported_outcomes_src ON imported_outcomes(source_type);
+CREATE TABLE IF NOT EXISTS titration_response_observations (
+    obs_id TEXT PRIMARY KEY,
+    ticker TEXT NOT NULL,
+    market TEXT NOT NULL DEFAULT 'GLOBAL_OTHER',
+    sector TEXT,
+    event_id TEXT NOT NULL DEFAULT '',
+    event_ts TEXT NOT NULL,
+    entry_bar_date TEXT,
+    reference_price REAL,
+    price_field TEXT NOT NULL DEFAULT '',
+    sigma_pre REAL,
+    dose REAL,
+    active_before REAL,
+    active_after REAL,
+    accumulation_velocity REAL,
+    acceleration REAL,
+    geometry TEXT NOT NULL DEFAULT '',
+    temperature REAL,
+    goldilocks REAL,
+    barrier REAL,
+    lrr REAL,
+    vmr REAL,
+    pag REAL,
+    ftr REAL,
+    titration_state TEXT NOT NULL DEFAULT '',
+    horizon INTEGER NOT NULL,
+    maturation TEXT NOT NULL,
+    exclusion_reason TEXT,
+    r_raw REAL,
+    z REAL,
+    mfe REAL,
+    mae REAL,
+    time_to_transition_days INTEGER,
+    y_absolute INTEGER,
+    y_directional INTEGER,
+    y_benchmark_relative INTEGER,
+    outcome_def_version TEXT NOT NULL DEFAULT '',
+    model_version TEXT NOT NULL DEFAULT '',
+    scoring_version TEXT NOT NULL DEFAULT '',
+    computed_at TEXT NOT NULL DEFAULT '',
+    advisory_only TEXT NOT NULL DEFAULT 'ADVISORY_ONLY',
+    broker_api_called INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_tro_ticker ON titration_response_observations(ticker);
+CREATE INDEX IF NOT EXISTS idx_tro_horizon ON titration_response_observations(horizon);
+CREATE INDEX IF NOT EXISTS idx_tro_maturation ON titration_response_observations(maturation);
+CREATE TABLE IF NOT EXISTS titration_susceptibility_estimates (
+    scope_type TEXT NOT NULL,
+    scope_key TEXT NOT NULL,
+    horizon INTEGER NOT NULL,
+    estimator TEXT NOT NULL DEFAULT '',
+    raw_slope REAL,
+    slope REAL,
+    slope_lo REAL,
+    slope_hi REAL,
+    was_shrunk INTEGER NOT NULL DEFAULT 0,
+    shrinkage_k REAL,
+    chi_norm REAL,
+    slope_scale REAL,
+    n INTEGER NOT NULL DEFAULT 0,
+    pairs INTEGER NOT NULL DEFAULT 0,
+    acceleration_class TEXT NOT NULL DEFAULT 'INSUFFICIENT_DATA',
+    slope_early REAL,
+    slope_late REAL,
+    acceleration_delta REAL,
+    outcome_def_version TEXT NOT NULL DEFAULT '',
+    computed_at TEXT NOT NULL DEFAULT '',
+    advisory_only TEXT NOT NULL DEFAULT 'ADVISORY_ONLY',
+    broker_api_called INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (scope_type, scope_key, horizon)
+);
+CREATE TABLE IF NOT EXISTS titration_state_transitions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ticker TEXT NOT NULL,
+    event_id TEXT NOT NULL DEFAULT '',
+    prev_state TEXT NOT NULL DEFAULT '',
+    new_state TEXT NOT NULL,
+    transitioned_at TEXT NOT NULL,
+    rule_trace TEXT NOT NULL DEFAULT '',
+    confidence TEXT NOT NULL DEFAULT '',
+    model_version TEXT NOT NULL DEFAULT '',
+    recorded_at TEXT NOT NULL DEFAULT '',
+    advisory_only TEXT NOT NULL DEFAULT 'ADVISORY_ONLY',
+    broker_api_called INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_tst_ticker ON titration_state_transitions(ticker);
+CREATE INDEX IF NOT EXISTS idx_tst_ts ON titration_state_transitions(transitioned_at);
 """
 
 # Track which DB paths have been initialized this process (avoids repeat schema runs)
@@ -1399,6 +1486,194 @@ def count_ohlcv_bars(db_path: Path = DB_PATH) -> int:
     finally:
         conn.close()
     return int(row["c"]) if row else 0
+
+
+# ---------------------------------------------------------------------------
+# Titration response observations / susceptibility estimates / transitions
+# (Market Titration empirical layer — advisory-only record-keeping)
+# ---------------------------------------------------------------------------
+
+_TITRATION_OBS_COLS = (
+    "obs_id", "ticker", "market", "sector", "event_id", "event_ts",
+    "entry_bar_date", "reference_price", "price_field", "sigma_pre",
+    "dose", "active_before", "active_after", "accumulation_velocity",
+    "acceleration", "geometry", "temperature", "goldilocks", "barrier",
+    "lrr", "vmr", "pag", "ftr", "titration_state", "horizon", "maturation",
+    "exclusion_reason", "r_raw", "z", "mfe", "mae",
+    "time_to_transition_days", "y_absolute", "y_directional",
+    "y_benchmark_relative", "outcome_def_version", "model_version",
+    "scoring_version", "computed_at",
+)
+
+
+def replace_titration_observations(
+    rows: list[dict[str, Any]], db_path: Path | None = None
+) -> int:
+    """Idempotently rebuild titration response observations.
+
+    The pipeline recomputes the full observation set deterministically from
+    signal_events + ohlcv_bars, so replace-all keeps the table an exact
+    function of its inputs (no stale rows from prior definitions).
+    Advisory-only record-keeping; never grants execution permission.
+    """
+    conn = _get_conn(db_path if db_path is not None else DB_PATH)
+    try:
+        conn.execute("DELETE FROM titration_response_observations")
+        count = 0
+        for row in rows:
+            if not isinstance(row, dict) or not row.get("obs_id"):
+                continue
+            vals = tuple(row.get(col) for col in _TITRATION_OBS_COLS)
+            conn.execute(
+                "INSERT OR REPLACE INTO titration_response_observations"
+                f" ({', '.join(_TITRATION_OBS_COLS)})"
+                f" VALUES ({', '.join('?' * len(_TITRATION_OBS_COLS))})",
+                vals,
+            )
+            count += 1
+        conn.commit()
+        return count
+    finally:
+        conn.close()
+
+
+def get_titration_observations(
+    *,
+    ticker: str | None = None,
+    horizon: int | None = None,
+    maturation: str | None = None,
+    limit: int = 100000,
+    db_path: Path | None = None,
+) -> list[dict[str, Any]]:
+    conn = _get_conn(db_path if db_path is not None else DB_PATH)
+    try:
+        query = "SELECT * FROM titration_response_observations WHERE 1=1"
+        params: list[Any] = []
+        if ticker:
+            query += " AND ticker=?"
+            params.append(str(ticker).strip().upper())
+        if horizon is not None:
+            query += " AND horizon=?"
+            params.append(int(horizon))
+        if maturation:
+            query += " AND maturation=?"
+            params.append(str(maturation))
+        query += " ORDER BY event_ts ASC LIMIT ?"
+        params.append(int(limit))
+        rows = conn.execute(query, params).fetchall()
+    finally:
+        conn.close()
+    return [_to_dict(r) for r in rows]
+
+
+_TITRATION_EST_COLS = (
+    "scope_type", "scope_key", "horizon", "estimator", "raw_slope", "slope",
+    "slope_lo", "slope_hi", "was_shrunk", "shrinkage_k", "chi_norm",
+    "slope_scale", "n", "pairs", "acceleration_class", "slope_early",
+    "slope_late", "acceleration_delta", "outcome_def_version", "computed_at",
+)
+
+
+def replace_titration_susceptibility_estimates(
+    rows: list[dict[str, Any]], db_path: Path | None = None
+) -> int:
+    """Idempotently rebuild the susceptibility estimate table."""
+    conn = _get_conn(db_path if db_path is not None else DB_PATH)
+    try:
+        conn.execute("DELETE FROM titration_susceptibility_estimates")
+        count = 0
+        for row in rows:
+            if not isinstance(row, dict) or not row.get("scope_type"):
+                continue
+            payload = dict(row)
+            payload["was_shrunk"] = 1 if payload.get("was_shrunk") else 0
+            vals = tuple(payload.get(col) for col in _TITRATION_EST_COLS)
+            conn.execute(
+                "INSERT OR REPLACE INTO titration_susceptibility_estimates"
+                f" ({', '.join(_TITRATION_EST_COLS)})"
+                f" VALUES ({', '.join('?' * len(_TITRATION_EST_COLS))})",
+                vals,
+            )
+            count += 1
+        conn.commit()
+        return count
+    finally:
+        conn.close()
+
+
+def get_titration_susceptibility_estimates(
+    db_path: Path | None = None,
+) -> list[dict[str, Any]]:
+    conn = _get_conn(db_path if db_path is not None else DB_PATH)
+    try:
+        rows = conn.execute(
+            "SELECT * FROM titration_susceptibility_estimates"
+            " ORDER BY scope_type, scope_key, horizon"
+        ).fetchall()
+    finally:
+        conn.close()
+    out = []
+    for r in rows:
+        d = _to_dict(r)
+        d["was_shrunk"] = bool(d.get("was_shrunk"))
+        out.append(d)
+    return out
+
+
+def insert_titration_state_transitions(
+    rows: list[dict[str, Any]], db_path: Path | None = None
+) -> int:
+    """Append state-transition history rows (advisory record-keeping)."""
+    conn = _get_conn(db_path if db_path is not None else DB_PATH)
+    try:
+        count = 0
+        for row in rows:
+            if not isinstance(row, dict) or not row.get("new_state"):
+                continue
+            conn.execute(
+                "INSERT INTO titration_state_transitions"
+                " (ticker, event_id, prev_state, new_state, transitioned_at,"
+                "  rule_trace, confidence, model_version, recorded_at)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    str(row.get("ticker", "") or "").upper(),
+                    str(row.get("event_id", "") or ""),
+                    str(row.get("prev_state", "") or ""),
+                    str(row.get("new_state", "") or ""),
+                    str(row.get("transitioned_at", "") or ""),
+                    str(row.get("rule_trace", "") or "")[:2000],
+                    str(row.get("confidence", "") or ""),
+                    str(row.get("model_version", "") or ""),
+                    str(row.get("recorded_at", "") or ""),
+                ),
+            )
+            count += 1
+        conn.commit()
+        return count
+    finally:
+        conn.close()
+
+
+def get_titration_state_transitions(
+    *, ticker: str | None = None, limit: int = 1000, db_path: Path | None = None
+) -> list[dict[str, Any]]:
+    conn = _get_conn(db_path if db_path is not None else DB_PATH)
+    try:
+        if ticker:
+            rows = conn.execute(
+                "SELECT * FROM titration_state_transitions WHERE ticker=?"
+                " ORDER BY transitioned_at DESC LIMIT ?",
+                (str(ticker).strip().upper(), int(limit)),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM titration_state_transitions"
+                " ORDER BY transitioned_at DESC LIMIT ?",
+                (int(limit),),
+            ).fetchall()
+    finally:
+        conn.close()
+    return [_to_dict(r) for r in rows]
 
 
 # ---------------------------------------------------------------------------

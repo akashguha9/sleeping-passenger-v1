@@ -115,6 +115,10 @@ _SUPPORT_EXPLICIT: frozenset[str] = frozenset({
     # Local operator-journal reset maintenance tool (DB + JSONL); dry-run by
     # default, --apply guarded by operator_permission_guard. SUPPORT tooling.
     "reset_local_logs",
+    # Measure-the-Reaction sprint: offline evidence->response observation
+    # builder (leakage-safe, deterministic, advisory record-keeping only).
+    # Operator-invoked CLI, not on the request path -> SUPPORT.
+    "titration_response_pipeline",
 })
 
 

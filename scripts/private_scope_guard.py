@@ -240,6 +240,17 @@ EXPLICIT_IN_SCOPE: frozenset[str] = frozenset({
     # surface; see docs/MARKET_TITRATION_ENGINE.md.
     "market_titration_engine.py",
     "titration_snapshot_attach.py",
+    # Measure-the-Reaction sprint: evidence->response measurement layer
+    # (versioned transition-outcome contract, leakage-safe observation
+    # pipeline, sample-gated measured susceptibility, refusal-first
+    # calibration report, shadow-mode runtime store).  Advisory-only,
+    # read/record-keeping only; see docs/TITRATION_RESPONSE_CALIBRATION.md.
+    "titration_outcome_contract.py",
+    "titration_susceptibility.py",
+    "titration_response_pipeline.py",
+    "titration_recognition.py",
+    "titration_runtime_store.py",
+    "titration_calibration_report.py",
 })
 
 # Modules deliberately marked OUT_OF_SCOPE inside ``scripts/``.  This

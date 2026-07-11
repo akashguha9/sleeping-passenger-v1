@@ -537,8 +537,35 @@ def _decorate_with_titration_state(item: dict[str, Any]) -> dict[str, Any]:
     except Exception:
         return _stamp_safety(annotated)
 
+    # Shadow-mode measured inputs (titration_v2): inject sample-gated
+    # measured susceptibility and OHLCV recognition inputs when the offline
+    # response pipeline has produced them.  Both lookups are cached and
+    # degrade to None (the engine then reports HEURISTIC_PROXY / overlap
+    # warnings honestly).  Injection never grants execution permission.
+    enriched = dict(item)
     try:
-        payload = evaluate_market_titration(item)
+        try:
+            from scripts.titration_runtime_store import (
+                measured_susceptibility_for,
+                recognition_inputs_for,
+            )
+        except ModuleNotFoundError:  # pragma: no cover - script-style fallback
+            from titration_runtime_store import (  # type: ignore[no-redef]
+                measured_susceptibility_for,
+                recognition_inputs_for,
+            )
+        ticker = str(item.get("ticker", "") or "")
+        measured = measured_susceptibility_for(ticker)
+        if measured is not None:
+            enriched["measured_susceptibility"] = measured
+        recognition = recognition_inputs_for(ticker)
+        if recognition is not None:
+            enriched["recognition_inputs"] = recognition
+    except Exception:
+        enriched = dict(item)
+
+    try:
+        payload = evaluate_market_titration(enriched)
         compact = compact_titration_fields(payload)
         if isinstance(compact, dict):
             annotated.update(compact)

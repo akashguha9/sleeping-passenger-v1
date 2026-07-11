@@ -608,7 +608,11 @@ def test_proxy_metrics_are_labelled_as_proxies():
         _item([30.0, 10.0, 4.0, 1.0]), now=NOW
     )
     assert payload["susceptibility"]["is_proxy"] is True
-    assert payload["buffer_capacity"]["is_proxy"] is True
+    # titration_v2: without measured response data the buffer is the
+    # legacy proxy and says so via status.
+    assert payload["buffer_capacity"]["status"] == "PROXY"
+    assert payload["susceptibility"]["source"] == "HEURISTIC_PROXY"
+    assert payload["susceptibility"]["fallback_level"] == 5
     assert payload["minimum_catalytic_dose"]["is_proxy"] is True
     assert payload["vmr"]["is_proxy"] is True
     assert payload["free_energy"]["is_proxy"] is True

@@ -93,7 +93,7 @@ def test_decoration_adds_titration_fields_and_safety():
     t = out["titration"]
     assert isinstance(t, dict)
     assert t["score_semantics"] == "heuristic_bounded_score_not_probability"
-    assert t["scoring_version"] == "titration_v1"
+    assert t["scoring_version"] == "titration_v2"
     # Safety invariants re-stamped after enrichment.
     assert out["advisory_status"] == "ADVISORY_ONLY"
     assert out["execution_gate"] == "LOCKED"
@@ -188,7 +188,7 @@ def test_titration_summary_endpoint_contract(client):
     assert body["ai_execution_count"] == 0
     assert body["score_semantics"] == "heuristic_bounded_score_not_probability"
     assert body["schema_version"]
-    assert body["scoring_version"] == "titration_v1"
+    assert body["scoring_version"] == "titration_v2"
     assert isinstance(body["titration_state_counts"], dict)
     assert isinstance(body["top_pre_alpha_gap_candidates"], list)
     assert len(body["top_pre_alpha_gap_candidates"]) <= 10

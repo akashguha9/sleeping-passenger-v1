@@ -3104,6 +3104,52 @@ def get_titration_summary(
     }
 
 
+@app.get("/api/titration/calibration")
+def get_titration_calibration(_auth: None = Depends(require_api_token_for_reads)) -> dict:
+    """Titration calibration report — temporally honest, refusal-first.
+
+    Evaluates persisted evidence-to-response observations: transition base
+    rates, per-state transition rates with Wilson intervals, time-ordered
+    out-of-sample comparator rankings (with overlap purge), experimental
+    catalytic convexity, and the transition-hazard sample gate.  Below the
+    sample gates it refuses performance claims rather than printing
+    statistics from tiny samples.  Advisory-only.
+    """
+    try:
+        from scripts.titration_calibration_report import build_report
+    except ModuleNotFoundError:  # pragma: no cover - script-style fallback
+        from titration_calibration_report import build_report  # type: ignore[no-redef]
+    return build_report()
+
+
+@app.get("/api/titration/stability")
+def get_titration_stability(_auth: None = Depends(require_api_token_for_reads)) -> dict:
+    """Titration drift/stability diagnostics (state frequencies, maturation
+    mix, proxy-fallback expectations, warnings).  Advisory-only."""
+    try:
+        from scripts.titration_calibration_report import build_stability_section
+        from scripts import persistence as _p
+    except ModuleNotFoundError:  # pragma: no cover - script-style fallback
+        from titration_calibration_report import build_stability_section  # type: ignore[no-redef]
+        import persistence as _p  # type: ignore[no-redef]
+    try:
+        observations = _p.get_titration_observations()
+    except Exception:
+        observations = []
+    try:
+        estimates = _p.get_titration_susceptibility_estimates()
+    except Exception:
+        estimates = []
+    section = build_stability_section(observations, estimates)
+    section.update({
+        "advisory_status": _ADVISORY_STATUS,
+        "human_review_required": True,
+        "execution_mode": _EXECUTION_MODE,
+        "ai_execution_count": _AI_EXECUTION_COUNT,
+    })
+    return section
+
+
 @app.get("/api/score-calibration")
 def get_score_calibration(_auth: None = Depends(require_api_token_for_reads)) -> dict:
     """Honest calibration status for the signal scores.

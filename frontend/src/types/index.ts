@@ -73,7 +73,9 @@ export type TitrationState =
   | 'FALSE_TRANSITION_RISK'
   | 'CROWDED'
   | 'EXHAUSTING'
+  | 'ENDPOINT_CROSSING'
   | 'PRIMED'
+  | 'BUFFER_DEPLETING'
   | 'PRE_ALPHA_WATCH'
   | 'LOADING'
   | 'NO_EDGE'
@@ -93,11 +95,22 @@ export interface TitrationCompact {
   goldilocks_quality?: number | null;
   activation_barrier?: number | null;
   susceptibility_proxy?: number | null;
+  // titration_v2: where susceptibility came from — MEASURED_TICKER /
+  // SHRUNK_SECTOR / MEASURED_MARKET / MEASURED_GLOBAL / HEURISTIC_PROXY —
+  // with the sample size behind a measured estimate.
+  susceptibility_source?: string | null;
+  susceptibility_sample_size?: number | null;
   buffer_capacity_proxy?: number | null;
+  // MEASURED / SHRUNK / PROXY / UNAVAILABLE
+  buffer_status?: string | null;
   mcd_normalized?: number | null;
   lrr?: number | null;
   vmr_proxy?: number | null;
+  vmr_confidence?: string | null;
+  vmr_independent_components?: number | null;
   pre_alpha_gap?: number | null;
+  pre_alpha_gap_adjusted?: number | null;
+  pre_alpha_gap_confidence?: string | null;
   free_energy_proxy?: number | null;
   false_transition_risk?: number | null;
   data_sufficiency?: string | null;

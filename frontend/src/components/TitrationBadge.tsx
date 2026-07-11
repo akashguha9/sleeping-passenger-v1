@@ -43,6 +43,21 @@ const STATE_STYLE: Record<string, { fg: string; bg: string; border: string; labe
     border: 'border-emerald-900/40',
     label: 'PRIMED',
   },
+  // Measured-response states (titration_v2): only assignable when a
+  // sample-gated measured susceptibility estimate exists — never from the
+  // heuristic proxy.  Conservative colors: informative, not "go".
+  BUFFER_DEPLETING: {
+    fg: 'text-teal-300',
+    bg: 'bg-teal-950/30',
+    border: 'border-teal-900/40',
+    label: 'BUFFER_DEPLETING',
+  },
+  ENDPOINT_CROSSING: {
+    fg: 'text-cyan-300',
+    bg: 'bg-cyan-950/30',
+    border: 'border-cyan-900/40',
+    label: 'ENDPOINT_CROSSING',
+  },
   CROWDED: {
     fg: 'text-violet-300',
     bg: 'bg-violet-950/30',

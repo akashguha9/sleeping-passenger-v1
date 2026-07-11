@@ -90,30 +90,34 @@ SAFETY_STAMPS: dict[str, Any] = {
     "human_review_required": True,
 }
 
-TITRATION_SCHEMA_VERSION = "1.0.0"
-TITRATION_SCORING_VERSION = "titration_v1"
+TITRATION_SCHEMA_VERSION = "1.1.0"
+TITRATION_SCORING_VERSION = "titration_v2"
 SCORE_SEMANTICS = "heuristic_bounded_score_not_probability"
 
 # States this engine can actually assign today, in precedence order.
+# BUFFER_DEPLETING and ENDPOINT_CROSSING became operational in titration_v2:
+# they activate ONLY when a measured/shrunk (sample-gated) susceptibility
+# estimate exists — never from the heuristic proxy alone.
 TITRATION_STATES: tuple[str, ...] = (
     "INSUFFICIENT_DATA",
     "FALSE_TRANSITION_RISK",
     "CROWDED",
     "EXHAUSTING",
+    "ENDPOINT_CROSSING",
     "PRIMED",
+    "BUFFER_DEPLETING",
     "PRE_ALPHA_WATCH",
     "LOADING",
     "NO_EDGE",
     "INERT",
 )
 
-# Designed in the state-transition model but NOT operational: they require
-# evidence->response observations (true susceptibility) that the current
-# data layer does not collect.  Kept here so tests and docs can assert the
-# boundary between designed and operational honestly.
+# Designed in the state-transition model but NOT operational: REPRICING
+# requires post-state realized-response attribution (outcome timestamp
+# strictly after state timestamp with confident attribution), which the
+# runtime read path cannot yet prove without ambiguity.  Kept reserved so
+# the designed/operational boundary stays honest.
 RESERVED_STATES: tuple[str, ...] = (
-    "BUFFER_DEPLETING",
-    "ENDPOINT_CROSSING",
     "REPRICING",
 )
 
@@ -247,6 +251,27 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "crowded_pag_max": 0.05,
     "exhausting_vmr_min": 0.40,
     "inert_evidence_floor": 0.10,
+    # Measured-response states (titration_v2).  Both require a
+    # measured/shrunk susceptibility estimate (fallback level <= 4).
+    "endpoint_chi_min": 0.20,
+    "buffer_depleting_max": 0.50,
+    # Weights for the measured buffer estimate (barrier / inverse chi /
+    # response-stability).  Operator priors, uncalibrated.
+    "buffer_weights": {"barrier": 0.5, "inverse_chi": 0.3, "stability": 0.2},
+    # VMR component weights (titration_v2 modular recognition).  PRICE and
+    # VOLUME come from OHLCV enrichment and are independent of the evidence
+    # feed; ATTENTION (source breadth) and VELOCITY (arrival rate) are
+    # evidence-derived and overlap with LRR inputs — the overlap penalty
+    # discounts PAG confidence when only those are available.
+    "vmr_component_weights": {
+        "price": 0.30,
+        "volume": 0.20,
+        "attention": 0.28,
+        "velocity": 0.22,
+    },
+    # Confidence multiplier applied to PAG when recognition rests solely on
+    # evidence-derived components (no independent price/volume data).
+    "pag_overlap_penalty": 0.5,
     # Free-energy proxy penalties (operator priors; no live friction feed).
     "friction_prior": 0.05,
     "uncertainty_penalty_weight": 0.15,
@@ -267,6 +292,9 @@ _NUMERIC_BOUNDS: dict[str, tuple[float, float]] = {
     "friction_prior": (0.0, 1.0),
     "mcd_cap": (1.0, 1e6),
     "epsilon": (1e-12, 1e-2),
+    "endpoint_chi_min": (0.0, 1.0),
+    "buffer_depleting_max": (0.0, 1.0),
+    "pag_overlap_penalty": (0.0, 1.0),
 }
 
 
@@ -447,6 +475,11 @@ def _extract_events(item: dict[str, Any], now: datetime) -> tuple[list[dict[str,
     sources = item.get("event_sources")
     events: list[dict[str, Any]] = []
 
+    directions = item.get("event_directions")
+    dir_list = directions if isinstance(directions, list) else []
+    magnitudes = item.get("event_magnitudes")
+    mag_list = magnitudes if isinstance(magnitudes, list) else []
+
     if isinstance(timestamps, list) and timestamps:
         src_list = sources if isinstance(sources, list) else []
         for idx, ts in enumerate(timestamps):
@@ -458,7 +491,21 @@ def _extract_events(item: dict[str, Any], now: datetime) -> tuple[list[dict[str,
                 notes.append("future_timestamp_clamped")
                 dt = now
             source = str(src_list[idx]) if idx < len(src_list) else str(item.get("source_name", "") or "")
-            events.append({"observed_at": dt, "source_name": source})
+            # Typed-evidence overlay (titration_v2): direction in {-1,+1},
+            # magnitude in [0,1].  Legacy events map to None (UNKNOWN) —
+            # never guessed.
+            direction = dir_list[idx] if idx < len(dir_list) else None
+            if direction not in (1, -1):
+                direction = None
+            magnitude = _finite_or_none(mag_list[idx]) if idx < len(mag_list) else None
+            if magnitude is not None:
+                magnitude = _clamp(magnitude)
+            events.append({
+                "observed_at": dt,
+                "source_name": source,
+                "direction": direction,
+                "magnitude": magnitude,
+            })
     else:
         dt = _parse_iso(item.get("observed_at") or item.get("last_observed_at"))
         if dt is not None:
@@ -496,7 +543,11 @@ def _event_mass_at(event: dict[str, Any], at: datetime, cfg: dict[str, Any]) -> 
     factor = decay_factor(age_hours, half)
     if factor is None:
         return 0.0
-    return _clamp(priors.get("quality", 0.4)) * _clamp(priors.get("reliability", 0.4)) * factor
+    # Typed-evidence magnitude scales unit mass when genuinely known;
+    # legacy events (magnitude None) keep m=1.
+    magnitude = event.get("magnitude")
+    m = magnitude if isinstance(magnitude, float) else 1.0
+    return m * _clamp(priors.get("quality", 0.4)) * _clamp(priors.get("reliability", 0.4)) * factor
 
 
 def _normalize_mass(raw: float, cfg: dict[str, Any]) -> float:
@@ -630,6 +681,7 @@ def compute_flow(
     a_now = _normalize_mass(raw_now, cfg)
     a_prev = _normalize_mass(raw_prev, cfg)
     net = a_now - a_prev
+    theta = float(cfg["activation_threshold"])
     return {
         "active_now": round(a_now, 6),
         "active_prev_step": round(a_prev, 6),
@@ -637,6 +689,9 @@ def compute_flow(
         "inflow_fresh_mass": round(inflow_fresh, 6),
         "decay_outflow_mass": round(max(0.0, raw_prev - raw_retained), 6),
         "loading": bool(net > float(cfg["loading_net_accumulation_eps"])),
+        # ENDPOINT_CROSSING freshness condition: the activation threshold
+        # was crossed within the last checkpoint step (new, not stale).
+        "threshold_newly_crossed": bool(a_prev < theta <= a_now),
         "step_hours": delta,
         "fresh_window_hours": fresh_window,
     }
@@ -709,6 +764,57 @@ def compute_source_concentration(per_source_mass: dict[str, float]) -> dict[str,
         "single_source_dependence": False,
         "source_family_count": len(masses),
         "estimator": "source_mass_entropy_v1",
+    }
+
+
+def compute_directional_disagreement(
+    events: list[dict[str, Any]], now: datetime, cfg: dict[str, Any]
+) -> dict[str, Any]:
+    """Directional disagreement entropy over typed evidence — when it exists.
+
+    Shannon entropy (normalized by ln 2) of the decayed-mass split between
+    bullish and bearish events.  Computed ONLY when at least two events
+    carry a real direction; source-concentration entropy is a different
+    quantity and is never presented as this one.  Legacy evidence without
+    direction yields available=False.
+    """
+    massed: list[tuple[int, float]] = []
+    for event in events:
+        direction = event.get("direction")
+        if direction in (1, -1):
+            mass = _event_mass_at(event, now, cfg)
+            if mass > 0:
+                massed.append((int(direction), mass))
+    if len(massed) < 2:
+        return {
+            "available": False,
+            "directional_events": len(massed),
+            "entropy": None,
+            "bull_share": None,
+            "estimator": "directional_mass_entropy_v1",
+        }
+    bull = sum(m for d, m in massed if d == 1)
+    bear = sum(m for d, m in massed if d == -1)
+    total = bull + bear
+    if total <= 0:
+        return {
+            "available": False,
+            "directional_events": len(massed),
+            "entropy": None,
+            "bull_share": None,
+            "estimator": "directional_mass_entropy_v1",
+        }
+    p = bull / total
+    entropy = 0.0
+    for share in (p, 1.0 - p):
+        if share > 0:
+            entropy -= share * math.log(share)
+    return {
+        "available": True,
+        "directional_events": len(massed),
+        "entropy": round(_clamp(entropy / math.log(2.0)), 6),
+        "bull_share": round(p, 6),
+        "estimator": "directional_mass_entropy_v1",
     }
 
 
@@ -852,20 +958,135 @@ def compute_susceptibility(
     }
 
 
-def compute_buffer_capacity(chi: float | None) -> dict[str, Any]:
-    """Buffer capacity as bounded inverse of susceptibility.
+def resolve_operational_susceptibility(
+    item: dict[str, Any], proxy: dict[str, Any]
+) -> dict[str, Any]:
+    """Overlay a measured/shrunk susceptibility estimate onto the proxy.
 
-    Conceptual form is beta ∝ 1/chi; we use beta = 1 - chi so the output
-    stays on [0,1] without singularities.  Monotone-inverse is preserved;
-    the deviation from the literal reciprocal is documented here and in the
-    docs.  Inherits proxy status from susceptibility.
+    The decoration layer injects ``item["measured_susceptibility"]`` (built
+    by scripts/titration_runtime_store from the persisted, sample-gated
+    estimate table).  When a usable measured estimate exists it becomes the
+    operational susceptibility; the heuristic proxy is retained alongside
+    for comparison.  When none exists, the proxy stands — explicitly
+    labelled HEURISTIC_PROXY at fallback level 5.
     """
-    if chi is None:
-        return {"buffer_capacity": None, "estimator": "bounded_inverse_proxy_v1", "is_proxy": True}
-    return {
-        "buffer_capacity": round(_clamp(1.0 - chi), 6),
-        "estimator": "bounded_inverse_proxy_v1",
+    measured = item.get("measured_susceptibility")
+    proxy_block = {
+        "susceptibility": proxy.get("susceptibility"),
+        "estimator": proxy.get("estimator"),
         "is_proxy": True,
+    }
+    if isinstance(measured, dict):
+        chi = _finite_or_none(measured.get("chi_norm"))
+        source = str(measured.get("source") or "")
+        level = measured.get("fallback_level")
+        if (
+            chi is not None
+            and source in {
+                "MEASURED_TICKER", "SHRUNK_SECTOR",
+                "MEASURED_MARKET", "MEASURED_GLOBAL",
+            }
+            and isinstance(level, int) and 1 <= level <= 4
+        ):
+            return {
+                "susceptibility": round(_clamp(chi), 6),
+                "source": source,
+                "fallback_level": level,
+                "estimator": str(measured.get("estimator") or "chi_theil_sen_v1"),
+                "is_proxy": False,
+                "is_shrunk": bool(measured.get("was_shrunk")),
+                "sample_size": measured.get("n"),
+                "slope": measured.get("slope"),
+                "slope_ci": [measured.get("slope_lo"), measured.get("slope_hi")],
+                "horizon": measured.get("horizon"),
+                "acceleration_class": str(
+                    measured.get("acceleration_class") or "INSUFFICIENT_DATA"
+                ),
+                "fallback_path": measured.get("fallback_path"),
+                "heuristic_proxy": proxy_block,
+                "sufficient": True,
+                "score_semantics": "measured_response_slope_not_probability",
+            }
+    return {
+        "susceptibility": proxy.get("susceptibility"),
+        "source": "HEURISTIC_PROXY",
+        "fallback_level": 5,
+        "estimator": proxy.get("estimator"),
+        "is_proxy": True,
+        "is_shrunk": False,
+        "sample_size": None,
+        "slope": None,
+        "slope_ci": None,
+        "horizon": None,
+        "acceleration_class": "INSUFFICIENT_DATA",
+        "fallback_path": (measured or {}).get("fallback_path")
+        if isinstance(measured, dict) else None,
+        "heuristic_proxy": proxy_block,
+        "sufficient": bool(proxy.get("sufficient")),
+        "components": proxy.get("components"),
+        "score_semantics": SCORE_SEMANTICS,
+    }
+
+
+def compute_buffer_capacity(
+    susceptibility: dict[str, Any], barrier: float | None
+) -> dict[str, Any]:
+    """Buffer capacity — measured market resistance where evidence permits.
+
+    With a measured/shrunk susceptibility estimate:
+
+        buffer = w_b*barrier + w_i*(1-chi) + w_s*stability
+
+    where stability maps the measured response-acceleration class
+    (DECELERATING -> 1.0: the market is absorbing each incremental dose;
+    STABLE/INSUFFICIENT -> 0.5; ACCELERATING -> 0.0).  Status: MEASURED
+    (level 1), SHRUNK (levels 2-4 or shrunk level 1).
+
+    Without measured data the old bounded inverse of the heuristic proxy
+    is retained — but explicitly as ``legacy_buffer_proxy`` semantics with
+    status PROXY (or UNAVAILABLE when even the proxy has no value).
+    """
+    chi = _finite_or_none(susceptibility.get("susceptibility"))
+    legacy = round(_clamp(1.0 - chi), 6) if chi is not None else None
+    if chi is None:
+        return {
+            "buffer_capacity": None,
+            "status": "UNAVAILABLE",
+            "estimator": "none",
+            "legacy_buffer_proxy": None,
+            "stability_input": None,
+        }
+    if not susceptibility.get("is_proxy"):
+        weights = DEFAULT_CONFIG["buffer_weights"]
+        accel = str(susceptibility.get("acceleration_class") or "INSUFFICIENT_DATA")
+        stability = {"RESPONSE_DECELERATING": 1.0, "RESPONSE_ACCELERATING": 0.0}.get(
+            accel, 0.5
+        )
+        b = _clamp(barrier if barrier is not None else 1.0)
+        buffer = _clamp(
+            float(weights["barrier"]) * b
+            + float(weights["inverse_chi"]) * (1.0 - chi)
+            + float(weights["stability"]) * stability
+        )
+        level = susceptibility.get("fallback_level")
+        status = (
+            "MEASURED"
+            if level == 1 and not susceptibility.get("is_shrunk")
+            else "SHRUNK"
+        )
+        return {
+            "buffer_capacity": round(buffer, 6),
+            "status": status,
+            "estimator": "barrier_invchi_stability_v1",
+            "stability_input": accel,
+            "legacy_buffer_proxy": legacy,
+        }
+    return {
+        "buffer_capacity": legacy,
+        "status": "PROXY",
+        "estimator": "legacy_bounded_inverse_proxy_v1",
+        "stability_input": None,
+        "legacy_buffer_proxy": legacy,
     }
 
 
@@ -905,49 +1126,101 @@ def compute_vmr(
     now: datetime,
     cfg: dict[str, Any],
 ) -> dict[str, Any]:
-    """Visible Market Recognition PROXY from reporting breadth + velocity.
+    """Visible Market Recognition — modular components, independence-aware.
 
-    Available recognition inputs today: how many independent source families
-    are reporting (breadth) and how fast events are arriving (velocity —
-    media-velocity analog).  Price extension, valuation repricing, analyst /
-    social attention and options crowding are NOT available; they are listed
-    in ``inputs_missing``.  LOW recognition with missing inputs is therefore
-    a LOW-CONFIDENCE claim, and the confidence field says so.
+    Components (each None when its data is unavailable):
+
+        PRICE      price-extension recognition from OHLCV enrichment
+                   (item["recognition_inputs"]["price_recognition"]) —
+                   INDEPENDENT of the evidence feed.
+        VOLUME     abnormal-volume recognition from OHLCV enrichment —
+                   INDEPENDENT of the evidence feed.
+        ATTENTION  source-family breadth (evidence-derived).
+        VELOCITY   event-arrival velocity (evidence-derived — OVERLAPS the
+                   readiness inputs; flagged, never hidden).
+
+    The score is computed only from available components, with weights
+    renormalized over what exists.  ``independent_component_count`` and
+    ``overlap_warning`` make the LRR/VMR coupling measurable so a large
+    Pre-Alpha Gap built purely on evidence-derived recognition cannot
+    masquerade as high confidence (see PAG confidence in the evaluate
+    path).  Valuation / analyst / options / social inputs remain missing
+    and listed.
     """
-    weights = cfg["vmr_weights"]
+    weights = cfg.get("vmr_component_weights", DEFAULT_CONFIG["vmr_component_weights"])
     missing = [
-        "price_extension", "valuation_repricing", "analyst_attention",
-        "media_velocity_external", "social_attention", "options_crowding",
+        "valuation_repricing", "analyst_attention",
+        "social_attention", "options_crowding",
     ]
-    if not events:
+    recognition_inputs = item.get("recognition_inputs")
+    recognition_inputs = recognition_inputs if isinstance(recognition_inputs, dict) else {}
+
+    components: dict[str, float | None] = {
+        "price": None, "volume": None, "attention": None, "velocity": None,
+    }
+    price = _finite_or_none(recognition_inputs.get("price_recognition"))
+    if price is not None:
+        components["price"] = round(_clamp(price), 6)
+    else:
+        missing.append("price_recognition_ohlcv")
+    volume = _finite_or_none(recognition_inputs.get("volume_recognition"))
+    if volume is not None:
+        components["volume"] = round(_clamp(volume), 6)
+    else:
+        missing.append("volume_recognition_ohlcv")
+
+    if events:
+        breadth_raw = _finite_or_none(item.get("cross_source_support_count")) or 0.0
+        distinct_sources = len({_source_family(e["source_name"], cfg) for e in events})
+        components["attention"] = round(_clamp(
+            max(breadth_raw, float(distinct_sources))
+            / max(float(cfg["vmr_breadth_saturation"]), 1.0)
+        ), 6)
+        window_h = 48.0
+        recent = [
+            e for e in events
+            if (now - e["observed_at"]).total_seconds() / 3600.0 <= window_h
+        ]
+        per_day = len(recent) * 24.0 / window_h
+        ref = max(_EPS, float(cfg["reference_events_per_day"]))
+        components["velocity"] = round(_clamp(per_day / (per_day + ref)), 6)
+
+    available = {k: v for k, v in components.items() if v is not None}
+    if not available:
         return {
             "vmr": None,
-            "estimator": "breadth_velocity_proxy_v1",
+            "estimator": "modular_recognition_v2",
             "is_proxy": True,
             "confidence": "none",
+            "components": components,
+            "independent_component_count": 0,
+            "overlap_warning": True,
             "inputs_missing": missing + ["event_velocity", "source_breadth"],
         }
-    breadth_raw = _finite_or_none(item.get("cross_source_support_count")) or 0.0
-    distinct_sources = len({_source_family(e["source_name"], cfg) for e in events})
-    breadth = _clamp(max(breadth_raw, float(distinct_sources)) / max(float(cfg["vmr_breadth_saturation"]), 1.0))
-    window_h = 48.0
-    recent = [e for e in events if (now - e["observed_at"]).total_seconds() / 3600.0 <= window_h]
-    per_day = len(recent) * 24.0 / window_h
-    ref = max(_EPS, float(cfg["reference_events_per_day"]))
-    velocity = _clamp(per_day / (per_day + ref))
-    vmr = _clamp(
-        float(weights.get("source_breadth", 0.5)) * breadth
-        + float(weights.get("event_velocity", 0.5)) * velocity
-    )
+    weight_sum = sum(float(weights.get(k, 0.0)) for k in available)
+    if weight_sum <= 0:
+        weight_sum = float(len(available))
+        vmr = sum(available.values()) / weight_sum
+    else:
+        vmr = sum(float(weights.get(k, 0.0)) * v for k, v in available.items()) / weight_sum
+    independent = sum(1 for k in ("price", "volume") if components[k] is not None)
+    overlap_warning = independent == 0
+    confidence = "moderate" if independent >= 1 else "low"
     return {
-        "vmr": round(vmr, 6),
-        "estimator": "breadth_velocity_proxy_v1",
+        "vmr": round(_clamp(vmr), 6),
+        "estimator": "modular_recognition_v2",
         "is_proxy": True,
-        "confidence": "low",
-        "components": {
-            "source_breadth": round(breadth, 6),
-            "event_velocity": round(velocity, 6),
+        "confidence": confidence,
+        "components": components,
+        "component_weights_used": {
+            k: round(float(weights.get(k, 0.0)) / weight_sum, 6) for k in available
         },
+        "independent_component_count": independent,
+        "overlap_warning": overlap_warning,
+        "overlap_note": (
+            "attention/velocity components derive from the same evidence "
+            "arrivals as readiness inputs"
+        ),
         "inputs_missing": missing,
     }
 
@@ -1176,6 +1449,34 @@ def classify_titration_state(
         trace.append(f"geometry=CONCAVE and vmr {vmr} >= {cfg['exhausting_vmr_min']}")
         return {"state": "EXHAUSTING", "rule_trace": trace}
 
+    # Measured-response states.  Both require a measured or shrunk
+    # susceptibility estimate (sample-gated upstream; fallback level <= 4)
+    # — the heuristic proxy can NEVER activate them.
+    susceptibility = metrics["susceptibility"]
+    chi_val = _finite_or_none(susceptibility.get("susceptibility"))
+    measured = (
+        not susceptibility.get("is_proxy")
+        and isinstance(susceptibility.get("fallback_level"), int)
+        and susceptibility["fallback_level"] <= 4
+        and chi_val is not None
+    )
+    buffer_block = metrics["buffer_capacity"]
+    buffer_val = _finite_or_none(buffer_block.get("buffer_capacity"))
+
+    if (
+        measured
+        and flow.get("threshold_newly_crossed")
+        and chi_val >= float(cfg["endpoint_chi_min"])
+        and (vmr is None or vmr < float(cfg["crowded_vmr_min"]))
+        and not ftr["triggered"]
+    ):
+        trace.append(
+            f"threshold newly crossed with measured chi {chi_val} >="
+            f" {cfg['endpoint_chi_min']} ({susceptibility.get('source')},"
+            f" n={susceptibility.get('sample_size')})"
+        )
+        return {"state": "ENDPOINT_CROSSING", "rule_trace": trace}
+
     if (
         lrr >= float(cfg["primed_lrr_min"])
         and pag is not None
@@ -1189,6 +1490,23 @@ def classify_titration_state(
             f" goldilocks {goldilocks} >= {cfg['primed_goldilocks_min']}"
         )
         return {"state": "PRIMED", "rule_trace": trace}
+
+    if (
+        measured
+        and str(susceptibility.get("acceleration_class")) == "RESPONSE_ACCELERATING"
+        and flow["loading"]
+        and barrier > 0.0
+        and buffer_val is not None
+        and buffer_block.get("status") in {"MEASURED", "SHRUNK"}
+        and buffer_val <= float(cfg["buffer_depleting_max"])
+        and not ftr["triggered"]
+    ):
+        trace.append(
+            f"measured response accelerating ({susceptibility.get('source')},"
+            f" n={susceptibility.get('sample_size')}), loading, buffer"
+            f" {buffer_val} <= {cfg['buffer_depleting_max']}, barrier {barrier} > 0"
+        )
+        return {"state": "BUFFER_DEPLETING", "rule_trace": trace}
 
     if lrr >= float(cfg["watch_lrr_min"]) and pag is not None and pag >= float(cfg["watch_pag_min"]):
         trace.append(f"lrr {lrr} >= {cfg['watch_lrr_min']} and pag {pag} >= {cfg['watch_pag_min']}")
@@ -1325,14 +1643,16 @@ def evaluate_market_titration(
     coherence = compute_coherence(item, active["per_source_mass"], cfg)
     concentration = compute_source_concentration(active["per_source_mass"])
     temperature = compute_temperature(item, events, now_dt, cfg)
-    susceptibility = compute_susceptibility(
+    proxy_susceptibility = compute_susceptibility(
         geometry, coherence["score"], events, now_dt, cfg
     )
-    buffer_capacity = compute_buffer_capacity(susceptibility.get("susceptibility"))
+    susceptibility = resolve_operational_susceptibility(item, proxy_susceptibility)
     barrier = compute_barrier(active["normalized"], cfg)
+    buffer_capacity = compute_buffer_capacity(susceptibility, barrier["barrier"])
     mcd = compute_minimum_catalytic_dose(
         barrier["barrier"], susceptibility.get("susceptibility"), cfg
     )
+    directional_disagreement = compute_directional_disagreement(events, now_dt, cfg)
     vmr = compute_vmr(item, events, now_dt, cfg)
     ftr = compute_ftr(temperature, concentration, item, coherence, sufficiency["score"], cfg)
     lrr = compute_lrr(
@@ -1341,8 +1661,21 @@ def evaluate_market_titration(
     )
     vmr_val = _finite_or_none(vmr.get("vmr"))
     pag = round(lrr["lrr"] - vmr_val, 6) if vmr_val is not None else None
+    # PAG confidence: a gap built purely on evidence-derived recognition
+    # (no independent price/volume component) is discounted and labelled.
+    if pag is None:
+        pag_confidence = "none"
+        pag_adjusted = None
+    elif vmr.get("overlap_warning"):
+        pag_confidence = "low_feature_overlap"
+        pag_adjusted = round(pag * float(cfg.get("pag_overlap_penalty", 0.5)), 6)
+    else:
+        pag_confidence = str(vmr.get("confidence", "low"))
+        pag_adjusted = pag
     free_energy = compute_free_energy(
-        lrr["lrr"], pag if pag is not None else 0.0, temperature, sufficiency["score"], cfg
+        lrr["lrr"],
+        pag_adjusted if pag_adjusted is not None else 0.0,
+        temperature, sufficiency["score"], cfg,
     )
 
     metrics: dict[str, Any] = {
@@ -1360,6 +1693,9 @@ def evaluate_market_titration(
         "lrr": lrr,
         "vmr": vmr,
         "pre_alpha_gap": pag,
+        "pre_alpha_gap_adjusted": pag_adjusted,
+        "pre_alpha_gap_confidence": pag_confidence,
+        "directional_disagreement": directional_disagreement,
         "false_transition_risk": ftr,
         "free_energy": free_energy,
         "data_sufficiency": sufficiency,
@@ -1411,11 +1747,20 @@ def compact_titration_fields(payload: dict[str, Any]) -> dict[str, Any]:
             "goldilocks_quality": temperature.get("goldilocks_quality"),
             "activation_barrier": (payload.get("barrier") or {}).get("barrier"),
             "susceptibility_proxy": (payload.get("susceptibility") or {}).get("susceptibility"),
+            "susceptibility_source": (payload.get("susceptibility") or {}).get("source"),
+            "susceptibility_sample_size": (payload.get("susceptibility") or {}).get("sample_size"),
             "buffer_capacity_proxy": (payload.get("buffer_capacity") or {}).get("buffer_capacity"),
+            "buffer_status": (payload.get("buffer_capacity") or {}).get("status"),
             "mcd_normalized": (payload.get("minimum_catalytic_dose") or {}).get("mcd_normalized"),
             "lrr": (payload.get("lrr") or {}).get("lrr"),
             "vmr_proxy": (payload.get("vmr") or {}).get("vmr"),
+            "vmr_confidence": (payload.get("vmr") or {}).get("confidence"),
+            "vmr_independent_components": (payload.get("vmr") or {}).get(
+                "independent_component_count"
+            ),
             "pre_alpha_gap": payload.get("pre_alpha_gap"),
+            "pre_alpha_gap_adjusted": payload.get("pre_alpha_gap_adjusted"),
+            "pre_alpha_gap_confidence": payload.get("pre_alpha_gap_confidence"),
             "free_energy_proxy": (payload.get("free_energy") or {}).get("free_energy"),
             "false_transition_risk": (payload.get("false_transition_risk") or {}).get("ftr"),
             "data_sufficiency": (payload.get("data_sufficiency") or {}).get("level"),
