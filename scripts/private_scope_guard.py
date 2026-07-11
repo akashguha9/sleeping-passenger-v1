@@ -264,6 +264,11 @@ EXPLICIT_IN_SCOPE: frozenset[str] = frozenset({
     "causal_event_graph.py",
     "entity_security_resolver.py",
     "narrative_cascade_engine.py",
+    # Defensive-integrity sprint: read-only functional integrity probe
+    # (schema/config/engine-determinism/clock-and-db_path-discipline/scope
+    # guard sweep) wired to GET /api/system/integrity.  Advisory-only,
+    # never writes; see docs/SYSTEM_INTEGRITY_PROBE.md.
+    "system_integrity_probe.py",
 })
 
 # Modules deliberately marked OUT_OF_SCOPE inside ``scripts/``.  This

@@ -3166,6 +3166,25 @@ def get_titration_stability(_auth: None = Depends(require_api_token_for_reads)) 
     return section
 
 
+@app.get("/api/system/integrity")
+def get_system_integrity(_auth: None = Depends(require_api_token_for_reads)) -> dict:
+    """Functional integrity sweep of the analytical spine — read-only.
+
+    Distinct from /health (liveness) and /health/full (security posture):
+    this walks schema tables, additive-migration sentinels, config
+    validity (titration / outcome contract / causal graph), engine
+    determinism (same input twice → identical output), honest cascade
+    degradation, clock-injection and db_path-injection discipline
+    ratchets, and the scope/boundary guards.  Never writes; the database
+    is opened read-only and never created.  Advisory-only.
+    """
+    try:
+        from scripts.system_integrity_probe import run_system_integrity_probe
+    except ModuleNotFoundError:  # pragma: no cover - script-style fallback
+        from system_integrity_probe import run_system_integrity_probe  # type: ignore[no-redef]
+    return run_system_integrity_probe()
+
+
 @app.get("/api/score-calibration")
 def get_score_calibration(_auth: None = Depends(require_api_token_for_reads)) -> dict:
     """Honest calibration status for the signal scores.

@@ -122,6 +122,9 @@ _SUPPORT_EXPLICIT: frozenset[str] = frozenset({
     # Narrative Cascade sprint: deterministic entity->ticker resolution
     # ladder over the securities master/alias tables (read-only) -> SUPPORT.
     "entity_security_resolver",
+    # Defensive-integrity sprint: read-only system integrity probe
+    # (operator diagnostics; never writes; not on the signal path) -> SUPPORT.
+    "system_integrity_probe",
 })
 
 

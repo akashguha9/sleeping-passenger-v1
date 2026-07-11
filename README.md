@@ -85,6 +85,7 @@ Open http://localhost:3000.
 | [docs/MARKET_TITRATION_ENGINE.md](docs/MARKET_TITRATION_ENGINE.md) | Pre-alpha titration layer: evidence decay, readiness vs recognition, titration states |
 | [docs/TITRATION_RESPONSE_CALIBRATION.md](docs/TITRATION_RESPONSE_CALIBRATION.md) | Evidence→response measurement: transition outcomes, measured susceptibility, refusal-first calibration |
 | [docs/NARRATIVE_CASCADE.md](docs/NARRATIVE_CASCADE.md) | Narrative Cascade: prediction-market impulses, linguistic states, curated causal propagation, downstream candidates |
+| [docs/SYSTEM_INTEGRITY_PROBE.md](docs/SYSTEM_INTEGRITY_PROBE.md) | Read-only functional integrity sweep: schema, configs, engine determinism, clock/db_path discipline ratchets, scope guards |
 | [docs/AI_OUTPUT_VALIDATION.md](docs/AI_OUTPUT_VALIDATION.md) | AI payload schema, malformed handling, safety overrides |
 | [docs/LIVE_SIGNALS_REFRESH_MODEL.md](docs/LIVE_SIGNALS_REFRESH_MODEL.md) | 6-hour refresh model and source-health contract |
 | [docs/LIVE_SIGNALS_SCHEDULING.md](docs/LIVE_SIGNALS_SCHEDULING.md) | Windows Task Scheduler / cron recipes |
