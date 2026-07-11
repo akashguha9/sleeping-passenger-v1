@@ -234,6 +234,12 @@ EXPLICIT_IN_SCOPE: frozenset[str] = frozenset({
     # operator_permission_guard.  In-scope record-keeping maintenance — it
     # never touches signal_events, brokers, or execution.
     "reset_local_logs.py",
+    # Market Titration sprint: pure advisory pre-alpha diagnostics wired
+    # into the Signal Inbox (/signals, /api/titration/summary) plus the
+    # titration-at-decision journal snapshot.  Advisory-only, no broker
+    # surface; see docs/MARKET_TITRATION_ENGINE.md.
+    "market_titration_engine.py",
+    "titration_snapshot_attach.py",
 })
 
 # Modules deliberately marked OUT_OF_SCOPE inside ``scripts/``.  This

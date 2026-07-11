@@ -221,6 +221,14 @@ class ManualTradeLog:
     operator_heat_at_decision: float | None = None
     gallardo_block_at_decision: bool = False
     preflight_state_at_decision: str = ""
+    # Market-Titration-at-decision snapshot (Market Titration sprint).
+    # Optional record-only fields capturing the titration state/scores when
+    # the operator decided.  ''/None means "no snapshot captured".  These
+    # never grant execution permission; they exist so reconciled outcomes
+    # can later be joined against the titration state for calibration.
+    titration_state_at_decision: str = ""
+    titration_pre_alpha_gap_at_decision: float | None = None
+    titration_lrr_at_decision: float | None = None
     # Sprint 7B.2 — Paper-trade ledger support.  trade_mode classifies a
     # row as 'PAPER' (rehearsal/simulation), 'REAL_MANUAL' (operator-entered
     # real trade — record-keeping only), or 'UNKNOWN'.  Storing this NEVER
@@ -486,6 +494,60 @@ def _decorate_with_reactor_diagnostics(item: dict[str, Any]) -> dict[str, Any]:
     return _stamp_safety(annotated)
 
 
+_TITRATION_DEFAULT_FIELDS: dict[str, Any] = {
+    "titration_state": "INSUFFICIENT_DATA",
+    "titration_available": False,
+    "titration": None,
+}
+
+
+def _decorate_with_titration_state(item: dict[str, Any]) -> dict[str, Any]:
+    """Attach Market Titration advisory fields to an inbox item.
+
+    Pure, defensive: any import or evaluation failure leaves the item with
+    the documented default fields rather than raising.  The titration state
+    is advisory-only (a diagnostic about evidence accumulation vs decay,
+    readiness vs recognition); this function re-stamps the canonical safety
+    invariants after enrichment so it can NEVER grant execution permission.
+    """
+    annotated = dict(item)
+    for key, default in _TITRATION_DEFAULT_FIELDS.items():
+        annotated.setdefault(key, default)
+
+    def _stamp_safety(d: dict[str, Any]) -> dict[str, Any]:
+        d["advisory_status"] = _ADVISORY_STATUS
+        d["execution_gate"] = _EXECUTION_GATE
+        d["broker_api_called"] = False
+        d["ai_execution_count"] = _AI_EXECUTION_COUNT
+        d["execution_permission"] = False
+        d["can_execute"] = False
+        return d
+
+    try:
+        try:
+            from scripts.market_titration_engine import (
+                compact_titration_fields,
+                evaluate_market_titration,
+            )
+        except ModuleNotFoundError:
+            from market_titration_engine import (  # type: ignore[no-redef]
+                compact_titration_fields,
+                evaluate_market_titration,
+            )
+    except Exception:
+        return _stamp_safety(annotated)
+
+    try:
+        payload = evaluate_market_titration(item)
+        compact = compact_titration_fields(payload)
+        if isinstance(compact, dict):
+            annotated.update(compact)
+    except Exception:
+        return _stamp_safety(annotated)
+
+    return _stamp_safety(annotated)
+
+
 def _decorate_inbox_diagnostics(item: dict[str, Any]) -> dict[str, Any]:
     """Attach signal-sensitivity and toxic-quarantine diagnostics to an inbox item.
 
@@ -558,6 +620,11 @@ def _decorate_inbox_diagnostics(item: dict[str, Any]) -> dict[str, Any]:
     # quarantine diagnostics so the reactor sees both the raw priority and
     # the contamination score derived just above.
     annotated = _decorate_with_reactor_diagnostics(annotated)
+
+    # Market Titration enrichment (evidence accumulation vs decay, readiness
+    # vs recognition, titration state).  Layered last so it can see the
+    # contamination / chaos-sensitivity diagnostics computed above.
+    annotated = _decorate_with_titration_state(annotated)
     return annotated
 
 
@@ -673,6 +740,16 @@ def list_inbox_items(
         if it.get("reactor_available") is False:
             reactor_unavailable_count += 1
 
+    # Titration-state aggregate counts so the inbox surface can show
+    # "2 PRIMED, 3 LOADING, 1 CROWDED" at a glance.  Advisory-only.
+    titration_state_counts: dict[str, int] = {}
+    titration_unavailable_count = 0
+    for it in items:
+        t_state = str(it.get("titration_state") or "INSUFFICIENT_DATA")
+        titration_state_counts[t_state] = titration_state_counts.get(t_state, 0) + 1
+        if it.get("titration_available") is False:
+            titration_unavailable_count += 1
+
     # Persistence truth model (see docs/PERSISTENCE_MODEL.md):
     #   sqlite     -> canonical
     #   anything else -> not canonical; UI should surface a cue
@@ -698,6 +775,8 @@ def list_inbox_items(
         "reactor_state_counts": reactor_state_counts,
         "reactor_gallardo_block_count": reactor_gallardo_block_count,
         "reactor_unavailable_count": reactor_unavailable_count,
+        "titration_state_counts": titration_state_counts,
+        "titration_unavailable_count": titration_unavailable_count,
         "advisory_status": _ADVISORY_STATUS,
         "human_review_required": True,
         "execution_mode": _EXECUTION_MODE,
@@ -1118,6 +1197,27 @@ def _safe_unit_score(value: Any) -> float | None:
     return n
 
 
+def _safe_signed_unit_score(value: Any) -> float | None:
+    """API-boundary normaliser for signed scores in [-1, 1].
+
+    Used for the titration pre-alpha gap, which is legitimately negative
+    when the recognition proxy exceeds latent readiness.  Anything outside
+    [-1, 1] or non-numeric returns None so bad payloads cannot corrupt the
+    calibration snapshot.
+    """
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        n = float(value)
+    except (TypeError, ValueError):
+        return None
+    if n != n:
+        return None
+    if n < -1.0 or n > 1.0:
+        return None
+    return n
+
+
 def _safe_bool(value: Any) -> bool:
     """Coerce any truthy/falsy payload to a strict bool. None -> False."""
     if value is None:
@@ -1221,6 +1321,9 @@ def log_manual_trade(
     operator_heat_at_decision: float | None = None,
     gallardo_block_at_decision: bool | None = None,
     preflight_state_at_decision: str = "",
+    titration_state_at_decision: str = "",
+    titration_pre_alpha_gap_at_decision: float | None = None,
+    titration_lrr_at_decision: float | None = None,
     trade_mode: str = "REAL_MANUAL",
     currency: str = "",
     ai_model_used: str = "",
@@ -1493,6 +1596,47 @@ def log_manual_trade(
         if "gallardo_block_at_decision" in _attached:
             gallardo_block_at_decision = _attached["gallardo_block_at_decision"]
 
+    # Auto-attach Market-Titration-at-decision snapshot when the caller did
+    # not supply one.  Same invariants as the reactor attach above: explicit
+    # values win, absence of titration context leaves the row empty, and no
+    # execution permission is ever granted.  See
+    # scripts/titration_snapshot_attach.py.
+    _explicit_titration_kwargs = {
+        "titration_state_at_decision": titration_state_at_decision,
+        "titration_pre_alpha_gap_at_decision": titration_pre_alpha_gap_at_decision,
+        "titration_lrr_at_decision": titration_lrr_at_decision,
+    }
+    try:
+        try:
+            from scripts.titration_snapshot_attach import (
+                ATTACH_FROM_SIGNAL as _T_ATTACH_FROM_SIGNAL,
+                maybe_attach_titration_snapshot,
+            )
+        except ModuleNotFoundError:  # pragma: no cover - script-style fallback
+            from titration_snapshot_attach import (  # type: ignore[no-redef]
+                ATTACH_FROM_SIGNAL as _T_ATTACH_FROM_SIGNAL,
+                maybe_attach_titration_snapshot,
+            )
+        titration_attach_source, _t_attached = maybe_attach_titration_snapshot(
+            _explicit_titration_kwargs, event_id=str(event_id)
+        )
+    except Exception:
+        titration_attach_source = "unavailable"
+        _t_attached = {}
+        _T_ATTACH_FROM_SIGNAL = "attached_from_signal"
+
+    if titration_attach_source == _T_ATTACH_FROM_SIGNAL:
+        titration_state_at_decision = _t_attached.get(
+            "titration_state_at_decision", titration_state_at_decision
+        )
+        titration_pre_alpha_gap_at_decision = _t_attached.get(
+            "titration_pre_alpha_gap_at_decision",
+            titration_pre_alpha_gap_at_decision,
+        )
+        titration_lrr_at_decision = _t_attached.get(
+            "titration_lrr_at_decision", titration_lrr_at_decision
+        )
+
     trade = ManualTradeLog(
         trade_id=f"MT_{uuid.uuid4().hex[:12]}",
         event_id=str(event_id),
@@ -1527,6 +1671,11 @@ def log_manual_trade(
         operator_heat_at_decision=_safe_unit_score(operator_heat_at_decision),
         gallardo_block_at_decision=_safe_bool(gallardo_block_at_decision),
         preflight_state_at_decision=_safe_journal_text(preflight_state_at_decision),
+        titration_state_at_decision=_safe_journal_text(titration_state_at_decision),
+        titration_pre_alpha_gap_at_decision=_safe_signed_unit_score(
+            titration_pre_alpha_gap_at_decision
+        ),
+        titration_lrr_at_decision=_safe_unit_score(titration_lrr_at_decision),
         trade_mode=_safe_trade_mode(trade_mode),
         # Stamp Manual Trade Log provenance on every row created through
         # this API path.  This is what scopes the Reconciliation queue and
@@ -1572,6 +1721,11 @@ def log_manual_trade(
                 operator_heat_at_decision=trade.operator_heat_at_decision,
                 gallardo_block_at_decision=trade.gallardo_block_at_decision,
                 preflight_state_at_decision=trade.preflight_state_at_decision,
+                titration_state_at_decision=trade.titration_state_at_decision,
+                titration_pre_alpha_gap_at_decision=(
+                    trade.titration_pre_alpha_gap_at_decision
+                ),
+                titration_lrr_at_decision=trade.titration_lrr_at_decision,
                 trade_mode=trade.trade_mode,
                 created_via=trade.created_via,
                 currency=trade.currency,
@@ -1624,6 +1778,12 @@ def log_manual_trade(
         # provided_explicitly | attached_from_signal | unavailable.
         # Advisory-only — never affects execution permission.
         "reactor_snapshot_source": attach_source,
+        "titration_state_at_decision": trade.titration_state_at_decision,
+        "titration_pre_alpha_gap_at_decision": (
+            trade.titration_pre_alpha_gap_at_decision
+        ),
+        "titration_lrr_at_decision": trade.titration_lrr_at_decision,
+        "titration_snapshot_source": titration_attach_source,
         "trade_mode": trade.trade_mode,
         "ai_model_used": trade.ai_model_used,
         # Paper-trade safety stamps. For PAPER rows: paper_trade_only=True,

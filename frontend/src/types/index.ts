@@ -65,7 +65,56 @@ export interface ReactorDiagnostics {
   reactor_available?: boolean;
 }
 
-export interface InboxItem extends ReactorDiagnostics {
+// Market Titration states — canonical enum mirroring
+// scripts/market_titration_engine.py TITRATION_STATES. INSUFFICIENT_DATA is
+// the safe default when the backend hasn't computed a titration verdict.
+export type TitrationState =
+  | 'INSUFFICIENT_DATA'
+  | 'FALSE_TRANSITION_RISK'
+  | 'CROWDED'
+  | 'EXHAUSTING'
+  | 'PRIMED'
+  | 'PRE_ALPHA_WATCH'
+  | 'LOADING'
+  | 'NO_EDGE'
+  | 'INERT';
+
+// Compact titration block attached to inbox items by the backend
+// (`scripts.signal_inbox_api._decorate_with_titration_state`).  All scores
+// are bounded heuristics — the wire contract says so explicitly via
+// score_semantics — and never calibrated probabilities.
+export interface TitrationCompact {
+  active_evidence?: number | null;
+  net_accumulation?: number | null;
+  loading?: boolean | null;
+  geometry?: string | null;
+  temperature?: number | null;
+  temperature_regime?: string | null;
+  goldilocks_quality?: number | null;
+  activation_barrier?: number | null;
+  susceptibility_proxy?: number | null;
+  buffer_capacity_proxy?: number | null;
+  mcd_normalized?: number | null;
+  lrr?: number | null;
+  vmr_proxy?: number | null;
+  pre_alpha_gap?: number | null;
+  free_energy_proxy?: number | null;
+  false_transition_risk?: number | null;
+  data_sufficiency?: string | null;
+  supporting_factors?: string[];
+  penalties?: string[];
+  score_semantics?: string;
+  scoring_version?: string;
+  schema_version?: string;
+}
+
+export interface TitrationDiagnostics {
+  titration_state?: TitrationState | string;
+  titration_available?: boolean;
+  titration?: TitrationCompact | null;
+}
+
+export interface InboxItem extends ReactorDiagnostics, TitrationDiagnostics {
   event_id: string;
   ticker: string;
   signal_state: string;

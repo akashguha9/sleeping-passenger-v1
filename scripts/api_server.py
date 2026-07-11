@@ -3020,6 +3020,90 @@ def get_business_value_summary(_auth: None = Depends(require_api_token_for_reads
     return _read_artifact_envelope("business_value")
 
 
+@app.get("/api/titration/summary")
+def get_titration_summary(
+    limit: int = 100, hours: int = 72,
+    _auth: None = Depends(require_api_token_for_reads),
+) -> dict:
+    """Market Titration overview for the current Signal Inbox.
+
+    Aggregates the advisory titration state (evidence accumulation vs
+    decay, latent readiness vs recognition proxy, pre-alpha gap) across
+    inbox items and lists the highest-gap candidates.  Advisory-only —
+    scores are heuristic bounded scores, never calibrated probabilities,
+    and nothing here authorizes execution.
+    """
+    from datetime import datetime, timezone
+
+    limit = clamp_limit(limit, default=100, ceiling=500)
+    hours = clamp_limit(hours, default=72, ceiling=24 * 30)
+    try:
+        from scripts.market_titration_engine import (
+            RESERVED_STATES,
+            SCORE_SEMANTICS,
+            TITRATION_SCHEMA_VERSION,
+            TITRATION_SCORING_VERSION,
+            TITRATION_STATES,
+        )
+    except ModuleNotFoundError:  # pragma: no cover - script-style fallback
+        from market_titration_engine import (  # type: ignore[no-redef]
+            RESERVED_STATES,
+            SCORE_SEMANTICS,
+            TITRATION_SCHEMA_VERSION,
+            TITRATION_SCORING_VERSION,
+            TITRATION_STATES,
+        )
+    inbox = list_inbox_items(limit=limit, hours=hours)
+    items = inbox.get("items") if isinstance(inbox.get("items"), list) else []
+
+    def _pag(it: dict) -> float:
+        t = it.get("titration") or {}
+        val = t.get("pre_alpha_gap")
+        try:
+            f = float(val)
+        except (TypeError, ValueError):
+            return float("-inf")
+        return f if f == f else float("-inf")
+
+    ranked = sorted(
+        (it for it in items if isinstance(it, dict) and it.get("titration_available")),
+        key=_pag,
+        reverse=True,
+    )
+    top = [
+        {
+            "event_id": it.get("event_id"),
+            "ticker": it.get("ticker"),
+            "titration_state": it.get("titration_state"),
+            "titration": it.get("titration"),
+        }
+        for it in ranked[:10]
+        if _pag(it) != float("-inf")
+    ]
+    return {
+        "operation": "titration_summary",
+        "item_count": len(items),
+        "titration_state_counts": inbox.get("titration_state_counts", {}),
+        "titration_unavailable_count": inbox.get("titration_unavailable_count", 0),
+        "top_pre_alpha_gap_candidates": top,
+        "operational_states": list(TITRATION_STATES),
+        "reserved_states_not_operational": list(RESERVED_STATES),
+        "score_semantics": SCORE_SEMANTICS,
+        "schema_version": TITRATION_SCHEMA_VERSION,
+        "scoring_version": TITRATION_SCORING_VERSION,
+        "freshness_window_hours": int(hours),
+        "truth_source": inbox.get("truth_source"),
+        "canonical": inbox.get("canonical"),
+        "advisory_status": _ADVISORY_STATUS,
+        "human_review_required": True,
+        "execution_mode": _EXECUTION_MODE,
+        "ai_execution_count": _AI_EXECUTION_COUNT,
+        "generated_at": datetime.now(timezone.utc)
+        .replace(microsecond=0)
+        .isoformat(),
+    }
+
+
 @app.get("/api/score-calibration")
 def get_score_calibration(_auth: None = Depends(require_api_token_for_reads)) -> dict:
     """Honest calibration status for the signal scores.

@@ -509,6 +509,15 @@ def _aggregate_group(
         "duplicate_suppressed_count": max(0, event_count - 1),
         "cross_source_support_count": int(cross_source_support),
         "aggregated_event_ids": capped_event_ids,
+        # Per-event observation provenance for time-decay engines (Market
+        # Titration).  Oldest-first, aligned lists, capped like event_ids so
+        # payload size stays bounded.  Advisory metadata only.
+        "event_timestamps": [
+            str(r.get("fetched_at", "") or "") for r in reversed(sorted_rows)
+        ][:50],
+        "event_sources": [
+            str(r.get("source_name", "") or "") for r in reversed(sorted_rows)
+        ][:50],
         "promotion_reason": _promotion_reason(
             source_name, event_count, cross_source_support, age_hours
         ),

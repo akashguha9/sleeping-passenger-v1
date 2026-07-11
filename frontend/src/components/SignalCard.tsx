@@ -8,6 +8,7 @@ import { AdvisoryOnlyBadge } from './AdvisoryOnlyBadge';
 import { NextHumanActionBadge } from './NextHumanActionBadge';
 import { GateDetailsPanel } from './GateDetailsPanel';
 import { ReactorBadge } from './ReactorBadge';
+import { TitrationBadge } from './TitrationBadge';
 import { deriveNextHumanAction } from '@/lib/nextHumanAction';
 
 const STATUS_STYLE: Record<string, string> = {
@@ -39,6 +40,10 @@ export function SignalCard({ item }: Props) {
               state={item.reactor_state}
               gallardoBlock={item.gallardo_block}
               reactorAvailable={item.reactor_available}
+            />
+            <TitrationBadge
+              state={item.titration_state}
+              preAlphaGap={item.titration?.pre_alpha_gap}
             />
           </div>
           <div className="flex items-center gap-2 shrink-0">

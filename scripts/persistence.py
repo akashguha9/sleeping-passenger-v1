@@ -443,6 +443,13 @@ def _additive_migrations(conn: sqlite3.Connection) -> None:
         ("manual_trades", "operator_heat_at_decision", "REAL"),
         ("manual_trades", "gallardo_block_at_decision", "INTEGER NOT NULL DEFAULT 0"),
         ("manual_trades", "preflight_state_at_decision", "TEXT NOT NULL DEFAULT ''"),
+        # Market-Titration-at-decision snapshot columns. Same contract as the
+        # reactor snapshot: optional, NULL/'' means "no snapshot captured",
+        # calibration joins on these later, and none of them grant execution
+        # permission — pure record-keeping for hindsight calibration.
+        ("manual_trades", "titration_state_at_decision", "TEXT NOT NULL DEFAULT ''"),
+        ("manual_trades", "titration_pre_alpha_gap_at_decision", "REAL"),
+        ("manual_trades", "titration_lrr_at_decision", "REAL"),
         # Sprint 7B.2 — Paper-trade ledger support.  ``trade_mode`` is
         # additive; legacy rows default to 'REAL_MANUAL' (operator-entered
         # hand record of real activity), paper imports set 'PAPER'.  This
@@ -879,6 +886,9 @@ def insert_manual_trade(
     operator_heat_at_decision: float | None = None,
     gallardo_block_at_decision: bool | int | None = None,
     preflight_state_at_decision: str = "",
+    titration_state_at_decision: str = "",
+    titration_pre_alpha_gap_at_decision: float | None = None,
+    titration_lrr_at_decision: float | None = None,
     trade_mode: str = "REAL_MANUAL",
     created_via: str = "",
     currency: str = "",
@@ -923,6 +933,26 @@ def insert_manual_trade(
     fission = _normalize_unit_score(fission_branch_clarity_at_decision)
     heat = _normalize_unit_score(operator_heat_at_decision)
     gallardo = 1 if gallardo_block_at_decision else 0
+
+    # Titration-at-decision snapshot normalization.  LRR is a unit score;
+    # the pre-alpha gap is legitimately signed on [-1, 1] so it gets its
+    # own bound instead of the unit clamp (a negative gap is real
+    # information — recognition exceeding readiness — not an error).
+    titration_state_norm = str(titration_state_at_decision or "").strip()[:64]
+    titration_lrr = _normalize_unit_score(titration_lrr_at_decision)
+
+    def _normalize_signed_unit(value: Any) -> float | None:
+        if value is None or isinstance(value, bool):
+            return None
+        try:
+            x = float(value)
+        except (TypeError, ValueError):
+            return None
+        if x != x or x in (float("inf"), float("-inf")):
+            return None
+        return min(1.0, max(-1.0, x))
+
+    titration_pag = _normalize_signed_unit(titration_pre_alpha_gap_at_decision)
 
     # Normalise trade_mode at the persistence boundary so hostile / typo
     # values can never corrupt calibration filters.  Unknown values fall
@@ -1034,6 +1064,15 @@ def insert_manual_trade(
         else:
             cols_sql = base_cols
             vals = base_vals
+        has_titration_cols = "titration_state_at_decision" in cols
+        if has_titration_cols:
+            cols_sql = (
+                cols_sql
+                + ", titration_state_at_decision,"
+                "   titration_pre_alpha_gap_at_decision,"
+                "   titration_lrr_at_decision"
+            )
+            vals = vals + (titration_state_norm, titration_pag, titration_lrr)
         if has_trade_mode:
             cols_sql = cols_sql + ", trade_mode"
             vals = vals + (mode_norm,)
