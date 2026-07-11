@@ -366,12 +366,20 @@ def _get_chart_structure(
     source_event_id: str | None = None,
     limit: int = 100,
     db_path=None,
+    now: _dt.datetime | None = None,
 ) -> dict:
     """Fetch market_data signal events for *symbol*, adapt to candles, run engine.
 
     Returns an advisory-only chart structure report. Never places orders.
     Safety invariants are always present in the returned dict.
     Importable without FastAPI — no web framework dependency.
+
+    ``now`` is the evaluation clock for the freshness gate and the
+    price-truth quote-age calculation.  Both downstream layers
+    (``market_data_freshness.evaluate`` and ``compute_price_truth``)
+    already accept an injected clock; threading it through here makes
+    the whole response deterministic for replay and testing.  ``None``
+    (the default) keeps the production wall-clock behaviour.
     """
     _safe_base = {
         "advisory_status": _ADVISORY_STATUS,
@@ -493,7 +501,9 @@ def _get_chart_structure(
                 f"python scripts/backfill_global_ohlcv.py --symbols {canonical_symbol} --period max --interval 1d --write"
             )
 
-            freshness = _freshness.evaluate(candles=[], source_kind=source_kind)
+            freshness = _freshness.evaluate(
+                candles=[], source_kind=source_kind, now=now,
+            )
             display_cur, cur_source = _resolve_display_currency(
                 canonical_symbol, None, security_meta,
             )
@@ -537,15 +547,33 @@ def _get_chart_structure(
         # frontend from ever seeing a normal "TRENDING_UP" verdict over
         # 2004 candles.
         freshness = _freshness.evaluate(
-            candles=selected_candles, source_kind=source_kind,
+            candles=selected_candles, source_kind=source_kind, now=now,
         )
         if freshness.get("freshness_gate") == _freshness.BLOCK:
+            # Degraded response contract: the advisory verdict and the
+            # report tiles are suppressed (report=None), but currency
+            # resolution and the latest validated daily close do NOT
+            # depend on data age — keep them present so the frontend
+            # never loses structural fields because the dataset is old.
+            # (The NO_LOCAL_OHLCV branch already carries the same
+            # currency fields; this brings the stale branch to parity.)
+            stale_display_cur, stale_cur_source = _resolve_display_currency(
+                symbol_upper, None, security_meta,
+            )
+            stale_latest_close = selected_candles[-1].get("close")
             return _stale_safe_response(
                 base=_safe_base,
                 symbol=symbol_upper,
                 candle_count=len(selected_candles),
                 freshness=freshness,
                 linked_event_id=linked_event_id,
+                extra={
+                    "display_currency": stale_display_cur,
+                    "currency_source": stale_cur_source,
+                    "latest_daily_close": stale_latest_close,
+                    "latest_daily_close_currency": stale_display_cur,
+                    "security": security_meta,
+                },
             )
 
         report = analyze_chart_structure(
@@ -593,6 +621,7 @@ def _get_chart_structure(
                 daily_close=daily_close,
                 daily_candle_utc=canonical_latest_utc,
                 freshness_latest_utc=freshness_latest_utc,
+                now=now,
             )
         except Exception as exc:  # pragma: no cover - defensive
             price_truth = {

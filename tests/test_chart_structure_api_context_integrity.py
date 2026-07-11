@@ -23,6 +23,7 @@ Yahoo quote fetcher so no network or DB is touched.
 """
 from __future__ import annotations
 
+import datetime as _dt
 import sys
 from pathlib import Path
 from unittest.mock import patch
@@ -32,6 +33,18 @@ import pytest
 _REPO = Path(__file__).resolve().parents[1]
 if str(_REPO) not in sys.path:
     sys.path.insert(0, str(_REPO))
+
+# Deterministic evaluation clock.  The candle fixtures below are pinned to
+# 2026-05-10..14 and the stubbed quote to 2026-05-15 — data that was FRESH
+# when this file was authored but that the wall-clock-anchored freshness
+# gate reclassifies as STALE after 2026-06-13 and ANCIENT after 2026-08-12,
+# silently flipping every response into the stale-blocked branch.  These
+# tests are about the response *contract* (single source of truth,
+# currency resolution, price-truth divergence), not about data ageing, so
+# they evaluate at a frozen instant one day after the latest fixture
+# candle.  Ageing behaviour is covered by test_market_data_freshness.py
+# (relative dates) and by the stale-branch test at the bottom of this file.
+_NOW = _dt.datetime(2026, 5, 15, 16, 0, 0, tzinfo=_dt.timezone.utc)
 
 
 def _ev(event_id: str, ts: str, *, close: float, high: float | None = None,
@@ -100,7 +113,7 @@ def test_freshness_and_summary_agree_on_latest_candle_utc():
     ]
 
     with _patch_persistence(events), _stub_quote_fetcher(price=115.0):
-        resp = _get_chart_structure("TEST", limit=10)
+        resp = _get_chart_structure("TEST", limit=10, now=_NOW)
 
     expected = "2026-05-14T16:00:00Z"
     assert resp["latest_candle_utc"] == expected
@@ -135,7 +148,7 @@ def test_invalid_latest_candle_is_dropped_before_freshness_sees_it():
         },
     ]
     with _patch_persistence(events), _stub_quote_fetcher(price=101.0):
-        resp = _get_chart_structure("TEST", limit=10)
+        resp = _get_chart_structure("TEST", limit=10, now=_NOW)
 
     # Both layers report 5-13 because the 5-14 row was rejected.  No
     # internal mismatch is ever surfaced because the data the freshness
@@ -160,7 +173,7 @@ def test_dedupe_keeps_latest_per_date():
         _ev("ohlcv_TEST_14_pm", "2026-05-14T16:00:00Z", close=110.0),
     ]
     with _patch_persistence(events), _stub_quote_fetcher(price=110.5):
-        resp = _get_chart_structure("TEST", limit=10)
+        resp = _get_chart_structure("TEST", limit=10, now=_NOW)
 
     assert resp["latest_candle_utc"] == "2026-05-14T16:00:00Z"
     assert resp["report"]["summary"]["latest_close"] == 110.0
@@ -177,7 +190,7 @@ def test_currency_from_provider_wins():
 
     events = [_ev("ohlcv_TEST_14", "2026-05-14T16:00:00Z", close=100.0)]
     with _patch_persistence(events), _stub_quote_fetcher(price=101.0, currency="JPY"):
-        resp = _get_chart_structure("ABCXYZ", limit=5)
+        resp = _get_chart_structure("ABCXYZ", limit=5, now=_NOW)
 
     assert resp["display_currency"] == "JPY"
     assert resp["currency_source"] == "PROVIDER"
@@ -190,7 +203,7 @@ def test_currency_suffix_fallback_inr_for_ns():
 
     events = [_ev("ohlcv_TEST_14", "2026-05-14T16:00:00Z", close=1789.20)]
     with _patch_persistence(events), _stub_quote_fetcher(price=1905.40, currency=""):
-        resp = _get_chart_structure("BHARTIARTL.NS", limit=5)
+        resp = _get_chart_structure("BHARTIARTL.NS", limit=5, now=_NOW)
 
     assert resp["display_currency"] == "INR"
     assert resp["currency_source"] in {"MARKET_METADATA", "SYMBOL_SUFFIX_FALLBACK"}
@@ -201,7 +214,7 @@ def test_currency_suffix_fallback_eur_for_de():
 
     events = [_ev("ohlcv_TEST_14", "2026-05-14T16:00:00Z", close=165.0)]
     with _patch_persistence(events), _stub_quote_fetcher(price=170.0, currency=""):
-        resp = _get_chart_structure("SAP.DE", limit=5)
+        resp = _get_chart_structure("SAP.DE", limit=5, now=_NOW)
 
     assert resp["display_currency"] == "EUR"
 
@@ -211,7 +224,7 @@ def test_currency_suffix_fallback_usd_for_bare_ticker():
 
     events = [_ev("ohlcv_TEST_14", "2026-05-14T16:00:00Z", close=180.0)]
     with _patch_persistence(events), _stub_quote_fetcher(price=181.0, currency=""):
-        resp = _get_chart_structure("AAPL", limit=5)
+        resp = _get_chart_structure("AAPL", limit=5, now=_NOW)
 
     assert resp["display_currency"] == "USD"
 
@@ -246,7 +259,7 @@ def test_bhartiartl_end_to_end_divergence():
         price=1905.40, currency="INR",
         timestamp="2026-05-15T10:00:00+00:00",
     ):
-        resp = _get_chart_structure("BHARTIARTL.NS", limit=10)
+        resp = _get_chart_structure("BHARTIARTL.NS", limit=10, now=_NOW)
 
     assert resp["latest_daily_close"] == 1789.20
     assert resp["latest_quote_price"] == 1905.40
@@ -276,7 +289,7 @@ def test_quote_unavailable_still_renders_daily_report():
         for d in (10, 11, 12, 13, 14)
     ]
     with _patch_persistence(events), _stub_quote_fetcher(price=None):
-        resp = _get_chart_structure("TEST", limit=10)
+        resp = _get_chart_structure("TEST", limit=10, now=_NOW)
 
     assert resp["report"] is not None
     assert resp["latest_daily_close"] == 114.0
@@ -301,7 +314,7 @@ def test_safety_stamps_always_present(symbol, have_quote):
     ]
     quote_stub = _stub_quote_fetcher(price=110.5 if have_quote else None)
     with _patch_persistence(events), quote_stub:
-        resp = _get_chart_structure(symbol, limit=10)
+        resp = _get_chart_structure(symbol, limit=10, now=_NOW)
 
     assert resp["advisory_status"] == "ADVISORY_ONLY"
     assert resp["execution_gate"] == "LOCKED"
@@ -309,3 +322,42 @@ def test_safety_stamps_always_present(symbol, have_quote):
     assert resp["ai_execution_count"] == 0
     assert resp["broker_api_called"] is False
     assert resp["broker_order_id"] == "NONE"
+
+
+# ---------------------------------------------------------------------------
+# Stale-blocked branch: verdict suppressed, structural fields preserved
+# ---------------------------------------------------------------------------
+
+
+def test_stale_block_suppresses_report_but_keeps_currency_and_close():
+    """When the freshness gate blocks (data older than the STALE
+    threshold), the advisory verdict and report tiles are suppressed —
+    but currency resolution and the latest validated daily close do not
+    depend on data age and must survive.  Deterministic: both the candle
+    dates and the evaluation clock are pinned (60 days apart)."""
+    from scripts.chart_structure_api_context import _get_chart_structure
+
+    events = [
+        _ev(f"ohlcv_TEST_{d:02d}", f"2026-05-{d:02d}T16:00:00Z", close=1780.0 + d)
+        for d in (10, 11, 12, 13, 14)
+    ]
+    stale_now = _NOW + _dt.timedelta(days=60)
+    with _patch_persistence(events), _stub_quote_fetcher(price=1905.40):
+        resp = _get_chart_structure("BHARTIARTL.NS", limit=10, now=stale_now)
+
+    # Sprint H contract unchanged: no normal verdict over stale data.
+    assert resp["report"] is None
+    assert resp["chart_state"] == "STALE_DATA_BLOCKED"
+    assert resp["freshness_gate"] == "BLOCK"
+    assert resp["data_freshness_status"] == "STALE"
+    # Structural fields survive the block (response-contract repair).
+    assert resp["display_currency"] == "INR"
+    assert resp["currency_source"] in {"MARKET_METADATA", "SYMBOL_SUFFIX_FALLBACK"}
+    assert resp["latest_daily_close"] == 1794.0
+    assert resp["latest_daily_close_currency"] == "INR"
+    assert resp["latest_candle_utc"] == "2026-05-14T16:00:00Z"
+    # Safety stamps preserved.
+    assert resp["advisory_status"] == "ADVISORY_ONLY"
+    assert resp["execution_gate"] == "LOCKED"
+    assert resp["broker_api_called"] is False
+    assert resp["ai_execution_count"] == 0
