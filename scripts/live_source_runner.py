@@ -192,6 +192,16 @@ def _normalize_polymarket_record(rec: dict[str, Any]) -> dict[str, Any] | None:
         "active": rec.get("active"),
         "domain": classification["domain"],
         "matched_terms": classification["matched_terms"],
+        # Narrative Cascade fix: the loader computes a normalised YES-side
+        # implied probability, but this normalizer used to DROP it — which
+        # made probability-change analysis impossible from persisted rows.
+        # Additive fields; legacy payloads simply lack them.
+        "question": str(rec.get("question", "") or rec.get("title", "") or ""),
+        "category": str(rec.get("category", "") or ""),
+        "implied_probability": rec.get("implied_probability"),
+        "implied_probability_source": str(
+            rec.get("implied_probability_source", "") or ""
+        ),
         "advisory_status": _ADVISORY_STATUS,
         "human_review_required": True,
         "execution_gate": _EXECUTION_GATE,
@@ -335,6 +345,7 @@ def _persist_events(
 
     target_db = getattr(_persistence, "DB_PATH", None)
     count = 0
+    snapshot_rows: list[dict[str, Any]] = []
     for ev in events:
         try:
             kwargs: dict[str, Any] = {
@@ -348,6 +359,32 @@ def _persist_events(
             inserted = insert_signal_event(**kwargs)
             if inserted:
                 count += 1
+        except Exception:
+            pass
+        # Prediction-market probability time series (Narrative Cascade):
+        # the event row is INSERT OR IGNORE on a constant per-market id, so
+        # snapshots must be recorded separately on EVERY refresh — this is
+        # what makes log-odds impulses computable.  Fail-safe, additive,
+        # advisory record-keeping only.
+        if ev.get("market_id") and ev.get("implied_probability") is not None:
+            snapshot_rows.append({
+                "market_id": ev.get("market_id"),
+                "source_name": source_name,
+                "fetched_at": fetched_at,
+                "probability": ev.get("implied_probability"),
+                "probability_source": ev.get("implied_probability_source"),
+                "volume": ev.get("volume"),
+                "liquidity": ev.get("liquidity"),
+                "question": ev.get("question") or ev.get("title"),
+            })
+    if snapshot_rows:
+        try:
+            insert_fn = getattr(_persistence, "insert_probability_snapshots", None)
+            if insert_fn is not None:
+                snap_kwargs: dict[str, Any] = {}
+                if target_db is not None:
+                    snap_kwargs["db_path"] = target_db
+                insert_fn(snapshot_rows, **snap_kwargs)
         except Exception:
             pass
     return count

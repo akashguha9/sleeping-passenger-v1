@@ -405,6 +405,21 @@ CREATE TABLE IF NOT EXISTS titration_susceptibility_estimates (
     broker_api_called INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (scope_type, scope_key, horizon)
 );
+CREATE TABLE IF NOT EXISTS narrative_probability_snapshots (
+    market_id TEXT NOT NULL,
+    source_name TEXT NOT NULL DEFAULT 'polymarket',
+    fetched_at TEXT NOT NULL,
+    probability REAL,
+    probability_source TEXT NOT NULL DEFAULT '',
+    volume REAL,
+    liquidity REAL,
+    question TEXT NOT NULL DEFAULT '',
+    advisory_only TEXT NOT NULL DEFAULT 'ADVISORY_ONLY',
+    broker_api_called INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (market_id, source_name, fetched_at)
+);
+CREATE INDEX IF NOT EXISTS idx_nps_market ON narrative_probability_snapshots(market_id);
+CREATE INDEX IF NOT EXISTS idx_nps_fetched ON narrative_probability_snapshots(fetched_at);
 CREATE TABLE IF NOT EXISTS titration_state_transitions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     ticker TEXT NOT NULL,
@@ -1618,6 +1633,83 @@ def get_titration_susceptibility_estimates(
         d["was_shrunk"] = bool(d.get("was_shrunk"))
         out.append(d)
     return out
+
+
+def insert_probability_snapshots(
+    rows: list[dict[str, Any]], db_path: Path | None = None
+) -> int:
+    """Append prediction-market probability snapshots (idempotent on PK).
+
+    This is the time-series feed for the prediction-market impulse engine:
+    unlike ``signal_events`` (INSERT OR IGNORE on a constant per-market
+    event_id), every refresh run adds one row per market per fetch time,
+    so log-odds changes become computable.  Advisory record-keeping only.
+    """
+    conn = _get_conn(db_path if db_path is not None else DB_PATH)
+    try:
+        count = 0
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            market_id = str(row.get("market_id", "") or "").strip()
+            fetched_at = str(row.get("fetched_at", "") or "").strip()
+            if not market_id or not fetched_at:
+                continue
+            prob = row.get("probability")
+            if isinstance(prob, bool) or (
+                prob is not None and not isinstance(prob, (int, float))
+            ):
+                prob = None
+            if isinstance(prob, (int, float)) and not (0.0 <= float(prob) <= 1.0):
+                prob = None  # out-of-range probabilities are dropped, not clamped
+            cursor = conn.execute(
+                "INSERT OR IGNORE INTO narrative_probability_snapshots"
+                " (market_id, source_name, fetched_at, probability,"
+                "  probability_source, volume, liquidity, question)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    market_id,
+                    str(row.get("source_name", "polymarket") or "polymarket"),
+                    fetched_at,
+                    float(prob) if prob is not None else None,
+                    str(row.get("probability_source", "") or "")[:64],
+                    row.get("volume") if isinstance(row.get("volume"), (int, float)) else None,
+                    row.get("liquidity") if isinstance(row.get("liquidity"), (int, float)) else None,
+                    str(row.get("question", "") or "")[:500],
+                ),
+            )
+            if cursor.rowcount > 0:
+                count += 1
+        conn.commit()
+        return count
+    finally:
+        conn.close()
+
+
+def get_probability_snapshots(
+    *,
+    market_id: str | None = None,
+    limit: int = 50000,
+    db_path: Path | None = None,
+) -> list[dict[str, Any]]:
+    """Snapshots ordered by (market_id, fetched_at) ascending."""
+    conn = _get_conn(db_path if db_path is not None else DB_PATH)
+    try:
+        if market_id:
+            rows = conn.execute(
+                "SELECT * FROM narrative_probability_snapshots WHERE market_id=?"
+                " ORDER BY fetched_at ASC LIMIT ?",
+                (str(market_id).strip(), int(limit)),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM narrative_probability_snapshots"
+                " ORDER BY market_id ASC, fetched_at ASC LIMIT ?",
+                (int(limit),),
+            ).fetchall()
+    finally:
+        conn.close()
+    return [_to_dict(r) for r in rows]
 
 
 def insert_titration_state_transitions(

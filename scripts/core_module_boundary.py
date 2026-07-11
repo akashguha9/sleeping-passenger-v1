@@ -119,6 +119,9 @@ _SUPPORT_EXPLICIT: frozenset[str] = frozenset({
     # builder (leakage-safe, deterministic, advisory record-keeping only).
     # Operator-invoked CLI, not on the request path -> SUPPORT.
     "titration_response_pipeline",
+    # Narrative Cascade sprint: deterministic entity->ticker resolution
+    # ladder over the securities master/alias tables (read-only) -> SUPPORT.
+    "entity_security_resolver",
 })
 
 

@@ -1,0 +1,120 @@
+{
+  "_comment": "Curated causal event graph v1 for the Narrative Cascade layer. Every edge is a CURATED economic-transmission prior (validation_status CURATED, provenance curated_v1) — NOT a learned or proven causal claim. Signs: +1 target benefits / increases, -1 target harmed / decreases. strength/confidence in (0,1]. lag_class: IMMEDIATE(0-1d)/FAST(2-5d)/MEDIUM(1-4w)/SLOW(1-6m)/STRUCTURAL(6m+). Event nodes carry trigger_keywords for deterministic narrative->event activation. Exposures map terminal industry nodes to seed-universe securities with an exposure weight. Advisory-only; never a trade instruction.",
+  "graph_version": "curated_v1",
+  "nodes": [
+    {"id": "ai_inference_demand", "type": "EVENT", "label": "AI inference/training demand rises",
+     "trigger_keywords": ["ai demand", "ai adoption", "ai inference", "ai capex", "data center demand", "datacenter demand", "gpu demand", "ai model", "hyperscaler capex", "ai infrastructure"]},
+    {"id": "chip_export_controls", "type": "POLICY", "label": "Chip export controls tighten",
+     "trigger_keywords": ["export control", "export controls", "chip ban", "chip restrictions", "semiconductor restriction", "semiconductor export", "chip curbs"]},
+    {"id": "oil_supply_shock", "type": "EVENT", "label": "Oil supply shock / OPEC cut",
+     "trigger_keywords": ["oil supply", "opec cut", "oil embargo", "crude supply", "oil sanctions", "oil disruption", "oil price surge"]},
+    {"id": "rates_higher_longer", "type": "MACRO", "label": "Rates higher for longer",
+     "trigger_keywords": ["rate hike", "rates higher", "hawkish", "fed hike", "tighter policy", "rate cut delayed", "inflation persistent"]},
+    {"id": "military_escalation", "type": "GEOPOLITICS", "label": "Military conflict escalation",
+     "trigger_keywords": ["war", "escalation", "invasion", "military conflict", "missile", "airstrike", "mobilization", "ceasefire collapse"]},
+    {"id": "shipping_disruption", "type": "EVENT", "label": "Shipping route disruption",
+     "trigger_keywords": ["shipping disruption", "red sea", "canal blocked", "port closure", "freight rates", "container rates", "strait closure"]},
+    {"id": "india_credit_expansion", "type": "MACRO", "label": "India credit expansion",
+     "trigger_keywords": ["india credit", "india lending", "rbi easing", "india gdp", "india infrastructure spending", "india capex"]},
+    {"id": "safe_haven_flight", "type": "EVENT", "label": "Safe-haven flight",
+     "trigger_keywords": ["safe haven", "flight to safety", "risk off", "gold rally", "haven demand"]},
+
+    {"id": "accelerator_demand", "type": "INDUSTRY", "label": "AI accelerator demand"},
+    {"id": "hbm_memory_demand", "type": "SUPPLY_CHAIN_COMPONENT", "label": "High-bandwidth memory demand"},
+    {"id": "foundry_utilization", "type": "INDUSTRY", "label": "Leading-edge foundry utilization"},
+    {"id": "semicap_equipment_demand", "type": "INDUSTRY", "label": "Semiconductor equipment demand"},
+    {"id": "datacenter_networking", "type": "INDUSTRY", "label": "Datacenter networking demand"},
+    {"id": "datacenter_power_demand", "type": "INDUSTRY", "label": "Datacenter power/cooling demand"},
+    {"id": "china_domestic_substitution", "type": "INDUSTRY", "label": "China domestic chip substitution"},
+    {"id": "oil_price", "type": "COMMODITY", "label": "Crude oil price"},
+    {"id": "energy_producers", "type": "INDUSTRY", "label": "Oil & gas producers"},
+    {"id": "airline_costs", "type": "INDUSTRY", "label": "Airline / transport fuel costs"},
+    {"id": "inflation_pressure", "type": "MACRO", "label": "Inflation pressure"},
+    {"id": "bank_net_interest_margin", "type": "INDUSTRY", "label": "Bank net interest margins"},
+    {"id": "long_duration_tech_valuation", "type": "INDUSTRY", "label": "Long-duration tech valuations"},
+    {"id": "defence_procurement", "type": "INDUSTRY", "label": "Defence procurement"},
+    {"id": "freight_rates", "type": "INDUSTRY", "label": "Container freight rates"},
+    {"id": "supply_chain_costs", "type": "INDUSTRY", "label": "Goods supply-chain costs"},
+    {"id": "gold_demand", "type": "COMMODITY", "label": "Gold demand"},
+    {"id": "india_bank_credit", "type": "INDUSTRY", "label": "India bank credit growth"},
+    {"id": "india_industrial_capex", "type": "INDUSTRY", "label": "India industrial capex"},
+    {"id": "mining_demand", "type": "INDUSTRY", "label": "Industrial metals demand"}
+  ],
+  "edges": [
+    {"source": "ai_inference_demand", "target": "accelerator_demand", "relation": "INCREASES", "sign": 1, "strength": 0.9, "confidence": 0.85, "lag_class": "FAST"},
+    {"source": "accelerator_demand", "target": "hbm_memory_demand", "relation": "REQUIRES", "sign": 1, "strength": 0.85, "confidence": 0.8, "lag_class": "MEDIUM"},
+    {"source": "accelerator_demand", "target": "foundry_utilization", "relation": "INCREASES", "sign": 1, "strength": 0.8, "confidence": 0.8, "lag_class": "MEDIUM"},
+    {"source": "foundry_utilization", "target": "semicap_equipment_demand", "relation": "INCREASES", "sign": 1, "strength": 0.7, "confidence": 0.7, "lag_class": "SLOW"},
+    {"source": "ai_inference_demand", "target": "datacenter_networking", "relation": "INCREASES", "sign": 1, "strength": 0.75, "confidence": 0.75, "lag_class": "MEDIUM"},
+    {"source": "ai_inference_demand", "target": "datacenter_power_demand", "relation": "INCREASES", "sign": 1, "strength": 0.7, "confidence": 0.7, "lag_class": "SLOW"},
+    {"source": "chip_export_controls", "target": "accelerator_demand", "relation": "CONSTRAINS", "sign": -1, "strength": 0.5, "confidence": 0.6, "lag_class": "FAST"},
+    {"source": "chip_export_controls", "target": "china_domestic_substitution", "relation": "INCREASES", "sign": 1, "strength": 0.7, "confidence": 0.7, "lag_class": "SLOW"},
+    {"source": "chip_export_controls", "target": "semicap_equipment_demand", "relation": "CONSTRAINS", "sign": -1, "strength": 0.5, "confidence": 0.55, "lag_class": "MEDIUM"},
+    {"source": "oil_supply_shock", "target": "oil_price", "relation": "INCREASES", "sign": 1, "strength": 0.9, "confidence": 0.85, "lag_class": "IMMEDIATE"},
+    {"source": "oil_price", "target": "energy_producers", "relation": "BENEFITS_FROM", "sign": 1, "strength": 0.85, "confidence": 0.8, "lag_class": "IMMEDIATE"},
+    {"source": "oil_price", "target": "airline_costs", "relation": "HARMED_BY", "sign": -1, "strength": 0.7, "confidence": 0.75, "lag_class": "FAST"},
+    {"source": "oil_price", "target": "inflation_pressure", "relation": "INCREASES", "sign": 1, "strength": 0.6, "confidence": 0.7, "lag_class": "MEDIUM"},
+    {"source": "inflation_pressure", "target": "rates_higher_longer", "relation": "INCREASES", "sign": 1, "strength": 0.6, "confidence": 0.6, "lag_class": "MEDIUM"},
+    {"source": "rates_higher_longer", "target": "bank_net_interest_margin", "relation": "INCREASES", "sign": 1, "strength": 0.6, "confidence": 0.65, "lag_class": "MEDIUM"},
+    {"source": "rates_higher_longer", "target": "long_duration_tech_valuation", "relation": "DECREASES", "sign": -1, "strength": 0.6, "confidence": 0.6, "lag_class": "FAST"},
+    {"source": "military_escalation", "target": "defence_procurement", "relation": "INCREASES", "sign": 1, "strength": 0.8, "confidence": 0.75, "lag_class": "SLOW"},
+    {"source": "military_escalation", "target": "oil_supply_shock", "relation": "ENABLES", "sign": 1, "strength": 0.5, "confidence": 0.5, "lag_class": "FAST"},
+    {"source": "military_escalation", "target": "safe_haven_flight", "relation": "INCREASES", "sign": 1, "strength": 0.7, "confidence": 0.7, "lag_class": "IMMEDIATE"},
+    {"source": "military_escalation", "target": "shipping_disruption", "relation": "ENABLES", "sign": 1, "strength": 0.5, "confidence": 0.5, "lag_class": "FAST"},
+    {"source": "shipping_disruption", "target": "freight_rates", "relation": "INCREASES", "sign": 1, "strength": 0.85, "confidence": 0.8, "lag_class": "IMMEDIATE"},
+    {"source": "freight_rates", "target": "supply_chain_costs", "relation": "INCREASES", "sign": 1, "strength": 0.7, "confidence": 0.7, "lag_class": "MEDIUM"},
+    {"source": "supply_chain_costs", "target": "inflation_pressure", "relation": "INCREASES", "sign": 1, "strength": 0.5, "confidence": 0.6, "lag_class": "SLOW"},
+    {"source": "safe_haven_flight", "target": "gold_demand", "relation": "INCREASES", "sign": 1, "strength": 0.8, "confidence": 0.75, "lag_class": "IMMEDIATE"},
+    {"source": "india_credit_expansion", "target": "india_bank_credit", "relation": "INCREASES", "sign": 1, "strength": 0.8, "confidence": 0.7, "lag_class": "MEDIUM"},
+    {"source": "india_credit_expansion", "target": "india_industrial_capex", "relation": "INCREASES", "sign": 1, "strength": 0.6, "confidence": 0.6, "lag_class": "SLOW"},
+    {"source": "india_industrial_capex", "target": "mining_demand", "relation": "INCREASES", "sign": 1, "strength": 0.5, "confidence": 0.55, "lag_class": "SLOW"},
+    {"source": "datacenter_power_demand", "target": "mining_demand", "relation": "INCREASES", "sign": 1, "strength": 0.4, "confidence": 0.5, "lag_class": "STRUCTURAL"}
+  ],
+  "exposures": {
+    "accelerator_demand": [
+      {"ticker": "NVDA", "weight": 0.9}, {"ticker": "AMD", "weight": 0.6},
+      {"ticker": "AVGO", "weight": 0.5}, {"ticker": "TSM", "weight": 0.6}
+    ],
+    "hbm_memory_demand": [{"ticker": "TSM", "weight": 0.3}],
+    "foundry_utilization": [{"ticker": "TSM", "weight": 0.8}],
+    "semicap_equipment_demand": [{"ticker": "ASML", "weight": 0.85}],
+    "datacenter_networking": [
+      {"ticker": "ANET", "weight": 0.8}, {"ticker": "CSCO", "weight": 0.5},
+      {"ticker": "AVGO", "weight": 0.4}
+    ],
+    "datacenter_power_demand": [{"ticker": "VST", "weight": 0.0}],
+    "china_domestic_substitution": [],
+    "energy_producers": [
+      {"ticker": "XOM", "weight": 0.8}, {"ticker": "CVX", "weight": 0.8},
+      {"ticker": "RELIANCE.NS", "weight": 0.4}
+    ],
+    "airline_costs": [],
+    "bank_net_interest_margin": [
+      {"ticker": "JPM", "weight": 0.6}, {"ticker": "HSBA.L", "weight": 0.4},
+      {"ticker": "ICICIBANK.NS", "weight": 0.4}, {"ticker": "HDFCBANK.NS", "weight": 0.4}
+    ],
+    "long_duration_tech_valuation": [
+      {"ticker": "MSFT", "weight": 0.4}, {"ticker": "GOOGL", "weight": 0.4},
+      {"ticker": "META", "weight": 0.4}, {"ticker": "AMZN", "weight": 0.4}
+    ],
+    "defence_procurement": [
+      {"ticker": "RTX", "weight": 0.7}, {"ticker": "LMT", "weight": 0.7},
+      {"ticker": "NOC", "weight": 0.6}, {"ticker": "GD", "weight": 0.6},
+      {"ticker": "RHM.DE", "weight": 0.7}, {"ticker": "AIR.PA", "weight": 0.3}
+    ],
+    "freight_rates": [{"ticker": "ZIM", "weight": 0.8}],
+    "supply_chain_costs": [{"ticker": "WMT", "weight": -0.3}, {"ticker": "AMZN", "weight": -0.2}],
+    "gold_demand": [{"ticker": "GLD", "weight": 0.9}],
+    "india_bank_credit": [
+      {"ticker": "ICICIBANK.NS", "weight": 0.7}, {"ticker": "HDFCBANK.NS", "weight": 0.7}
+    ],
+    "india_industrial_capex": [{"ticker": "RELIANCE.NS", "weight": 0.4}],
+    "mining_demand": [{"ticker": "BHP", "weight": 0.6}, {"ticker": "VALE", "weight": 0.6}],
+    "oil_price": [],
+    "inflation_pressure": [],
+    "rates_higher_longer": [],
+    "safe_haven_flight": [],
+    "oil_supply_shock": [],
+    "shipping_disruption": []
+  }
+}

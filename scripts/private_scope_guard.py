@@ -251,6 +251,19 @@ EXPLICIT_IN_SCOPE: frozenset[str] = frozenset({
     "titration_recognition.py",
     "titration_runtime_store.py",
     "titration_calibration_report.py",
+    # Narrative Cascade sprint: deterministic information-propagation layer
+    # (typed observations + dedup, prediction-market log-odds impulses,
+    # lexical linguistic features, narrative states, curated causal graph
+    # traversal, entity->security resolution, cascade candidates) wired to
+    # GET /api/narrative/cascade.  Advisory-only, no LLM calls, no broker
+    # surface; see docs/NARRATIVE_CASCADE.md.
+    "narrative_observation.py",
+    "prediction_market_impulse.py",
+    "linguistic_state_engine.py",
+    "narrative_state_engine.py",
+    "causal_event_graph.py",
+    "entity_security_resolver.py",
+    "narrative_cascade_engine.py",
 })
 
 # Modules deliberately marked OUT_OF_SCOPE inside ``scripts/``.  This

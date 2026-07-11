@@ -3104,6 +3104,22 @@ def get_titration_summary(
     }
 
 
+@app.get("/api/narrative/cascade")
+def get_narrative_cascade(_auth: None = Depends(require_api_token_for_reads)) -> dict:
+    """Narrative Cascade report: upstream information observations →
+    narrative states → curated causal propagation → under-recognized
+    downstream security candidates with Narrative Pre-Alpha Gaps and
+    titration integration.  Advisory-only; candidates are prioritization
+    labels for human review, never trade instructions.  TTL-cached (60s)
+    so /signals-grade latency is unaffected.
+    """
+    try:
+        from scripts.narrative_cascade_engine import get_cached_cascade_report
+    except ModuleNotFoundError:  # pragma: no cover - script-style fallback
+        from narrative_cascade_engine import get_cached_cascade_report  # type: ignore[no-redef]
+    return get_cached_cascade_report()
+
+
 @app.get("/api/titration/calibration")
 def get_titration_calibration(_auth: None = Depends(require_api_token_for_reads)) -> dict:
     """Titration calibration report — temporally honest, refusal-first.
