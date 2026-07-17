@@ -7,7 +7,7 @@
  * broker/execution path exists on this page.
  */
 // @ts-ignore
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import { vi } from 'vitest';
 
 // @ts-ignore
@@ -25,6 +25,7 @@ vi.mock('@/lib/apiClient', () => ({
   getSimulationScenarios: vi.fn(),
   getSimulationRuns: vi.fn(),
   postSimulationRun: vi.fn(),
+  postSimulationRatings: vi.fn(),
 }));
 
 import {
@@ -32,6 +33,7 @@ import {
   getSimulationEngines,
   getSimulationScenarios,
   getSimulationRuns,
+  postSimulationRatings,
 } from '@/lib/apiClient';
 import SimulationLabPage from '@/app/simulation-lab/page';
 
@@ -39,6 +41,7 @@ const mockHealth = getSimulationHealth as unknown as ReturnType<typeof vi.fn>;
 const mockEngines = getSimulationEngines as unknown as ReturnType<typeof vi.fn>;
 const mockScenarios = getSimulationScenarios as unknown as ReturnType<typeof vi.fn>;
 const mockRuns = getSimulationRuns as unknown as ReturnType<typeof vi.fn>;
+const mockRatings = postSimulationRatings as unknown as ReturnType<typeof vi.fn>;
 
 const HEALTH = {
   advisory_status: 'ADVISORY_ONLY',
@@ -70,12 +73,52 @@ const ENGINES = {
 const SCENARIOS = { ...HEALTH, count: 32, default_scenario_ids: [], scenarios: [] };
 const RUNS = { ...HEALTH, count: 0, runs: [] };
 
+const RATINGS = {
+  ...HEALTH,
+  ok: true,
+  run_id: 'SIM_x',
+  ticker: 'RELIANCE.NS',
+  five_scores: {
+    role_adjusted_performance: 7.7,
+    engineering_quality: 8.8,
+    decision_utility: 5.3,
+    empirical_validation: 1.0,
+    whole_mvp_maturity: 5.8,
+    empirical_sample_size: 0,
+    components_scored: 18,
+    components_runtime_reached: 18,
+    note: 'Five scores are separate by design.',
+    whole_mvp_detail: {},
+  },
+  ratings: [
+    { component_id: 'council', component_name: 'Council', role_template: 'COUNCIL',
+      role_adjusted_performance: 8.2, engineering_quality: 8.5, decision_utility: 8.0,
+      empirical_validation: 1.0, rating_confidence: 0.6, support: 'SUPPORTED',
+      evidence_grade: 'MEASURED', honest_ceiling: 9.3, runtime_reached: true,
+      empirically_validated: false, severe_events: 0, caps_applied: [], reasons: [],
+      dimension_scores: [] },
+  ],
+  contribution_events: [
+    { event_id: 'EV_1', component_id: 'council', event_type: 'risk_block_overrode_aggregate',
+      direction: 'POSITIVE', severity: 'MAJOR', event_class: 'PREVENTION',
+      target_dimension: 'risk_interception', counterfactual_impact: 'x', evidence: 'risk_block',
+      affected_final_result: true },
+  ],
+  context_difficulty: { score: 0.33, band: 'EASY', dominant_factor: 'volatility' },
+  ablation: { most_valuable_lens: 'RACING', quietest_valuable_lens: 'RACING',
+    shapley_exact: true, lens_contributions: [] },
+  council_vote: 'AVOID',
+  evidence_label: 'SIMULATED_ONLY',
+  simulation_only: false,
+};
+
 describe('SimulationLabPage', () => {
   beforeEach(() => {
     mockHealth.mockReset();
     mockEngines.mockReset();
     mockScenarios.mockReset();
     mockRuns.mockReset();
+    mockRatings.mockReset();
   });
 
   it('resolves out of the loading state when the backend responds', async () => {
@@ -115,5 +158,28 @@ describe('SimulationLabPage', () => {
     render(<SimulationLabPage />);
     await waitFor(() => expect(screen.queryByTestId('sim-loading')).toBeNull());
     expect(screen.getByText(/BACKEND OFFLINE/i)).toBeTruthy();
+  });
+
+  it('renders the five SEPARATE role-aware scores and keeps empirical low', async () => {
+    mockHealth.mockResolvedValue(HEALTH);
+    mockEngines.mockResolvedValue(ENGINES);
+    mockScenarios.mockResolvedValue(SCENARIOS);
+    mockRuns.mockResolvedValue(RUNS);
+    mockRatings.mockResolvedValue(RATINGS);
+
+    const { container } = render(<SimulationLabPage />);
+    await waitFor(() => expect(screen.queryByTestId('sim-loading')).toBeNull());
+    fireEvent.click(screen.getByTestId('run-ratings'));
+    await waitFor(() => expect(screen.getByTestId('role-ratings')).toBeTruthy());
+
+    // Five scores are shown as separate values (never one averaged number).
+    const fiveScores = screen.getByTestId('five-scores');
+    const text = fiveScores.textContent || '';
+    expect(text).toContain('7.7');   // role-adjusted
+    expect(text).toContain('1');     // empirical stays low
+    // The role-ratings surface never grants execution.
+    expect(container.querySelector('[data-execution-permission="false"]')).toBeTruthy();
+    // Contribution-event audit trail is present.
+    expect(screen.getByTestId('contribution-events')).toBeTruthy();
   });
 });

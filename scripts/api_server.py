@@ -3340,6 +3340,159 @@ def get_simulation_stress_summary(
     }
 
 
+# ---------------------------------------------------------------------------
+# Role-Adjusted Contribution Rating (RACR / "Kanté Index") — advisory-only
+# role-aware scoring surface. Every route is record-only and never grants
+# execution. Heavy work (ablation, reliability batch) is bounded.
+# ---------------------------------------------------------------------------
+
+
+def _racr_import():
+    """Lazy dual-path import of the RACR service + supporting modules."""
+    try:
+        from scripts.simulation_intelligence import role_contracts as _rc
+        from scripts.simulation_intelligence import role_rating_service as _svc
+        from scripts.simulation_intelligence import reliability as _rel
+        from scripts.simulation_intelligence import engine_validation as _ev
+        from scripts.simulation_intelligence import signal_bridge as _bridge
+        from scripts.simulation_intelligence import api_surface as _api
+        from scripts import persistence as _persist
+    except ModuleNotFoundError:  # pragma: no cover - script-style fallback
+        from simulation_intelligence import role_contracts as _rc  # type: ignore[no-redef]
+        from simulation_intelligence import role_rating_service as _svc  # type: ignore[no-redef]
+        from simulation_intelligence import reliability as _rel  # type: ignore[no-redef]
+        from simulation_intelligence import engine_validation as _ev  # type: ignore[no-redef]
+        from simulation_intelligence import signal_bridge as _bridge  # type: ignore[no-redef]
+        from simulation_intelligence import api_surface as _api  # type: ignore[no-redef]
+        import persistence as _persist  # type: ignore[no-redef]
+    return _rc, _svc, _rel, _ev, _bridge, _api, _persist
+
+
+@app.get("/api/simulation/role-contracts")
+def get_role_contracts(_auth: None = Depends(require_api_token_for_reads)) -> dict:
+    """Versioned, immutable component role contracts (the RACR taxonomy)."""
+    rc, _svc, _rel, _ev, _bridge, _api, _persist = _racr_import()
+    return rc.registry_report()
+
+
+@app.get("/api/simulation/observation/{ticker}")
+def get_simulation_observation(
+    ticker: str,
+    session_date: str | None = None,
+    parent_signal_id: str = "",
+    _auth: None = Depends(require_api_token_for_reads),
+) -> dict:
+    """Priority-1 bridge: build a validated MarketObservation from live DB state.
+
+    Advisory-only; never a trade action. Fails closed (missing_fields) when the
+    canonical OHLCV/live data is incomplete.
+    """
+    rc, _svc, _rel, _ev, _bridge, _api, _persist = _racr_import()
+    result = _bridge.build_observation_for_ticker(
+        ticker[:32], session_date=session_date, parent_signal_id=parent_signal_id[:64])
+    out = result.to_dict()
+    out["report"] = "simulation_observation"
+    out.update({"advisory_status": _ADVISORY_STATUS, "execution_gate": "LOCKED",
+                "ai_execution_count": 0, "broker_api_called": False,
+                "human_review_required": True})
+    return out
+
+
+@app.post("/api/simulation/ratings")
+def post_simulation_ratings(
+    body: "SimulationRunBody",
+    _auth: None = Depends(require_api_token),
+) -> dict:
+    """Build the five role-aware scores for a candidate and persist events +
+    ratings. Advisory-only, record-only, bounded."""
+    rc, svc, _rel, _ev, _bridge, api, _persist = _racr_import()
+    if not api.flags.sil_enabled():
+        return {"report": "role_adjusted_ratings", "ok": False, "error": "sil_disabled",
+                "advisory_status": _ADVISORY_STATUS, "execution_gate": "LOCKED",
+                "ai_execution_count": 0, "broker_api_called": False,
+                "human_review_required": True}
+    payload = {
+        "ticker": body.ticker, "market": body.market, "seed": body.seed,
+        "max_runs": body.max_runs, "parent_signal_id": body.parent_signal_id,
+        "observation": body.observation or {}, "scenarios": body.scenarios,
+        "requested_lenses": body.requested_lenses,
+    }
+    request = api.build_request(payload)
+    result = svc.build_ratings(request)
+    result["ok"] = True
+    # Persist events + per-component ratings (best-effort).
+    try:
+        _persist.insert_contribution_events(result.get("contribution_events", []))
+        for rating in result.get("ratings", []):
+            rating2 = dict(rating)
+            rating2.setdefault("rating_id",
+                               f"RR_{rating.get('component_id','')}_{result.get('run_id','')}")
+            _persist.insert_role_rating(rating2, run_id=str(result.get("run_id", "")))
+        result["persisted"] = True
+    except Exception:
+        result["persisted"] = False
+    return result
+
+
+@app.get("/api/simulation/ratings")
+def get_simulation_ratings(
+    limit: int = 50,
+    _auth: None = Depends(require_api_token_for_reads),
+) -> dict:
+    """Recent persisted role-adjusted rating snapshots (newest first)."""
+    rc, _svc, _rel, _ev, _bridge, _api, _persist = _racr_import()
+    limit = clamp_limit(limit, default=50, ceiling=200)
+    ratings = _persist.get_role_ratings(limit=limit)
+    return {"report": "role_ratings", "count": len(ratings), "ratings": ratings,
+            "advisory_status": _ADVISORY_STATUS, "execution_gate": "LOCKED",
+            "ai_execution_count": 0, "broker_api_called": False,
+            "human_review_required": True}
+
+
+@app.get("/api/simulation/contribution-events")
+def get_simulation_contribution_events(
+    component_id: str | None = None,
+    run_id: str | None = None,
+    limit: int = 200,
+    _auth: None = Depends(require_api_token_for_reads),
+) -> dict:
+    """Recent contribution events (the audit trail behind role ratings)."""
+    rc, _svc, _rel, _ev, _bridge, _api, _persist = _racr_import()
+    limit = clamp_limit(limit, default=200, ceiling=1000)
+    events = _persist.get_contribution_events(
+        component_id=component_id[:64] if component_id else None,
+        run_id=run_id[:64] if run_id else None, limit=limit)
+    return {"report": "contribution_events", "count": len(events), "events": events,
+            "advisory_status": _ADVISORY_STATUS, "execution_gate": "LOCKED",
+            "ai_execution_count": 0, "broker_api_called": False,
+            "human_review_required": True}
+
+
+@app.get("/api/simulation/reliability")
+def get_simulation_reliability(_auth: None = Depends(require_api_token_for_reads)) -> dict:
+    """Fault-injection + scenario-mutation reliability report (advisory-only)."""
+    rc, _svc, rel, _ev, _bridge, _api, _persist = _racr_import()
+    faults = [f.to_dict() for f in rel.run_fault_injection()]
+    all_safe = all(f["survived"] and f["safe"] for f in faults)
+    return {
+        "report": "simulation_reliability",
+        "fault_injection": faults,
+        "all_faults_survived_safely": all_safe,
+        "advisory_status": _ADVISORY_STATUS, "execution_gate": "LOCKED",
+        "ai_execution_count": 0, "broker_api_called": False,
+        "human_review_required": True,
+    }
+
+
+@app.get("/api/simulation/engine-validation")
+def get_simulation_engine_validation(
+    _auth: None = Depends(require_api_token_for_reads),
+) -> dict:
+    """Optional-engine (Stockfish/COPASI) verification profiles."""
+    rc, _svc, _rel, ev, _bridge, _api, _persist = _racr_import()
+    return ev.validate_optional_engines()
+
+
 if __name__ == "__main__":  # pragma: no cover
     import sys
 

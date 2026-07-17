@@ -369,6 +369,57 @@ CREATE TABLE IF NOT EXISTS simulation_runs (
 CREATE INDEX IF NOT EXISTS idx_sim_runs_ticker ON simulation_runs(ticker);
 CREATE INDEX IF NOT EXISTS idx_sim_runs_created ON simulation_runs(created_at);
 CREATE INDEX IF NOT EXISTS idx_sim_runs_parent ON simulation_runs(parent_signal_id);
+CREATE TABLE IF NOT EXISTS sil_contribution_events (
+    event_id TEXT PRIMARY KEY,
+    component_id TEXT NOT NULL DEFAULT '',
+    run_id TEXT NOT NULL DEFAULT '',
+    event_type TEXT NOT NULL DEFAULT '',
+    direction TEXT NOT NULL DEFAULT 'NEUTRAL',
+    severity TEXT NOT NULL DEFAULT 'MINOR',
+    event_class TEXT NOT NULL DEFAULT 'CONTRIBUTION',
+    target_dimension TEXT NOT NULL DEFAULT '',
+    base_value REAL NOT NULL DEFAULT 0.0,
+    context_difficulty REAL NOT NULL DEFAULT 0.5,
+    confidence REAL NOT NULL DEFAULT 0.7,
+    counterfactual_impact TEXT NOT NULL DEFAULT '',
+    evidence TEXT NOT NULL DEFAULT '',
+    affected_final_result INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT '',
+    -- Advisory: contribution events are audit metadata for role ratings. They
+    -- NEVER grant execution, NEVER touch a broker, NEVER feed sizing.
+    advisory_status TEXT NOT NULL DEFAULT 'ADVISORY_ONLY',
+    execution_gate TEXT NOT NULL DEFAULT 'LOCKED',
+    ai_execution_count INTEGER NOT NULL DEFAULT 0,
+    broker_api_called INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_sil_ce_component ON sil_contribution_events(component_id);
+CREATE INDEX IF NOT EXISTS idx_sil_ce_run ON sil_contribution_events(run_id);
+CREATE TABLE IF NOT EXISTS sil_role_ratings (
+    rating_id TEXT PRIMARY KEY,
+    component_id TEXT NOT NULL DEFAULT '',
+    run_id TEXT NOT NULL DEFAULT '',
+    role_template TEXT NOT NULL DEFAULT '',
+    role_adjusted_performance REAL NOT NULL DEFAULT 0.0,
+    engineering_quality REAL NOT NULL DEFAULT 0.0,
+    decision_utility REAL NOT NULL DEFAULT 0.0,
+    empirical_validation REAL NOT NULL DEFAULT 0.0,
+    rating_confidence REAL NOT NULL DEFAULT 0.0,
+    support TEXT NOT NULL DEFAULT 'UNSUPPORTED',
+    evidence_grade TEXT NOT NULL DEFAULT 'NONE',
+    honest_ceiling REAL NOT NULL DEFAULT 9.5,
+    runtime_reached INTEGER NOT NULL DEFAULT 0,
+    empirically_validated INTEGER NOT NULL DEFAULT 0,
+    severe_events INTEGER NOT NULL DEFAULT 0,
+    contract_version TEXT NOT NULL DEFAULT '',
+    result_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL DEFAULT '',
+    advisory_status TEXT NOT NULL DEFAULT 'ADVISORY_ONLY',
+    execution_gate TEXT NOT NULL DEFAULT 'LOCKED',
+    ai_execution_count INTEGER NOT NULL DEFAULT 0,
+    broker_api_called INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_sil_rr_component ON sil_role_ratings(component_id);
+CREATE INDEX IF NOT EXISTS idx_sil_rr_created ON sil_role_ratings(created_at);
 """
 
 # Track which DB paths have been initialized this process (avoids repeat schema runs)
@@ -1801,6 +1852,8 @@ def get_db_status(db_path: Path = DB_PATH) -> dict[str, Any]:
         "global_securities",
         "global_security_aliases",
         "simulation_runs",
+        "sil_contribution_events",
+        "sil_role_ratings",
     ]
     counts: dict[str, int] = {}
     pragmas: dict[str, Any] = {
@@ -2599,6 +2652,165 @@ def _sim_row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
     return d
 
 
+# ---------------------------------------------------------------------------
+# RACR / Kanté Index — contribution events + role rating snapshots.
+#
+# Audit metadata for the role-adjusted rating system. These rows NEVER grant
+# execution, NEVER touch a broker, NEVER feed sizing or calibration. Late-bound
+# db_path keeps conftest's runtime-DB isolation working.
+# ---------------------------------------------------------------------------
+_CONTRIB_COLS = (
+    "event_id", "component_id", "run_id", "event_type", "direction", "severity",
+    "event_class", "target_dimension", "base_value", "context_difficulty",
+    "confidence", "counterfactual_impact", "evidence", "affected_final_result",
+    "created_at",
+)
+
+
+def insert_contribution_events(
+    events: list[dict[str, Any]],
+    created_at: str | None = None,
+    db_path: Path | None = None,
+) -> int:
+    """Persist contribution events (idempotent on event_id). Returns rows written."""
+    target = db_path if db_path is not None else DB_PATH
+    ts = created_at or utc_timestamp()
+    conn = _get_conn(target)
+    written = 0
+    try:
+        for ev in events:
+            cur = conn.execute(
+                "INSERT OR IGNORE INTO sil_contribution_events ("
+                " event_id, component_id, run_id, event_type, direction, severity,"
+                " event_class, target_dimension, base_value, context_difficulty,"
+                " confidence, counterfactual_impact, evidence, affected_final_result,"
+                " created_at, advisory_status, execution_gate, ai_execution_count,"
+                " broker_api_called"
+                ") VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (
+                    str(ev.get("event_id", "")), str(ev.get("component_id", "")),
+                    str(ev.get("run_id", "")), str(ev.get("event_type", "")),
+                    str(ev.get("direction", "NEUTRAL")), str(ev.get("severity", "MINOR")),
+                    str(ev.get("event_class", "CONTRIBUTION")),
+                    str(ev.get("target_dimension", "")),
+                    float(ev.get("base_value", 0.0) or 0.0),
+                    float(ev.get("context_difficulty", 0.5) or 0.5),
+                    float(ev.get("confidence", 0.7) or 0.7),
+                    str(ev.get("counterfactual_impact", "")), str(ev.get("evidence", "")),
+                    1 if ev.get("affected_final_result") else 0,
+                    str(ev.get("created_at") or ts),
+                    _ADVISORY_STATUS, "LOCKED", _AI_EXECUTION_COUNT, 0,
+                ),
+            )
+            written += cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
+        conn.commit()
+    finally:
+        conn.close()
+    return written
+
+
+def get_contribution_events(
+    component_id: str | None = None,
+    run_id: str | None = None,
+    limit: int = 500,
+    db_path: Path | None = None,
+) -> list[dict[str, Any]]:
+    target = db_path if db_path is not None else DB_PATH
+    limit = max(1, min(int(limit), 5000))
+    conn = _get_conn(target)
+    try:
+        clauses, params = [], []
+        if component_id:
+            clauses.append("component_id=?"); params.append(component_id)
+        if run_id:
+            clauses.append("run_id=?"); params.append(run_id)
+        where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+        params.append(limit)
+        rows = conn.execute(
+            f"SELECT * FROM sil_contribution_events{where} ORDER BY created_at DESC LIMIT ?",
+            params,
+        ).fetchall()
+    finally:
+        conn.close()
+    out = []
+    for r in rows:
+        d = dict(r)
+        d["advisory_status"] = _ADVISORY_STATUS
+        d["affected_final_result"] = bool(d.get("affected_final_result"))
+        out.append(d)
+    return out
+
+
+def insert_role_rating(
+    rating: dict[str, Any],
+    run_id: str = "",
+    created_at: str | None = None,
+    db_path: Path | None = None,
+) -> str:
+    """Persist one role-adjusted rating snapshot (idempotent on rating_id)."""
+    target = db_path if db_path is not None else DB_PATH
+    ts = created_at or utc_timestamp()
+    rating_id = str(rating.get("rating_id")
+                    or f"RR_{rating.get('component_id','')}_{uuid.uuid4().hex[:8]}")
+    conn = _get_conn(target)
+    try:
+        conn.execute(
+            "INSERT OR REPLACE INTO sil_role_ratings ("
+            " rating_id, component_id, run_id, role_template, role_adjusted_performance,"
+            " engineering_quality, decision_utility, empirical_validation, rating_confidence,"
+            " support, evidence_grade, honest_ceiling, runtime_reached, empirically_validated,"
+            " severe_events, contract_version, result_json, created_at, advisory_status,"
+            " execution_gate, ai_execution_count, broker_api_called"
+            ") VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (
+                rating_id, str(rating.get("component_id", "")), str(run_id),
+                str(rating.get("role_template", "")),
+                float(rating.get("role_adjusted_performance", 0.0) or 0.0),
+                float(rating.get("engineering_quality", 0.0) or 0.0),
+                float(rating.get("decision_utility", 0.0) or 0.0),
+                float(rating.get("empirical_validation", 0.0) or 0.0),
+                float(rating.get("rating_confidence", 0.0) or 0.0),
+                str(rating.get("support", "UNSUPPORTED")),
+                str(rating.get("evidence_grade", "NONE")),
+                float(rating.get("honest_ceiling", 9.5) or 9.5),
+                1 if rating.get("runtime_reached") else 0,
+                1 if rating.get("empirically_validated") else 0,
+                int(rating.get("severe_events", 0) or 0),
+                str(rating.get("contract_version", "")),
+                json.dumps(rating, default=str), ts,
+                _ADVISORY_STATUS, "LOCKED", _AI_EXECUTION_COUNT, 0,
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return rating_id
+
+
+def get_role_ratings(limit: int = 100, db_path: Path | None = None) -> list[dict[str, Any]]:
+    target = db_path if db_path is not None else DB_PATH
+    limit = max(1, min(int(limit), 1000))
+    conn = _get_conn(target)
+    try:
+        rows = conn.execute(
+            "SELECT * FROM sil_role_ratings ORDER BY created_at DESC LIMIT ?", (limit,),
+        ).fetchall()
+    finally:
+        conn.close()
+    out = []
+    for r in rows:
+        d = dict(r)
+        d["advisory_status"] = _ADVISORY_STATUS
+        d["runtime_reached"] = bool(d.get("runtime_reached"))
+        d["empirically_validated"] = bool(d.get("empirically_validated"))
+        try:
+            d["result"] = json.loads(d.get("result_json") or "{}")
+        except (json.JSONDecodeError, TypeError):
+            d["result"] = {}
+        out.append(d)
+    return out
+
+
 __all__ = [
     "DB_PATH",
     "init_schema",
@@ -2651,4 +2863,8 @@ __all__ = [
     "get_simulation_run",
     "get_recent_simulation_runs",
     "get_latest_simulation_run_for_ticker",
+    "insert_contribution_events",
+    "get_contribution_events",
+    "insert_role_rating",
+    "get_role_ratings",
 ]

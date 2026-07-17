@@ -1419,3 +1419,120 @@ export interface SimRunsResponse extends SimAdvisoryStamps {
   count: number;
   runs: SimRunSummary[];
 }
+
+// --- Role-Adjusted Contribution Rating (RACR / "Kanté Index") ---------------
+
+export interface SimRoleContract {
+  component_id: string;
+  component_name: string;
+  role_template: string;
+  primary_mandate: string;
+  forbidden_mandates: string[];
+  honest_ceiling: number;
+  dimension_weights: Record<string, number>;
+}
+
+export interface SimRoleContractsResponse extends SimAdvisoryStamps {
+  contract_version: string;
+  component_count: number;
+  components: SimRoleContract[];
+  dimensions: string[];
+}
+
+export interface SimFiveScores {
+  role_adjusted_performance: number;
+  engineering_quality: number;
+  decision_utility: number;
+  empirical_validation: number;
+  whole_mvp_maturity: number;
+  empirical_sample_size: number;
+  components_scored: number;
+  components_runtime_reached: number;
+  note: string;
+  whole_mvp_detail: Record<string, unknown>;
+}
+
+export interface SimComponentRating {
+  component_id: string;
+  component_name: string;
+  role_template: string;
+  role_adjusted_performance: number;
+  engineering_quality: number;
+  decision_utility: number;
+  empirical_validation: number;
+  rating_confidence: number;
+  support: string;
+  evidence_grade: string;
+  honest_ceiling: number;
+  runtime_reached: boolean;
+  empirically_validated: boolean;
+  severe_events: number;
+  caps_applied: string[];
+  reasons: string[];
+  dimension_scores: Array<{
+    dimension: string;
+    weight: number;
+    value: number;
+    grade: string;
+    confidence: number;
+    support: string;
+    source: string;
+    reason: string;
+  }>;
+}
+
+export interface SimContributionEvent {
+  event_id: string;
+  component_id: string;
+  event_type: string;
+  direction: string;
+  severity: string;
+  event_class: string;
+  target_dimension: string;
+  counterfactual_impact: string;
+  evidence: string;
+  affected_final_result: boolean;
+}
+
+export interface SimLensContribution {
+  lens: string;
+  vote_changed: boolean;
+  shapley_value: number;
+  tail_warning_lost: number;
+  coverage_loss: number;
+  marginal_summary: string;
+}
+
+export interface SimRatingsResult extends SimAdvisoryStamps {
+  ok: boolean;
+  run_id: string;
+  ticker: string;
+  persisted?: boolean;
+  five_scores: SimFiveScores;
+  ratings: SimComponentRating[];
+  contribution_events: SimContributionEvent[];
+  context_difficulty: { score: number; band: string; dominant_factor: string };
+  ablation: {
+    most_valuable_lens: string;
+    quietest_valuable_lens: string;
+    shapley_exact: boolean;
+    lens_contributions: SimLensContribution[];
+  };
+  council_vote: string;
+  evidence_label: string;
+  simulation_only: boolean;
+}
+
+export interface SimReliabilityResponse extends SimAdvisoryStamps {
+  fault_injection: Array<{ fault: string; survived: boolean; safe: boolean; detail: string }>;
+  all_faults_survived_safely: boolean;
+}
+
+export interface SimEngineValidationResponse extends SimAdvisoryStamps {
+  engine_count: number;
+  optional_real_integrations: string[];
+  any_engine_available: boolean;
+  base_app_runs_without_engines: boolean;
+  all_never_real_execution: boolean;
+  validations: Array<{ engine: string; status: string; available: boolean; integration_mode: string }>;
+}

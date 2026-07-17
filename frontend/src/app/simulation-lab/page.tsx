@@ -7,6 +7,7 @@ import {
   getSimulationScenarios,
   getSimulationRuns,
   postSimulationRun,
+  postSimulationRatings,
 } from '@/lib/apiClient';
 import type {
   SimHealthResponse,
@@ -15,6 +16,7 @@ import type {
   SimRunsResponse,
   SimCouncilResult,
   SimLensResult,
+  SimRatingsResult,
 } from '@/types';
 import { AdvisoryOnlyBadge } from '@/components/AdvisoryOnlyBadge';
 import { NoExecutionBanner } from '@/components/NoExecutionBanner';
@@ -63,6 +65,8 @@ export default function SimulationLabPage() {
   const [result, setResult] = useState<SimCouncilResult | null>(null);
   const [running, setRunning] = useState(false);
   const [runError, setRunError] = useState<string | null>(null);
+  const [ratings, setRatings] = useState<SimRatingsResult | null>(null);
+  const [ratingRunning, setRatingRunning] = useState(false);
 
   const load = useCallback(() => {
     Promise.all([
@@ -117,6 +121,36 @@ export default function SimulationLabPage() {
       setRunError(err instanceof Error ? err.message : 'run failed');
     } finally {
       setRunning(false);
+    }
+  }, [ticker, market, seed]);
+
+  const runRatings = useCallback(async () => {
+    setRatingRunning(true);
+    try {
+      const res = await postSimulationRatings({
+        ticker,
+        market,
+        seed,
+        observation: {
+          ticker,
+          market,
+          data_cutoff: new Date().toISOString().slice(0, 10),
+          returns: DEMO_RETURNS,
+          volatility: 0.022,
+          spread_bps: 8,
+          adv_usd: 8_000_000,
+          sector: 'DEMO',
+          narrative_sources: ['sec', 'news1'],
+          source_count: 2,
+          freshness_status: 'FRESH',
+          catalysts: [{ id: 'earnings', magnitude: 0.3 }],
+        },
+      });
+      setRatings(res);
+    } catch {
+      setRatings(null);
+    } finally {
+      setRatingRunning(false);
     }
   }, [ticker, market, seed]);
 
@@ -208,6 +242,14 @@ export default function SimulationLabPage() {
               >
                 {running ? 'Simulating…' : 'Run simulation'}
               </button>
+              <button
+                onClick={runRatings}
+                disabled={ratingRunning}
+                className="bg-indigo-700 hover:bg-indigo-600 disabled:opacity-50 text-white text-sm rounded px-4 py-1.5"
+                data-testid="run-ratings"
+              >
+                {ratingRunning ? 'Scoring…' : 'Score role contribution'}
+              </button>
             </div>
             {runError && <p className="text-xs text-red-400">Simulation error: {runError}</p>}
             <p className="text-[11px] text-slate-500">
@@ -216,6 +258,8 @@ export default function SimulationLabPage() {
           </section>
 
           {result && <CouncilResultView result={result} />}
+
+          {ratings && ratings.ok && <RoleRatingsView ratings={ratings} />}
 
           {/* Engine registry ----------------------------------------- */}
           {engines && (
@@ -400,6 +444,101 @@ function LensCard({ lr }: { lr: SimLensResult }) {
       </div>
       {lr.tail_warning && <p className="text-orange-400 text-[11px]">⚠ {lr.tail_warning}</p>}
     </div>
+  );
+}
+
+function RoleRatingsView({ ratings }: { ratings: SimRatingsResult }) {
+  const fs = ratings.five_scores;
+  const abl = ratings.ablation;
+  const topComponents = [...ratings.ratings]
+    .sort((a, b) => b.role_adjusted_performance - a.role_adjusted_performance)
+    .slice(0, 6);
+  return (
+    <section
+      className="bg-slate-900 border border-indigo-800/50 rounded-lg p-4 space-y-4"
+      data-testid="role-ratings"
+      data-execution-permission="false"
+    >
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <h2 className="text-sm font-semibold text-slate-200">
+          Role-adjusted contribution — {ratings.ticker}
+        </h2>
+        <span className="text-[11px] text-slate-500">
+          context: {ratings.context_difficulty.band} ({ratings.context_difficulty.score})
+        </span>
+      </div>
+
+      {/* Five SEPARATE scores — never averaged into one number */}
+      <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 text-xs" data-testid="five-scores">
+        <Stat label="Role-adjusted" value={`${fs.role_adjusted_performance}/10`} tone="text-indigo-300" />
+        <Stat label="Engineering" value={`${fs.engineering_quality}/10`} tone="text-sky-300" />
+        <Stat label="Decision utility" value={`${fs.decision_utility}/10`} tone="text-emerald-300" />
+        <Stat label="Empirical" value={`${fs.empirical_validation}/10`} tone="text-orange-400" />
+        <Stat label="Whole-MVP" value={`${fs.whole_mvp_maturity}/10`} tone="text-slate-200" />
+      </div>
+      <p className="text-[11px] text-slate-500">{fs.note}</p>
+
+      {/* The "Kanté" — quiet but valuable lens */}
+      {abl.quietest_valuable_lens && (
+        <div className="bg-indigo-950/40 border border-indigo-800/50 rounded px-3 py-2 text-xs text-indigo-200">
+          <span className="font-semibold">Quiet contributor (highest marginal value without changing the vote):</span>{' '}
+          <span className="font-mono">{abl.quietest_valuable_lens}</span>. Shapley marginal-contribution
+          measured by {abl.shapley_exact ? 'exact' : 'approximate'} lens ablation.
+        </div>
+      )}
+
+      {/* Per-component ratings with evidence drill-down */}
+      <div className="overflow-x-auto">
+        <table className="w-full text-xs">
+          <thead>
+            <tr className="text-slate-500 text-left border-b border-slate-800">
+              <th className="py-1 pr-3">Component</th>
+              <th className="py-1 pr-3">RACR</th>
+              <th className="py-1 pr-3">Support</th>
+              <th className="py-1 pr-3">Grade</th>
+              <th className="py-1 pr-3">Reached</th>
+              <th className="py-1 pr-3">Ceiling</th>
+            </tr>
+          </thead>
+          <tbody>
+            {topComponents.map((r) => (
+              <tr key={r.component_id} className="border-b border-slate-800/50">
+                <td className="py-1 pr-3 font-mono text-slate-200">{r.component_id}</td>
+                <td className="py-1 pr-3 text-indigo-300 font-semibold">{r.role_adjusted_performance}</td>
+                <td className="py-1 pr-3 text-slate-400">{r.support}</td>
+                <td className="py-1 pr-3 text-slate-400">{r.evidence_grade}</td>
+                <td className="py-1 pr-3">{r.runtime_reached ? '✓' : '—'}</td>
+                <td className="py-1 pr-3 text-slate-500">{r.honest_ceiling}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Contribution events — the audit trail */}
+      {ratings.contribution_events.length > 0 && (
+        <details className="text-xs" data-testid="contribution-events">
+          <summary className="text-slate-400 cursor-pointer">
+            Contribution events ({ratings.contribution_events.length}) — evidence behind the scores
+          </summary>
+          <ul className="mt-2 space-y-1">
+            {ratings.contribution_events.slice(0, 12).map((e) => (
+              <li key={e.event_id} className="text-slate-400 font-mono text-[11px]">
+                <span className={e.direction === 'POSITIVE' ? 'text-emerald-400' : 'text-red-400'}>
+                  [{e.direction}]
+                </span>{' '}
+                {e.component_id} · {e.event_type} — {e.evidence}
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
+
+      <p className="text-[11px] text-slate-500">
+        Empirical validation stays low ({fs.empirical_validation}/10) by design: there are no
+        leakage-safe real outcomes yet. Role excellence never inflates it.
+      </p>
+    </section>
   );
 }
 

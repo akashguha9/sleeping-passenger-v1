@@ -714,6 +714,10 @@ import type {
   SimHealthResponse,
   SimRunsResponse,
   SimCouncilResult,
+  SimRoleContractsResponse,
+  SimRatingsResult,
+  SimReliabilityResponse,
+  SimEngineValidationResponse,
 } from '@/types';
 
 export async function getSimulationHealth(): Promise<SimHealthResponse | null> {
@@ -778,4 +782,43 @@ export async function postSimulationRun(body: {
     method: 'POST',
     body: JSON.stringify(body),
   });
+}
+
+// --- Role-Adjusted Contribution Rating (RACR / "Kanté Index") ---------------
+
+export async function getRoleContracts(): Promise<SimRoleContractsResponse | null> {
+  try {
+    return await apiFetch<SimRoleContractsResponse>('/api/simulation/role-contracts');
+  } catch {
+    return null;
+  }
+}
+
+export async function postSimulationRatings(body: {
+  ticker: string;
+  market?: string;
+  seed?: number;
+  observation?: Record<string, unknown>;
+  scenarios?: string[];
+}): Promise<SimRatingsResult> {
+  return apiFetch<SimRatingsResult>('/api/simulation/ratings', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+export async function getSimulationReliability(): Promise<SimReliabilityResponse | null> {
+  try {
+    return await apiFetch<SimReliabilityResponse>('/api/simulation/reliability');
+  } catch {
+    return null;
+  }
+}
+
+export async function getSimulationEngineValidation(): Promise<SimEngineValidationResponse | null> {
+  try {
+    return await apiFetch<SimEngineValidationResponse>('/api/simulation/engine-validation');
+  } catch {
+    return null;
+  }
 }
