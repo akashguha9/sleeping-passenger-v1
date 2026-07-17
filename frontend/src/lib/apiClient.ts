@@ -699,3 +699,83 @@ export function getCsvExportUrl(
 ): string {
   return `${API_BASE}/exports/${type}.csv`;
 }
+
+// ---------------------------------------------------------------------------
+// Simulation Intelligence Layer (SIL) — advisory-only six-lens council.
+// All wrappers return T | null (try/catch -> null), matching the repo
+// convention. postSimulationRun is the only mutating call and requires the
+// operator token when the backend sets one. None of these authorise
+// execution; every payload keeps execution_gate=LOCKED, broker_api_called=false.
+// Backend producer: scripts/simulation_intelligence/ via scripts/api_server.py.
+// ---------------------------------------------------------------------------
+import type {
+  SimEnginesResponse,
+  SimScenariosResponse,
+  SimHealthResponse,
+  SimRunsResponse,
+  SimCouncilResult,
+} from '@/types';
+
+export async function getSimulationHealth(): Promise<SimHealthResponse | null> {
+  try {
+    return await apiFetch<SimHealthResponse>('/api/simulation/health');
+  } catch {
+    return null;
+  }
+}
+
+export async function getSimulationEngines(): Promise<SimEnginesResponse | null> {
+  try {
+    return await apiFetch<SimEnginesResponse>('/api/simulation/engines');
+  } catch {
+    return null;
+  }
+}
+
+export async function getSimulationScenarios(): Promise<SimScenariosResponse | null> {
+  try {
+    return await apiFetch<SimScenariosResponse>('/api/simulation/scenarios');
+  } catch {
+    return null;
+  }
+}
+
+export async function getSimulationRuns(
+  limit = 50,
+  ticker?: string,
+): Promise<SimRunsResponse | null> {
+  try {
+    const params = new URLSearchParams();
+    params.set('limit', String(limit));
+    if (ticker) params.set('ticker', ticker);
+    return await apiFetch<SimRunsResponse>(`/api/simulation/runs?${params.toString()}`);
+  } catch {
+    return null;
+  }
+}
+
+export async function getSimulationRun(runId: string): Promise<SimCouncilResult | null> {
+  try {
+    return await apiFetch<SimCouncilResult>(
+      `/api/simulation/runs/${encodeURIComponent(runId)}`,
+    );
+  } catch {
+    return null;
+  }
+}
+
+export async function postSimulationRun(body: {
+  ticker: string;
+  market?: string;
+  seed?: number;
+  max_runs?: number;
+  parent_signal_id?: string;
+  observation?: Record<string, unknown>;
+  scenarios?: string[];
+  requested_lenses?: string[];
+}): Promise<SimCouncilResult> {
+  return apiFetch<SimCouncilResult>('/api/simulation/run', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}

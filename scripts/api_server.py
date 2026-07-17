@@ -421,6 +421,9 @@ if _FASTAPI_AVAILABLE:
         "/diagnostics/",
         "/learning-completeness",
         "/self-test/",
+        # Simulation Intelligence Layer runs the six-lens Monte-Carlo council;
+        # give it the stricter rate-limit bucket so a burst can't hog CPU.
+        "/api/simulation/",
     )
 
     def _scope_for(path: str, is_mutating: bool) -> str:
@@ -945,6 +948,19 @@ class MoltbookEntryBody(BaseModel):
     bias_detected: str = Field("", max_length=200)
     recalibration_note: str = Field("", max_length=4000)
     future_rule_update: str = Field("", max_length=4000)
+
+
+class SimulationRunBody(BaseModel):
+    # Simulation Intelligence Layer run request. Advisory-only, record-only.
+    # Bounded: caps mirror scripts/simulation_intelligence/api_surface.py.
+    ticker: str = Field(..., min_length=1, max_length=32)
+    market: str = Field("UNKNOWN", max_length=8)
+    seed: int = Field(0, ge=0, le=2_000_000_000)
+    max_runs: int = Field(256, ge=8, le=20_000)
+    parent_signal_id: str = Field("", max_length=64)
+    observation: dict = Field(default_factory=dict)
+    scenarios: list[str] = Field(default_factory=list, max_length=64)
+    requested_lenses: list[str] = Field(default_factory=list, max_length=6)
 
 
 class ReconciliationAutoUpdateBody(BaseModel):
@@ -3122,6 +3138,206 @@ def post_live_refresh_run(
         human_execution_required=True,
         execution_gate="LOCKED",
     )
+
+
+# ---------------------------------------------------------------------------
+# Simulation Intelligence Layer (SIL) — advisory-only six-lens simulation council
+#
+# All routes are advisory-only and record-only.  The POST route runs a bounded,
+# deterministic Monte-Carlo council and persists a SIMULATED_ONLY run to SQLite;
+# it NEVER feeds calibration, NEVER calls a broker, and NEVER grants execution.
+# Heavy work is bounded by SIL feature-flag caps; the layer degrades gracefully
+# when optional engines are unavailable (the council always runs).
+# ---------------------------------------------------------------------------
+
+
+def _sil_import():
+    """Lazy dual-path import of the SIL API surface + replay + persistence."""
+    try:
+        from scripts.simulation_intelligence import api_surface as _api
+        from scripts.simulation_intelligence import replay as _replay
+        from scripts.simulation_intelligence import engine_manifest as _em
+        from scripts import persistence as _persist
+    except ModuleNotFoundError:  # pragma: no cover - script-style fallback
+        from simulation_intelligence import api_surface as _api  # type: ignore[no-redef]
+        from simulation_intelligence import replay as _replay  # type: ignore[no-redef]
+        from simulation_intelligence import engine_manifest as _em  # type: ignore[no-redef]
+        import persistence as _persist  # type: ignore[no-redef]
+    return _api, _replay, _em, _persist
+
+
+@app.get("/api/simulation/health")
+def get_simulation_health(_auth: None = Depends(require_api_token_for_reads)) -> dict:
+    """SIL availability + feature flags (advisory-only). Never blocks."""
+    try:
+        api, _replay, _em, _persist = _sil_import()
+        return api.health_report()
+    except Exception as exc:  # fail soft
+        return {"report": "simulation_health", "ok": False,
+                "error": _safe_exc_summary(exc), "advisory_status": _ADVISORY_STATUS,
+                "execution_gate": "LOCKED", "ai_execution_count": 0,
+                "broker_api_called": False, "human_review_required": True}
+
+
+@app.get("/api/simulation/engines")
+def get_simulation_engines(_auth: None = Depends(require_api_token_for_reads)) -> dict:
+    """Verified 18-engine manifest + honest live adapter availability."""
+    api, _replay, _em, _persist = _sil_import()
+    return api.engines_report()
+
+
+@app.get("/api/simulation/scenarios")
+def get_simulation_scenarios(_auth: None = Depends(require_api_token_for_reads)) -> dict:
+    """Reusable India/US stress + operational scenario catalog."""
+    api, _replay, _em, _persist = _sil_import()
+    return api.scenarios_report()
+
+
+@app.post("/api/simulation/run")
+def post_simulation_run(
+    body: "SimulationRunBody",
+    _auth: None = Depends(require_api_token),
+) -> dict:
+    """Run the six-lens council for a candidate; persist a SIMULATED_ONLY run.
+
+    Advisory-only and record-only: the result never feeds calibration and never
+    grants execution.  Deterministic given (seed, data cutoff, observation).
+    """
+    api, _replay, _em, _persist = _sil_import()
+    payload = {
+        "ticker": body.ticker, "market": body.market, "seed": body.seed,
+        "max_runs": body.max_runs, "parent_signal_id": body.parent_signal_id,
+        "observation": body.observation or {}, "scenarios": body.scenarios,
+        "requested_lenses": body.requested_lenses,
+    }
+    result = api.run_simulation(payload)
+    if result.get("ok"):
+        try:
+            _persist.insert_simulation_run(
+                result, request_payload=payload,
+                engine_manifest_version=_em.MANIFEST_VERSION,
+            )
+        except Exception:  # persistence is best-effort; the run itself is returned
+            result["persisted"] = False
+        else:
+            result["persisted"] = True
+    return result
+
+
+@app.get("/api/simulation/runs")
+def get_simulation_runs(
+    limit: int = 50,
+    ticker: str | None = None,
+    _auth: None = Depends(require_api_token_for_reads),
+) -> dict:
+    """List recent simulation runs (newest first), optionally by ticker."""
+    api, _replay, _em, _persist = _sil_import()
+    limit = clamp_limit(limit, default=50, ceiling=200)
+    runs = _persist.get_recent_simulation_runs(limit=limit, ticker=ticker)
+    # Return compact rows (drop the heavy result_json blob from the list view).
+    compact = []
+    for r in runs:
+        compact.append({k: r.get(k) for k in (
+            "run_id", "ticker", "market", "seed", "aggregate_vote",
+            "disagreement_class", "aggregate_confidence", "evidence_label",
+            "risk_block_engaged", "simulation_only", "usefulness_score", "created_at",
+        )})
+    return {
+        "report": "simulation_runs", "count": len(compact), "runs": compact,
+        "advisory_status": _ADVISORY_STATUS, "execution_gate": "LOCKED",
+        "ai_execution_count": 0, "broker_api_called": False,
+        "human_review_required": True,
+    }
+
+
+@app.get("/api/simulation/runs/{run_id}")
+def get_simulation_run_by_id(
+    run_id: str,
+    _auth: None = Depends(require_api_token_for_reads),
+) -> dict:
+    """Return one stored simulation run (full council result)."""
+    api, _replay, _em, _persist = _sil_import()
+    run = _persist.get_simulation_run(run_id[:64])
+    if run is None:
+        raise HTTPException(status_code=404, detail={
+            "message": "simulation run not found", "reason": "unknown_run_id",
+            "advisory_status": _ADVISORY_STATUS, "execution_gate": "LOCKED",
+            "ai_execution_count": 0, "broker_api_called": False,
+            "human_review_required": True, "record_keeping_only": True,
+        })
+    return {"report": "simulation_run_detail", **run}
+
+
+@app.get("/api/simulation/runs/{run_id}/replay")
+def get_simulation_replay(
+    run_id: str,
+    _auth: None = Depends(require_api_token_for_reads),
+) -> dict:
+    """Re-run the council from the stored request and confirm determinism."""
+    api, _replay, _em, _persist = _sil_import()
+    run = _persist.get_simulation_run(run_id[:64])
+    if run is None:
+        raise HTTPException(status_code=404, detail={
+            "message": "simulation run not found", "reason": "unknown_run_id",
+            "advisory_status": _ADVISORY_STATUS, "execution_gate": "LOCKED",
+            "ai_execution_count": 0, "broker_api_called": False,
+            "human_review_required": True, "record_keeping_only": True,
+        })
+    return _replay.replay_run(run)
+
+
+@app.get("/api/simulation/council/{ticker}")
+def get_simulation_council(
+    ticker: str,
+    _auth: None = Depends(require_api_token_for_reads),
+) -> dict:
+    """Return the latest stored council result for a ticker (advisory-only)."""
+    api, _replay, _em, _persist = _sil_import()
+    run = _persist.get_latest_simulation_run_for_ticker(ticker[:32])
+    if run is None:
+        return {
+            "report": "simulation_council", "ticker": ticker, "found": False,
+            "message": "no stored simulation run for this ticker; POST /api/simulation/run first",
+            "advisory_status": _ADVISORY_STATUS, "execution_gate": "LOCKED",
+            "ai_execution_count": 0, "broker_api_called": False,
+            "human_review_required": True,
+        }
+    return {"report": "simulation_council", "ticker": ticker, "found": True, **run}
+
+
+@app.get("/api/simulation/stress-summary")
+def get_simulation_stress_summary(
+    ticker: str | None = None,
+    _auth: None = Depends(require_api_token_for_reads),
+) -> dict:
+    """Roll up stress-test survival across recent runs (advisory-only)."""
+    api, _replay, _em, _persist = _sil_import()
+    runs = _persist.get_recent_simulation_runs(limit=50, ticker=ticker)
+    total = 0
+    survived = 0
+    worst_tail = 0.0
+    per_scenario: dict = {}
+    for r in runs:
+        for st in (r.get("result", {}) or {}).get("stress_results", []):
+            total += 1
+            if st.get("survived"):
+                survived += 1
+            band = st.get("band", {}) or {}
+            worst_tail = min(worst_tail, float(band.get("tail_low", 0.0) or 0.0))
+            sid = st.get("scenario_id", "unknown")
+            slot = per_scenario.setdefault(sid, {"n": 0, "survived": 0})
+            slot["n"] += 1
+            slot["survived"] += 1 if st.get("survived") else 0
+    return {
+        "report": "simulation_stress_summary", "runs_considered": len(runs),
+        "stress_cells": total, "survived": survived,
+        "survival_rate": round(survived / total, 4) if total else None,
+        "worst_tail": round(worst_tail, 6), "per_scenario": per_scenario,
+        "evidence_note": "SIMULATED_ONLY — stress outcomes are simulated, not measured.",
+        "advisory_status": _ADVISORY_STATUS, "execution_gate": "LOCKED",
+        "ai_execution_count": 0, "broker_api_called": False,
+        "human_review_required": True,
+    }
 
 
 if __name__ == "__main__":  # pragma: no cover

@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -334,6 +335,40 @@ CREATE TABLE IF NOT EXISTS imported_outcomes (
     broker_api_called INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_imported_outcomes_src ON imported_outcomes(source_type);
+CREATE TABLE IF NOT EXISTS simulation_runs (
+    run_id TEXT PRIMARY KEY,
+    ticker TEXT NOT NULL DEFAULT '',
+    market TEXT NOT NULL DEFAULT 'UNKNOWN',
+    as_of TEXT NOT NULL DEFAULT '',
+    data_cutoff TEXT NOT NULL DEFAULT '',
+    seed INTEGER NOT NULL DEFAULT 0,
+    parent_signal_id TEXT NOT NULL DEFAULT '',
+    contract_version TEXT NOT NULL DEFAULT '',
+    aggregate_vote TEXT NOT NULL DEFAULT 'WAIT',
+    disagreement_class TEXT NOT NULL DEFAULT '',
+    aggregate_confidence REAL NOT NULL DEFAULT 0.0,
+    evidence_label TEXT NOT NULL DEFAULT 'SIMULATED_ONLY',
+    robustness REAL NOT NULL DEFAULT 0.0,
+    fragility REAL NOT NULL DEFAULT 0.0,
+    risk_block_engaged INTEGER NOT NULL DEFAULT 0,
+    simulation_only INTEGER NOT NULL DEFAULT 1,
+    usefulness_score REAL NOT NULL DEFAULT 0.0,
+    engine_manifest_version TEXT NOT NULL DEFAULT '',
+    request_json TEXT NOT NULL DEFAULT '{}',
+    result_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL DEFAULT '',
+    -- Advisory invariants: a simulation run is SIMULATED_ONLY advisory output.
+    -- It NEVER feeds calibration, NEVER touches a broker, NEVER grants execution.
+    advisory_status TEXT NOT NULL DEFAULT 'ADVISORY_ONLY',
+    execution_mode TEXT NOT NULL DEFAULT 'HUMAN_ONLY',
+    execution_gate TEXT NOT NULL DEFAULT 'LOCKED',
+    human_review_required INTEGER NOT NULL DEFAULT 1,
+    ai_execution_count INTEGER NOT NULL DEFAULT 0,
+    broker_api_called INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_sim_runs_ticker ON simulation_runs(ticker);
+CREATE INDEX IF NOT EXISTS idx_sim_runs_created ON simulation_runs(created_at);
+CREATE INDEX IF NOT EXISTS idx_sim_runs_parent ON simulation_runs(parent_signal_id);
 """
 
 # Track which DB paths have been initialized this process (avoids repeat schema runs)
@@ -1765,6 +1800,7 @@ def get_db_status(db_path: Path = DB_PATH) -> dict[str, Any]:
         "source_run_log",
         "global_securities",
         "global_security_aliases",
+        "simulation_runs",
     ]
     counts: dict[str, int] = {}
     pragmas: dict[str, Any] = {
@@ -2431,6 +2467,138 @@ def get_security_coverage(
     }
 
 
+# ---------------------------------------------------------------------------
+# Simulation Intelligence Layer (SIL) — canonical run storage.
+#
+# A simulation run is SIMULATED_ONLY advisory output: it stores the full council
+# result + the input request (for seed/data-cutoff replay).  It NEVER feeds
+# calibration, NEVER writes manual_trades/imported_outcomes, NEVER calls a
+# broker, and NEVER grants execution.  Late-bound db_path keeps conftest's
+# runtime-DB isolation working.
+# ---------------------------------------------------------------------------
+def insert_simulation_run(
+    run: dict[str, Any],
+    request_payload: dict[str, Any] | None = None,
+    engine_manifest_version: str = "",
+    created_at: str | None = None,
+    db_path: Path | None = None,
+) -> str:
+    """Persist a council result dict (from SimulationCouncilResult.to_dict()).
+
+    Idempotent on ``run_id`` (INSERT OR REPLACE — a re-run with the same seed +
+    data cutoff overwrites the identical row).  Returns the run_id.
+    """
+    target = db_path if db_path is not None else DB_PATH
+    run_id = str(run.get("run_id") or f"SIM_{uuid.uuid4().hex[:12]}")
+    ts = created_at or utc_timestamp()
+    conn = _get_conn(target)
+    try:
+        conn.execute(
+            "INSERT OR REPLACE INTO simulation_runs ("
+            " run_id, ticker, market, as_of, data_cutoff, seed, parent_signal_id,"
+            " contract_version, aggregate_vote, disagreement_class, aggregate_confidence,"
+            " evidence_label, robustness, fragility, risk_block_engaged, simulation_only,"
+            " usefulness_score, engine_manifest_version, request_json, result_json, created_at,"
+            " advisory_status, execution_mode, execution_gate, human_review_required,"
+            " ai_execution_count, broker_api_called"
+            ") VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (
+                run_id,
+                str(run.get("ticker", "")),
+                str(run.get("market", "UNKNOWN")),
+                str(run.get("as_of", "")),
+                str(run.get("data_cutoff", "")),
+                int(run.get("seed", 0) or 0),
+                str(run.get("parent_signal_id", "")),
+                str(run.get("contract_version", "")),
+                str(run.get("aggregate_vote", "WAIT")),
+                str(run.get("disagreement_class", "")),
+                float(run.get("aggregate_confidence", 0.0) or 0.0),
+                str(run.get("evidence_label", "SIMULATED_ONLY")),
+                float(run.get("robustness", 0.0) or 0.0),
+                float(run.get("fragility", 0.0) or 0.0),
+                1 if run.get("risk_block_engaged") else 0,
+                1 if run.get("simulation_only", True) else 0,
+                float(run.get("usefulness_score", 0.0) or 0.0),
+                str(engine_manifest_version),
+                json.dumps(request_payload or {}, default=str),
+                json.dumps(run, default=str),
+                ts,
+                _ADVISORY_STATUS, _EXECUTION_MODE, "LOCKED", 1, _AI_EXECUTION_COUNT, 0,
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return run_id
+
+
+def get_simulation_run(run_id: str, db_path: Path | None = None) -> dict[str, Any] | None:
+    """Return one simulation run (full result_json parsed), or None."""
+    target = db_path if db_path is not None else DB_PATH
+    conn = _get_conn(target)
+    try:
+        row = conn.execute(
+            "SELECT * FROM simulation_runs WHERE run_id=?", (run_id,)
+        ).fetchone()
+    finally:
+        conn.close()
+    if row is None:
+        return None
+    return _sim_row_to_dict(row)
+
+
+def get_recent_simulation_runs(
+    limit: int = 50,
+    ticker: str | None = None,
+    db_path: Path | None = None,
+) -> list[dict[str, Any]]:
+    """Return recent simulation runs (newest first), optionally by ticker."""
+    target = db_path if db_path is not None else DB_PATH
+    limit = max(1, min(int(limit), 500))
+    conn = _get_conn(target)
+    try:
+        if ticker:
+            rows = conn.execute(
+                "SELECT * FROM simulation_runs WHERE ticker=?"
+                " ORDER BY created_at DESC LIMIT ?",
+                (ticker, limit),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM simulation_runs ORDER BY created_at DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+    finally:
+        conn.close()
+    return [_sim_row_to_dict(r) for r in rows]
+
+
+def get_latest_simulation_run_for_ticker(
+    ticker: str, db_path: Path | None = None
+) -> dict[str, Any] | None:
+    runs = get_recent_simulation_runs(limit=1, ticker=ticker, db_path=db_path)
+    return runs[0] if runs else None
+
+
+def _sim_row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
+    d = dict(row)
+    d["advisory_status"] = _ADVISORY_STATUS
+    d["execution_mode"] = _EXECUTION_MODE
+    d["execution_gate"] = "LOCKED"
+    d["ai_execution_count"] = _AI_EXECUTION_COUNT
+    d["broker_api_called"] = False
+    d["risk_block_engaged"] = bool(d.get("risk_block_engaged"))
+    d["simulation_only"] = bool(d.get("simulation_only", 1))
+    d["human_review_required"] = bool(d.get("human_review_required", 1))
+    for key in ("request_json", "result_json"):
+        try:
+            d[key.replace("_json", "")] = json.loads(d.get(key) or "{}")
+        except (json.JSONDecodeError, TypeError):
+            d[key.replace("_json", "")] = {}
+    return d
+
+
 __all__ = [
     "DB_PATH",
     "init_schema",
@@ -2479,4 +2647,8 @@ __all__ = [
     "upsert_security_alias",
     "resolve_alias",
     "get_security_coverage",
+    "insert_simulation_run",
+    "get_simulation_run",
+    "get_recent_simulation_runs",
+    "get_latest_simulation_run_for_ticker",
 ]

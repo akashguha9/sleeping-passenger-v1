@@ -203,6 +203,11 @@ APPROVED_DOMAINS: tuple[str, ...] = (
     "decision_board",      # manual_decision_board.py — advisory-only human-review
                            # classifier; emits no order/execution instruction
     "mvp_readiness",       # mvp_readiness_report.py — single advisory truth surface
+    # Simulation Intelligence Layer (SIL) — advisory-only six-lens simulation
+    # council under scripts/simulation_intelligence/.  Scores/labels/what-if
+    # distributions only; SIMULATED_ONLY outputs never feed calibration, never
+    # touch a broker, never place an order, and never grant execution.
+    "simulation",          # scripts/simulation_intelligence/ package
 )
 
 # Explicit allowlist for individual files / directories whose name does

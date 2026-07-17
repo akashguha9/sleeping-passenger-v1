@@ -120,6 +120,15 @@ CONTRACT: dict[str, str] = {
     "GDELT_LIVE_ENABLED": _SOURCE,
     "LIVE_REFRESH_MAX_TICKERS": _PLAIN,
     "LIVE_REFRESH_REQUIRE_ADVISORY_ONLY": _PLAIN,
+    # Simulation Intelligence Layer (SIL) — advisory-only simulation council.
+    # None of these grants execution; they gate simulation breadth and the two
+    # OPTIONAL, OFF-by-default engine adapters (Stockfish subprocess, COPASI lib).
+    "SIL_ENABLED": _PLAIN,
+    "SIL_STOCKFISH_ENABLED": _PLAIN,
+    "SIL_COPASI_ENABLED": _PLAIN,
+    "SIL_MAX_RUNS": _PLAIN,
+    "SIL_MAX_SCENARIOS": _PLAIN,
+    "SIL_TIMEOUT_MS": _PLAIN,
 }
 
 REQUIRED_VARS = tuple(k for k, v in CONTRACT.items() if v == _REQUIRED)

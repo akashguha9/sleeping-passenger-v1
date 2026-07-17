@@ -1269,3 +1269,153 @@ export interface SecurityCoverageResponse {
   broker_order_id: string;
   error?: string;
 }
+
+// ---------------------------------------------------------------------------
+// Simulation Intelligence Layer (SIL) — advisory-only six-lens council.
+// Every response carries the standard advisory invariants. All simulation
+// output is SIMULATED_ONLY / PROXY_DERIVED / MODEL_INFERRED — never measured,
+// never execution. Backend producer: scripts/simulation_intelligence/.
+// ---------------------------------------------------------------------------
+export interface SimAdvisoryStamps {
+  advisory_status: string;
+  execution_gate: string;
+  ai_execution_count: number;
+  broker_api_called: boolean;
+  human_review_required: boolean;
+}
+
+export interface SimLensResult {
+  lens: string;
+  state_interpretation: string;
+  advisory_vote: string;
+  confidence: number;
+  evidence_label: string;
+  uncertainty: number;
+  robustness: number;
+  fragility: number;
+  regret: number;
+  exploitability: number;
+  main_risk: string;
+  main_opportunity: string;
+  tail_warning: string;
+  missing_data_warnings: string[];
+  scenario_branches: string[];
+  freshness_status: string;
+  error?: string;
+  detail?: Record<string, unknown>;
+}
+
+export interface SimLensWeight {
+  lens: string;
+  final_weight: number;
+  reasons: string[];
+}
+
+export interface SimStressResult {
+  scenario_id: string;
+  scenario_name: string;
+  survived: boolean;
+  impact: number;
+  failure_modes: string[];
+  band?: Record<string, number | string>;
+}
+
+export interface SimCouncilResult extends SimAdvisoryStamps {
+  ok?: boolean;
+  report?: string;
+  run_id: string;
+  contract_version: string;
+  ticker: string;
+  market: string;
+  as_of: string;
+  data_cutoff: string;
+  seed: number;
+  aggregate_vote: string;
+  disagreement_class: string;
+  aggregate_confidence: number;
+  evidence_label: string;
+  robustness: number;
+  fragility: number;
+  risk_block_engaged: boolean;
+  risk_block_reason: string;
+  simulation_only: boolean;
+  usefulness_score: number;
+  lens_results: SimLensResult[];
+  lens_weights: SimLensWeight[];
+  minority_warnings: string[];
+  tail_warnings: string[];
+  stress_results: SimStressResult[];
+  dominant_assumptions: string[];
+  missing_data_warnings: string[];
+  aggregation_explanation: string[];
+  engine_availability: Record<string, string>;
+  freshness_status: string;
+  persisted?: boolean;
+}
+
+export interface SimEngineEntry {
+  engine: string;
+  domain: string;
+  integration_mode: string;
+  final_decision: string;
+  license: string;
+  python313: string;
+  windows: string;
+  transplanted_into: string;
+  reason: string;
+}
+
+export interface SimEnginesResponse extends SimAdvisoryStamps {
+  manifest_version: string;
+  summary: {
+    engine_count: number;
+    by_mode: Record<string, string[]>;
+    honesty_note: string;
+  };
+  engines: SimEngineEntry[];
+  availability: { available_now: string[]; available_count: number };
+}
+
+export interface SimScenario {
+  scenario_id: string;
+  name: string;
+  description: string;
+  tags: string[];
+  operational: boolean;
+}
+
+export interface SimScenariosResponse extends SimAdvisoryStamps {
+  count: number;
+  default_scenario_ids: string[];
+  scenarios: SimScenario[];
+}
+
+export interface SimHealthResponse extends SimAdvisoryStamps {
+  sil_enabled: boolean;
+  feature_flags: Record<string, unknown>;
+  engine_count: number;
+  engines_available_now: string[];
+  engines_available_count: number;
+  manifest_version: string;
+  note: string;
+}
+
+export interface SimRunSummary {
+  run_id: string;
+  ticker: string;
+  market: string;
+  seed: number;
+  aggregate_vote: string;
+  disagreement_class: string;
+  aggregate_confidence: number;
+  evidence_label: string;
+  risk_block_engaged: boolean;
+  simulation_only: boolean;
+  usefulness_score: number;
+  created_at: string;
+}
+
+export interface SimRunsResponse extends SimAdvisoryStamps {
+  count: number;
+  runs: SimRunSummary[];
+}
