@@ -718,6 +718,9 @@ import type {
   SimRatingsResult,
   SimReliabilityResponse,
   SimEngineValidationResponse,
+  EurekaHealthResponse,
+  DecisionTwinsResponse,
+  DailyShadowRunResponse,
 } from '@/types';
 
 export async function getSimulationHealth(): Promise<SimHealthResponse | null> {
@@ -821,4 +824,33 @@ export async function getSimulationEngineValidation(): Promise<SimEngineValidati
   } catch {
     return null;
   }
+}
+
+// --- Eureka closed-loop intelligence ---------------------------------------
+
+export async function getEurekaHealth(): Promise<EurekaHealthResponse | null> {
+  try {
+    return await apiFetch<EurekaHealthResponse>('/api/intelligence/eureka-health');
+  } catch {
+    return null;
+  }
+}
+
+export async function getDecisionTwins(limit = 50): Promise<DecisionTwinsResponse | null> {
+  try {
+    return await apiFetch<DecisionTwinsResponse>(`/api/intelligence/twins?limit=${limit}`);
+  } catch {
+    return null;
+  }
+}
+
+export async function postDailyShadowRun(body: {
+  session_date: string;
+  seed?: number;
+  candidates: Record<string, unknown>[];
+}): Promise<DailyShadowRunResponse> {
+  return apiFetch<DailyShadowRunResponse>('/api/intelligence/daily-shadow-run', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
 }

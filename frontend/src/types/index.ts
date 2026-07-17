@@ -1536,3 +1536,56 @@ export interface SimEngineValidationResponse extends SimAdvisoryStamps {
   all_never_real_execution: boolean;
   validations: Array<{ engine: string; status: string; available: boolean; integration_mode: string }>;
 }
+
+// --- Eureka closed-loop intelligence ---------------------------------------
+
+export interface EurekaHealthResponse extends SimAdvisoryStamps {
+  twins_frozen: number;
+  predictions_resolved: number;
+  mean_brier: number | null;
+  empirical_readiness_score: number;
+  empirical_score: number;
+  empirical_note: string;
+  loop_closed: boolean;
+}
+
+export interface DecisionTwinSummary {
+  twin_id: string;
+  candidate_id: string;
+  info_cutoff: string;
+  advisory_state: string;
+  regime_key: string;
+  immutability_hash: string;
+  created_at: string;
+}
+
+export interface DecisionTwinsResponse extends SimAdvisoryStamps {
+  count: number;
+  twins: DecisionTwinSummary[];
+}
+
+export interface ShadowAttentionItem {
+  candidate: string;
+  advisory_state: string;
+  priority: number;
+  depth: string;
+  regime: string;
+  process_quality: number | null;
+}
+
+export interface DailyShadowRunResponse extends SimAdvisoryStamps {
+  ok: boolean;
+  mode: string;
+  session_date: string;
+  candidates_considered: number;
+  rejected_cheaply: number;
+  analysed: number;
+  twins_created: number;
+  predictions_frozen: number;
+  outcome_jobs_registered: number;
+  attention_queue: ShadowAttentionItem[];
+  top_research_actions: Array<{ candidate: string; action: string; net_voi: number }>;
+  no_research_needed: string[];
+  human_action_required: boolean;
+  persisted?: boolean;
+}

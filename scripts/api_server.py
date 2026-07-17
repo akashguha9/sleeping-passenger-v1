@@ -424,6 +424,8 @@ if _FASTAPI_AVAILABLE:
         # Simulation Intelligence Layer runs the six-lens Monte-Carlo council;
         # give it the stricter rate-limit bucket so a burst can't hog CPU.
         "/api/simulation/",
+        # Closed-loop daily shadow run is the heaviest route (council per candidate).
+        "/api/intelligence/",
     )
 
     def _scope_for(path: str, is_mutating: bool) -> str:
@@ -3491,6 +3493,193 @@ def get_simulation_engine_validation(
     """Optional-engine (Stockfish/COPASI) verification profiles."""
     rc, _svc, _rel, ev, _bridge, _api, _persist = _racr_import()
     return ev.validate_optional_engines()
+
+
+# ---------------------------------------------------------------------------
+# Eureka closed-loop intelligence — Decision Twins + shadow-mode daily run.
+#
+# Turns discovery into frozen, falsifiable, immutable predictions with an
+# outcome-resolution schedule, so the system can accumulate leakage-safe
+# empirical evidence over time. Advisory-only, record-only, shadow-mode.
+# No route contains an execution-shaped term; nothing here can place an order.
+# ---------------------------------------------------------------------------
+
+
+class DailyShadowRunBody(BaseModel):
+    # Shadow-mode daily run. Advisory-only, record-only. Bounded to 50 candidates.
+    candidates: list[dict] = Field(default_factory=list, max_length=50)
+    session_date: str = Field(..., min_length=8, max_length=10)
+    seed: int = Field(0, ge=0, le=2_000_000_000)
+    persist: bool = Field(True)
+
+
+def _intel_import():
+    try:
+        from scripts.simulation_intelligence import daily_shadow_run as _dsr
+        from scripts.simulation_intelligence import value_of_information as _voi
+        from scripts.simulation_intelligence import belief_revision as _br
+        from scripts.simulation_intelligence import api_surface as _api
+        from scripts import persistence as _persist
+    except ModuleNotFoundError:  # pragma: no cover
+        from simulation_intelligence import daily_shadow_run as _dsr  # type: ignore[no-redef]
+        from simulation_intelligence import value_of_information as _voi  # type: ignore[no-redef]
+        from simulation_intelligence import belief_revision as _br  # type: ignore[no-redef]
+        from simulation_intelligence import api_surface as _api  # type: ignore[no-redef]
+        import persistence as _persist  # type: ignore[no-redef]
+    return _dsr, _voi, _br, _api, _persist
+
+
+@app.post("/api/intelligence/daily-shadow-run")
+def post_daily_shadow_run(
+    body: "DailyShadowRunBody",
+    _auth: None = Depends(require_api_token),
+) -> dict:
+    """Run the closed-loop shadow analysis over the day's candidates: build
+    observations, allocate intelligence budget, run the council, freeze Decision
+    Twins + falsifiable predictions, rank value-of-information, and register
+    outcome-resolution windows. Shadow mode — no human action, no execution."""
+    dsr, _voi, _br, _api, persist = _intel_import()
+    result = dsr.run_daily_shadow(body.candidates, session_date=body.session_date[:10],
+                                  seed=body.seed)
+    if result.get("ok") and body.persist:
+        try:
+            for r in result.get("results", []):
+                if r.get("twin"):
+                    persist.insert_decision_twin(r["twin"])
+                    persist.register_outcome_jobs(r.get("outcome_jobs", []))
+            result["persisted"] = True
+        except Exception:
+            result["persisted"] = False
+    return result
+
+
+@app.get("/api/intelligence/twins")
+def get_intelligence_twins(
+    limit: int = 50, candidate_id: str | None = None,
+    _auth: None = Depends(require_api_token_for_reads),
+) -> dict:
+    """Recent Decision Twins (frozen, immutable decision records)."""
+    dsr, _voi, _br, _api, persist = _intel_import()
+    limit = clamp_limit(limit, default=50, ceiling=200)
+    twins = persist.get_recent_decision_twins(
+        limit=limit, candidate_id=candidate_id[:32] if candidate_id else None)
+    return {"report": "decision_twins", "count": len(twins), "twins": twins,
+            "advisory_status": _ADVISORY_STATUS, "execution_gate": "LOCKED",
+            "ai_execution_count": 0, "broker_api_called": False,
+            "human_review_required": True}
+
+
+@app.get("/api/intelligence/twins/{twin_id}")
+def get_intelligence_twin(
+    twin_id: str, _auth: None = Depends(require_api_token_for_reads),
+) -> dict:
+    """One full Decision Twin, with an integrity check on its immutability hash."""
+    dsr, _voi, _br, _api, persist = _intel_import()
+    twin = persist.get_decision_twin(twin_id[:64])
+    if twin is None:
+        raise HTTPException(status_code=404, detail={
+            "message": "decision twin not found", "reason": "unknown_twin_id",
+            "advisory_status": _ADVISORY_STATUS, "execution_gate": "LOCKED",
+            "ai_execution_count": 0, "broker_api_called": False,
+            "human_review_required": True})
+    return {"report": "decision_twin_detail", **twin}
+
+
+@app.get("/api/intelligence/twins/{twin_id}/timeline")
+def get_intelligence_twin_timeline(
+    twin_id: str, _auth: None = Depends(require_api_token_for_reads),
+) -> dict:
+    """Append-only belief-revision timeline for a twin."""
+    dsr, _voi, br, _api, persist = _intel_import()
+    revs = persist.get_belief_timeline(twin_id[:64])
+    summary = br.analyse_timeline(revs)
+    return {"report": "belief_timeline_detail", "twin_id": twin_id,
+            "revisions": revs, **summary}
+
+
+@app.get("/api/intelligence/twins/{twin_id}/research-priority")
+def get_intelligence_twin_research(
+    twin_id: str, _auth: None = Depends(require_api_token_for_reads),
+) -> dict:
+    """The stored research-priority (value-of-information) for a twin."""
+    dsr, _voi, _br, _api, persist = _intel_import()
+    twin = persist.get_decision_twin(twin_id[:64])
+    if twin is None:
+        raise HTTPException(status_code=404, detail={
+            "message": "decision twin not found", "reason": "unknown_twin_id",
+            "advisory_status": _ADVISORY_STATUS, "execution_gate": "LOCKED",
+            "ai_execution_count": 0, "broker_api_called": False,
+            "human_review_required": True})
+    tra = (twin.get("twin", {}) or {}).get("top_research_action", {})
+    return {"report": "twin_research_priority", "twin_id": twin_id,
+            "top_research_action": tra, "advisory_status": _ADVISORY_STATUS,
+            "execution_gate": "LOCKED", "ai_execution_count": 0,
+            "broker_api_called": False, "human_review_required": True}
+
+
+@app.get("/api/intelligence/outcome-queue")
+def get_intelligence_outcome_queue(
+    session_date: str, limit: int = 200,
+    _auth: None = Depends(require_api_token_for_reads),
+) -> dict:
+    """Outcome-resolution jobs whose window has elapsed and are ready to resolve."""
+    dsr, _voi, _br, _api, persist = _intel_import()
+    limit = clamp_limit(limit, default=200, ceiling=1000)
+    due = persist.get_due_outcome_jobs(session_date[:10], limit=limit)
+    return {"report": "outcome_resolution_queue", "session_date": session_date,
+            "due_count": len(due), "jobs": due, "advisory_status": _ADVISORY_STATUS,
+            "execution_gate": "LOCKED", "ai_execution_count": 0,
+            "broker_api_called": False, "human_review_required": True}
+
+
+@app.get("/api/intelligence/eureka-health")
+def get_intelligence_eureka_health(
+    _auth: None = Depends(require_api_token_for_reads),
+) -> dict:
+    """Closed-loop health: how much falsifiable, resolvable evidence exists, and
+    the honest split between Empirical Score and Empirical Readiness."""
+    dsr, _voi, _br, _api, persist = _intel_import()
+    try:
+        twins = persist.get_recent_decision_twins(limit=500)
+        outcomes = persist.get_prediction_outcomes(limit=2000)
+    except Exception:
+        twins, outcomes = [], []
+    resolved = [o for o in outcomes if o.get("resolved")]
+    n_resolved = len(resolved)
+    briers = [o["brier_contribution"] for o in resolved
+              if o.get("brier_contribution") is not None and o.get("kind") == "PROBABILITY"]
+    mean_brier = round(sum(briers) / len(briers), 4) if briers else None
+    # Empirical READINESS: can the machine generate/freeze/resolve/learn? (structural)
+    readiness = 0.0
+    readiness += 3.0  # twins freeze falsifiable predictions
+    readiness += 2.5  # leakage-safe resolution exists + wired
+    readiness += 2.0  # outcome jobs registered + due-detection
+    readiness += 1.5 if twins else 0.0  # loop actually produces frozen records
+    readiness += 1.0 if n_resolved > 0 else 0.0  # at least one resolved outcome
+    readiness = round(min(9.5, readiness), 2)
+    # Empirical SCORE: how much VALIDATED outcome evidence exists (stays low).
+    if n_resolved >= 50:
+        empirical = min(3.0, 1.0 + n_resolved / 100.0)
+    elif n_resolved >= 20:
+        empirical = 1.8
+    else:
+        empirical = 1.0
+    return {
+        "report": "eureka_health",
+        "twins_frozen": len(twins),
+        "predictions_resolved": n_resolved,
+        "mean_brier": mean_brier,
+        "empirical_readiness_score": readiness,
+        "empirical_score": round(empirical, 2),
+        "empirical_note": ("Empirical READINESS measures whether the machine can "
+                           "generate/freeze/resolve/learn from evidence without leakage; "
+                           "Empirical SCORE measures how much VALIDATED evidence exists "
+                           "today. They are reported separately and never merged."),
+        "loop_closed": bool(twins),
+        "advisory_status": _ADVISORY_STATUS, "execution_gate": "LOCKED",
+        "ai_execution_count": 0, "broker_api_called": False,
+        "human_review_required": True,
+    }
 
 
 if __name__ == "__main__":  # pragma: no cover

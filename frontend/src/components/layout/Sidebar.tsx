@@ -40,6 +40,7 @@ const NAV_GROUPS: NavGroup[] = [
       { href: '/moltbook', label: 'Moltbook', icon: '◑' },
       { href: '/cockpit', label: 'Cockpit', icon: '◳' },
       { href: '/simulation-lab', label: 'Simulation Lab', icon: '⬢' },
+      { href: '/intelligence', label: 'Intelligence Loop', icon: '◉' },
       { href: '/exports', label: 'Exports', icon: '▤' },
     ],
   },

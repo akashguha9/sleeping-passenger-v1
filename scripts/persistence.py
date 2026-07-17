@@ -420,6 +420,111 @@ CREATE TABLE IF NOT EXISTS sil_role_ratings (
 );
 CREATE INDEX IF NOT EXISTS idx_sil_rr_component ON sil_role_ratings(component_id);
 CREATE INDEX IF NOT EXISTS idx_sil_rr_created ON sil_role_ratings(created_at);
+CREATE TABLE IF NOT EXISTS decision_twins (
+    twin_id TEXT PRIMARY KEY,
+    candidate_id TEXT NOT NULL DEFAULT '',
+    parent_signal_id TEXT NOT NULL DEFAULT '',
+    run_id TEXT NOT NULL DEFAULT '',
+    info_cutoff TEXT NOT NULL DEFAULT '',
+    twin_contract_version TEXT NOT NULL DEFAULT '',
+    advisory_state TEXT NOT NULL DEFAULT 'WATCH',
+    regime_key TEXT NOT NULL DEFAULT '',
+    immutability_hash TEXT NOT NULL DEFAULT '',
+    twin_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL DEFAULT '',
+    -- A Decision Twin is a frozen SIMULATED_ONLY advisory record. It NEVER feeds
+    -- calibration directly, NEVER touches a broker, NEVER grants execution.
+    advisory_status TEXT NOT NULL DEFAULT 'ADVISORY_ONLY',
+    execution_gate TEXT NOT NULL DEFAULT 'LOCKED',
+    ai_execution_count INTEGER NOT NULL DEFAULT 0,
+    broker_api_called INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_twins_candidate ON decision_twins(candidate_id);
+CREATE INDEX IF NOT EXISTS idx_twins_regime ON decision_twins(regime_key);
+CREATE TABLE IF NOT EXISTS decision_twin_predictions (
+    prediction_id TEXT PRIMARY KEY,
+    twin_id TEXT NOT NULL DEFAULT '',
+    candidate_id TEXT NOT NULL DEFAULT '',
+    parent_signal_id TEXT NOT NULL DEFAULT '',
+    info_cutoff TEXT NOT NULL DEFAULT '',
+    target_variable TEXT NOT NULL DEFAULT '',
+    kind TEXT NOT NULL DEFAULT 'PROBABILITY',
+    probability REAL,
+    interval_low REAL,
+    interval_high REAL,
+    outcome_window_days INTEGER NOT NULL DEFAULT 20,
+    calibration_cohort TEXT NOT NULL DEFAULT '',
+    evidence_grade TEXT NOT NULL DEFAULT 'SIMULATED_ONLY',
+    resolution_method TEXT NOT NULL DEFAULT '',
+    immutability_hash TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'FROZEN',
+    created_at TEXT NOT NULL DEFAULT '',
+    advisory_status TEXT NOT NULL DEFAULT 'ADVISORY_ONLY',
+    execution_gate TEXT NOT NULL DEFAULT 'LOCKED',
+    ai_execution_count INTEGER NOT NULL DEFAULT 0,
+    broker_api_called INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_twinpred_twin ON decision_twin_predictions(twin_id);
+CREATE INDEX IF NOT EXISTS idx_twinpred_status ON decision_twin_predictions(status);
+CREATE TABLE IF NOT EXISTS outcome_resolution_jobs (
+    prediction_id TEXT PRIMARY KEY,
+    twin_id TEXT NOT NULL DEFAULT '',
+    candidate_id TEXT NOT NULL DEFAULT '',
+    info_cutoff TEXT NOT NULL DEFAULT '',
+    outcome_window_days INTEGER NOT NULL DEFAULT 20,
+    resolve_on_or_after TEXT NOT NULL DEFAULT '',
+    resolution_method TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'REGISTERED',
+    created_at TEXT NOT NULL DEFAULT '',
+    advisory_status TEXT NOT NULL DEFAULT 'ADVISORY_ONLY',
+    execution_gate TEXT NOT NULL DEFAULT 'LOCKED',
+    ai_execution_count INTEGER NOT NULL DEFAULT 0,
+    broker_api_called INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_ores_status ON outcome_resolution_jobs(status);
+CREATE INDEX IF NOT EXISTS idx_ores_date ON outcome_resolution_jobs(resolve_on_or_after);
+CREATE TABLE IF NOT EXISTS prediction_outcomes (
+    prediction_id TEXT PRIMARY KEY,
+    twin_id TEXT NOT NULL DEFAULT '',
+    candidate_id TEXT NOT NULL DEFAULT '',
+    kind TEXT NOT NULL DEFAULT 'PROBABILITY',
+    resolved INTEGER NOT NULL DEFAULT 0,
+    reason TEXT NOT NULL DEFAULT '',
+    entry_date TEXT NOT NULL DEFAULT '',
+    exit_date TEXT NOT NULL DEFAULT '',
+    realized_value REAL,
+    predicted_value REAL,
+    hit INTEGER,
+    brier_contribution REAL,
+    adverse INTEGER NOT NULL DEFAULT 0,
+    tail INTEGER NOT NULL DEFAULT 0,
+    resolved_at TEXT NOT NULL DEFAULT '',
+    advisory_status TEXT NOT NULL DEFAULT 'ADVISORY_ONLY',
+    execution_gate TEXT NOT NULL DEFAULT 'LOCKED',
+    ai_execution_count INTEGER NOT NULL DEFAULT 0,
+    broker_api_called INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_predout_twin ON prediction_outcomes(twin_id);
+CREATE TABLE IF NOT EXISTS belief_revisions (
+    revision_id TEXT PRIMARY KEY,
+    twin_id TEXT NOT NULL DEFAULT '',
+    seq INTEGER NOT NULL DEFAULT 0,
+    prior_state TEXT NOT NULL DEFAULT '',
+    revised_state TEXT NOT NULL DEFAULT '',
+    prior_confidence REAL NOT NULL DEFAULT 0.0,
+    revised_confidence REAL NOT NULL DEFAULT 0.0,
+    evidence_arrival TEXT NOT NULL DEFAULT '',
+    information_gain REAL NOT NULL DEFAULT 0.0,
+    revision_class TEXT NOT NULL DEFAULT '',
+    days_since_signal REAL NOT NULL DEFAULT 0.0,
+    content_hash TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT '',
+    advisory_status TEXT NOT NULL DEFAULT 'ADVISORY_ONLY',
+    execution_gate TEXT NOT NULL DEFAULT 'LOCKED',
+    ai_execution_count INTEGER NOT NULL DEFAULT 0,
+    broker_api_called INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_belief_twin ON belief_revisions(twin_id, seq);
 """
 
 # Track which DB paths have been initialized this process (avoids repeat schema runs)
@@ -1854,6 +1959,11 @@ def get_db_status(db_path: Path = DB_PATH) -> dict[str, Any]:
         "simulation_runs",
         "sil_contribution_events",
         "sil_role_ratings",
+        "decision_twins",
+        "decision_twin_predictions",
+        "outcome_resolution_jobs",
+        "prediction_outcomes",
+        "belief_revisions",
     ]
     counts: dict[str, int] = {}
     pragmas: dict[str, Any] = {
@@ -2811,6 +2921,274 @@ def get_role_ratings(limit: int = 100, db_path: Path | None = None) -> list[dict
     return out
 
 
+# ---------------------------------------------------------------------------
+# Eureka closed-loop: Decision Twins, frozen predictions, outcome-resolution
+# jobs, resolved outcomes, append-only belief revisions.
+#
+# Frozen predictions and twins are NEVER updated in place (append-only history;
+# outcomes attach via separate rows). None of these grant execution, touch a
+# broker, or feed sizing. Late-bound db_path keeps conftest isolation working.
+# ---------------------------------------------------------------------------
+def insert_decision_twin(twin: dict[str, Any], created_at: str | None = None,
+                         db_path: Path | None = None) -> str:
+    """Persist a frozen Decision Twin (idempotent on twin_id — a re-freeze with the
+    same content is identical). Predictions are stored in their own table."""
+    target = db_path if db_path is not None else DB_PATH
+    ts = created_at or utc_timestamp()
+    twin_id = str(twin.get("twin_id") or f"TWIN_{uuid.uuid4().hex[:12]}")
+    conn = _get_conn(target)
+    try:
+        conn.execute(
+            "INSERT OR IGNORE INTO decision_twins ("
+            " twin_id, candidate_id, parent_signal_id, run_id, info_cutoff,"
+            " twin_contract_version, advisory_state, regime_key, immutability_hash,"
+            " twin_json, created_at, advisory_status, execution_gate,"
+            " ai_execution_count, broker_api_called"
+            ") VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (
+                twin_id, str(twin.get("candidate_id", "")),
+                str(twin.get("parent_signal_id", "")), str(twin.get("run_id", "")),
+                str(twin.get("info_cutoff", "")),
+                str(twin.get("twin_contract_version", "")),
+                str(twin.get("advisory_state", "WATCH")),
+                str((twin.get("regime") or {}).get("regime_key", "")),
+                str(twin.get("immutability_hash", "")),
+                json.dumps(twin, default=str), ts,
+                _ADVISORY_STATUS, "LOCKED", _AI_EXECUTION_COUNT, 0,
+            ),
+        )
+        for pred in twin.get("predictions", []) or []:
+            conn.execute(
+                "INSERT OR IGNORE INTO decision_twin_predictions ("
+                " prediction_id, twin_id, candidate_id, parent_signal_id, info_cutoff,"
+                " target_variable, kind, probability, interval_low, interval_high,"
+                " outcome_window_days, calibration_cohort, evidence_grade,"
+                " resolution_method, immutability_hash, status, created_at,"
+                " advisory_status, execution_gate, ai_execution_count, broker_api_called"
+                ") VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (
+                    str(pred.get("prediction_id", "")), twin_id,
+                    str(pred.get("candidate_id", "")), str(pred.get("parent_signal_id", "")),
+                    str(pred.get("info_cutoff", "")), str(pred.get("target_variable", "")),
+                    str(pred.get("kind", "PROBABILITY")), pred.get("probability"),
+                    pred.get("interval_low"), pred.get("interval_high"),
+                    int(pred.get("outcome_window_days", 20) or 20),
+                    str(pred.get("calibration_cohort", "")),
+                    str(pred.get("evidence_grade", "SIMULATED_ONLY")),
+                    str(pred.get("resolution_method", "")),
+                    str(pred.get("immutability_hash", "")),
+                    str(pred.get("status", "FROZEN")), ts,
+                    _ADVISORY_STATUS, "LOCKED", _AI_EXECUTION_COUNT, 0,
+                ),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+    return twin_id
+
+
+def get_decision_twin(twin_id: str, db_path: Path | None = None) -> dict[str, Any] | None:
+    target = db_path if db_path is not None else DB_PATH
+    conn = _get_conn(target)
+    try:
+        row = conn.execute("SELECT * FROM decision_twins WHERE twin_id=?", (twin_id,)).fetchone()
+    finally:
+        conn.close()
+    if row is None:
+        return None
+    d = dict(row)
+    d["advisory_status"] = _ADVISORY_STATUS
+    try:
+        d["twin"] = json.loads(d.get("twin_json") or "{}")
+    except (json.JSONDecodeError, TypeError):
+        d["twin"] = {}
+    return d
+
+
+def get_recent_decision_twins(limit: int = 50, candidate_id: str | None = None,
+                              db_path: Path | None = None) -> list[dict[str, Any]]:
+    target = db_path if db_path is not None else DB_PATH
+    limit = max(1, min(int(limit), 500))
+    conn = _get_conn(target)
+    try:
+        if candidate_id:
+            rows = conn.execute(
+                "SELECT twin_id, candidate_id, info_cutoff, advisory_state, regime_key,"
+                " immutability_hash, created_at FROM decision_twins WHERE candidate_id=?"
+                " ORDER BY created_at DESC LIMIT ?", (candidate_id, limit)).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT twin_id, candidate_id, info_cutoff, advisory_state, regime_key,"
+                " immutability_hash, created_at FROM decision_twins"
+                " ORDER BY created_at DESC LIMIT ?", (limit,)).fetchall()
+    finally:
+        conn.close()
+    return [{**dict(r), "advisory_status": _ADVISORY_STATUS} for r in rows]
+
+
+def register_outcome_jobs(jobs: list[dict[str, Any]], created_at: str | None = None,
+                          db_path: Path | None = None) -> int:
+    """Register outcome-resolution jobs (idempotent on prediction_id)."""
+    import datetime as _dt
+    target = db_path if db_path is not None else DB_PATH
+    ts = created_at or utc_timestamp()
+    conn = _get_conn(target)
+    written = 0
+    try:
+        for j in jobs:
+            cutoff = str(j.get("info_cutoff", ""))
+            window = int(j.get("outcome_window_days", 20) or 20)
+            resolve_after = ""
+            try:
+                d = _dt.date.fromisoformat(cutoff[:10])
+                resolve_after = (d + _dt.timedelta(days=window)).isoformat()
+            except (ValueError, TypeError):
+                resolve_after = ""
+            cur = conn.execute(
+                "INSERT OR IGNORE INTO outcome_resolution_jobs ("
+                " prediction_id, twin_id, candidate_id, info_cutoff, outcome_window_days,"
+                " resolve_on_or_after, resolution_method, status, created_at,"
+                " advisory_status, execution_gate, ai_execution_count, broker_api_called"
+                ") VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (
+                    str(j.get("prediction_id", "")), str(j.get("twin_id", "")),
+                    str(j.get("candidate_id", "")), cutoff, window, resolve_after,
+                    str(j.get("resolution_method", "")), "REGISTERED", ts,
+                    _ADVISORY_STATUS, "LOCKED", _AI_EXECUTION_COUNT, 0,
+                ),
+            )
+            written += cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
+        conn.commit()
+    finally:
+        conn.close()
+    return written
+
+
+def get_due_outcome_jobs(session_date: str, limit: int = 200,
+                         db_path: Path | None = None) -> list[dict[str, Any]]:
+    """Return REGISTERED jobs whose resolution window has elapsed by session_date."""
+    target = db_path if db_path is not None else DB_PATH
+    limit = max(1, min(int(limit), 1000))
+    conn = _get_conn(target)
+    try:
+        rows = conn.execute(
+            "SELECT * FROM outcome_resolution_jobs WHERE status='REGISTERED'"
+            " AND resolve_on_or_after != '' AND resolve_on_or_after <= ?"
+            " ORDER BY resolve_on_or_after ASC LIMIT ?", (session_date, limit)).fetchall()
+    finally:
+        conn.close()
+    return [{**dict(r), "advisory_status": _ADVISORY_STATUS} for r in rows]
+
+
+def record_prediction_outcome(outcome: dict[str, Any], resolved_at: str | None = None,
+                              db_path: Path | None = None) -> None:
+    """Record a resolved outcome (idempotent on prediction_id) and mark the job DONE.
+    Never mutates the original frozen prediction."""
+    target = db_path if db_path is not None else DB_PATH
+    ts = resolved_at or utc_timestamp()
+    conn = _get_conn(target)
+    try:
+        conn.execute(
+            "INSERT OR IGNORE INTO prediction_outcomes ("
+            " prediction_id, twin_id, candidate_id, kind, resolved, reason, entry_date,"
+            " exit_date, realized_value, predicted_value, hit, brier_contribution,"
+            " adverse, tail, resolved_at, advisory_status, execution_gate,"
+            " ai_execution_count, broker_api_called"
+            ") VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (
+                str(outcome.get("prediction_id", "")), str(outcome.get("twin_id", "")),
+                str(outcome.get("candidate_id", "")), str(outcome.get("kind", "PROBABILITY")),
+                1 if outcome.get("resolved") else 0, str(outcome.get("reason", "")),
+                str(outcome.get("entry_date", "")), str(outcome.get("exit_date", "")),
+                outcome.get("realized_value"), outcome.get("predicted_value"),
+                (1 if outcome.get("hit") else 0) if outcome.get("hit") is not None else None,
+                outcome.get("brier_contribution"),
+                1 if outcome.get("adverse") else 0, 1 if outcome.get("tail") else 0, ts,
+                _ADVISORY_STATUS, "LOCKED", _AI_EXECUTION_COUNT, 0,
+            ),
+        )
+        if outcome.get("resolved"):
+            conn.execute(
+                "UPDATE outcome_resolution_jobs SET status='RESOLVED' WHERE prediction_id=?",
+                (str(outcome.get("prediction_id", "")),))
+            conn.execute(
+                "UPDATE decision_twin_predictions SET status='RESOLVED' WHERE prediction_id=?",
+                (str(outcome.get("prediction_id", "")),))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_prediction_outcomes(limit: int = 200, twin_id: str | None = None,
+                            db_path: Path | None = None) -> list[dict[str, Any]]:
+    target = db_path if db_path is not None else DB_PATH
+    limit = max(1, min(int(limit), 2000))
+    conn = _get_conn(target)
+    try:
+        if twin_id:
+            rows = conn.execute("SELECT * FROM prediction_outcomes WHERE twin_id=?"
+                                " ORDER BY resolved_at DESC LIMIT ?", (twin_id, limit)).fetchall()
+        else:
+            rows = conn.execute("SELECT * FROM prediction_outcomes ORDER BY resolved_at DESC"
+                                " LIMIT ?", (limit,)).fetchall()
+    finally:
+        conn.close()
+    out = []
+    for r in rows:
+        d = dict(r)
+        d["advisory_status"] = _ADVISORY_STATUS
+        d["resolved"] = bool(d.get("resolved"))
+        d["hit"] = None if d.get("hit") is None else bool(d.get("hit"))
+        out.append(d)
+    return out
+
+
+def append_belief_revision(rev: dict[str, Any], created_at: str | None = None,
+                           db_path: Path | None = None) -> str:
+    """Append a belief revision (idempotent on revision_id). Append-only — never
+    overwrites prior revisions."""
+    target = db_path if db_path is not None else DB_PATH
+    ts = created_at or utc_timestamp()
+    rid = str(rev.get("revision_id") or f"REV_{uuid.uuid4().hex[:12]}")
+    conn = _get_conn(target)
+    try:
+        conn.execute(
+            "INSERT OR IGNORE INTO belief_revisions ("
+            " revision_id, twin_id, seq, prior_state, revised_state, prior_confidence,"
+            " revised_confidence, evidence_arrival, information_gain, revision_class,"
+            " days_since_signal, content_hash, created_at, advisory_status,"
+            " execution_gate, ai_execution_count, broker_api_called"
+            ") VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (
+                rid, str(rev.get("twin_id", "")), int(rev.get("seq", 0) or 0),
+                str(rev.get("prior_state", "")), str(rev.get("revised_state", "")),
+                float(rev.get("prior_confidence", 0.0) or 0.0),
+                float(rev.get("revised_confidence", 0.0) or 0.0),
+                str(rev.get("evidence_arrival", "")),
+                float(rev.get("information_gain", 0.0) or 0.0),
+                str(rev.get("revision_class", "")),
+                float(rev.get("days_since_signal", 0.0) or 0.0),
+                str(rev.get("content_hash", "")), ts,
+                _ADVISORY_STATUS, "LOCKED", _AI_EXECUTION_COUNT, 0,
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return rid
+
+
+def get_belief_timeline(twin_id: str, db_path: Path | None = None) -> list[dict[str, Any]]:
+    target = db_path if db_path is not None else DB_PATH
+    conn = _get_conn(target)
+    try:
+        rows = conn.execute("SELECT * FROM belief_revisions WHERE twin_id=?"
+                            " ORDER BY seq ASC", (twin_id,)).fetchall()
+    finally:
+        conn.close()
+    return [{**dict(r), "advisory_status": _ADVISORY_STATUS} for r in rows]
+
+
 __all__ = [
     "DB_PATH",
     "init_schema",
@@ -2867,4 +3245,13 @@ __all__ = [
     "get_contribution_events",
     "insert_role_rating",
     "get_role_ratings",
+    "insert_decision_twin",
+    "get_decision_twin",
+    "get_recent_decision_twins",
+    "register_outcome_jobs",
+    "get_due_outcome_jobs",
+    "record_prediction_outcome",
+    "get_prediction_outcomes",
+    "append_belief_revision",
+    "get_belief_timeline",
 ]
