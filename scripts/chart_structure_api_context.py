@@ -44,6 +44,7 @@ from __future__ import annotations
 
 import datetime as _dt
 import json
+import os
 from typing import Any
 
 try:
@@ -52,6 +53,33 @@ except ModuleNotFoundError:
     import market_data_freshness as _freshness  # type: ignore[no-redef]
 
 _ADVISORY_STATUS = "ADVISORY_ONLY"
+
+# Optional deterministic "as-of" reporting clock for the freshness gate.
+#
+# By default (env var unset) the freshness gate uses the wall clock, so
+# production behaviour is unchanged and genuinely stale data is still blocked.
+# When ``MVP_CHART_STRUCTURE_AS_OF`` holds an ISO-8601 timestamp, the freshness
+# gate evaluates candle age *as of that instant* instead.  This makes a chart
+# report reproducible for a historical cutoff and lets deterministic OHLCV
+# fixtures be evaluated against a fixed clock rather than drifting from FRESH to
+# STALE as real time advances.  It never relaxes the staleness thresholds — it
+# only changes the reference "now".
+_AS_OF_ENV_VAR = "MVP_CHART_STRUCTURE_AS_OF"
+
+
+def _resolve_as_of_now() -> _dt.datetime | None:
+    """Return the configured as-of instant (tz-aware UTC), or None for wall clock."""
+    raw = os.environ.get(_AS_OF_ENV_VAR, "").strip()
+    if not raw:
+        return None
+    try:
+        text = raw.replace("Z", "+00:00")
+        parsed = _dt.datetime.fromisoformat(text)
+    except (ValueError, TypeError):
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=_dt.timezone.utc)
+    return parsed.astimezone(_dt.timezone.utc)
 _AI_EXECUTION_COUNT = 0
 
 
@@ -493,7 +521,9 @@ def _get_chart_structure(
                 f"python scripts/backfill_global_ohlcv.py --symbols {canonical_symbol} --period max --interval 1d --write"
             )
 
-            freshness = _freshness.evaluate(candles=[], source_kind=source_kind)
+            freshness = _freshness.evaluate(
+                candles=[], source_kind=source_kind, now=_resolve_as_of_now(),
+            )
             display_cur, cur_source = _resolve_display_currency(
                 canonical_symbol, None, security_meta,
             )
@@ -538,6 +568,7 @@ def _get_chart_structure(
         # 2004 candles.
         freshness = _freshness.evaluate(
             candles=selected_candles, source_kind=source_kind,
+            now=_resolve_as_of_now(),
         )
         if freshness.get("freshness_gate") == _freshness.BLOCK:
             return _stale_safe_response(

@@ -34,6 +34,22 @@ if str(_REPO) not in sys.path:
     sys.path.insert(0, str(_REPO))
 
 
+@pytest.fixture(autouse=True)
+def _freeze_chart_structure_as_of(monkeypatch):
+    """Freeze the chart-structure freshness clock for this module.
+
+    Every fixture below is dated *as of 2026-05-15* (note the quote-stub default
+    ``regular_market_time`` of ``2026-05-15``).  The freshness gate measures
+    candle age against "now"; without a fixed reference these deterministic
+    fixtures silently drift from FRESH to STALE as real wall-clock time advances,
+    which would block the daily report the contract tests assert on.  Pinning the
+    reporting clock to the scenario date makes the suite time-independent without
+    relaxing any staleness threshold — production and every other test keep the
+    real clock (this override is scoped to this module only).
+    """
+    monkeypatch.setenv("MVP_CHART_STRUCTURE_AS_OF", "2026-05-15T00:00:00Z")
+
+
 def _ev(event_id: str, ts: str, *, close: float, high: float | None = None,
         low: float | None = None, open_: float | None = None,
         volume: float = 1_000_000.0) -> dict:
