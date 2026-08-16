@@ -1,6 +1,6 @@
 # OPERATOR ACTION CHECKLIST
 
-_Generated 2026-07-04T14:06:51Z from the live truth surface. State: **BLOCKED**._
+_Generated 2026-08-06T03:00:13Z from the live truth surface. State: **BLOCKED**._
 
 Work top to bottom; each item names its command.
 
@@ -10,11 +10,11 @@ Work top to bottom; each item names its command.
 4. [ ] Re-run the risk gate and read the summary: `python scripts/holdings_truth_gate.py --show-summary`
 5. [ ] Let the daily loop run (or force one): `python -m scripts.nbi_scheduler run-once` — it produces locked predictions, matures due outcomes, harvests settlements, refreshes discovery, and dispatches alerts
 6. [ ] Prove the Sheets loop when you configure it: `python scripts/sheets_roundtrip_probe.py --fixture` (logic proof) or `--live-safe` with SHEETS_PROBE_SHEET_ID set
-7. [ ] Inspect alerts: `runtime/alerts/operator_alerts.jsonl` (or the cockpit panel) — 5 in the latest snapshot
-8. [ ] Wait for the next maturity date (2026-07-09; projected N -> 81) — do NOT try to shortcut outcomes
+7. [ ] Inspect alerts: `runtime/alerts/operator_alerts.jsonl` (or the cockpit panel) — 6 in the latest snapshot
+8. [ ] Wait for the next maturity date (2026-08-11; projected N -> 231) — do NOT try to shortcut outcomes
 
 ---
 
-**DO NOT use real money.** The readiness gates are not passed: calibration is MEASURED_NOT_CALIBRATED (N=56), risk state is BLOCKED. The execution lock stays LOCKED regardless.
+**DO NOT use real money.** The readiness gates are not passed: calibration is MEASURED_NOT_CALIBRATED (N=206), risk state is BLOCKED. The execution lock stays LOCKED regardless.
 
 Next required action (truth surface): Confirm stops: python scripts/holdings_truth_gate.py --write-template, edit/confirm each entry, then --apply-confirmed --write

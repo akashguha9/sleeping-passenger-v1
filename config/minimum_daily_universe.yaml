@@ -66,3 +66,71 @@ buckets:
     - {ticker: ANET, name: "Arista Networks",           market: US, country: "United States", asset_type: equity, default_risk_band: high_beta, notes: "High-beta networking/AI"}
     - {ticker: PLTR, name: "Palantir Technologies",     market: US, country: "United States", asset_type: equity, default_risk_band: high_beta, notes: "High-beta software"}
     - {ticker: SMCI, name: "Super Micro Computer",      market: US, country: "United States", asset_type: equity, default_risk_band: high_beta, notes: "High-beta AI hardware"}
+  ASIA_DEVELOPED_LARGE_CAP:
+    - {ticker: 7203.T,     name: "Toyota Motor Corp",                 market: Japan,       country: Japan,       asset_type: equity, default_risk_band: core, notes: "Global auto/mobility leader"}
+    - {ticker: 6758.T,     name: "Sony Group Corp",                   market: Japan,       country: Japan,       asset_type: equity, default_risk_band: core, notes: "Consumer electronics/gaming/entertainment"}
+    - {ticker: 9984.T,     name: "SoftBank Group Corp",                market: Japan,       country: Japan,       asset_type: equity, default_risk_band: core, notes: "Tech holding/telecom/AI bets"}
+    - {ticker: 8306.T,     name: "Mitsubishi UFJ Financial Group",     market: Japan,       country: Japan,       asset_type: equity, default_risk_band: core, notes: "Japan mega-bank"}
+    - {ticker: 005930.KS,  name: "Samsung Electronics",                market: "South Korea", country: "South Korea", asset_type: equity, default_risk_band: core, notes: "Memory/semis/consumer electronics"}
+    - {ticker: 000660.KS,  name: "SK Hynix",                           market: "South Korea", country: "South Korea", asset_type: equity, default_risk_band: core, notes: "Memory semiconductor leader"}
+    - {ticker: 2330.TW,    name: "Taiwan Semiconductor Manufacturing", market: Taiwan,      country: Taiwan,      asset_type: equity, default_risk_band: core, notes: "Foundry leader (local listing)"}
+    - {ticker: D05.SI,     name: "DBS Group Holdings",                 market: Singapore,   country: Singapore,   asset_type: equity, default_risk_band: core, notes: "SE Asia banking leader"}
+  ASEAN_EMERGING_LARGE_CAP:
+    - {ticker: BBCA.JK, name: "Bank Central Asia",                          market: Indonesia, country: Indonesia, asset_type: equity, default_risk_band: watch, notes: "Indonesia largest private bank"}
+    - {ticker: TLKM.JK, name: "Telkom Indonesia",                           market: Indonesia, country: Indonesia, asset_type: equity, default_risk_band: watch, notes: "Indonesia telecom infrastructure"}
+    - {ticker: ASII.JK, name: "Astra International",                       market: Indonesia, country: Indonesia, asset_type: equity, default_risk_band: watch, notes: "Indonesia diversified conglomerate"}
+    - {ticker: VNM,     name: "Vietnam Dairy Products (Vinamilk, HOSE)",    market: Vietnam,   country: Vietnam,   asset_type: equity, default_risk_band: watch, notes: "HOSE listing; live price provider coverage unconfirmed"}
+    - {ticker: VIC,     name: "Vingroup JSC (HOSE)",                        market: Vietnam,   country: Vietnam,   asset_type: equity, default_risk_band: watch, notes: "HOSE listing; live price provider coverage unconfirmed"}
+  AUSTRALIA_LARGE_CAP:
+    - {ticker: BHP.AX, name: "BHP Group",                        market: Australia, country: Australia, asset_type: equity, default_risk_band: core, notes: "Diversified mining major"}
+    - {ticker: CBA.AX, name: "Commonwealth Bank of Australia",   market: Australia, country: Australia, asset_type: equity, default_risk_band: core, notes: "Australia largest bank"}
+    - {ticker: CSL.AX, name: "CSL Limited",                      market: Australia, country: Australia, asset_type: equity, default_risk_band: core, notes: "Biotech/plasma therapeutics"}
+    - {ticker: WES.AX, name: "Wesfarmers",                       market: Australia, country: Australia, asset_type: equity, default_risk_band: core, notes: "Diversified retail/industrial conglomerate"}
+  EUROPE_NORDIC_SWISS_LARGE_CAP:
+    - {ticker: NESN.SW,     name: "Nestle SA",                       market: Switzerland, country: Switzerland, asset_type: equity, default_risk_band: core, notes: "Global consumer staples"}
+    - {ticker: ROG.SW,      name: "Roche Holding",                   market: Switzerland, country: Switzerland, asset_type: equity, default_risk_band: core, notes: "Pharma/diagnostics major"}
+    - {ticker: NOVN.SW,     name: "Novartis AG",                     market: Switzerland, country: Switzerland, asset_type: equity, default_risk_band: core, notes: "Pharma major"}
+    - {ticker: VOLV-B.ST,   name: "Volvo AB",                        market: Sweden,      country: Sweden,      asset_type: equity, default_risk_band: core, notes: "Industrial/truck manufacturer"}
+    - {ticker: ERIC-B.ST,   name: "Telefonaktiebolaget LM Ericsson", market: Sweden,      country: Sweden,      asset_type: equity, default_risk_band: core, notes: "Telecom infrastructure/5G rails"}
+    - {ticker: EQNR.OL,     name: "Equinor ASA",                     market: Norway,      country: Norway,      asset_type: equity, default_risk_band: core, notes: "Energy major/state-linked"}
+    - {ticker: NOVO-B.CO,   name: "Novo Nordisk A/S",                market: Denmark,     country: Denmark,     asset_type: equity, default_risk_band: core, notes: "GLP-1/pharma leader"}
+    - {ticker: MAERSK-B.CO, name: "A.P. Moller-Maersk",              market: Denmark,     country: Denmark,     asset_type: equity, default_risk_band: core, notes: "Global shipping/logistics rails"}
+    - {ticker: PKO.WA,      name: "PKO Bank Polski",                 market: Poland,      country: Poland,      asset_type: equity, default_risk_band: core, notes: "Poland largest bank"}
+  LATAM_LARGE_CAP:
+    - {ticker: VALE3.SA,    name: "Vale SA",                         market: Brazil, country: Brazil, asset_type: equity, default_risk_band: core, notes: "Iron ore/mining major"}
+    - {ticker: PETR4.SA,    name: "Petroleo Brasileiro (Petrobras)", market: Brazil, country: Brazil, asset_type: equity, default_risk_band: core, notes: "State-linked energy major"}
+    - {ticker: ITUB4.SA,    name: "Itau Unibanco",                   market: Brazil, country: Brazil, asset_type: equity, default_risk_band: core, notes: "Brazil largest private bank"}
+    - {ticker: WALMEX.MX,   name: "Walmart de Mexico",               market: Mexico, country: Mexico, asset_type: equity, default_risk_band: core, notes: "Mexico retail leader"}
+    - {ticker: AMXL.MX,     name: "America Movil",                   market: Mexico, country: Mexico, asset_type: equity, default_risk_band: core, notes: "LatAm telecom infrastructure"}
+    - {ticker: GFNORTEO.MX, name: "Grupo Financiero Banorte",        market: Mexico, country: Mexico, asset_type: equity, default_risk_band: core, notes: "Mexico banking"}
+  MIDDLE_EAST_AFRICA_LARGE_CAP:
+    - {ticker: 2222.SR,   name: "Saudi Arabian Oil Co (Saudi Aramco)", market: "Saudi Arabia",          country: "Saudi Arabia",          asset_type: equity, default_risk_band: watch, notes: "World's largest oil producer"}
+    - {ticker: 1120.SR,   name: "Al Rajhi Bank",                       market: "Saudi Arabia",          country: "Saudi Arabia",          asset_type: equity, default_risk_band: watch, notes: "Largest Islamic bank"}
+    - {ticker: FAB.AD,    name: "First Abu Dhabi Bank",                market: "United Arab Emirates",  country: "United Arab Emirates",  asset_type: equity, default_risk_band: watch, notes: "UAE largest bank"}
+    - {ticker: EMAAR.DU,  name: "Emaar Properties",                    market: "United Arab Emirates",  country: "United Arab Emirates",  asset_type: equity, default_risk_band: watch, notes: "Dubai real estate/retail conglomerate"}
+    - {ticker: NPN.JO,    name: "Naspers Ltd",                         market: "South Africa",          country: "South Africa",          asset_type: equity, default_risk_band: watch, notes: "Tech/internet holding (Prosus/Tencent stake)"}
+    - {ticker: FSR.JO,    name: "FirstRand Ltd",                       market: "South Africa",          country: "South Africa",          asset_type: equity, default_risk_band: watch, notes: "South Africa banking leader"}
+  CANADA_LARGE_CAP:
+    - {ticker: SHOP.TO, name: "Shopify Inc",                  market: Canada, country: Canada, asset_type: equity, default_risk_band: core, notes: "E-commerce platform/rails"}
+    - {ticker: RY.TO,   name: "Royal Bank of Canada",         market: Canada, country: Canada, asset_type: equity, default_risk_band: core, notes: "Canada largest bank"}
+    - {ticker: CNQ.TO,  name: "Canadian Natural Resources",   market: Canada, country: Canada, asset_type: equity, default_risk_band: core, notes: "Energy major"}
+    - {ticker: CNR.TO,  name: "Canadian National Railway",    market: Canada, country: Canada, asset_type: equity, default_risk_band: core, notes: "Rail logistics infrastructure"}
+  INDIA_SECTOR_BREADTH:
+    - {ticker: BEL.NS,        name: "Bharat Electronics",                     market: India, country: India, asset_type: equity, default_risk_band: core, notes: "PSU defense electronics"}
+    - {ticker: HAL.NS,        name: "Hindustan Aeronautics",                  market: India, country: India, asset_type: equity, default_risk_band: core, notes: "PSU defense aerospace"}
+    - {ticker: IRCTC.NS,      name: "Indian Railway Catering & Tourism Corp", market: India, country: India, asset_type: equity, default_risk_band: core, notes: "PSU railways/DPI monopoly rail"}
+    - {ticker: RVNL.NS,       name: "Rail Vikas Nigam",                       market: India, country: India, asset_type: equity, default_risk_band: core, notes: "PSU railways infrastructure execution"}
+    - {ticker: POWERGRID.NS,  name: "Power Grid Corp of India",               market: India, country: India, asset_type: equity, default_risk_band: core, notes: "PSU power transmission grid"}
+    - {ticker: NTPC.NS,       name: "NTPC Ltd",                               market: India, country: India, asset_type: equity, default_risk_band: core, notes: "PSU power generation"}
+    - {ticker: LT.NS,         name: "Larsen & Toubro",                        market: India, country: India, asset_type: equity, default_risk_band: core, notes: "Private capital goods/infrastructure conglomerate"}
+    - {ticker: ADANIPORTS.NS, name: "Adani Ports and SEZ",                    market: India, country: India, asset_type: equity, default_risk_band: core, notes: "Private ports/logistics infrastructure"}
+    - {ticker: DIXON.NS,      name: "Dixon Technologies",                     market: India, country: India, asset_type: equity, default_risk_band: core, notes: "Private electronics manufacturing (PLI beneficiary)"}
+    - {ticker: PIDILITIND.NS, name: "Pidilite Industries",                    market: India, country: India, asset_type: equity, default_risk_band: core, notes: "Private specialty chemicals/adhesives"}
+    - {ticker: APOLLOHOSP.NS, name: "Apollo Hospitals Enterprise",            market: India, country: India, asset_type: equity, default_risk_band: core, notes: "Private hospitals/diagnostics"}
+    - {ticker: ULTRACEMCO.NS, name: "UltraTech Cement",                       market: India, country: India, asset_type: equity, default_risk_band: core, notes: "Private building materials leader"}
+    - {ticker: BAJFINANCE.NS, name: "Bajaj Finance",                          market: India, country: India, asset_type: equity, default_risk_band: core, notes: "Private NBFC consumer/SME lending"}
+    - {ticker: LICI.NS,       name: "Life Insurance Corp of India",           market: India, country: India, asset_type: equity, default_risk_band: core, notes: "PSU insurance; governance/float overhang risk"}
+    - {ticker: BSE.NS,        name: "BSE Ltd",                                market: India, country: India, asset_type: equity, default_risk_band: core, notes: "Private stock exchange/market infrastructure"}
+    - {ticker: CDSL.NS,       name: "Central Depository Services",            market: India, country: India, asset_type: equity, default_risk_band: core, notes: "Private depository/market infrastructure rail"}
+    - {ticker: WABAG.NS,      name: "VA Tech Wabag",                          market: India, country: India, asset_type: equity, default_risk_band: core, notes: "Underfollowed water/waste infrastructure"}
+    - {ticker: ZOMATO.NS,     name: "Eternal (Zomato)",                       market: India, country: India, asset_type: equity, default_risk_band: core, notes: "Private consumer platform/food delivery+quick commerce"}

@@ -1,6 +1,6 @@
 {
-  "run_date": "2026-07-04",
-  "generated_at_utc": "2026-07-04T15:03:42Z",
+  "run_date": "2026-08-16",
+  "generated_at_utc": "2026-08-16T16:18:15Z",
   "snapshot_timestamp_utc": null,
   "source_health": "UNVERIFIED",
   "provider": "STATIC_UNIVERSE_FALLBACK",
@@ -72,26 +72,26 @@
       "freshness": "UNVERIFIED"
     }
   ],
-  "artifact_created_at": "2026-07-04T15:03:42Z",
+  "artifact_created_at": "2026-08-16T16:18:15Z",
   "provider_canary": {
     "canary_symbol": "SPY",
-    "checked_at_utc": "2026-07-04T15:03:42Z",
+    "checked_at_utc": "2026-08-16T16:18:15Z",
     "max_provider_age_minutes": 1560.0,
     "provider_age_minutes": null,
     "latest_close": null,
     "status": "FAIL",
     "reason": "NO_BARS_FOR_CANARY_SYMBOL"
   },
-  "run_id": "2ca2603ccae1",
+  "run_id": "96a4298e7a91",
   "source_mode": "SYNTHETIC_RUNTIME_FALLBACK",
-  "run_started_at": "2026-07-04T14:54:54+00:00",
-  "artifact_written_at": "2026-07-04T15:03:42+00:00",
+  "run_started_at": "2026-08-16T16:14:00+00:00",
+  "artifact_written_at": "2026-08-16T16:18:15+00:00",
   "operating_mode": "seeded",
   "truth_origin": "seeded",
   "truth_origin_tags": [
     "seeded",
     "placeholder"
   ],
-  "commit_hash": "0d8aa05",
+  "commit_hash": "ec4b9ce",
   "config_fingerprint": "401f0d8f1975"
 }

@@ -4,7 +4,7 @@
 > This system places no orders and calls no broker API (`execution_gate = LOCKED`, `broker_api_called = false`).
 
 - Generated (UTC): `2026-05-20T00:00:00Z`
-- Repo commit: `0d8aa05e3bdbad77d9751791aab82c9ac7a75b17`
+- Repo commit: `ec4b9ce89fd5b1f233020e2c3dc0f0933959aaf5`
 - Predictive claim allowed: **False**
 - Real-money ready: **False**
 
