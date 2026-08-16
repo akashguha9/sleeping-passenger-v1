@@ -202,11 +202,20 @@ def _resolve_sources(raw: str) -> list[str]:
     return out
 
 
+# Derived passes run AFTER the provider phases over rows already persisted
+# this cycle (e.g. the Polymarket x Kalshi disagreement scanner).  Before
+# this registration the key fell through _phase_for as "unknown" and was
+# silently skipped on every scheduled refresh.
+_DERIVED_KEYS = ("prediction_market_disagreement",)
+
+
 def _phase_for(key: str) -> str:
     if key in _PHASE1_KEYS:
         return "phase1"
     if key in _PHASE2_KEYS:
         return "phase2"
+    if key in _DERIVED_KEYS:
+        return "derived"
     return "unknown"
 
 
@@ -366,6 +375,26 @@ def _invoke_phase2_single(source_key: str, *, dry_run: bool) -> dict[str, Any]:
     return report.sources[0].to_dict()
 
 
+def _invoke_derived_single(source_key: str, *, dry_run: bool) -> dict[str, Any]:
+    """Run a derived pass over rows persisted this cycle.
+
+    Currently only the cross-venue disagreement scanner.  The scanner's
+    ``run`` CLI returns an exit code; nonzero is reported as an error so
+    the refresh summary stays truthful.
+    """
+    if source_key != "prediction_market_disagreement":
+        return {"status": "skipped",
+                "skipped_reason": f"unregistered derived source: {source_key}"}
+    from scripts.prediction_market_disagreement_scanner import run as scan_run
+
+    argv = ["--json", "--write"] if not dry_run else ["--json"]
+    rc = scan_run(argv)
+    if rc != 0:
+        return {"status": "error",
+                "error_message": f"disagreement scanner exit code {rc}"}
+    return {"status": "ok"}
+
+
 def _run_one_source(
     run_id: str,
     source_key: str,
@@ -411,6 +440,8 @@ def _run_one_source(
             runner_result = _invoke_phase1_single(source_key, dry_run=not write_mode)
         elif phase == "phase2":
             runner_result = _invoke_phase2_single(source_key, dry_run=not write_mode)
+        elif phase == "derived":
+            runner_result = _invoke_derived_single(source_key, dry_run=not write_mode)
         else:
             skipped = True
             skipped_reason = f"unknown_phase: {phase}"

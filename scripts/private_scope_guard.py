@@ -234,6 +234,26 @@ APPROVED_DOMAINS: tuple[str, ...] = (
     # (nbi_daily_bridge).  Read-only over providers; scores/gates only; no
     # broker execution, no order placement, no API trading writes.
     "nbi_",                # nbi_*.py
+    # Regime-transition sprint — advisory-only research-triage stack built
+    # from the Dzhanibekov/wave/titration/inertia reflection: contract
+    # equivalence (CES), market-quality + probability dynamics, inertia
+    # stack (PIS/CIS/SIS/IIR), titration/buffer/threshold pressure,
+    # instability + flip engine, temporal wave graph + wavefront, and the
+    # probability-to-equity propagation gap (PEG).  All modules are pure,
+    # deterministic, cite-or-drop on evidence, UNKNOWN-honest on missing
+    # data, and stamped experimental where uncalibrated.  No broker
+    # execution, no order placement, no API trading writes.
+    "regime_transition",   # regime_transition_*.py
+    # Quant research sprint — mathematical/empirical spine: feature
+    # registry (canonical state vector), returns/abnormal-returns engine,
+    # event-study engine, walk-forward splits with purge/embargo +
+    # no-lookahead guard, statistics primitives (IC, monotonicity, Brier,
+    # reliability, BH-FDR, bootstrap, decay fits), lead-lag engine
+    # (cross-correlation + OOS Granger-style), PEG research framework,
+    # append-only hash-chained research ledger, and the experiment runner.
+    # All RESEARCH_ONLY: read-only over canonical data, writes only the
+    # ledger and reports/; no broker execution, no order placement.
+    "quant_",              # quant_*.py / run_quant_research.py
 )
 
 # Explicit allowlist for individual files / directories whose name does
@@ -327,6 +347,10 @@ EXPLICIT_IN_SCOPE: frozenset[str] = frozenset({
     "model_calibration.py", "model_scorecard.py", "llm_grounding_guard.py",
     "sensitivity_analysis.py", "generate_decision_memo.py",
     "review_signal_outcomes.py",
+    # Matrix-winner sprint: isolated India+US matrix report builder over the
+    # sourced daily discovery evidence. Advisory-only; no broker, no
+    # execution, no order surface.
+    "generate_matrix_stock_winners.py",
     # Pass-5 production integration + adversarial validation: evidence
     # bridge, syndication collapse, weight sanity, tournament (shadow
     # observations only — order-shaped rows are refused by contract),

@@ -1,0 +1,102 @@
+{
+  "prediction_market_coverage": {
+    "total_observations": 1906,
+    "distinct_markets": 425,
+    "distinct_days": 2,
+    "first_day": "2026-07-02",
+    "last_day": "2026-08-16",
+    "elapsed_calendar_days": 45,
+    "markets_ge_2_days": 210,
+    "markets_ge_3_days": 0,
+    "markets_ge_7_days": 0,
+    "markets_ge_14_days": 0,
+    "markets_ge_21_days": 0,
+    "max_depth_days": 2,
+    "median_depth_days": 1,
+    "feature_capability_counts": {
+      "DELTA_AND_VELOCITY_POSSIBLE": 210,
+      "LEVEL_ONLY": 215
+    },
+    "per_venue": {
+      "kalshi": {
+        "contracts": 325,
+        "ge_2_days": 210
+      },
+      "polymarket": {
+        "contracts": 100,
+        "ge_2_days": 0
+      }
+    },
+    "venues": [
+      "kalshi",
+      "polymarket"
+    ]
+  },
+  "frozen_exposure_map_versions": 0,
+  "real_peg": {
+    "n_live_observations": 0,
+    "n_matured_by_horizon": {
+      "1": 0,
+      "3": 0,
+      "5": 0,
+      "10": 0,
+      "21": 0
+    },
+    "hop_distribution": {},
+    "filing_confirmation_distribution": {}
+  },
+  "experiments": {
+    "peg_forward_ar": {
+      "question": "does high PEG predict forward abnormal return?",
+      "n": 0,
+      "n_unit": "matured 5d LIVE PEG observations",
+      "status": "BLOCKED_BY_DATA"
+    },
+    "probability_dynamics": {
+      "question": "are dP/dt / d2P/dt2 informative?",
+      "n": 0,
+      "n_unit": "markets with >=7 daily observations",
+      "status": "BLOCKED_BY_DATA",
+      "depth_note": "EARLY_LONGITUDINAL: 210 contracts have 2-day depth (\u0394P/velocity only); acceleration needs 3, Z-shock needs 10"
+    },
+    "cross_venue_divergence": {
+      "question": "does CES-matched divergence carry information?",
+      "n": 0,
+      "n_unit": "matched multi-day Kalshi x Polymarket pairs",
+      "status": "BLOCKED_BY_DATA",
+      "note": "requires multi-day series on BOTH venues + CES match"
+    },
+    "hop_lag_wave": {
+      "question": "do hop-2+ names reprice later than hop-0/1?",
+      "n": 0,
+      "n_unit": "matured hop>=2 LIVE observations",
+      "status": "BLOCKED_BY_DATA"
+    },
+    "filing_confirmation": {
+      "question": "does STRONG filing confirmation outperform narrative-only exposure?",
+      "n": 0,
+      "n_unit": "matured STRONG-filing LIVE observations",
+      "status": "BLOCKED_BY_DATA"
+    },
+    "threshold_titration": {
+      "question": "does sensitivity rise near inferred transitions?",
+      "n": 0,
+      "n_unit": "persisted titration time-series days",
+      "status": "BLOCKED_BY_DATA",
+      "note": "capture begins once operator activates watch events with evidence feeds"
+    },
+    "halflife": {
+      "question": "how fast does probability-shock predictiveness decay?",
+      "n": 0,
+      "n_unit": "matured PEG observations (same corpus, horizon ladder)",
+      "status": "BLOCKED_BY_DATA"
+    }
+  },
+  "gates": {
+    "n_exploratory": 20,
+    "n_validation": 80,
+    "rationale": "documented heuristics \u2014 see module docstring; UNCALIBRATED"
+  },
+  "signal_class": "RESEARCH_ONLY",
+  "advisory_status": "ADVISORY_ONLY"
+}

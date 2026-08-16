@@ -120,6 +120,14 @@ def test_ready_position_flows_into_stop_monitoring(
 ) -> None:
     """A fresh, stop-carrying, priced position gets real action treatment."""
     import sqlite3
+    from datetime import datetime, timezone
+
+    # Dynamic "today" timestamps: this test asserts the FRESH path, so the
+    # fixture must stay inside the freshness gate as the calendar advances
+    # (hardcoded dates aged out and silently flipped the test to stale).
+    now = datetime.now(timezone.utc)
+    now_iso = now.strftime("%Y-%m-%dT%H:%M:%SZ")
+    today = now.date().isoformat()
 
     db = tmp_path / "mvp.db"
     conn = sqlite3.connect(db)
@@ -130,21 +138,21 @@ def test_ready_position_flows_into_stop_monitoring(
     conn.execute(
         "INSERT INTO signal_events VALUES (1,'e1','market_data',?,?)",
         (json.dumps({"symbol": "ANET",
-                     "timestamp": "2026-07-04T16:00:00Z", "close": 100.0}),
-         "2026-07-04T16:00:00Z"),
+                     "timestamp": now_iso, "close": 100.0}),
+         now_iso),
     )
     conn.commit()
     conn.close()
     holdings = _write_holdings(
         tmp_path / "h.json",
-        "2026-07-04",
+        today,
         [{
             "ticker": "NASDAQ:ANET", "normalized_ticker": "ANET",
             "status": "OPEN", "quantity": 1.0, "entry_price": 141.97,
             "currency": "USD", "leverage": 1,
             "stop_loss": 120.0,  # current 100 < stop 120: breached
             "stop_loss_source": "operator", "stop_loss_confirmed": True,
-            "stop_loss_confirmed_at": "2026-07-04T09:00:00Z",
+            "stop_loss_confirmed_at": now_iso,
             "opened_at": "2026-05-18T00:00:00Z",
             "created_via": "manual_trade_log",
             "broker_confirmed": False, "human_confirmed": True,

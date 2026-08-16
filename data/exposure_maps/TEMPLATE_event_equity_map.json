@@ -1,0 +1,21 @@
+{
+  "doctrine": "OPERATOR-CURATED event->equity exposure map. Every entry must cite evidence. This file is SNAPSHOT INPUT: the capture freezes a hash-chained version whenever content changes; frozen history is never rewritten.",
+  "entries": [
+    {
+      "event_id": "<kalshi event_ticker or watch event_id>",
+      "ticker": "<exchange ticker>",
+      "company": "<name>",
+      "direction": "<+1 benefits | -1 harmed>",
+      "exposure": "<0..1>",
+      "exposure_confidence": "<0..1>",
+      "hop": "<0 direct, 1 first-order, 2 second-order, 3+ later>",
+      "chain_position": "<UPSTREAM|MIDSTREAM|DOWNSTREAM>",
+      "expected_lag_days": "<int>",
+      "filing_confirmation": "<NONE|WEAK|STRONG>",
+      "capture_rate": "<0..1 Porter value-capture proxy, optional>",
+      "narrative_state": "<OLD|TRANSITION|NEW, optional>",
+      "rationale": "<why>",
+      "evidence_ref": "<citation \u2014 REQUIRED>"
+    }
+  ]
+}

@@ -101,6 +101,9 @@ _SUPPORT_SUFFIXES: tuple[str, ...] = (
     "_value", "_engine_belief_extension", "_extension", "_purity_audit",
     # Live Evidence Wiring sprint: read-only evidence miners (EDGAR FTS).
     "_miner",
+    # Data-pipeline sprint: longitudinal PM state capture (append-only
+    # probability ledger + frozen exposure maps + price snapshots).
+    "_capture",
     # Outcome Factory sprint: source-availability inventories.
     "_inventory",
     # NBI Evidence Factory sprint: the closed-loop ingestion->closeout->
@@ -138,6 +141,9 @@ _SUPPORT_EXPLICIT: frozenset[str] = frozenset({
     "secret_provider", "manage_secrets",
     "backup_private_data", "restore_private_data",
     "generate_checksums",
+    # Matrix-winner sprint: isolated India+US matrix report builder over the
+    # sourced daily discovery evidence. Advisory-only report tooling.
+    "generate_matrix_stock_winners",
     # Pass-4 model-quality tooling (advisory-only analytics).
     "generate_decision_memo", "review_signal_outcomes",
     "model_scorecard", "sensitivity_analysis",

@@ -1,0 +1,1428 @@
+{
+  "run_date": "2026-08-16",
+  "signal_class": "RESEARCH_ONLY",
+  "E1_pm_calibration": {
+    "verdict": "ACCEPTED",
+    "conclusion": "Kalshi settlement prices beat the constant-base-rate baseline by 0.0564 Brier points (N=42)",
+    "n": 42,
+    "source": "C:\\Users\\akash\\sleeping-passenger-v1\\data\\calibration_corpus\\pm_settlements.jsonl",
+    "brier": {
+      "status": "OK",
+      "n": 42,
+      "brier": 0.12502619047619049,
+      "base_rate": 0.23809523809523808,
+      "brier_baseline_constant": 0.18140589569160995,
+      "skill_vs_constant": 0.05637970521541946,
+      "epistemic_status": "DERIVED"
+    },
+    "log_loss": {
+      "status": "OK",
+      "n": 42,
+      "log_loss": 0.4033542702722741,
+      "epistemic_status": "DERIVED"
+    },
+    "reliability": {
+      "status": "OK",
+      "n": 42,
+      "buckets": [
+        {
+          "bucket": [
+            0.0,
+            0.2
+          ],
+          "n": 22,
+          "status": "OK",
+          "mean_forecast": 0.06727272727272728,
+          "observed_freq": 0.0,
+          "gap": -0.06727272727272728
+        },
+        {
+          "bucket": [
+            0.2,
+            0.4
+          ],
+          "n": 3,
+          "status": "INSUFFICIENT_DATA"
+        },
+        {
+          "bucket": [
+            0.4,
+            0.6
+          ],
+          "n": 0,
+          "status": "INSUFFICIENT_DATA"
+        },
+        {
+          "bucket": [
+            0.6,
+            0.8
+          ],
+          "n": 3,
+          "status": "INSUFFICIENT_DATA"
+        },
+        {
+          "bucket": [
+            0.8,
+            1.0
+          ],
+          "n": 14,
+          "status": "OK",
+          "mean_forecast": 0.9471428571428572,
+          "observed_freq": 0.7142857142857143,
+          "gap": -0.23285714285714287
+        }
+      ],
+      "expected_calibration_error": 0.13166666666666668,
+      "epistemic_status": "DERIVED"
+    }
+  },
+  "E2_lead_lag": {
+    "verdict": "REJECTED",
+    "conclusion": "0/8 pre-registered pairs show out-of-sample predictive lead; 7 of 8 correlation peaks survive BH-FDR at 5%",
+    "studies": [
+      {
+        "pair": "GLD->TLT",
+        "cross_correlation": {
+          "status": "OK",
+          "n": 5496,
+          "lags": [
+            {
+              "k": -5,
+              "rho": -0.1018647621880552,
+              "n": 5491,
+              "p_value": 3.6637359812630166e-14
+            },
+            {
+              "k": -4,
+              "rho": -0.013393778225548597,
+              "n": 5492,
+              "p_value": 0.3210147683674076
+            },
+            {
+              "k": -3,
+              "rho": -0.021761585098651625,
+              "n": 5493,
+              "p_value": 0.10681641484414262
+            },
+            {
+              "k": -2,
+              "rho": -0.10858537634500402,
+              "n": 5494,
+              "p_value": 6.661338147750939e-16
+            },
+            {
+              "k": -1,
+              "rho": 0.0023422257989037278,
+              "n": 5495,
+              "p_value": 0.8621970795526153
+            },
+            {
+              "k": 0,
+              "rho": 0.28924755466025853,
+              "n": 5496,
+              "p_value": 0.0
+            },
+            {
+              "k": 1,
+              "rho": -0.00025775992873528284,
+              "n": 5495,
+              "p_value": 0.9847596715406024
+            },
+            {
+              "k": 2,
+              "rho": -0.12335530360774384,
+              "n": 5494,
+              "p_value": 0.0
+            },
+            {
+              "k": 3,
+              "rho": -0.02225688218309545,
+              "n": 5493,
+              "p_value": 0.0990686416034472
+            },
+            {
+              "k": 4,
+              "rho": -0.015037603710204295,
+              "n": 5492,
+              "p_value": 0.2651990786847678
+            },
+            {
+              "k": 5,
+              "rho": -0.10907223469121803,
+              "n": 5491,
+              "p_value": 4.440892098500626e-16
+            }
+          ],
+          "best_lag": 0,
+          "best_rho": 0.28924755466025853,
+          "best_p_value": 0.0,
+          "relationship": "ASSOCIATED",
+          "note": "correlation peak != causal leadership"
+        },
+        "granger_style_oos": {
+          "status": "OK",
+          "n": 5494,
+          "folds_used": 3,
+          "oos_mse_baseline": 0.00010243655265423296,
+          "oos_mse_augmented": 0.00010181770775442214,
+          "oos_improvement_frac": 0.00604119176782423,
+          "relationship": "NOT_PREDICTIVE",
+          "threshold_note": "PREDICTIVE requires >2% OOS MSE improvement (documented heuristic floor, uncalibrated)",
+          "epistemic_status": "ESTIMATED"
+        },
+        "verdict": "ASSOCIATED"
+      },
+      {
+        "pair": "TLT->GLD",
+        "cross_correlation": {
+          "status": "OK",
+          "n": 5496,
+          "lags": [
+            {
+              "k": -5,
+              "rho": -0.10907223469121803,
+              "n": 5491,
+              "p_value": 4.440892098500626e-16
+            },
+            {
+              "k": -4,
+              "rho": -0.015037603710204295,
+              "n": 5492,
+              "p_value": 0.2651990786847678
+            },
+            {
+              "k": -3,
+              "rho": -0.02225688218309545,
+              "n": 5493,
+              "p_value": 0.0990686416034472
+            },
+            {
+              "k": -2,
+              "rho": -0.12335530360774384,
+              "n": 5494,
+              "p_value": 0.0
+            },
+            {
+              "k": -1,
+              "rho": -0.00025775992873528284,
+              "n": 5495,
+              "p_value": 0.9847596715406024
+            },
+            {
+              "k": 0,
+              "rho": 0.28924755466025853,
+              "n": 5496,
+              "p_value": 0.0
+            },
+            {
+              "k": 1,
+              "rho": 0.0023422257989037278,
+              "n": 5495,
+              "p_value": 0.8621970795526153
+            },
+            {
+              "k": 2,
+              "rho": -0.10858537634500402,
+              "n": 5494,
+              "p_value": 6.661338147750939e-16
+            },
+            {
+              "k": 3,
+              "rho": -0.021761585098651625,
+              "n": 5493,
+              "p_value": 0.10681641484414262
+            },
+            {
+              "k": 4,
+              "rho": -0.013393778225548597,
+              "n": 5492,
+              "p_value": 0.3210147683674076
+            },
+            {
+              "k": 5,
+              "rho": -0.1018647621880552,
+              "n": 5491,
+              "p_value": 3.6637359812630166e-14
+            }
+          ],
+          "best_lag": 0,
+          "best_rho": 0.28924755466025853,
+          "best_p_value": 0.0,
+          "relationship": "ASSOCIATED",
+          "note": "correlation peak != causal leadership"
+        },
+        "granger_style_oos": {
+          "status": "OK",
+          "n": 5494,
+          "folds_used": 3,
+          "oos_mse_baseline": 0.005257634927284496,
+          "oos_mse_augmented": 0.005250187430894673,
+          "oos_improvement_frac": 0.001416510479771793,
+          "relationship": "NOT_PREDICTIVE",
+          "threshold_note": "PREDICTIVE requires >2% OOS MSE improvement (documented heuristic floor, uncalibrated)",
+          "epistemic_status": "ESTIMATED"
+        },
+        "verdict": "ASSOCIATED"
+      },
+      {
+        "pair": "NVDA->SPY",
+        "cross_correlation": {
+          "status": "OK",
+          "n": 83,
+          "lags": [
+            {
+              "k": -5,
+              "rho": 0.12695917061162135,
+              "n": 78,
+              "p_value": 0.2689586119603886
+            },
+            {
+              "k": -4,
+              "rho": 0.036204728070547414,
+              "n": 79,
+              "p_value": 0.7521820126553385
+            },
+            {
+              "k": -3,
+              "rho": -0.2295811500113419,
+              "n": 80,
+              "p_value": 0.04025487836963304
+            },
+            {
+              "k": -2,
+              "rho": 0.240392067651299,
+              "n": 81,
+              "p_value": 0.030352392777958315
+            },
+            {
+              "k": -1,
+              "rho": 0.07356196626152753,
+              "n": 82,
+              "p_value": 0.5124572741535136
+            },
+            {
+              "k": 0,
+              "rho": 0.249891406900572,
+              "n": 83,
+              "p_value": 0.022404132177889835
+            },
+            {
+              "k": 1,
+              "rho": 0.0481073345295719,
+              "n": 82,
+              "p_value": 0.6687110707272379
+            },
+            {
+              "k": 2,
+              "rho": -0.13546842835305992,
+              "n": 81,
+              "p_value": 0.22865713603319415
+            },
+            {
+              "k": 3,
+              "rho": 0.23706296561469065,
+              "n": 80,
+              "p_value": 0.03395911030430243
+            },
+            {
+              "k": 4,
+              "rho": -0.030052036044415482,
+              "n": 79,
+              "p_value": 0.7932701827696638
+            },
+            {
+              "k": 5,
+              "rho": 0.12460298869086094,
+              "n": 78,
+              "p_value": 0.27804091232739636
+            }
+          ],
+          "best_lag": 0,
+          "best_rho": 0.249891406900572,
+          "best_p_value": 0.022404132177889835,
+          "relationship": "ASSOCIATED",
+          "note": "correlation peak != causal leadership"
+        },
+        "granger_style_oos": {
+          "status": "OK",
+          "n": 81,
+          "folds_used": 3,
+          "oos_mse_baseline": 0.006131325963368523,
+          "oos_mse_augmented": 0.006727263838408131,
+          "oos_improvement_frac": -0.09719557912993804,
+          "relationship": "NOT_PREDICTIVE",
+          "threshold_note": "PREDICTIVE requires >2% OOS MSE improvement (documented heuristic floor, uncalibrated)",
+          "epistemic_status": "ESTIMATED"
+        },
+        "verdict": "ASSOCIATED"
+      },
+      {
+        "pair": "SPY->NVDA",
+        "cross_correlation": {
+          "status": "OK",
+          "n": 83,
+          "lags": [
+            {
+              "k": -5,
+              "rho": 0.12460298869086094,
+              "n": 78,
+              "p_value": 0.27804091232739636
+            },
+            {
+              "k": -4,
+              "rho": -0.030052036044415482,
+              "n": 79,
+              "p_value": 0.7932701827696638
+            },
+            {
+              "k": -3,
+              "rho": 0.23706296561469065,
+              "n": 80,
+              "p_value": 0.03395911030430243
+            },
+            {
+              "k": -2,
+              "rho": -0.13546842835305992,
+              "n": 81,
+              "p_value": 0.22865713603319415
+            },
+            {
+              "k": -1,
+              "rho": 0.0481073345295719,
+              "n": 82,
+              "p_value": 0.6687110707272379
+            },
+            {
+              "k": 0,
+              "rho": 0.249891406900572,
+              "n": 83,
+              "p_value": 0.022404132177889835
+            },
+            {
+              "k": 1,
+              "rho": 0.07356196626152753,
+              "n": 82,
+              "p_value": 0.5124572741535136
+            },
+            {
+              "k": 2,
+              "rho": 0.240392067651299,
+              "n": 81,
+              "p_value": 0.030352392777958315
+            },
+            {
+              "k": 3,
+              "rho": -0.2295811500113419,
+              "n": 80,
+              "p_value": 0.04025487836963304
+            },
+            {
+              "k": 4,
+              "rho": 0.036204728070547414,
+              "n": 79,
+              "p_value": 0.7521820126553385
+            },
+            {
+              "k": 5,
+              "rho": 0.12695917061162135,
+              "n": 78,
+              "p_value": 0.2689586119603886
+            }
+          ],
+          "best_lag": 0,
+          "best_rho": 0.249891406900572,
+          "best_p_value": 0.022404132177889835,
+          "relationship": "ASSOCIATED",
+          "note": "correlation peak != causal leadership"
+        },
+        "granger_style_oos": {
+          "status": "OK",
+          "n": 81,
+          "folds_used": 3,
+          "oos_mse_baseline": 0.0006933748959058718,
+          "oos_mse_augmented": 0.0006881714292549856,
+          "oos_improvement_frac": 0.007504539286137187,
+          "relationship": "NOT_PREDICTIVE",
+          "threshold_note": "PREDICTIVE requires >2% OOS MSE improvement (documented heuristic floor, uncalibrated)",
+          "epistemic_status": "ESTIMATED"
+        },
+        "verdict": "ASSOCIATED"
+      },
+      {
+        "pair": "BTC-USD->NVDA",
+        "cross_correlation": {
+          "status": "OK",
+          "n": 51,
+          "lags": [
+            {
+              "k": -5,
+              "rho": 0.251295146201184,
+              "n": 46,
+              "p_value": 0.09219790814269224
+            },
+            {
+              "k": -4,
+              "rho": 0.29381941787511023,
+              "n": 47,
+              "p_value": 0.04462632635101249
+            },
+            {
+              "k": -3,
+              "rho": 0.062159054562103494,
+              "n": 48,
+              "p_value": 0.6763025653763093
+            },
+            {
+              "k": -2,
+              "rho": -0.2139283039613088,
+              "n": 49,
+              "p_value": 0.14056376625269396
+            },
+            {
+              "k": -1,
+              "rho": -0.23893316918411303,
+              "n": 50,
+              "p_value": 0.0948544811346721
+            },
+            {
+              "k": 0,
+              "rho": 0.29912872691611553,
+              "n": 51,
+              "p_value": 0.032534338042516264
+            },
+            {
+              "k": 1,
+              "rho": 0.21242064274580874,
+              "n": 50,
+              "p_value": 0.1391940183937601
+            },
+            {
+              "k": 2,
+              "rho": 0.026215676826974874,
+              "n": 49,
+              "p_value": 0.8588453968078533
+            },
+            {
+              "k": 3,
+              "rho": 0.005760495336684487,
+              "n": 48,
+              "p_value": 0.9691750149536684
+            },
+            {
+              "k": 4,
+              "rho": -0.022413921244012893,
+              "n": 47,
+              "p_value": 0.8817887524623078
+            },
+            {
+              "k": 5,
+              "rho": 0.17157717953850646,
+              "n": 46,
+              "p_value": 0.25581154086257785
+            }
+          ],
+          "best_lag": 0,
+          "best_rho": 0.29912872691611553,
+          "best_p_value": 0.032534338042516264,
+          "relationship": "ASSOCIATED",
+          "note": "correlation peak != causal leadership"
+        },
+        "granger_style_oos": {
+          "status": "OK",
+          "n": 49,
+          "folds_used": 3,
+          "oos_mse_baseline": 0.0006859447203026624,
+          "oos_mse_augmented": 0.0007648234359662289,
+          "oos_improvement_frac": -0.11499264931452964,
+          "relationship": "NOT_PREDICTIVE",
+          "threshold_note": "PREDICTIVE requires >2% OOS MSE improvement (documented heuristic floor, uncalibrated)",
+          "epistemic_status": "ESTIMATED"
+        },
+        "verdict": "ASSOCIATED"
+      },
+      {
+        "pair": "SPY->AAPL",
+        "cross_correlation": {
+          "status": "OK",
+          "n": 8448,
+          "lags": [
+            {
+              "k": -5,
+              "rho": -0.21816812313926529,
+              "n": 8443,
+              "p_value": 0.0
+            },
+            {
+              "k": -4,
+              "rho": -0.05454644199647461,
+              "n": 8444,
+              "p_value": 5.264076632371939e-07
+            },
+            {
+              "k": -3,
+              "rho": -0.06122049519608805,
+              "n": 8445,
+              "p_value": 1.7812739727673943e-08
+            },
+            {
+              "k": -2,
+              "rho": -0.22425124261142648,
+              "n": 8446,
+              "p_value": 0.0
+            },
+            {
+              "k": -1,
+              "rho": -0.029851859917528773,
+              "n": 8447,
+              "p_value": 0.006070668992352424
+            },
+            {
+              "k": 0,
+              "rho": 0.768372165217177,
+              "n": 8448,
+              "p_value": 0.0
+            },
+            {
+              "k": 1,
+              "rho": -0.026819807386080904,
+              "n": 8447,
+              "p_value": 0.013697634799511693
+            },
+            {
+              "k": 2,
+              "rho": -0.23091487167605995,
+              "n": 8446,
+              "p_value": 0.0
+            },
+            {
+              "k": 3,
+              "rho": -0.058453855509546446,
+              "n": 8445,
+              "p_value": 7.578314131784225e-08
+            },
+            {
+              "k": 4,
+              "rho": -0.04769953051523,
+              "n": 8444,
+              "p_value": 1.1560353541550938e-05
+            },
+            {
+              "k": 5,
+              "rho": -0.22446525214398583,
+              "n": 8443,
+              "p_value": 0.0
+            }
+          ],
+          "best_lag": 0,
+          "best_rho": 0.768372165217177,
+          "best_p_value": 0.0,
+          "relationship": "ASSOCIATED",
+          "note": "correlation peak != causal leadership"
+        },
+        "granger_style_oos": {
+          "status": "OK",
+          "n": 8446,
+          "folds_used": 3,
+          "oos_mse_baseline": 0.0017299444598177045,
+          "oos_mse_augmented": 0.0017024710539164112,
+          "oos_improvement_frac": 0.015881082114686085,
+          "relationship": "NOT_PREDICTIVE",
+          "threshold_note": "PREDICTIVE requires >2% OOS MSE improvement (documented heuristic floor, uncalibrated)",
+          "epistemic_status": "ESTIMATED"
+        },
+        "verdict": "ASSOCIATED"
+      },
+      {
+        "pair": "TSLA->SPY",
+        "cross_correlation": {
+          "status": "OK",
+          "n": 83,
+          "lags": [
+            {
+              "k": -5,
+              "rho": 0.07594290945208466,
+              "n": 78,
+              "p_value": 0.5099255380765761
+            },
+            {
+              "k": -4,
+              "rho": 0.028891857846371133,
+              "n": 79,
+              "p_value": 0.8010847395163441
+            },
+            {
+              "k": -3,
+              "rho": -0.20722098890892043,
+              "n": 80,
+              "p_value": 0.06502652477300841
+            },
+            {
+              "k": -2,
+              "rho": 0.13105100698954156,
+              "n": 81,
+              "p_value": 0.24438097031821648
+            },
+            {
+              "k": -1,
+              "rho": 0.005671654342484145,
+              "n": 82,
+              "p_value": 0.9597946261958816
+            },
+            {
+              "k": 0,
+              "rho": 0.14701042079417728,
+              "n": 83,
+              "p_value": 0.18533753636015593
+            },
+            {
+              "k": 1,
+              "rho": 0.029828419685444356,
+              "n": 82,
+              "p_value": 0.7908558077043162
+            },
+            {
+              "k": 2,
+              "rho": -0.012561106184257076,
+              "n": 81,
+              "p_value": 0.911661926776252
+            },
+            {
+              "k": 3,
+              "rho": 0.20978307070250185,
+              "n": 80,
+              "p_value": 0.0616813120217099
+            },
+            {
+              "k": 4,
+              "rho": -0.055560752701807874,
+              "n": 79,
+              "p_value": 0.6277708690791561
+            },
+            {
+              "k": 5,
+              "rho": 0.0021570191892062154,
+              "n": 78,
+              "p_value": 0.9850960935017627
+            }
+          ],
+          "best_lag": 3,
+          "best_rho": 0.20978307070250185,
+          "best_p_value": 0.0616813120217099,
+          "relationship": "ASSOCIATED",
+          "note": "correlation peak != causal leadership"
+        },
+        "granger_style_oos": {
+          "status": "OK",
+          "n": 81,
+          "folds_used": 3,
+          "oos_mse_baseline": 0.006131325963368523,
+          "oos_mse_augmented": 0.007097179720209568,
+          "oos_improvement_frac": -0.15752768733612096,
+          "relationship": "NOT_PREDICTIVE",
+          "threshold_note": "PREDICTIVE requires >2% OOS MSE improvement (documented heuristic floor, uncalibrated)",
+          "epistemic_status": "ESTIMATED"
+        },
+        "verdict": "NOT_PREDICTIVE"
+      },
+      {
+        "pair": "MSFT->SPY",
+        "cross_correlation": {
+          "status": "OK",
+          "n": 8433,
+          "lags": [
+            {
+              "k": -5,
+              "rho": 0.007499302322199436,
+              "n": 8428,
+              "p_value": 0.4912277709757453
+            },
+            {
+              "k": -4,
+              "rho": -0.01794847043830725,
+              "n": 8429,
+              "p_value": 0.09940905150648671
+            },
+            {
+              "k": -3,
+              "rho": -0.018848928024345894,
+              "n": 8430,
+              "p_value": 0.08353885501507552
+            },
+            {
+              "k": -2,
+              "rho": -0.0034816460059918807,
+              "n": 8431,
+              "p_value": 0.7492482184761331
+            },
+            {
+              "k": -1,
+              "rho": -0.06148545566419797,
+              "n": 8432,
+              "p_value": 1.585141928828193e-08
+            },
+            {
+              "k": 0,
+              "rho": 0.4586380176032325,
+              "n": 8433,
+              "p_value": 0.0
+            },
+            {
+              "k": 1,
+              "rho": -0.03555293194212433,
+              "n": 8432,
+              "p_value": 0.0010928016010853803
+            },
+            {
+              "k": 2,
+              "rho": -0.03369499178819507,
+              "n": 8431,
+              "p_value": 0.001971374959610195
+            },
+            {
+              "k": 3,
+              "rho": 0.005896286425018171,
+              "n": 8430,
+              "p_value": 0.5883162173020036
+            },
+            {
+              "k": 4,
+              "rho": -0.026625220667769033,
+              "n": 8429,
+              "p_value": 0.014501560916099887
+            },
+            {
+              "k": 5,
+              "rho": -0.0065053769467349875,
+              "n": 8428,
+              "p_value": 0.550425494780943
+            }
+          ],
+          "best_lag": 0,
+          "best_rho": 0.4586380176032325,
+          "best_p_value": 0.0,
+          "relationship": "ASSOCIATED",
+          "note": "correlation peak != causal leadership"
+        },
+        "granger_style_oos": {
+          "status": "OK",
+          "n": 8431,
+          "folds_used": 3,
+          "oos_mse_baseline": 0.0003547472664239176,
+          "oos_mse_augmented": 0.0003549785503250923,
+          "oos_improvement_frac": -0.0006519662618966252,
+          "relationship": "NOT_PREDICTIVE",
+          "threshold_note": "PREDICTIVE requires >2% OOS MSE improvement (documented heuristic floor, uncalibrated)",
+          "epistemic_status": "ESTIMATED"
+        },
+        "verdict": "ASSOCIATED"
+      }
+    ],
+    "fdr": {
+      "status": "OK",
+      "m": 8,
+      "alpha": 0.05,
+      "n_survive": 7,
+      "survives": [
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        false,
+        true
+      ],
+      "epistemic_status": "DERIVED"
+    }
+  },
+  "E3_momentum_decay": {
+    "verdict": "INCONCLUSIVE",
+    "conclusion": "momentum rank-IC by horizon: h=1: -0.007 (N=101886), h=3: -0.017 (N=101241), h=5: -0.017 (N=101354), h=10: 0.000 (N=101309), h=20: 0.013 (N=101950)",
+    "curve": {
+      "1": {
+        "status": "OK",
+        "n": 101886,
+        "ic": -0.1257867575897889,
+        "rank_ic": -0.006687604574633833,
+        "epistemic_status": "DERIVED"
+      },
+      "3": {
+        "status": "OK",
+        "n": 101241,
+        "ic": -0.13458597964744995,
+        "rank_ic": -0.017049450332992155,
+        "epistemic_status": "DERIVED"
+      },
+      "5": {
+        "status": "OK",
+        "n": 101354,
+        "ic": -0.08126924586437376,
+        "rank_ic": -0.01732620603106489,
+        "epistemic_status": "DERIVED"
+      },
+      "10": {
+        "status": "OK",
+        "n": 101309,
+        "ic": -0.07143212393067488,
+        "rank_ic": 0.0004351019039761697,
+        "epistemic_status": "DERIVED"
+      },
+      "20": {
+        "status": "OK",
+        "n": 101950,
+        "ic": NaN,
+        "rank_ic": 0.013179969359967895,
+        "epistemic_status": "DERIVED"
+      }
+    },
+    "notable_horizons": []
+  },
+  "E4_peg": {
+    "verdict": "BLOCKED_BY_DATA",
+    "conclusion": "REAL propagation-gap observations: N=0 \u2014 no real PEG alpha claim is possible; machinery demonstrated on fixture rows only",
+    "n_real": 0,
+    "n_fixture": 56,
+    "fixture_demonstration": {
+      "signal_class": "RESEARCH_ONLY",
+      "data_modes_present": [
+        "FIXTURE_DEMONSTRATION"
+      ],
+      "n_samples": 56,
+      "status": "OK",
+      "primary_horizon": 5,
+      "monotonicity": {
+        "status": "OK",
+        "n": 56,
+        "k": 5,
+        "buckets": [
+          {
+            "quantile": 1,
+            "n": 11,
+            "mean_fwd": -0.0014916363636363636,
+            "median_fwd": -0.016104,
+            "hit_rate": 0.45454545454545453
+          },
+          {
+            "quantile": 2,
+            "n": 11,
+            "mean_fwd": -0.004028090909090908,
+            "median_fwd": -0.014164,
+            "hit_rate": 0.36363636363636365
+          },
+          {
+            "quantile": 3,
+            "n": 11,
+            "mean_fwd": 0.00671090909090909,
+            "median_fwd": 0.014955,
+            "hit_rate": 0.7272727272727273
+          },
+          {
+            "quantile": 4,
+            "n": 11,
+            "mean_fwd": 0.0012949090909090907,
+            "median_fwd": 0.013715,
+            "hit_rate": 0.5454545454545454
+          },
+          {
+            "quantile": 5,
+            "n": 12,
+            "mean_fwd": 0.014206666666666666,
+            "median_fwd": 0.016150499999999998,
+            "hit_rate": 0.9166666666666666
+          }
+        ],
+        "top_minus_bottom": 0.01569830303030303,
+        "monotone_fraction": 0.5,
+        "is_strictly_monotone": false,
+        "epistemic_status": "DERIVED"
+      },
+      "monotonicity_placebo": {
+        "status": "OK",
+        "n": 56,
+        "k": 5,
+        "buckets": [
+          {
+            "quantile": 1,
+            "n": 11,
+            "mean_fwd": 0.013437272727272727,
+            "median_fwd": 0.016341,
+            "hit_rate": 0.9090909090909091
+          },
+          {
+            "quantile": 2,
+            "n": 11,
+            "mean_fwd": -0.003987181818181818,
+            "median_fwd": -0.015576,
+            "hit_rate": 0.36363636363636365
+          },
+          {
+            "quantile": 3,
+            "n": 11,
+            "mean_fwd": -0.001181,
+            "median_fwd": -0.014591,
+            "hit_rate": 0.45454545454545453
+          },
+          {
+            "quantile": 4,
+            "n": 11,
+            "mean_fwd": 0.004035454545454545,
+            "median_fwd": 0.015054,
+            "hit_rate": 0.6363636363636364
+          },
+          {
+            "quantile": 5,
+            "n": 12,
+            "mean_fwd": 0.0052064166666666665,
+            "median_fwd": 0.0149675,
+            "hit_rate": 0.6666666666666666
+          }
+        ],
+        "top_minus_bottom": -0.00823085606060606,
+        "monotone_fraction": 0.75,
+        "is_strictly_monotone": false,
+        "epistemic_status": "DERIVED"
+      },
+      "placebo_verdict": "EXCEEDS_PLACEBO (necessary, not sufficient, for real signal)",
+      "event_study_top_peg": {
+        "n_events": 18,
+        "horizons": {
+          "1": {
+            "h": 1,
+            "n": 18,
+            "stats": {
+              "status": "OK",
+              "n": 18,
+              "mean": 0.0003740555555555556,
+              "median": -4.0499999999999995e-05,
+              "std": 0.0014060353301653564,
+              "se": 0.00033140570551592997,
+              "ci": [
+                -0.0002754996272556672,
+                0.0010236107383667784
+              ],
+              "epistemic_status": "DERIVED"
+            },
+            "hit_rate": 0.4444444444444444,
+            "bootstrap": {
+              "status": "OK",
+              "n": 18,
+              "stat": "mean",
+              "point": 0.0003740555555555556,
+              "ci": [
+                -0.00018188888888888888,
+                0.0010632222222222221
+              ],
+              "b": 2000,
+              "block": null,
+              "epistemic_status": "ESTIMATED"
+            },
+            "tails": {
+              "min": -0.000982,
+              "max": 0.004449
+            },
+            "aar": 0.0003740555555555556,
+            "caar_proxy": 0.0003740555555555556
+          },
+          "5": {
+            "h": 5,
+            "n": 18,
+            "stats": {
+              "status": "OK",
+              "n": 18,
+              "mean": 0.011294388888888889,
+              "median": 0.016100999999999997,
+              "std": 0.012850817708653631,
+              "se": 0.0030289667818603847,
+              "ci": [
+                0.005357613996442534,
+                0.017231163781335244
+              ],
+              "epistemic_status": "DERIVED"
+            },
+            "hit_rate": 0.8333333333333334,
+            "bootstrap": {
+              "status": "OK",
+              "n": 18,
+              "stat": "mean",
+              "point": 0.011294388888888889,
+              "ci": [
+                0.005195666666666666,
+                0.016649999999999998
+              ],
+              "b": 2000,
+              "block": null,
+              "epistemic_status": "ESTIMATED"
+            },
+            "tails": {
+              "min": -0.016675,
+              "max": 0.021314
+            },
+            "aar": 0.011294388888888889,
+            "caar_proxy": 0.011294388888888889
+          },
+          "21": {
+            "h": 21,
+            "n": 18,
+            "stats": {
+              "status": "OK",
+              "n": 18,
+              "mean": 0.05702372222222222,
+              "median": 0.08293500000000001,
+              "std": 0.06164331734479612,
+              "se": 0.014529469236446555,
+              "ci": [
+                0.028545962518786973,
+                0.08550148192565746
+              ],
+              "epistemic_status": "DERIVED"
+            },
+            "hit_rate": 0.8333333333333334,
+            "bootstrap": {
+              "status": "OK",
+              "n": 18,
+              "stat": "mean",
+              "point": 0.05702372222222222,
+              "ci": [
+                0.028493777777777778,
+                0.083366
+              ],
+              "b": 2000,
+              "block": null,
+              "epistemic_status": "ESTIMATED"
+            },
+            "tails": {
+              "min": -0.079686,
+              "max": 0.089059
+            },
+            "aar": 0.05702372222222222,
+            "caar_proxy": 0.05702372222222222
+          }
+        },
+        "n_min": 8,
+        "status": "OK",
+        "usable_horizons": [
+          1,
+          5,
+          21
+        ],
+        "note": "window ARs are cumulative from t by construction; the horizon ladder IS the CAAR curve"
+      },
+      "event_study_top_delta_p_baseline": {
+        "n_events": 18,
+        "horizons": {
+          "1": {
+            "h": 1,
+            "n": 18,
+            "stats": {
+              "status": "OK",
+              "n": 18,
+              "mean": 0.000406,
+              "median": -5.9e-05,
+              "std": 0.0013805269241254565,
+              "se": 0.0003253933165532389,
+              "ci": [
+                -0.00023177090044434827,
+                0.0010437709004443483
+              ],
+              "epistemic_status": "DERIVED"
+            },
+            "hit_rate": 0.4444444444444444,
+            "bootstrap": {
+              "status": "OK",
+              "n": 18,
+              "stat": "mean",
+              "point": 0.000406,
+              "ci": [
+                -0.0001493888888888889,
+                0.0010452222222222223
+              ],
+              "b": 2000,
+              "block": null,
+              "epistemic_status": "ESTIMATED"
+            },
+            "tails": {
+              "min": -0.000892,
+              "max": 0.004449
+            },
+            "aar": 0.000406,
+            "caar_proxy": 0.000406
+          },
+          "5": {
+            "h": 5,
+            "n": 18,
+            "stats": {
+              "status": "OK",
+              "n": 18,
+              "mean": 0.009566555555555556,
+              "median": 0.0162385,
+              "std": 0.014467328531891201,
+              "se": 0.003409982036851296,
+              "ci": [
+                0.0028829907633270155,
+                0.016250120347784097
+              ],
+              "epistemic_status": "DERIVED"
+            },
+            "hit_rate": 0.7777777777777778,
+            "bootstrap": {
+              "status": "OK",
+              "n": 18,
+              "stat": "mean",
+              "point": 0.009566555555555556,
+              "ci": [
+                0.0022183888888888887,
+                0.015393555555555556
+              ],
+              "b": 2000,
+              "block": null,
+              "epistemic_status": "ESTIMATED"
+            },
+            "tails": {
+              "min": -0.017625,
+              "max": 0.021314
+            },
+            "aar": 0.009566555555555556,
+            "caar_proxy": 0.009566555555555556
+          },
+          "21": {
+            "h": 21,
+            "n": 18,
+            "stats": {
+              "status": "OK",
+              "n": 18,
+              "mean": 0.048578277777777776,
+              "median": 0.08354049999999999,
+              "std": 0.06949957195196627,
+              "se": 0.016381206205599245,
+              "ci": [
+                0.01647111361480326,
+                0.08068544194075229
+              ],
+              "epistemic_status": "DERIVED"
+            },
+            "hit_rate": 0.7777777777777778,
+            "bootstrap": {
+              "status": "OK",
+              "n": 18,
+              "stat": "mean",
+              "point": 0.048578277777777776,
+              "ci": [
+                0.013151166666666667,
+                0.0760235
+              ],
+              "b": 2000,
+              "block": null,
+              "epistemic_status": "ESTIMATED"
+            },
+            "tails": {
+              "min": -0.082625,
+              "max": 0.089059
+            },
+            "aar": 0.048578277777777776,
+            "caar_proxy": 0.048578277777777776
+          }
+        },
+        "n_min": 8,
+        "status": "OK",
+        "usable_horizons": [
+          1,
+          5,
+          21
+        ],
+        "note": "window ARs are cumulative from t by construction; the horizon ladder IS the CAAR curve"
+      },
+      "event_study_unconditional": {
+        "n_events": 56,
+        "horizons": {
+          "1": {
+            "h": 1,
+            "n": 56,
+            "stats": {
+              "status": "OK",
+              "n": 56,
+              "mean": 0.00011405357142857144,
+              "median": -5.9e-05,
+              "std": 0.0009556676946158992,
+              "se": 0.00012770646745931437,
+              "ci": [
+                -0.0001362511047916847,
+                0.00036435824764882756
+              ],
+              "epistemic_status": "DERIVED"
+            },
+            "hit_rate": 0.4642857142857143,
+            "bootstrap": {
+              "status": "OK",
+              "n": 56,
+              "stat": "mean",
+              "point": 0.00011405357142857144,
+              "ci": [
+                -0.00011901785714285714,
+                0.0003822857142857143
+              ],
+              "b": 2000,
+              "block": null,
+              "epistemic_status": "ESTIMATED"
+            },
+            "tails": {
+              "min": -0.000982,
+              "max": 0.004449
+            },
+            "aar": 0.00011405357142857144,
+            "caar_proxy": 0.00011405357142857144
+          },
+          "5": {
+            "h": 5,
+            "n": 56,
+            "stats": {
+              "status": "OK",
+              "n": 56,
+              "mean": 0.003532625,
+              "median": 0.015077,
+              "std": 0.01607314595394499,
+              "se": 0.0021478644745454986,
+              "ci": [
+                -0.0006771893701091767,
+                0.007742439370109177
+              ],
+              "epistemic_status": "DERIVED"
+            },
+            "hit_rate": 0.6071428571428571,
+            "bootstrap": {
+              "status": "OK",
+              "n": 56,
+              "stat": "mean",
+              "point": 0.003532625,
+              "ci": [
+                -0.0007581249999999999,
+                0.0075084464285714286
+              ],
+              "b": 2000,
+              "block": null,
+              "epistemic_status": "ESTIMATED"
+            },
+            "tails": {
+              "min": -0.018187,
+              "max": 0.021314
+            },
+            "aar": 0.003532625,
+            "caar_proxy": 0.003532625
+          },
+          "21": {
+            "h": 21,
+            "n": 56,
+            "stats": {
+              "status": "OK",
+              "n": 56,
+              "mean": 0.01986780357142857,
+              "median": 0.079817,
+              "std": 0.0784932900885442,
+              "se": 0.010489107095428257,
+              "ci": [
+                -0.0006908463356108119,
+                0.040426453478467954
+              ],
+              "epistemic_status": "DERIVED"
+            },
+            "hit_rate": 0.6071428571428571,
+            "bootstrap": {
+              "status": "OK",
+              "n": 56,
+              "stat": "mean",
+              "point": 0.01986780357142857,
+              "ci": [
+                -0.0007966250000000005,
+                0.03971941071428571
+              ],
+              "b": 2000,
+              "block": null,
+              "epistemic_status": "ESTIMATED"
+            },
+            "tails": {
+              "min": -0.082625,
+              "max": 0.089059
+            },
+            "aar": 0.01986780357142857,
+            "caar_proxy": 0.01986780357142857
+          }
+        },
+        "n_min": 8,
+        "status": "OK",
+        "usable_horizons": [
+          1,
+          5,
+          21
+        ],
+        "note": "window ARs are cumulative from t by construction; the horizon ladder IS the CAAR curve"
+      },
+      "peg_vs_delta_p": {
+        "status": "OK",
+        "horizons": {
+          "1": {
+            "h": 1,
+            "signal_aar": 0.0003740555555555556,
+            "signal_n": 18,
+            "baseline_aar": 0.000406,
+            "baseline_n": 18,
+            "edge_vs_baseline": -3.1944444444444414e-05
+          },
+          "5": {
+            "h": 5,
+            "signal_aar": 0.011294388888888889,
+            "signal_n": 18,
+            "baseline_aar": 0.009566555555555556,
+            "baseline_n": 18,
+            "edge_vs_baseline": 0.001727833333333333
+          },
+          "21": {
+            "h": 21,
+            "signal_aar": 0.05702372222222222,
+            "signal_n": 18,
+            "baseline_aar": 0.048578277777777776,
+            "baseline_n": 18,
+            "edge_vs_baseline": 0.008445444444444443
+          }
+        },
+        "beats_baseline_horizons": [
+          5,
+          21
+        ]
+      },
+      "peg_vs_unconditional": {
+        "status": "OK",
+        "horizons": {
+          "1": {
+            "h": 1,
+            "signal_aar": 0.0003740555555555556,
+            "signal_n": 18,
+            "baseline_aar": 0.00011405357142857144,
+            "baseline_n": 56,
+            "edge_vs_baseline": 0.00026000198412698416
+          },
+          "5": {
+            "h": 5,
+            "signal_aar": 0.011294388888888889,
+            "signal_n": 18,
+            "baseline_aar": 0.003532625,
+            "baseline_n": 56,
+            "edge_vs_baseline": 0.007761763888888888
+          },
+          "21": {
+            "h": 21,
+            "signal_aar": 0.05702372222222222,
+            "signal_n": 18,
+            "baseline_aar": 0.01986780357142857,
+            "baseline_n": 56,
+            "edge_vs_baseline": 0.03715591865079365
+          }
+        },
+        "beats_baseline_horizons": [
+          1,
+          5,
+          21
+        ]
+      },
+      "exposure_caveat": "exposure defaulted to 1.0 (HEURISTIC) \u2014 PEG here reduces to \u0394P minus observed move"
+    }
+  }
+}

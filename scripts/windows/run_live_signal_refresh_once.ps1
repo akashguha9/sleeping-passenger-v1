@@ -60,6 +60,13 @@ if (-not (Test-Path $LogDir)) {
     New-Item -ItemType Directory -Path $LogDir -Force | Out-Null
 }
 
+# Enable the built-in SEC EDGAR 7-stock watchlist for the scheduled
+# refresh (data-pipeline sprint: sec_edgar previously skipped every run
+# with "No CIK provided"). No secret involved — public EDGAR data.
+if ([string]::IsNullOrWhiteSpace($env:SEC_DEFAULT_WATCHLIST)) {
+    $env:SEC_DEFAULT_WATCHLIST = "1"
+}
+
 $Mode = if ($WriteMode) { "--write" } else { "--dry-run" }
 $Timestamp = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss zzz")
 
@@ -101,4 +108,34 @@ if ($rc -eq 0) {
         Out-File -FilePath $LogPath -Append -Encoding utf8
     Write-Output "FAIL rc=$rc"
 }
+
+# --- longitudinal research-data capture (data-pipeline sprint) ---------------
+# Appends prediction-market probability observations to the append-only
+# ledger, freezes the event->equity exposure map when changed, matures
+# real PEG observations, and refreshes the readiness dashboard.  Each
+# step is isolated: a failure here is logged but NEVER changes the
+# refresh exit code — one broken step must not destroy the day's capture
+# or the existing signal refresh.
+if ($WriteMode) {
+    $captureSteps = @(
+        @("scripts/prediction_market_state_capture.py", "--write"),
+        @("scripts/run_quant_peg_dataset.py"),
+        @("scripts/quant_data_readiness_report.py")
+    )
+    foreach ($step in $captureSteps) {
+        try {
+            $stepOut = & python @step 2>&1
+            $stepRc = $LASTEXITCODE
+            "[$Timestamp] capture step $($step[0]) rc=$stepRc" |
+                Out-File -FilePath $LogPath -Append -Encoding utf8
+            if ($null -ne $stepOut) {
+                $stepOut | Out-File -FilePath $LogPath -Append -Encoding utf8
+            }
+        } catch {
+            "[$Timestamp] capture step $($step[0]) threw: $($_.Exception.Message)" |
+                Out-File -FilePath $LogPath -Append -Encoding utf8
+        }
+    }
+}
+
 exit $rc

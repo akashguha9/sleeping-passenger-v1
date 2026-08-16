@@ -183,6 +183,15 @@ def test_feed_staleness_lowers_usability(tmp_path):
         {"headline": "x", "url": "https://e/1", "provider": "P",
          "timestamp_utc": "2026-07-01T00:00:00Z"},
     ])
+    # Freshness is computed from file mtime vs now_iso; pin the mtime so
+    # the fixture does not decay as the real calendar advances past the
+    # frozen _NOW_ISO (the tmp file would otherwise be "newer than now"
+    # and both scores clamp to age 0).
+    import os
+    from datetime import datetime, timezone
+
+    mtime = datetime(2026, 7, 3, 0, 0, tzinfo=timezone.utc).timestamp()
+    os.utime(path, times=(mtime, mtime))
     fresh = feed.score_feed_candidate(path, now_iso=_NOW_ISO)
     aged = feed.score_feed_candidate(path, now_iso="2026-07-20T12:00:00+00:00")
     assert aged["feed_usability"] < fresh["feed_usability"]
