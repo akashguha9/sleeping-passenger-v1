@@ -23,6 +23,7 @@ Yahoo quote fetcher so no network or DB is touched.
 """
 from __future__ import annotations
 
+import datetime as _dt
 import sys
 from pathlib import Path
 from unittest.mock import patch
@@ -32,6 +33,36 @@ import pytest
 _REPO = Path(__file__).resolve().parents[1]
 if str(_REPO) not in sys.path:
     sys.path.insert(0, str(_REPO))
+
+
+# ---------------------------------------------------------------------------
+# Time-stable fixture dates.
+#
+# These are *contract* tests about latest-candle consistency, NOT about the
+# stale-data gate.  The market-data freshness gate BLOCKs any candle whose
+# newest row is > 30 days old (market_data_freshness.STALE_THRESHOLD_DAYS),
+# using the real wall clock.  Hardcoding absolute 2026-05-1x dates therefore
+# made every test in this file a time bomb: once 30 days elapsed the gate
+# blocked the (otherwise valid) candles and `report` came back None.
+#
+# `_day(n)` maps the original legacy day numbers (10..14) onto a window that
+# floats forward in time so the latest candle is always a few days old and
+# comfortably inside the FRESH window — exercising the consistency contract
+# without depending on the calendar.  offset = n - 10.
+# ---------------------------------------------------------------------------
+_BASE_DATE = _dt.datetime.now(_dt.timezone.utc).date() - _dt.timedelta(days=8)
+
+
+def _day(day: int, hh: str = "16:00:00") -> str:
+    """ISO candle timestamp for a legacy day number (10..14), kept fresh."""
+    d = _BASE_DATE + _dt.timedelta(days=day - 10)
+    return f"{d.isoformat()}T{hh}Z"
+
+
+def _recent_quote_ts(minutes_ago: int = 30) -> str:
+    """A quote timestamp a few minutes in the past — always quote-fresh."""
+    t = _dt.datetime.now(_dt.timezone.utc) - _dt.timedelta(minutes=minutes_ago)
+    return t.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _ev(event_id: str, ts: str, *, close: float, high: float | None = None,
@@ -65,8 +96,12 @@ def _patch_persistence(events: list[dict]):
 
 
 def _stub_quote_fetcher(price: float | None = None, currency: str = "USD",
-                       timestamp: str | None = "2026-05-15T15:55:00Z"):
-    """Replace the Yahoo adapter with a deterministic fetcher."""
+                       timestamp: str | None = None):
+    """Replace the Yahoo adapter with a deterministic fetcher.
+
+    ``timestamp=None`` (default) uses a freshly-computed recent quote time so
+    the quote-freshness layer never goes stale as the wall clock advances."""
+    ts = timestamp if timestamp is not None else _recent_quote_ts()
 
     def fake_fetch(symbol):
         if price is None:
@@ -74,7 +109,7 @@ def _stub_quote_fetcher(price: float | None = None, currency: str = "USD",
         return {
             "last_price": price,
             "currency": currency,
-            "regular_market_time": timestamp,
+            "regular_market_time": ts,
         }
 
     return patch(
@@ -95,14 +130,14 @@ def test_freshness_and_summary_agree_on_latest_candle_utc():
     from scripts.chart_structure_api_context import _get_chart_structure
 
     events = [
-        _ev(f"ohlcv_TEST_{day:02d}", f"2026-05-{day:02d}T16:00:00Z", close=100.0 + day)
+        _ev(f"ohlcv_TEST_{day:02d}", _day(day), close=100.0 + day)
         for day in (10, 11, 12, 13, 14)
     ]
 
     with _patch_persistence(events), _stub_quote_fetcher(price=115.0):
         resp = _get_chart_structure("TEST", limit=10)
 
-    expected = "2026-05-14T16:00:00Z"
+    expected = _day(14)
     assert resp["latest_candle_utc"] == expected
     assert resp["freshness"]["latest_candle_utc"] == expected
     assert resp["report"]["summary"]["latest_timestamp"] == expected
@@ -118,11 +153,11 @@ def test_invalid_latest_candle_is_dropped_before_freshness_sees_it():
     from scripts.chart_structure_api_context import _get_chart_structure
 
     events = [
-        _ev("ohlcv_TEST_13", "2026-05-13T16:00:00Z", close=100.0),
-        # 5-14 candle has high < low — engine validator rejects it.
+        _ev("ohlcv_TEST_13", _day(13), close=100.0),
+        # day-14 candle has high < low — engine validator rejects it.
         {
             "event_id": "ohlcv_TEST_14_bad",
-            "fetched_at": "2026-05-14T16:00:00Z",
+            "fetched_at": _day(14),
             "raw_payload": {
                 "symbol": "TEST",
                 "open": 100.0,
@@ -130,19 +165,20 @@ def test_invalid_latest_candle_is_dropped_before_freshness_sees_it():
                 "low": 110.0,
                 "close": 100.0,
                 "volume": 1_000_000.0,
-                "timestamp": "2026-05-14T16:00:00Z",
+                "timestamp": _day(14),
             },
         },
     ]
     with _patch_persistence(events), _stub_quote_fetcher(price=101.0):
         resp = _get_chart_structure("TEST", limit=10)
 
-    # Both layers report 5-13 because the 5-14 row was rejected.  No
+    # Both layers report day-13 because the day-14 row was rejected.  No
     # internal mismatch is ever surfaced because the data the freshness
-    # gate sees and the data the engine sees are the same.
-    assert resp["latest_candle_utc"] == "2026-05-13T16:00:00Z"
-    assert resp["freshness"]["latest_candle_utc"] == "2026-05-13T16:00:00Z"
-    assert resp["report"]["summary"]["latest_timestamp"] == "2026-05-13T16:00:00Z"
+    # gate sees and the data the engine sees are the same.  (Dates float
+    # forward in time so the surviving candle never trips the stale gate.)
+    assert resp["latest_candle_utc"] == _day(13)
+    assert resp["freshness"]["latest_candle_utc"] == _day(13)
+    assert resp["report"]["summary"]["latest_timestamp"] == _day(13)
     assert resp.get("chart_state") != "INTERNAL_DATA_CONSISTENCY_ERROR"
 
 
@@ -153,16 +189,16 @@ def test_dedupe_keeps_latest_per_date():
     from scripts.chart_structure_api_context import _get_chart_structure
 
     events = [
-        _ev("ohlcv_TEST_13", "2026-05-13T16:00:00Z", close=100.0),
-        # First 5-14 candle, fetched in the morning.
-        _ev("ohlcv_TEST_14_am", "2026-05-14T10:00:00Z", close=104.0),
-        # Second 5-14 candle, fetched at close — the one we want to keep.
-        _ev("ohlcv_TEST_14_pm", "2026-05-14T16:00:00Z", close=110.0),
+        _ev("ohlcv_TEST_13", _day(13), close=100.0),
+        # First day-14 candle, fetched in the morning.
+        _ev("ohlcv_TEST_14_am", _day(14, "10:00:00"), close=104.0),
+        # Second day-14 candle, fetched at close — the one we want to keep.
+        _ev("ohlcv_TEST_14_pm", _day(14, "16:00:00"), close=110.0),
     ]
     with _patch_persistence(events), _stub_quote_fetcher(price=110.5):
         resp = _get_chart_structure("TEST", limit=10)
 
-    assert resp["latest_candle_utc"] == "2026-05-14T16:00:00Z"
+    assert resp["latest_candle_utc"] == _day(14, "16:00:00")
     assert resp["report"]["summary"]["latest_close"] == 110.0
 
 
@@ -175,7 +211,7 @@ def test_currency_from_provider_wins():
     """Quote currency from provider beats every other source."""
     from scripts.chart_structure_api_context import _get_chart_structure
 
-    events = [_ev("ohlcv_TEST_14", "2026-05-14T16:00:00Z", close=100.0)]
+    events = [_ev("ohlcv_TEST_14", _day(14), close=100.0)]
     with _patch_persistence(events), _stub_quote_fetcher(price=101.0, currency="JPY"):
         resp = _get_chart_structure("ABCXYZ", limit=5)
 
@@ -188,7 +224,7 @@ def test_currency_suffix_fallback_inr_for_ns():
     """No provider currency → fall back to symbol suffix.  .NS → INR."""
     from scripts.chart_structure_api_context import _get_chart_structure
 
-    events = [_ev("ohlcv_TEST_14", "2026-05-14T16:00:00Z", close=1789.20)]
+    events = [_ev("ohlcv_TEST_14", _day(14), close=1789.20)]
     with _patch_persistence(events), _stub_quote_fetcher(price=1905.40, currency=""):
         resp = _get_chart_structure("BHARTIARTL.NS", limit=5)
 
@@ -199,7 +235,7 @@ def test_currency_suffix_fallback_inr_for_ns():
 def test_currency_suffix_fallback_eur_for_de():
     from scripts.chart_structure_api_context import _get_chart_structure
 
-    events = [_ev("ohlcv_TEST_14", "2026-05-14T16:00:00Z", close=165.0)]
+    events = [_ev("ohlcv_TEST_14", _day(14), close=165.0)]
     with _patch_persistence(events), _stub_quote_fetcher(price=170.0, currency=""):
         resp = _get_chart_structure("SAP.DE", limit=5)
 
@@ -209,7 +245,7 @@ def test_currency_suffix_fallback_eur_for_de():
 def test_currency_suffix_fallback_usd_for_bare_ticker():
     from scripts.chart_structure_api_context import _get_chart_structure
 
-    events = [_ev("ohlcv_TEST_14", "2026-05-14T16:00:00Z", close=180.0)]
+    events = [_ev("ohlcv_TEST_14", _day(14), close=180.0)]
     with _patch_persistence(events), _stub_quote_fetcher(price=181.0, currency=""):
         resp = _get_chart_structure("AAPL", limit=5)
 
@@ -238,13 +274,13 @@ def test_bhartiartl_end_to_end_divergence():
 
     events = [
         _ev(f"ohlcv_BHARTIARTL_{d:02d}",
-            f"2026-05-{d:02d}T16:00:00Z",
+            _day(d),
             close=1789.20 if d == 14 else 1780.0 + d)
         for d in (10, 11, 12, 13, 14)
     ]
     with _patch_persistence(events), _stub_quote_fetcher(
         price=1905.40, currency="INR",
-        timestamp="2026-05-15T10:00:00+00:00",
+        timestamp=_recent_quote_ts(),
     ):
         resp = _get_chart_structure("BHARTIARTL.NS", limit=10)
 
@@ -272,7 +308,7 @@ def test_quote_unavailable_still_renders_daily_report():
     from scripts.chart_structure_api_context import _get_chart_structure
 
     events = [
-        _ev(f"ohlcv_TEST_{d:02d}", f"2026-05-{d:02d}T16:00:00Z", close=100.0 + d)
+        _ev(f"ohlcv_TEST_{d:02d}", _day(d), close=100.0 + d)
         for d in (10, 11, 12, 13, 14)
     ]
     with _patch_persistence(events), _stub_quote_fetcher(price=None):
@@ -296,7 +332,7 @@ def test_safety_stamps_always_present(symbol, have_quote):
     from scripts.chart_structure_api_context import _get_chart_structure
 
     events = [
-        _ev(f"ohlcv_TEST_{d:02d}", f"2026-05-{d:02d}T16:00:00Z", close=100.0 + d)
+        _ev(f"ohlcv_TEST_{d:02d}", _day(d), close=100.0 + d)
         for d in (10, 11, 12, 13, 14)
     ]
     quote_stub = _stub_quote_fetcher(price=110.5 if have_quote else None)
