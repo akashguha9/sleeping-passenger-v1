@@ -43,9 +43,9 @@ $provider = "xAI"
 $model = "grok-4.5"
 $runDate = Get-Date -Format "yyyy-MM-dd"
 
-# Stable cache-routing key.
-# This is NOT an API key or credential.
-$promptCacheKey = "sleeping-passenger-grok-daily-v1"
+# Stable cache-routing identifier (deterministic label sent as the
+# API's prompt_cache_key request field). NOT an API key or credential.
+$promptCacheId = "sleeping-passenger-grok-daily-v1"
 
 Write-Host "Run date: $runDate"
 Write-Host "Provider: $provider"
@@ -384,7 +384,7 @@ $bodyObj = @{
 
     store = $false
 
-    prompt_cache_key = $promptCacheKey
+    prompt_cache_key = $promptCacheId
 }
 
 # ============================================================

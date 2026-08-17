@@ -1,0 +1,65 @@
+# Gitleaks configuration (syntax verified against gitleaks 8.24.3, the
+# version CI runs via gitleaks/gitleaks-action v3).
+#
+# This config EXTENDS the full default gitleaks ruleset — nothing is
+# disabled globally and no rule attributes (regex/entropy/keywords) are
+# overridden. It attaches two deliberately narrow allowlists to the
+# `generic-api-key` rule for verified false positives. Each allowlist
+# uses condition = "AND", so a fragment is exempt only when BOTH the
+# exact path pattern AND the exact known-safe line pattern match. A
+# real credential anywhere — including inside these files — still
+# fails the scan. Historical one-off findings (synthetic test
+# fixtures in old commits) are handled by commit-pinned fingerprints
+# in .gitleaksignore instead.
+#
+# Guarded by tests/test_gitleaks_config_guard.py, which asserts the
+# default ruleset stays enabled, the rule extension carries no
+# attribute overrides, the allowlists stay this narrow, and
+# credential-shaped fixtures are NOT covered by them.
+
+[extend]
+useDefault = true
+
+# Extend the default generic-api-key rule by id only: every detection
+# attribute (regex, entropy, keywords) is inherited unchanged from the
+# default config. Only the allowlists below are appended.
+[[rules]]
+id = "generic-api-key"
+
+  # False positive 1+2 (verified 2026-08-17): generated equity research
+  # reports carry a JSON field literally named "key_risk" whose value is
+  # human-language risk prose (e.g. supply-chain or regulatory risk
+  # descriptions). The "key" keyword plus a high-entropy prose fragment
+  # trips generic-api-key. The value is not a credential and cannot
+  # authenticate anywhere. Scope: only the `"key_risk": "..."` line
+  # itself, only in dated discovery-report JSON files.
+  [[rules.allowlists]]
+  description = "key_risk prose field in dated discovery report JSON (not a credential)"
+  condition = "AND"
+  regexTarget = "line"
+  paths = [
+    '''reports/(daily_stock_discovery|mvp_global_equity_discovery)_\d{4}-\d{2}-\d{2}\.json''',
+  ]
+  regexes = [
+    '''"key_risk"\s*:\s*"[^"]*",?\s*$''',
+  ]
+
+  # False positive 3 (verified 2026-08-17): scripts/run_grok_daily.ps1
+  # historically assigned the deterministic cache-routing label
+  # "sleeping-passenger-grok-daily-v1" to a variable named
+  # $promptCacheKey (sent as the API's prompt_cache_key request field —
+  # a routing identifier, not an authentication credential). The
+  # variable has been renamed to $promptCacheId going forward; this
+  # entry only covers the exact literal (old and new spelling) so the
+  # weekly full-history scan stays clean. Any other value assigned to
+  # that variable is NOT allowlisted.
+  [[rules.allowlists]]
+  description = "prompt cache-routing label in grok runner (exact literal only)"
+  condition = "AND"
+  regexTarget = "line"
+  paths = [
+    '''scripts/run_grok_daily\.ps1''',
+  ]
+  regexes = [
+    '''\$promptCache(Key|Id)\s*=\s*"sleeping-passenger-grok-daily-v1"''',
+  ]
