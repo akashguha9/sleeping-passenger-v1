@@ -1,0 +1,19 @@
+﻿CLAUDE API REQUEST FAILED
+
+Date:
+2026-08-10
+
+Provider:
+Anthropic
+
+Model:
+claude-fable-5
+
+HTTP status:
+401
+
+HTTP reason:
+Unauthorized
+
+API response:
+{"type":"error","error":{"type":"authentication_error","message":"API key is invalid."},"request_id":null}

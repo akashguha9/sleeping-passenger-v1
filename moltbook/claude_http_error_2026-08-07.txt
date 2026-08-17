@@ -1,0 +1,19 @@
+﻿CLAUDE API REQUEST FAILED
+
+Date:
+2026-08-07
+
+Provider:
+Anthropic
+
+Model:
+claude-fable-5
+
+Endpoint:
+https://api.anthropic.com/v1/messages
+
+Exception:
+The operation has timed out
+
+API error details:
+

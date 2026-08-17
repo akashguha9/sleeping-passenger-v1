@@ -158,3 +158,8 @@ data/manual_trades_by_date.json
 # Local-only LLM prompt drafts. Canonical prompts live under prompts/.
 Prompt_*.txt
 
+# Generated model-quality decision memos (timestamped; local only) —
+# mirrors the sprint branch's ignore rule so runtime output from the
+# advisory pipeline never shows up as untracked noise on main.
+reports/decision_memos/
+

@@ -1,0 +1,19 @@
+﻿GROK API REQUEST FAILED
+
+Date:
+2026-08-10
+
+Provider:
+xAI
+
+Model:
+grok-4.5
+
+Endpoint:
+https://api.x.ai/v1/responses
+
+Exception:
+The remote server returned an error: (400) Bad Request.
+
+API error details:
+{"code":"invalid-argument","error":"Incorrect API key provided. You can obtain an API key from https://console.x.ai."}

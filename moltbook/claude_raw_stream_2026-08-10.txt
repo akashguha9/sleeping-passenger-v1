@@ -1,0 +1,1530 @@
+﻿
+event: message_start
+data: {"type":"message_start","message":{"model":"claude-fable-5","id":"msg_011CdtqkZosiDNhfGgKpRjjZ","type":"message","role":"assistant","content":[],"stop_reason":null,"stop_sequence":null,"stop_details":null,"usage":{"input_tokens":22946,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"cache_creation":{"ephemeral_5m_input_tokens":0,"ephemeral_1h_input_tokens":0},"output_tokens":4,"service_tier":"standard","inference_geo":"global"}}           }
+
+event: content_block_start
+data: {"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":"","signature":""} }
+
+event: ping
+data: {"type": "ping"}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":""}              }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"CAISyB0KiAEIEBgCKkAsLWTDPROJKH+NxAA7aKEi3PO3+3dHESnjOUT7OLjQtg9qbUpi+KuVflhU14PBR7rMb4hizVLj7FD2V9a4EYGIMg5jbGF1ZGUtZmFibGUtNTgBQgh0aGlua2luZ1okMzU1Njc1OGEtMTYyNi00MDk1LWIzZDctMTlmYTkxYjdhMzYyEgxxBcQYvMFjMjKLpwEaDNielyek8TzK/7QFdSIwsKaI6OyxgiT9sDXAQJVvPfMSnmzzj/enTMM6DKMmxoq68OflXOQEvNrFsgcIZSRiKuwb91R1GN2sx5ndyvfUFb7gtXXUt7W38j+/DMYf+0pKkOm/+9Ao+kTRhwrS7a/AMXb+AHd0HfqhYavhY/5n5+8ron12gGI8FLlHkHn27Ub3o5abWnM+AngEVBXgzUCX24Lfd7U3wP05oCQviuev0ac3no+ExiZDoRxoSfYTl8+U3RWVUKG3qUpWty9sOhE4Y0yMK692KVjXQDRPtZnUvkujBO+Dt+0UhSMbwiUFtCWp0wMTajOzqkdohtxy5enCqBgY3JhqffnLvF7ivx1QdeRGbY7Pa0JIrsXsyvrjXXpEswgotjKdqH85+iJ8ldo1bpCZJI9myvR2j5yEhYLVEc97hkD/16kfjTTxH176piuZY637/7gois3iNeDVv5o7Q0JSinW55kSLiQsWSJoUwtYPFNMilhYDDF/iEXYSMoVpKeXw9o7Glx0asWr298zwWM5brdpsvQm+qMDu/LwjWTK3UVJS8PcDbmiao5qNW/buKszdK/D8YQc3CvOebuOjXNEaFZsO/eBXrk+irthf0zZYsQcHLEXTnyMozuRMseALvNwnlGWtTDKqlX5jHRZu7/QJX28/CdIbGqktt4HDbYhCPaSjDVa0PYU/+St2l53u5lgN5iyLcEvT5bKwrYfwAQK8+Ya51wkWKyRsuuCTJhK7nuOKlnnMzSG0IvVE5XhNZmdJcDfCMWYjX6HDAx1Na56NMo0M9eaP9FQqqF//n602At1U8uU+reP8oZZs3HfjtSY8S1MUNUxtAjK6MSOqMGNPl1OVmNiNMKnt6fHKWq1NGNlCTg2MdBsbJPahOE7t9SzENZid2zRV48Q5dFPxXfANSVo6fuA69eIdUSuufNLj5RDOWgo7b75KejAgrR0U6k1jBUF74Fr8fQgZSTSVSTP1MsF+ftzHMiG21++BMJn7P/+dIMjL7s/jkq+AVENQQ99oeyVg7nDbbS+8B1cfoXpc/1AQfmddhKh16llyS6KXN9if6SIc7/WvKZdssYuK2+3wnHbZiM/CxwOKHvwTUSSKy6sY5aPqmYkRUSKDXX5pdG6wnt9rUSK3NFFJArKq2n0hu8EGMPWQr7ZxNe+TgtgP6yjso32eAR59NoOOQ6g+U91BiynAn6bfG75+caLSjFhj6wk2m0UdcwlkaaZ2FHGvMy9EY4KuU1/G9etWlNnobHTrRu+KR7MUZGGDYuctAG7yP+39q4qDqhax62VkCRrqYtP10lePInI3hod0HHVNtSa653ekzGuhd32x6vQZhsCgtH09yMwRVIW6Exc5Q+DkZ2w1IJhu8+xrkpwcpgNYbeyQXE5gnXjXRu2nlla1qTNuBpUy9RSn38MjNnI3QAq4DEGX0nFQnfbLDRIe9/5aSgBcaUtonOtzbewNsrV+drixd9qqNyjHwq+9yRtQzTmNN0pXjM5AwHJlgKnmz39+H8S4hlpl4rf7kxTvUb43L9AfHBfjUbW6L4V/Y5jNMa/p7EvWn+dagoOizQD799cRtSbGw6szYvytmkSfqO+m664aM9d0eWsV42cUDfSGiTPYp5XEJwxRQcKcnapbVaqmUBNcwVIb8lk+jagk2+YUwskD388W0vnLQZPGHQ6i/zYWVIcWOlUjqhOUj5anC8xgkm+1qJnwMlianme13m/yiXyxCzO3iUUunhyAXWUwEWKoObA6C/p2EC3wnP92YPi2GJdnv9NmxU7mC75Q0HY3u8Md0wM7ida3W2CKg38Ha3Ia227arbROzAHWKoWdEIH2Uib3aOPWFeJyykthdaNyOqraJTfcE1m1s+cPV03IMkm2F3en5KeTH6uDduRc38vXQX0e/mCCMip6T1ojCu8uE86Y0YeZSA5c5GeoNTInc8YDBnBKjujEzyUcaZqRFcJIGIykZdtpl6r/XIHj85q0D5n1X68OkIPBJDSb7vdwXfcE9ygyHwyuKNQSlTzA2ZtSm2ihGsaO9gDHyOSeRdphPsfjGRDSeWmV2Ss60p3wyBg/qwzOJUj3RfnKZlEtLA/wfiIs+wth0egSe0UdGoHwCHuSVyCUDRA4rvEW9tDCEDTrqEJOhZ7/959LbyLaxl2JevM6ug+bRS5JQQx6r4u1pKxcbuWavZqeShLA3fXWBPlV5RC80vurRN3XFifzxmpXNTVuK6Ln7wVNsSVG4Yik090qbShmxJ4fvYhsFKeOpBrb6/q7D8qH4hM381eCZou3tt2yvegHMVYGABBCJm6cKosrAd0T9+uOr4hsOlErJgmamdPRmd/7528nVBSP5v4CiP+pMyLMLM7dI5IMmKSMpm+J9Ff3+wAYRYgdon2msjgBdP7DrXdBMZ/1iBWwqZHVT/nSZTxYTxzn8whgZGXqY58rFoaM5nE4/ll9HcIClnqkqTifrTCtdLX7HlZhl9TVkRzJWfzrDUPTt/f5+KJ/lG/KIira5lLr785+WD1A/XpduzsTaqffL+zrDWIECQMMfTkPfddXLYEYgBnkI3kfWkb6xK2MUWnJMrEjbB3VuJl27k4uoSULNZBOIes3ConBERyCGoBi9pZYiG/8U7GR9vNJY+gVfd6st53GvMpMGK44yFcacdxVe/gLOltpegAWhbXdHbUoRJELHzGhuancAZ45Ap4JjXIvQpdDyS7pAc1a1S0nyGkXWdMNUzZtsyy2FZJ4BDUULo2jPvV8RWe6jUhob4+J6ga4Uof3FT/cge3EX5mIUkr3nLUA7x7H7GqVKAcqSs4Xeov/VlzXqHd8qNUXLZ6qleoqfyVqbtmUM/j1G+XaE97E2YZZr51KC1L+jiXYSt72vM0PBsAMrQ6iT1jusNlauOoFi0Cxw1SehmbaOb+H6nCkQQZvsdd998yj22yCBimtOHUaC4z19yYFt6TBXAUaWYpA6Am7f0DR7PYhg/i/oB4By5RVPUC4guO+gnguTBvmmsq8nMVppYUXmCOZCD6bH0Rbo6U51gTd16BXIb6ukxaAZGF3241UXDdpNVEQlZdmO2pHcefTjwi9/m29ZIhPTLTVCsDh0ntjQBy8E+AAltFV8XoAsI+s6fMbS7NO/AmljQwgnkjA/yDndlLog70kMg9CDhbcvgECLKrX5TidFtQnXHqTvqKQ3DeHP+ngL/phIEpKzvjyvRkZGfU7mB2nQSVMPxCnF3GXdBMyhcdgPQWcXheeTay3NZpFJ0Nm1wfyk6j3vf52/AnKrL6n0mVed5IQAsleUt8yV0WRRcMtBBXgqigzb9S2EW8nG8DYYbEDsezG/u491DU7yWt+dlQTwhl47bM4ucjr1rmcqksMfWW8q73WcF3N8O+JvQwVff0eA3IRG4e8RqAtmKtHQpNNj59nq55EZoqRBjJZZ+jbQZmNPBmSKD+P313cRa6Jbgit/z1AhhpIkLstc2Sr7gJLHsqB4LLDXGmyYNd/hIP1mizO/oZyHRkbfEECNnlfWeTc8BAqdB+mX1lQjCh90cOgiL82QRnk+4b9UldvOOJf2FXRF4IFr4Z8SXJwdZ8xlmhOrWNYqkCV3/6h+6ho4wOp8tGPNMhSQKOInyU65rufko8RccDpg8+Jr2ym6JYNyNoktPqbiSjcGYlA4rg6zXWXHrGwo6fmbHJ5fR2ed0Voxqzn8xgjxhNf3HIMPlojslxRwouF9gHHvx2n/SPoJ6PgeSq2ev+w/y0W1Lrkqw/TXznM/f5qT55ZRDZ9IfLUWbemWtKrvyRr8ecuJvKOp5c7YOs7Q+QuvDeuPr+gnC2WJnsEz/EtdhEJ3n5mBkOh2ExkjF+qiddnDrwKb93ysziQUX9GRQozUlFbYT/SmtVeINXGfpMl2rQGIcCxnbte9DXOxN2/Pl2n0eKrK0LOo39MnjMmB7xEkeTKpTMvYsa5XtvmJHcFFOIrdmSfhuymkD7RxdccbQ2g/q7IZN0RYG2+IfFgg96cMAlbi2wtzg1iSYG7bNWjvKlB2Nq8UOzAT8iV8bsW7GAOyCyfxBq3PZFFw/2bnDashtiKmfY8QlSjrwQ4NchQ5O4BBJ4RB0ZY9i+443wMqrmJ2uh1TerQvjhR7S7TkLCMfsZECAKGZ5o0tYdTAJF0Q/OHG0LnCDvrxWDdU3VuYZXzYaWLVI2RYvxm5DBujLQ/Ol5q7HSmucyGsxw9kFa3Goq01Mo5ed7WOhwUH1VqTJf4sOoY3brWpfBvRso82p6y3xNmOwp5z1X/P51zgHSAtO5mES128OyRNZSv8mxXu9scK6WkFJbjNPpXt8GNJjO2Uit99Z8XXeBZB8YgmIkp7Y8QoIYbVI3xQJY8amDyrdCOKnWARWMO3Svqb6levZBj2pVEgVG+nV6K87dbY8BYKfiQgtLeHxsj2U1BNFYmDPYfjVo46vOBCwyd6hioIOslskyz5VIFPATkGQ3T+D+m0vjO7iQF4vupXP9pRLcPYKn+NwCbeJUxuil2V8Zjv608ELfkDnyCNgTw+a43RNxMv0L7HD6yyszvwFMXxztBbWRpeoOUHlW81xpSNYyk5+9bS7ck3T7YN9KrG1+X+LzavN78N7EyyDrFj25SguB4wlD4hUdoPCSy02FZywF0TLoQ/96iOHWiUCcbJGoioJ8AgaZ4nzZNy/KyizpSVRbbvuoPMvXKZnVYVGXMDwAejhvi894xIjtM9U6xl7XqlQUIw8tH+/OP45ax9GfPHeZXJNikTCBILWxf4z77W2IwaPwI6+UYnJ0WjFc+J+AUmEBcGhghn7yoL8+yWmxeR8mhcyPYZ06thvCHZsxdZjBRUj9qruWPD3P+L2YhxOO6Xj4V2AWdGAE="}            }
+
+event: content_block_stop
+data: {"type":"content_block_stop","index":0           }
+
+event: content_block_start
+data: {"type":"content_block_start","index":1,"content_block":{"type":"text","text":""}   }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"# Claude — Sleeping Passenger Matrix Winner Discovery Report\n\n## 0. Data Bo"}               }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"undary Check\n\n| Data Category | Status | Notes |\n|---|---|---|\n| Run date | SUPPLIED | 2026-08-10 (injected by runner) |\n| Pasted open positions | SUPPLIED | 4 positions (UNG, F"}          }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"CG, TLT, TIP) — treated as REPO-OPEN / BROKER-UNVERIFIED pasted text |\n| Pasted signal ledger | SUPPLIED | 8 signals —"}            }
+
+event: ping
+data: {"type": "ping"}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" pasted text only |\n| Pasted thresholds | SUPPLIED | config/thresholds.yaml — pasted text only |\n| Live prices | NOT SUPPLIED | LIVE VALIDATION REQUIRED for all price/"}               }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"valuation claims |\n| Live company filings | NOT SUPPLIED | LIVE VALIDATION REQUIRED |\n| Live news | NOT SUPPLIED | No verified \""}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"why today\" triggers possible |\n| Broker truth | NOT SUPPLIED | No reconciliation claimed; none performed |\n| Current PnL | NOT S"}      }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"UPPLIED (beyond pasted repo figures) | Pasted PnL is repo-stated, not broker-verified |\n| Reconciliation state | NOT SUPPLIED | No reconciliation perform"}             }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ed or claimed |\n\n**DISCOVERY UNDERPOWERED BUT NOT SKIPPED.**\n\nAll company-level analysis below is `MODEL ANALYTICAL INFERENCE` built"}               }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" on structural knowledge that predates the run date. Every valuation, price, recent-quarter, and catalyst dimension is `LIVE VALIDATION REQUIRED`. No score"}   }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" in this report is current-data-supported; all scores are **structural**.\n\n---\n\n## 1. Analysis Metadata\n\n- **Analysis date:** 2026-08-10 (Sunday by"}    }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" calendar — India and US markets presumptively closed; `LIVE VALIDATION REQUIRED` for holiday/session status)\n- **India market-"}      }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"status knowledge:** No live NSE/BSE data supplied\n- **US market-status knowledge:** No live NYSE/Nasdaq data supplied\n- **Evidence actually available:** Pasted open positions, sign"}             }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"al ledger, thresholds; model structural knowledge (stale relative to run date)\n- **Material limitations:** No prices, no filings, no news, no volatility data, no ownership/p"}       }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ledging updates, no earnings since model knowledge cutoff. Time gap between knowledge cutoff and run date means recent qu"}     }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"arters, corporate actions, and valuation shifts are unknown.\n- **Live-validation warnings:** Every \"Why Today\" cell is `NOT VERIFIED — STRUCTURAL CANDIDATE`."}               }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" Confidence is capped ≤ 65 across the board.\n- **Score nature:** STRUCTURAL, not current-data-supported.\n\n---\n\n## 2. Claude Fundamental Regime\n\n**Regime classification:** `FUNDAMENTALLY CLE"}     }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"AN / LIVE DATA LIMITED`\n\n- **Strongest fundamental thesis available:** Indian market-infrastructure monopolies (CDSL, CAMS, IEX, BSE) — duopoly/"}               }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"monopoly rails with regulated moats, negligible capital intensity, high cash conversion, and a structural tailwind from financialization of Indian household"}  }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" savings.\n- **Weakest fundamental thesis in the discovery pool:** Momentum and turnaround candidates — both require live price and operational evidence that is not"}      }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" supplied.\n- **Best cash-conversion profile:** US financial-data/exchange complex (S&P Global, ICE, MSCI) and Indian depositories/registr"}              }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ars — revenue arrives as fees on other people's activity with minimal working capital.\n- **Strongest moat:** ICE / CME (US"}       }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":") — regulated clearing and settlement with liquidity network effects; CDSL (India) — statutory duopoly depository.\n- **Highest capital-allocation concern in"}    }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" pool:** Indian PSU capex names and any US name where buybacks merely offset SBC (flagged per-name below"}              }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":").\n- **Highest permanent-impairment risk in pool:** Leveraged turnarounds (Vodafone Idea-type situations in India;"}   }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" deeply indebted US telecom/legacy tech) — excluded from primary boards.\n- **Most important falsification question of this run:** *"}              }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"Are the Indian market-infrastructure rails still priced at multiples that leave any margin of safety, or has the financialization theme already been fully bought?* — `L"}   }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"IVE VALIDATION REQUIRED`.\n\n---\n\n## 3. Claude Investment-Committee Board\n\n| Candidate | Core Causal Thesis | Strongest Evidence | Strongest Bear Case | Weakest Link | Moat"}     }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" Durability | Capital Allocation | Perm-Impair Risk | Verdict |\n|---|---|---|---|---|---|---|---|---|\n| CDSL (IN) | Demat account growth → per-account +"}   }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" transaction fees → near-zero incremental cost → FCF | Statutory duopoly; historical account CAGR | SEBI fee caps; cyclical trans"}      }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"action revenue tied to retail activity | Regulator sets pricing | 9 | 8 | 2 | THESIS ROBUST WITH CONDITION"}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"S (valuation unverified) |\n| ICE (US) | Trading/data/mortgage rails → recurring fees → operating leverage → buybacks/"}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"deleveraging | Decades of exchange + data economics; mortgage-tech installed base | Mortgage-tech cyclicality; acquisition-heavy balance sheet"}    }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" | Mortgage segment cyclicality | 9 | 8 | 2 | THESIS ROBUST |\n| Bajaj Finance (IN) | Distribution + underwriting data → low-cost cross-sell → high"}              }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" ROE lending compounding | Long ROE/AUM compounding record | Credit cycle; rising competition in consumer lending; le"}         }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"adership transition | Credit-cycle sensitivity | 7 | 8 | 4 | THESIS ROBUST WITH CONDITIONS |\n| S&P Global (US) | Debt issuance +"}   }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" index AUM → ratings/index fees → oligopoly pricing → FCF → buybacks | Ratings duopoly; index licensing lock-in | Issuance cyclicality; passive f"}  }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ee pressure; regulatory attack on ratings | Issuance cycle | 9 | 8 | 2 | THESIS ROBUST |\n| Kaynes Technologies (IN) | India electronics manufacturing sh"}  }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ift → order book → margin scale-up → ROCE expansion | Policy tailwind (PLI);"} }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" order-book growth history | Working-capital intensity; valuation likely rich; customer concentration | Cash conversion vs reported growth | 5 | 6 | 5 | EARLY TH"}               }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ESIS / EVIDENCE BUILDING |\n| Copart (US) | Total-loss frequency → salvage auction network effect → land + buyer-network moat →"}         }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" FCF | Two-player market; owned land bank; decades of returns | EV/ADAS reduces accident frequency long-term; insurer"}       }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" bargaining power | Long-run accident-frequency decline | 8 | 9 | 3 | THESIS ROBUST WITH CONDITIONS |\n| ITC (IN) | Cigarette cash c"} }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ow → funds FMCG/agri build-out → dividend + rerating from demerger clean-up | D"}         }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ominant cigarette economics; improving FMCG margins | Tobacco taxation shocks; FMCG returns still below cost of"} }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" capital historically | Regulatory tax risk | 7 | 6 | 3 | THESIS ROBUST WITH CONDITIONS |\n| Axon (US) | Taser/bodycam installed base →"}        }
+
+event: ping
+data: {"type": "ping"}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" Evidence.com SaaS lock-in → public-safety workflow ownership | High-retention government SaaS; hardware-to-cloud conversion pro"}         }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ven | Valuation likely extreme; SBC heavy; municipal budget cyclicality | Price paid vs growth persistence | 8 | 6"} }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" | 3 | GREAT BUSINESS / POT ODDS UNVERIFIED |\n\n---\n\n## 4. India Market Map\n\n**Structural condition (`MODEL ANALY"} }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"TICAL INFERENCE`):**\n- Long-run drivers intact: household financialization, formalization, manufacturing localization (PLI), credit de"}      }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"epening, power/infra capex cycle, digital public infrastructure (UPI/ONDC/Aadhaar rails).\n- Current cycle position: `"}          }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"LIVE VALIDATION REQUIRED` — cannot verify where the 2024–2026 valuation cycle sits at"}       }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" run date.\n\n**Sector opportunities:**\n- **Market infrastructure / rails:** CDSL, CAMS, BSE, IEX, MCX — get paid regardless of which fund,"}          }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" broker, or trader wins. Highest-quality structural pool in India.\n- **Financials:** Private banks (HDFC Bank, ICICI) post-merger-dig"}       }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"estion; NBFC compounders (Bajaj Finance, Cholamandalam).\n- **Electronics/defence manufacturing:** D"}            }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ixon, Kaynes, Syrma, HAL, Data Patterns — real policy tailwind but crowd-owned; watch working capital and valuation.\n- **Consumer:** Trent ("}          }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"execution outlier), Titan, Varun Beverages — quality high, entry price unverified.\n- **Power value chain:** Transmission (Power Grid),"}   }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" exchanges (IEX), transformers/cables (Polycab, APL Apollo adjacents) — multi-year capex cycle.\n- **Healthcare:** Divi's"}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" (CDMO), Cipla/Sun (US generics + India chronic).\n\n**Governance / capital-allocation risks:** Promoter pledging in mid/small caps, related-party le"}   }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"akage, SME-IPO froth, PSU capital allocation subordinated to policy. All name-level checks `LIVE VALIDATION REQUI"}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"RED`.\n\n**Macro sensitivities:** Crude import bill / INR, FII flow reversals, SEBI derivative-market inter"}        }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ventions (materially affects exchange/broker revenue — key falsifier for BSE/Angel One-type theses).\n\n**Likely value traps:** Low"}          }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"-P/E PSU banks at peak credit-cycle earnings; commodity converters with peak sp"}     }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"reads; old-economy holdcos without catalyst.\n**Areas to avoid:** Highly pledged promoter micro-caps; lo"}        }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ss-making platform stories without unit-economics proof; NANO liquidity.\n**Data limitations:** No"}           }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" shareholding, pledging, or results data current to run date.\n\n## 5. US Market Map\n\n**Structural condition (`MODEL ANALYTICAL INFER"}       }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ENCE`):**\n- Dominant regime question: AI capex supercycle sustainability and index concentration. Whether it has cracked, broadened, or continued by Aug-"}             }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"2026 is `LIVE VALIDATION REQUIRED`.\n- Rate path, dollar, election-aftermath fiscal st"}   }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ance: all unverified at run date.\n\n**Sector opportunities:**\n- **Financial data/exchanges:** S&P Global, ICE, CME, MSCI, FICO — toll coll"}  }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ectors on capital markets.\n- **Industrial compounders:** TransDigm, Heico, Cintas, Waste Management, Copart — pricing power + fragmented-market cons"}        }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"olidation.\n- **Semis picks-and-shovels:** KLA, Lam, Cadence, Synopsys — sell to all fabs/designers rather than bet"}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ting on one chip winner; cyclicality is the honest cost.\n- **Healthcare:** Vertex (franchise monopoly in CF +"}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" pipeline), Zoetis (animal health duopoly), Danaher (bioprocessing recovery).\n- **Insurance:** Progressive, Kinsale, Brown & Brown — under"}              }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"writing + float economics with low tech-disruption risk.\n- **Energy infrastructure:** Cheniere, Williams — contracted LNG/gas rails (n"}      }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ota bene: pasted portfolio already holds natgas exposure — redundancy flag in §18).\n\n**Key US ris"}     }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ks:** SBC-masked dilution in software; buybacks that merely offset SBC; AI-capex dependence concentrated on a handful of hypersca"} }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ler budgets; antitrust/platform regulation; valuation concentration in index leaders.\n**Likely value traps:** Legacy telecom/media at low multiples with"}    }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" secular decline; \"cheap\" cyclicals at peak margins.\n**Data limitations:** No current multiples, insider data, or filings supplied.\n\n---"}        }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"\n\n## 6. Full Matrix Segment Winners\n\n### 6.1 Use-Case Winners\n\n| Use Case | Best India | Best US | Best Overall | Runner-Up | MVP |"} }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" Conf | Thesis Q | Red-Team | Why Winner | Main Risk | Action |\n|---|---|---|---|---|---|---|---|---|---|---|---|\n| QC | Bajaj Finance |"}               }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" Copart | Copart | Cintas (US) | 86 | 60 | 9 | 8 | Network + land moat, elite allocation | Acc"}          }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ident-frequency decline | HIGH-CONVICTION RESEARCH CANDIDATE |\n| GR | Trent | Axon | Trent | Dixon (IN) | 84 | 55 | 8 | "}          }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"7 | Rare Indian retail execution at scale | Valuation; fashion-cycle risk | RESEARCH DEEPER |\n| VA | ITC | (US V"} }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"A) LIVE VALIDATION REQUIRED | ITC | Power Grid (IN) | 78 | 55 | 7 | 7 | Cash cow + optionality,"}           }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" historically undemanding multiple | Tobacco tax shock | RESEARCH DEEPER |\n| IN | Power Grid | Willi"}             }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ams | Power Grid | Coal India (IN) | 76 | 60 | 7 | 7 | Regulated-return transmission monopoly, high payout | Regulated ROE cuts; capex di"}           }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"version | WATCHLIST |\n| BC | HDFC Bank | Berkshire Hathaway | HDFC Bank | ICICI Bank (IN) | 82 | 60 | 8 | 8 | Deposit franchise + post"}    }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"-merger normalization runway | NIM compression persistence | HIGH-CONVICTION RESEARCH CANDIDATE |\n| DF | Nestle India | Waste Management | Waste Management | Zoetis (US"}               }
+
+event: ping
+data: {"type": "ping"}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":") | 80 | 60 | 8 | 8 | Landfill scarcity moat + pricing escalators | Rate sensitivity of valuation | WATCHLIST |\n| CY"}              }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" | Cholamandalam | Lam Research | Lam Research | KLA (US) | 79 | 55 | 8 | 7 | Sells to all fabs; WFE cyc"}       }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"le position unverified | Cycle timing unknown | WAIT FOR ENTRY |\n| MO | DATA INSUFFICIENT | D"}            }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ATA INSUFFICIENT | — | — | — | — | — | — | Momentum requires live price data | — | DATA INSUFFICIENT — LIVE VALIDATION REQUIRED |\n| EC | Kaynes"}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" Technologies | Axon (earlier-stage adjacents unverified) | Kaynes | Syrma SGS (IN) | 74 | 50"}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" | 6 | 6 | Electronics-manufacturing rail forming; pre-full-recognition | WC intensity, valuation | EARLY CAPTURE |\n| T"}    }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"U | One97 (Paytm) | Intel | Neither dominant | — | 58 | 40 | 5 | 4 | Both are recovery stories requiring current evidence |"}   }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" Execution + competitive erosion | RESEARCH DEEPER / DATA INSUFFICIENT |\n| SS | ITC (post-hotels-demerger cl"}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ean-up) | LIVE VALIDATION REQUIRED | ITC | — | 72 | 50 | 6 | 6 | Demerger simplification thesis;"}       }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" residual value unlock | Already priced? unverified | WATCHLIST |\n| SR | CDSL | ICE | CDSL |"}   }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" CAMS (IN) | 88 | 62 | 9 | 8 | Statutory duopoly rail on Indian financialization | Regulated fee caps; activity cyclicality | HIGH-CONV"}               }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ICTION RESEARCH CANDIDATE |\n| CI | Coal India | Texas Pacific Land | TPL | Vedanta excluded (governance) | 75 | 50"}         }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" | 7 | 7 | Royalty-like land economics, zero-capex commodity capture | Commodity price path unknown | WATCHLIST |\n| SP | Data"}          }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" Patterns | (US small-cap SP) DATA INSUFFICIENT | Data Patterns | — | 62 | 45 | 5 | 5 | Defence-electronics I"}            }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"P with asymmetric order optionality | Order lumpiness; valuation | HIGH UPSIDE — HIGH MINE DENSITY |\n| DS | NO QUALIFIED WINNER TOD"}            }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"AY | NO QUALIFIED WINNER TODAY | — | — | — | — | — | — | Distressed requires live balance-sheet data | — | NO QUALIFIED WINNER TODAY |\n\n### 6.2 Sector Winners\n\n| Sector | Best India |"}  }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" Best US | Best Overall | Use Case | MVP | Conf | Thesis Q | Moat | Why Winner | Main Risk | Action |\n|---|---|---|---|---|---|---|---|---|---|---|---|\n| Energy | Coal India | Cheniere"}             }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" | Cheniere | CI/IN | 76 | 55 | 7 | 7 | Contracted LNG tolling economics | Contract-renewal p"}      }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ricing; gas macro | WATCHLIST |\n| Materials | Pidilite | Sherwin-Williams | Pidilite | QC | 79 | 58 | 8 | 8 | Adhesives brand mon"}        }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"opoly, distribution depth | Input-cost cycles; valuation | GOOD COMPANY — PRICE UNVERIFIED |\n| Industrials | Polycab | TransDigm | TransDigm | QC | 84"}          }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" | 58 | 8 | 9 | Sole-source aerospace IP + pricing power | Leverage; aftermarket cycle | HIGH-CONVICTION RESEARCH"} }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" CANDIDATE |\n| Cons. Disc. | Trent | O'Reilly | Trent | GR | 83 | 55 | 8 | 7 | Store economics +"}             }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" Zudio format scaling | Fashion risk; valuation | RESEARCH DEEPER |\n| Cons. Staples | Varun Beverages | Costco | Costco | QC | 82"}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" | 60 | 8 | 8 | Membership flywheel; scale sovereignty | Valuation premium | GOOD COMPANY — E"} }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"XPENSIVE PRICE (structurally) |\n| Health Care | Divi's Labs | Vertex | Vertex | QC/GR | 81 | 55 | 8 | 8 | CF franchise monopoly + pipeline optionality | Pipeline bin"}          }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ary events | RESEARCH DEEPER |\n| Financials | HDFC Bank | S&P Global | S&P Global | QC/SR | 86 | 62 | 9 | 9 | Ratings/index du"}             }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"opoly toll | Issuance cyclicality | HIGH-CONVICTION RESEARCH CANDIDATE |\n| Info Tech | KPIT / Persistent | Cadence | Cadence | SR/QC | 84 | 58 | 8"}         }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" | 9 | EDA duopoly — every chip pays the toll | AI-design disruption (low prob) | H"}       }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"IGH-CONVICTION RESEARCH CANDIDATE |\n| Comm. Svcs | Bharti Airtel | Alphabet (earned via framework: search cash + c"} }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"loud/AI optionality at reasonable historical multiple) | Bharti Airtel | QC | 80 | 58 | 8 | 7 | 2-."}  }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"5-player market, ARPU repair cycle | Capex intensity; spectrum policy | RESEARCH DEEPER |\n| Utilities | Power Grid | NextEra | Power Grid | IN"}     }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" | 76 | 58 | 7 | 8 | Transmission monopoly + energy-transition capex | Regulated-return revisions | WATCHLIST |\n| Real"}    }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" Estate | Anant Raj / DLF | Prologis | DLF | CY | 72 | 50 | 6 | 6 | India hous"}              }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ing upcycle + land bank | Cycle timing unknown | WAIT FOR ENTRY |\n\n### 6.3 Market-Cap Winners\n\n| Market Cap | Best India |"}              }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" Best US | Best Overall | Use Case | MVP | Conf | Liquidity | Thesis Q | Main Risk | Action |\n|---|---|---|---|---|---|---|---|---|---|---|\n| MEGA | HDFC Bank | Ber"}      }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"kshire / S&P Global | S&P Global | QC | 86 | 62 | HIGH | 9 | Cyclicality of issuance | HIGH-CONVICTION RESEARCH CANDIDATE |\n| LARGE | Bajaj Finance |"}         }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" ICE | ICE | SR | 86 | 60 | HIGH | 9 | Mortgage-cycle drag | HIGH-CONVICTION RESEARCH CANDID"}    }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ATE |\n| MID | CDSL | Kinsale Capital | CDSL | SR | 88 | 62 | ADEQUATE | 9 | Regulated fee caps | HIGH-CONVICTION RESEARCH CANDIDATE |"}  }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"\n| SMALL | Data Patterns | (US small) DATA INSUFFICIENT | Data Patterns | SP | 62 | 45 | ADEQUATE, verify | 5 | Order lumpiness | HIGH UPSIDE"}               }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" — HIGH MINE DENSITY |\n| MICRO | NO QUALIFIED WINNER TODAY | NO QUALIFIED WINNER TODAY | — | — | — | — | UNACCEPTABLE w/o live"}       }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" data | — | — | NO QUALIFIED WINNER TODAY |\n| NANO | NO QUALIFIED WINNER TODAY | NO QUALIFIED WINNER TODAY | — | — | — | — | UNACCEPTABLE | — | — | NO"}              }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" QUALIFIED WINNER TODAY |\n\n### 6.4 Maturity-Stage Winners\n\n| Stage | Best India | Best US | Best Overall | Use Case | MVP | Conf | Cap Alloc | Why Winner | Main Mine"}              }
+
+event: ping
+data: {"type": "ping"}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" | Action |\n|---|---|---|---|---|---|---|---|---|---|---|\n| M1 | NO QUALIFIED WINNER TODAY | NO QUALIFIED WINNER TODAY | — | — | — | — | — | Pre-commercial names need live ev"}    }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"idence | — | NO QUALIFIED WINNER TODAY |\n| M2 | One97 (Paytm) | DATA INSUFFICIENT | Paytm | TU | 58 | 40 | MIXED | Payment sc"} }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ale, monetization unproven | Regulatory | RESEARCH DEEPER |\n| M3 | Kaynes | Axon | Axon | GR | 80 | 55 | STRONG ("}            }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"Axon), MIXED (Kaynes) | Hardware→SaaS conversion proven | Valuation | RESEARCH DEEPER |\n| M4 | Trent | Kinsale | Trent | GR | 83 | 55 | STRONG | Profitable grow"}          }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"th at scale | Fashion cycle | RESEARCH DEEPER |\n| M5 | Bajaj Finance | Copart | Copart | QC | 86 | 60 | ELITE (Copart) | Compounding with re"}               }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"investment runway | Accident frequency | HIGH-CONVICTION RESEARCH CANDIDATE |\n| M6 | ITC | Waste Management | WM | IN/DF | 80 | 60 | STRONG | C"}    }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ash incumbent with pricing escalators | Rate-driven derating | WATCHLIST |\n| M7 | NO QUALIFIED WINNER TODAY | Intel ("}       }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"turnaround; unproven) | — | TU | 55 | 40 | MIXED | Foundry pivot requires live evidence | Capital"}  }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" destruction | DATA INSUFFICIENT |\n\n### 6.5 Volatility Winners\n\n| Vol Class | Best India | Best US | Best Overall | Use Case | MVP | Conf | Why It Fits | Perm-Impair |"}          }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" Risk Control | Action |\n|---|---|---|---|---|---|---|---|---|---|---|\n| LV | Power Grid | Waste Management | WM | DF/IN | 80 | 58 | Regulated/contracted cash"}      }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" flows | LOW | Position sizing normal | WATCHLIST |\n| NV | HDFC Bank | S&P Global | S&P Global | QC | 86 | 62 | Fee compounding, moderate be"}          }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ta | LOW | Standard | HIGH-CONVICTION RESEARCH CANDIDATE |\n| HV | Data Patterns | Lam Research | Lam | CY/SP | 75 | 50 | C"}           }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"yclical amplitude with structural floor | MODERATE | Smaller sizing; staged entry | WAIT FOR ENTRY |\n\nVol"}     }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"atility classes are structural; `LIVE VALIDATION REQUIRED` for realized vol.\n\n### 6.6 Risk-Sensitivity Winners\n\n| Risk Tag | Best India | Best US | Best Overall | Use Case | MVP | Conf |"}   }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" Why Exposure Attractive | Causal Dependency | Main Risk | Action |\n|---|---|---|---|---|---|---|---|---|---|---|\n| BETA | Bajaj Finance | Lam Research | Bajaj Finance | Q"}        }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"C/CY | 82 | 55 | Beta paid for by structural growth | Credit/WFE cycle | Drawdown depth | RESEARCH DEEPER |\n|"}  }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" LIQ | CDSL | ICE | ICE | SR | 87 | 60 | Volumes = revenue; liquidity is"}            }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" the product | Market activity levels | Activity slumps | HIGH-CONVICTION RESEARCH CANDIDATE |\n| EVT | Divi's"}       }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" Labs | Vertex | Vertex | GR | 80 | 52 | Event risk compensated by franchise floor | Pipeline readouts | Binary outcomes | RESEARCH DEEPER |"}  }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"\n| CMD | Coal India | Texas Pacific Land | TPL | CI | 75 | 50 | Royalty capture without capex | Commodity price | Price collapse | WATCHLIST |\n| RATE | C"}               }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"holamandalam | Prologis | Cholamandalam | CY | 74 | 50 | Rate-cut beneficiary with growth engine | Rate path un"}             }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"known | Funding-cost spikes | WAIT FOR CATALYST |\n| REG | IEX | ICE | IEX | SR | 76 | 50 | Regulation"}               }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" created the monopoly | Market-coupling policy risk | Coupling decision (India) | RESEARCH DEEPER — LIVE VALIDATION REQUIRED |\n| GE"} }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"O | HAL | RTX (already on pasted watchlist) | HAL | GR/SP | 76 | 52 | Defence indigenization struct"}     }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ural | Government budgets | Order timing | WATCHLIST |\n\n### 6.7 Structural-Role Winners\n\n| Casino Role | Best India | Best US | Best Overall | Sector | MVP | Conf | Why"}            }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" Winner | Moat | Valuation Risk | Action |\n|---|---|---|---|---|---|---|---|---|---|---|\n| PLAYER | Trent | Vertex | Trent | Cons Disc / HC | 83 | 55"}             }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" | Best operator economics among players | 7 | Unverified — likely high | RESEARCH DEEPER |\n| DEALER | Angel One |"}  }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" Charles Schwab | Angel One | Financials | 72 | 48 | Retail-broking flow capture | 5 | Regulatory (F&O cur"}     }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"bs) | RESEARCH DEEPER |\n| TABLE | BSE | Nasdaq Inc. | BSE | Financials | 78 | 50 | Derivatives franchise built"}              }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" vs NSE | 6 | Regulatory intervention | RESEARCH DEEPER |\n| HOUSE | CDSL | ICE | CDSL/ICE tie | Financials | 88"}               }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" | 62 | Rules/settlement/data control | 9 | Multiple likely rich | HIGH-CONVICTION RESEARCH CANDIDATE |\n| CHIP | (U"}  }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"PI rails mostly unlisted; nearest: SBI Cards) | Visa | Visa | Financials |"}   }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" 84 | 60 | Global settlement unit; take-rate durability | 9 | Regulation of interchange; stablecoin nar"}          }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"rative | RESEARCH DEEPER |\n\n### 6.8 Chess-Promotion Winners\n\n| Chess Segment | Best India | Best US | Best Overall | Promo Prob | Horizon | Main Milestone | Th"}            }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"esis-Break Point | Main Mine | Action |\n|---|---|---|---|---|---|---|---|---|---|\n| Best PAWN | Syrma SGS | DATA INSUFFICIENT | Syrma | 30% | 3–5y |"}           }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" Margin expansion with scale | Margins stagnate 2+ yrs | WC intensity | WATCHLIST |\n| Best KNIGHT | Angel One | Axon (ear"}         }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"lier era; now beyond knight) | Angel One | — | — | Wealth/AMC diversification | F"}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"&O revenue collapse w/o offset | Regulation | RESEARCH DEEPER |\n| Best BISHOP | Divi's | Vertex | Vertex | — | — |"}      }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" Pipeline diversification beyond CF | Competitor CF entry | Binary trials | RESEARCH DEEPER |\n| Best ROOK | CAMS | FICO | F"}      }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ICO | — | — | Pricing-power continuation | Regulatory score-pricing pushback | Regulation | RESEARCH DEE"}        }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"PER |\n| Best QUEEN | HDFC Bank ecosystem / Reliance | S&P Global | S&P Global | — | — | Index/data expansion | Issuance secular decline | Cyclicality | HIG"}           }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"H-CONVICTION RESEARCH CANDIDATE |\n| PAWN→KNIGHT | Data Patterns | DATA INSUFFICIENT | Data Patterns | 25–35% | 3–5y | Export or"}              }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ders; recurring platforms | Order-book stagnation | Lumpy revenue | HIGH UPSIDE — HIGH MINE DENSITY |\n| PAWN→BISHOP"}          }
+
+event: ping
+data: {"type": "ping"}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" | KPIT | DATA INSUFFICIENT | KPIT | 35% | 2–4y | SDV program wins beyond top clients | Auto-client concentration crac"}          }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ks | Client concentration | RESEARCH DEEPER |\n| PAWN→ROOK | Kaynes | DATA INSUFFICIENT | Kaynes | 30% | 3–5y | OSAT/semis backend exec"}  }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ution | Capex without returns | Dilution/capex | EARLY CAPTURE |\n| PAWN→QUEEN | NO QUALIFIED WINNER TODAY | NO QUALIF"}          }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"IED WINNER TODAY | — | — | — | Queen promotions are rare; none evidenced | — | — | NO QUALIFIED WINNER TODAY |\n\n### 6.9 Food-Ch"}   }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ain Winners\n\n| Role | Best India | Best US | Best Overall | Capture Mechanism | MVP | Conf | Why Winner | Bargaining Risk | Main Risk | Action |\n|---|---|---|---|---|---|---|---|---|---|---|\n| PR"}             }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ODUCER | Coal India | Texas Pacific Land | TPL | Resource ownership/royalty | 75 | 50 | Zero-capex royalty capture | LOW | Commodity price"}   }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" | WATCHLIST |\n| PRIMARY CONSUMER | Polycab | Lam Research | Polycab | Converts inputs w/ brand+distribution | 78 | 55 | Brand premium on comm"}    }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"odity input | MODERATE | Copper cycle | RESEARCH DEEPER |\n| SECONDARY CONSUMER | Trent | Costco | Costco | Owns end"}       }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"-customer relationship | 82 | 60 | Membership = customer ownership | LOW | Valuation | GOOD COMPANY — EXPENSIVE PRICE (structural) |\n| TERTI"}   }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ARY CONSUMER | CAMS | S&P Global | S&P Global | Fees on others' assets/activity | 86 | 62 | Paid regardless of winner | LOW | Activity cyclicality | H"}      }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"IGH-CONVICTION RESEARCH CANDIDATE |\n| QUATERNARY CONSUMER | CDSL | ICE | CDSL | Settlement/custody toll on entire chain | 88 | 62"}         }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" | Statutory position atop chain | VERY LOW | Regulated pricing | HIGH-CONVICTION RESEARCH CANDIDATE |\n\n### 6.10 Half-Life Winners\n\n| Half-"}         }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"Life | Best India | Best US | Best Overall | Use Case | MVP | Conf | Durability Mechanism | Moat Decay Risk | Main Decay Risk | Action |\n|---|---|---|---|---|---|---|---|---|---|---"}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"|\n| ULTRA-SHORT | NO QUALIFIED WINNER TODAY | NO QUALIFIED WINNER TODAY | — | — | — | — | Hype names need live data; speculative only | — | — | NO QUALIFI"}       }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ED WINNER TODAY |\n| SHORT | Angel One | Lam Research | Lam | CY | 74 | 50 | Cycle position, not durability | HIGH | Cyc"}       }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"le turn | WAIT FOR ENTRY |\n| MEDIUM | Dixon | Axon | Axon | GR | 80 | 55 | Installed base converting to SaaS | MODERATE | Contract churn | RESEARCH"}     }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" DEEPER |\n| LONG | Pidilite | Copart | Copart | QC | 85 | 60 | Physical network + land + buyer liquidity | LOW | EV/"}       }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ADAS long arc | HIGH-CONVICTION RESEARCH CANDIDATE |\n| VERY LONG | CDSL | ICE | ICE | SR | 88 | 62 | Statute +"}               }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" clearing network effects | VERY LOW | Regulatory redesign | HIGH-CONVICTION RESEARCH CANDIDATE |\n\n---\n\n## 7. Top 15 India Primary Candidates\n\nAll"}        }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":": Current Price = `LIVE VALIDATION REQUIRED`; Why Today = `NOT VERIFIED — STRUCTURAL CANDIDATE`; Entry Status = `LIVE VALIDATION REQUI"}   }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"RED`.\n\n| Rank | Company | Ticker | Sector | UC | Cap | Price/Val | Why Today | MVP | Conf | ThesisQ | RedTeam | Moat | C"}        }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"apAlloc | CashConv | PermImp | Casino | Chess | Poker | Half-Life | Sovereignty | Mines | Entry | Catalyst |"}              }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" Invalidation | Action |\n|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|\n| 1 | Central Depository Services"}     }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" | CDSL | Financials | SR | MID | LVR | NV—STRUCT | 88 | 62 | 9 | 8 | 9 | "}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"8 | 9 | 2 | HOUSE | ROOK | FULL HOUSE | VERY LONG | HIGH | LOW | LVR | STRUCTURAL/NON-DATED (demat growth) | SEBI sl"}               }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ashes depository fees materially | HIGH-CONVICTION RESEARCH CANDIDATE |\n| 2 | HDFC Bank | HDFCBANK | Financials | BC | MEGA | LVR |"}   }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" NV—STRUCT | 84 | 60 | 8 | 8 | 8 | 7 | 7 | 2 | HOUSE | QUEEN | FLUSH | VERY LONG | HIGH | LOW | L"}               }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"VR | STRUCTURAL (merger normalization) | Deposit franchise share loss persists | HIGH-CONVICTION RESEARCH CANDIDATE |\n| 3 | Bajaj Finance | BAJF"}          }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"INANCE | Financials | QC | LARGE | LVR | NV—STRUCT | 83 | 58 | 8 | 7 | 7 | 8 | 7 | 4 | DEALER→"}            }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"HOUSE | ROOK | THREE OF A KIND | LONG | MED-HIGH | MED | LVR | STRUCTURAL (credit deepening) | Credit costs structurally re-rate "}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ROE below 18% | HIGH-CONVICTION RESEARCH CANDIDATE |\n| 4 | CAMS | CAMS | Financials | SR | MID | LVR | NV—STRUCT | 82 | 60"}         }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" | 8 | 8 | 8 | 8 | 9 | 2 | HOUSE | ROOK | FULL HOUSE | LONG | MED-HIGH | LOW | LVR | STRUCTURAL (MF AUM growth) | AMC ins"}            }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ourcing or fee compression | HIGH-CONVICTION RESEARCH CANDIDATE |\n| 5 | Trent | TRENT | Cons Disc | GR | LARGE | LVR | NV—STRUCT | 81 | "}               }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"55 | 8 | 7 | 7 | 8 | 7 | 3 | PLAYER | KNIGHT→BISHOP | STRAIGHT | MEDIUM | MED | MED | LVR | STRUCTURAL ("}     }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"Zudio rollout) | Same-store sales decline across cohorts | RESEARCH DEEPER |\n| 6 | ITC | ITC | Cons Staples | VA | M"}         }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"EGA | LVR | NV—STRUCT | 79 | 58 | 7 | 7 | 7 | 6 | 8 | 3 | HOUSE (tobacco) | ROOK | FULL HOUSE |"}         }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" LONG | MED | MED | LVR | STRUCTURAL (post-demerger simplification) | Punitive tobacco taxation regime shift | RESEARCH DEEPER |\n| 7 "}        }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"| ICICI Bank | ICICIBANK | Financials | BC | MEGA | LVR | NV—STRUCT | 79 | 58 | 8 | 7 | 7 | 7 | 7 | 2 | HOUSE | "}             }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ROOK | FLUSH | LONG | HIGH | LOW | LVR | STRUCTURAL | Asset-quality cycle deterioration | RESEARCH DEEPER |\n| 8 | Polycab India"}             }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" | POLYCAB | Industrials | QC | LARGE | LVR | NV—STRUCT | 78 | 55 | 7 | 7 | 7 | 7 | 7 | 3 | PLAYER | BISHOP | THREE OF A KIND"}    }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" | MEDIUM-LONG | MED | MED | LVR | STRUCTURAL (power capex) | Copper spread compression + share loss | RESEARCH DEEPER |\n| 9 | IEX"}        }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" | IEX | Utilities/Fin | SR | MID | LVR | NV—STRUCT | 76 | 48 | 8 | 5 | 7 | 8 | 9 | 5 | HOUSE | ROOK | T"}     }
+
+event: ping
+data: {"type": "ping"}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"WO PAIR + regulatory overhang | LONG (if coupling survives) | LOW vs regulator | HIGH ("} }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"REG) | LVR | Market-coupling regulatory decision — LIVE VALIDATION REQUIRED | Coupling implemented destroying price-discovery mo"}        }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"at | RESEARCH DEEPER |\n| 10 | Divi's Laboratories | DIVISLAB | Health Care | QC | LARGE | LVR | NV—STRUCT | 77 | 55 | 8 | 7 | 8 | 8"}  }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" | 7 | 3 | DEALER (CDMO) | BISHOP | THREE OF A KIND | LONG | MED | MED | LVR | STRUCTURAL (peptide/CDMO c"}             }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ycle) | Major client program losses; capacity mis-timed | RESEARCH DEEPER |\n| 11 | Bharti Airtel | BHARTI"}  }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ARTL | Comm Svcs | QC | MEGA | LVR | NV—STRUCT | 77 | 56 | 8 | 7 | 7 | 6 | 6 | 3 | HOUSE ("}              }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"network) | ROOK | STRAIGHT | LONG | MED | MED | LVR | STRUCTURAL (ARPU repair) | Tariff war resumes; capex without "}          }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ARPU gains | RESEARCH DEEPER |\n| 12 | Cholamandalam Inv & Fin | CHOLAFIN | Financials | CY | LARGE | LVR | NV—STRUCT | 75"}        }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" | 52 | 7 | 6 | 6 | 7 | 6 | 4 | DEALER | KNIGHT | TWO PAIR | MEDIUM | MED | MED | LVR | STRUCTURAL (vehicle fin"}          }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ance cycle) | Credit costs spike in new lending verticals | WAIT FOR CATALYST |\n| 13 | Kaynes Technologies | KAYNES | Info Tech/"}  }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"Ind | EC | MID | LVR | NV—STRUCT | 72 | 48 | 6 | 6 | 5 | 6 | 4 | 5 | PLAYER→DEALER | PAWN→ROOK | DR"}        }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"AW | MEDIUM | LOW-MED | HIGH | LVR | STRUCTURAL (PLI/OSAT) | Cash conversion never follows reported growth | EARLY CAPT"}       }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"URE |\n| 14 | HAL | HAL | Industrials | GR | LARGE | LVR | NV—STRUCT | 73 | 52 | 7 | 6 | 7 | 5 | 5 | 3"}        }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" | HOUSE (monopsony-adjacent) | ROOK | THREE OF A KIND | LONG | LOW (one customer) | MED | LVR | STR"}     }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"UCTURAL (defence indigenization) | Order execution delays + margin caps | WATCHLIST |\n| 15 | Data Patterns | DATAPATTNS | Industrials | S"}      }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"P | SMALL | LVR | NV—STRUCT | 65 | 45 | 5 | 5 | 6 | 6 | 4 | 5 | PLAYER | PAWN→KNIGHT | DRAW | MEDIUM | LOW |"}              }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" HIGH | LVR | STRUCTURAL (defence electronics IP) | Order book stagnates two consecutive years | HIGH UPSIDE — HIGH MINE DENSITY |\n\n**Top-5 India thesis"}       }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" notes:**\n\n1. **CDSL** — Causal chain: household financialization → demat account growth → annuity (issuer charges, per"}           }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"-account fees) + transaction fees → ~zero incremental cost → FCF → dividends. **Bear case:** SEBI can cap/cut fees; trans"}            }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"action revenue is cyclically tied to retail trading activity which regulators have actively dampened; valuation historically rich. **Perm-impairment risk:** LOW"}          }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" (statutory duopoly). **Falsifier:** a regulatory fee cut >30% or structural retail-activity collapse lasting >2 years.\n2. **HDFC"}               }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" Bank** — Deposit franchise + merger-drag normalization → NIM recovery → book-value compounding at scale. **Bear:** de"}            }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"posit-cost war structurally erodes the low-cost franchise; scale caps growth. **Perm-impairment:** LOW. **Falsifier"} }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":":** sustained deposit market-share loss with NIM below private-bank median for 6+ quarters.\n3. **Bajaj Finance** — Distribution +"}               }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" data → lowest-cost customer acquisition in consumer credit → high-ROE AUM compounding. **Bear:** consumer-credit c"}     }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ycle turn; fintech/bank competition compressing spreads; regulatory unsecured-lending curbs. **Perm-impairment:** MODER"}           }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ATE-LOW (levered financial). **Falsifier:** credit costs re-basing ROE below ~18% structurally.\n4. **CAMS** — MF AUM growth → R"}        }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"TA fees on AUM → duopoly with high switching costs → 40%+ margins, high cash conversion. **Bear:** fee bps compression as AUM sc"}  }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ales; large AMC insourcing threat. **Perm-impairment:** LOW. **Falsifier:** a top-5 AMC insourcing registrarship.\n5. **Trent"}              }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"** — Format innovation (Zudio) → store-level economics → self-funded rollout → revenue compounding. **Bear:** value-fashion compet"} }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ition (Reliance, D-Mart adjacents), fashion-inventory risk, valuation likely extreme."} }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" **Perm-impairment:** LOW-MODERATE. **Falsifier:** cohort store productivity declining while rollout continues.\n\n---\n\n## 8. Top 15 US"}        }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" Primary Candidates\n\nSame conventions: LVR = LIVE VALIDATION REQUIRED; Why Today = NOT VERIFIED — STRUCTURAL CANDIDATE.\n\n| Rank | Company | Ticker | Sector | UC |"}            }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" Cap | Price/Val | Why Today | MVP | Conf | ThesisQ | RedTeam | Moat | CapAlloc | CashConv | PermImp | Casino | Chess | Poker | Half-Life | Sovereignty | Mines | Entry | Catalyst |"}   }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" Invalidation | Action |\n|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|\n| 1 | S&P Global | SPGI | Financials | QC/SR | M"}            }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"EGA | LVR | NV—STRUCT | 87 | 62 | 9 | 8 | 9 | 8 | 9 | 2 | HOUSE | QUEEN | FULL HOUSE | VERY LONG | HIGH | LOW | L"}    }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"VR | STRUCTURAL (issuance + index growth) | Regulatory dismantling of issuer-pays ratings | HIGH-CONVICTION RESEARCH CANDIDATE |\n| 2 | Intercontinental"}   }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" Exchange | ICE | Financials | SR | MEGA | LVR | NV—STRUCT | 86 | 62 | 9 | 8 | 9 | 8 | 9 | 2 | HOUSE | QUEEN | FULL HOUSE | VER"}        }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"Y LONG | HIGH | LOW | LVR | STRUCTURAL (data + mortgage digitization) | Mortgage-tech thesis fails through a full"}         }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" rate cycle | HIGH-CONVICTION RESEARCH CANDIDATE |\n| 3 | Copart | CPRT | Industrials | QC | LARGE | LVR | NV—STRUCT | 85 | 60 | 9 | 8 | 8"}         }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" | 9 | 9 | 2 | TABLE/HOUSE | ROOK | FULL HOUSE | LONG | HIGH | LOW | LVR | STRUCTURAL (total-loss frequency) | Accident/"}            }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"total-loss frequency secular decline materializes | HIGH-CONVICTION RESEARCH CANDIDATE |\n| 4 | Cadence Design Systems | CDNS | Info Tech | SR |"}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" LARGE | LVR | NV—STRUCT | 84 | 58 | 9 | 8 | 9 | 7 | 8 | 2 | HOUSE | ROOK | FULL HOUSE | VERY LONG | HIGH | LOW | LV"}              }
+
+event: ping
+data: {"type": "ping"}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"R | STRUCTURAL (design complexity) | AI-generated design tools commoditize EDA | HIGH-CONVICTION RESEARCH CANDIDATE |\n| 5 | TransDigm | TDG |"}        }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" Industrials | QC | LARGE | LVR | NV—STRUCT | 83 | 58 | 8 | 8 | 9 | 8 | 8 | 3 | HOUSE (sole-source) | ROOK | FULL HOUSE | LONG | HIGH |"}          }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" MED (leverage) | LVR | STRUCTURAL (aftermarket pricing) | Regulatory pricing intervention on sole-source parts | HIGH-CONVICTION RESEARCH CANDIDATE |\n| 6 | Visa | V | Financials | S"}   }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"R | MEGA | LVR | NV—STRUCT | 83 | 60 | 8 | 7 | 9 | 8 | 9 | 2 | CHIP | QUEEN | FLUSH | VERY L"}   }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ONG | HIGH | MED (REG) | LVR | STRUCTURAL (cash→digital) | Interchange regulation + alternative-rail share loss compounding"}      }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" | RESEARCH DEEPER |\n| 7 | Moody's | MCO | Financials | QC | LARGE | LVR | NV—STRUCT | 82 | 58 | 8 | 8 | 9 | 8 | 9"}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" | 2 | HOUSE | ROOK | FULL HOUSE | VERY LONG | HIGH | LOW | LVR | STRUCTURAL | Same as SPGI ratings falsifier | R"}       }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ESEARCH DEEPER |\n| 8 | Kinsale Capital | KNSL | Financials | GR | MID | LVR | NV—STRUCT | 80 | 55 | 8 | 7 | 7 | 8 | 8 | 3"}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" | PLAYER (disciplined) | KNIGHT→BISHOP | THREE OF A KIND | MEDIUM-LONG | HIGH | MED | LVR | STRUCTURAL (E&S market growth) | Comb"}        }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ined ratio deteriorates through soft market | RESEARCH DEEPER |\n| 9 | Waste Management | WM | Industrials | DF | LARGE | LVR | NV—STRUCT | 80 | 60"}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" | 8 | 8 | 8 | 7 | 8 | 2 | HOUSE (landfill scarcity) | ROOK | FULL HOUSE | VERY LONG | HIGH | LOW | LVR | STRUCTURAL | Landfill p"}        }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ricing power capped by regulation | WATCHLIST |\n| 10 | Vertex Pharmaceuticals | VRTX | Health Care | GR | LARGE | LVR | NV—STRUCT | 79 | 54"}            }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" | 8 | 7 | 8 | 7 | 8 | 3 | HOUSE (CF monopoly) | BISHOP | THREE OF A KIND + DRAW | LONG | HIGH | MED (EVT) | LVR |"}     }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" Pipeline readouts — LIVE VALIDATION REQUIRED | CF competition emerges; pipeline serially fails | RESEARCH DEEPER |\n| 11 | Axon"}   }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" Enterprise | AXON | Industrials | GR | LARGE | LVR | NV—STRUCT | 78 | 52 | 8 | 6 | 8 | 6 | 6 | 3 | HOUSE (public-safety O"}             }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"S) | BISHOP→ROOK | STRAIGHT | MEDIUM-LONG | MED-HIGH | MED (valuation, SBC) | LVR | STRUCTURAL (SaaS attach) | Net"}     }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" retention breaks below ~110%; SBC dilution outruns FCF/share | RESEARCH DEEPER |\n| 12 | K"}            }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"LA Corp | KLAC | Info Tech | CY | LARGE | LVR | NV—STRUCT | 78 | 54 | 8 | 7 | 8 | 8 | 8 | 3 | DEALER (process control) |"}     }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" ROOK | THREE OF A KIND | LONG (through cycles) | MED | MED (cycle) | LVR | STRUCTURAL (node complexity) | Process-control int"}        }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ensity per wafer declines | WAIT FOR ENTRY |\n| 13 | Progressive | PGR | Financials | QC | MEGA | LVR | NV—STRUCT | 78 | 56"}         }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" | 8 | 8 | 7 | 8 | 8 | 2 | PLAYER (data edge) | ROOK | THREE OF A KIND | LONG | HIGH | LOW | LVR | ST"}        }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"RUCTURAL (telematics edge) | Underwriting edge converges to industry | WATCHLIST |\n| 14 | Cheniere Energy | LNG | Energy | IN/"}     }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"CI | LARGE | LVR | NV—STRUCT | 76 | 52 | 7 | 7 | 7 | 7 | 7 | 3 | HOUSE (tolling) | ROOK | THREE OF A KIND | LONG ("}     }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"contract life) | MED | MED | LVR | STRUCTURAL (contracted LNG) — note portfolio natgas overlap | Recontracting at materially worse spreads | WATCHLIST (red"}            }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"undancy flag) |\n| 15 | Texas Pacific Land | TPL | Energy | CI | MID | LVR | NV—STRUCT | 74 | 50 | 7 | 7 | 8 | 6 | 9 | 3 | PR"}             }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ODUCER-royalty | ROOK | THREE OF A KIND | LONG | HIGH | MED (CMD) | LVR | STRUCTURAL (Permian royalties + water) | Permian activity secular decline | W"} }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ATCHLIST |\n\n**Top-5 US thesis notes:**\n\n1. **SPGI** — Debt issuance + index AUM → duopoly fees → ~90%+ incremental margins on data"}              }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"/index → FCF → buybacks. **Bear:** issuance is cyclical and can disappoint for years; private credit disintermediates r"}      }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ated public debt; regulation attacks issuer-pays. **Perm-impairment:** LOW. **Falsifier:** structural (not cyclical) decline in rated public issuance share for 3+ years.\n2"}          }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":". **ICE** — Exchange/clearing liquidity network + data subscriptions + mortgage workflow digitization → recurring fee stack. **Bear:** mortgage business bought near"}   }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" cycle bottom may never deliver promised synergies; leverage from acquisitions. **Perm-impairment:** LOW. **Falsifier:** mortgage-segment revenue fail"}        }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ing to inflect through a full rate-cut cycle.\n3. **CPRT** — Rising vehicle complexity → higher total-loss frequency"}      }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" → salvage volumes through the dominant auction network → land+buyer-liquidity moat → FCF, net-cash balance sheet. **Bear:** "}             }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ADAS reduces accident frequency over decades; insurer consolidation pressures fees. **Perm-impairment:** LOW-MODERATE (very long arc). **Falsifier:** sustained decline in total-loss frequency desp"}        }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ite complexity trends.\n4. **CDNS** — Chip design complexity → EDA duopoly (with Synopsys) → subscription lock-in inside engineer workflows → pricing power. **Bear"}        }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":":** AI-assisted design could compress seats; China restrictions cap TAM;"}           }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" valuation historically rich. **Perm-impairment:** LOW. **Falsifier:** credible AI design toolchain displacing EDA seats at major customers.\n5. **T"}            }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"DG** — Sole-source certified aerospace parts → aftermarket pricing power → private-equity-style capital allocation → high FCF/share growth. **Bear:** leverage; government pricing sc"}    }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"rutiny; air-travel shock. **Perm-impairment:** MODERATE (leverage in a shock). **Falsifier:** regulatory action capping sole-source aftermarket pricing.\n\n---"}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"\n\n## 9. Additional Discovery Board\n\n**India (10):**\n\n| Ticker | Company | Sector | Why Interesting | Thesis Stage | Missing Evidence | Main Falsifier | Action |\n|---|---|---|---|---|---|---|---|\n| M"}      }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"CX | Multi Commodity Exchange | Financials | Commodity-derivatives monopoly rail | Established | Current volumes/pricing | Regulat"}          }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ory product curbs | RESEARCH DEEPER |\n| BSE | BSE Ltd | Financials | Derivatives franchise built vs NSE | Building | SEBI F&O policy impact | F"}               }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"&O curbs gut volumes | RESEARCH DEEPER |\n| ANGELONE | Angel One | Financials | Low-cost retail broking flow | Building | Post"}              }
+
+event: ping
+data: {"type": "ping"}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"-regulation economics | Regulatory take-rate cuts | RESEARCH DEEPER |\n| PERSISTENT | Persistent Systems | Info Tech | Mid-"}    }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"tier IT outgrowing majors | Established | Current deal flow | Growth converges to sector | WATCHLIST |\n| KPITT"}          }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ECH | KPIT Technologies | Info Tech | SDV engineering specialist | Building | Client concentration data | Auto-client program cuts | RESEARCH DEEPER |\n| VBL | Varun Beverages"}        }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" | Cons Staples | Bottling compounder, geography expansion | Established | Current capex/returns | New-geography ROIC dilution | W"}            }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ATCHLIST |\n| APLAPOLLO | APL Apollo Tubes | Materials | Structural-steel tube category creator | Established | Spread/volume data | Capacity gl"}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ut in tubes | WATCHLIST |\n| TIINDIA | Tube Investments | Industrials | Murugappa cap"}           }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ital-allocation platform | Established | New-venture returns | EV ventures burning cash | RESEARCH DEEPER |\n| S"}              }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"YRMA | Syrma SGS | Industrials | EMS second-tier optionality | Early | Margin trajectory | Margins never scale | WATCHLIST |\n| NAM-INDIA |"}  }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" Nippon Life India AMC | Financials | AUM toll on financialization | Established | Flow data | Fee compression outpaces AUM | RESEARCH DEEPER |\n\n**US (10):**\n\n| "}            }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"Ticker | Company | Sector | Why Interesting | Thesis Stage | Missing Evidence | Main Falsifier | Action |\n|---|---|---|---|---|---|---|---|\n| MSCI | MSCI | Financials | Index/ES"}             }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"G/analytics toll | Established | Current retention/pricing | Passive fee war reaching index licensors | RESEARCH D"}              }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"EEPER |\n| FICO | Fair Isaac | Info Tech | Credit-score pricing power | Established | Regulatory posture 2026 | Score-pricing regulation | RESEARCH DE"}              }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"EPER |\n| VRSK | Verisk | Industrials | Insurance data monopoly | Established | Current growth | Insurer data mutualization | WATCHLIST |\n| HEI | Heico | Industr"}  }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ials | PMA parts + M&A discipline | Established | Current multiple | Aftermarket downturn | WATCHLIST |\n| BRO | Brown & Brown | Financials | Insurance broker"}         }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"age roll-up | Established | Organic growth data | Soft market + M&A overpaying | WATCHLIST |\n| ODFL | Old Dominion | Industr"}        }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ials | LTL network density moat | Established | Freight-cycle position | Share loss to rivals | WAIT FOR ENTRY |\n| CS"}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"U-adjacent: ROP | Roper Technologies | Info Tech | Niche vertical-software collector | Established | Recent deal returns | Overpaying for grow"}       }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"th | WATCHLIST |\n| WMB | Williams Companies | Energy | Contracted gas pipes; income | Established | Contract data | Volume declines | WATCHLI"}   }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ST (natgas redundancy flag) |\n| DHR | Danaher | Health Care | Bioprocessing recovery + DBS allocation | Established | Order trends | Bioprocessing structurally sm"} }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"aller | RESEARCH DEEPER |\n| ZTS | Zoetis | Health Care | Animal-health duopoly, pet spend | Established | Current growth | Pet-spend normalization | WATCHL"}         }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"IST |\n\n---\n\n## 10. Early-Capture Board\n\n**India Top 8:** (all: LIVE VALIDATION REQUIRED for current state)\n\n| Name | Pawn State | Promotion Path"}    }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" | Prob | Key Milestone | Capital Req | Causal Weak Point | Main Mine | Market May Miss |\n|---|---|---|---|---|---|"}            }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"---|---|---|\n| Kaynes | Advanced pawn | PAWN→ROOK (OSAT rail) | 30% | Semis-backend revenue at target"} }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" margins | HIGH (capex) | Cash conversion | Dilution | Optionality if OSAT works |\n| Syrma SGS | Early pawn | PAWN→K"}      }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"NIGHT | 25% | Margin expansion 2 consecutive yrs | MED | Commodity EMS margins | Customer concentration | Under-followed vs"}              }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" Dixon |\n| Data Patterns | Pawn w/ IP | PAWN→KNIGHT | 25–35% | Export + recurring platform orders | LOW-MED | Order lumpiness | Val"}              }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"uation froth | True IP vs assemblers |\n| KPIT | Knight-ish pawn | PAWN→BISHOP | 35% | SDV wins beyond top"}            }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"-5 clients | LOW | Client concentration | Auto-cycle capex cuts | Specialist premium durability |\n| Angel One | Pawn under fire | PAWN→BISHOP (wealth"}              }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" platform) | 30% | Non-broking revenue >30% | LOW | Regulatory dependence | F&O curbs | Client base as distribution as"}              }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"set |\n| Netweb Technologies | Early pawn | PAWN→KNIGHT (AI servers) | 20% | Sustained AI-infra or"}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ders | MED | Import dependence | Competition from global OEMs | Domestic AI-infra policy pull |\n| Anant"}             }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" Raj | Pawn | PAWN→BISHOP (data centers) | 25% | DC leasing at scale | HIGH | Execution capability | Funding |"}         }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" Land bank conversion value |\n| Jupiter Wagons | Pawn | PAWN→KNIGHT | 20% | Diversification beyond rail or"}            }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ders | MED | Government-order dependence | Order cycles | WC discipline if proven |\n\n**US Top 8:** Genuine early-capture in"}  }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" the US requires current small/mid-cap evidence not supplied. Rather than fabricate, listing structurally-known younger franchises still"}              }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" in expansion phase:\n\n| Name | Pawn State | Promotion Path | Prob | Key Milestone | Capital Req | Causal Weak Point | Main Mine | Market May Miss |\n|---|---|---|---|---|---|---|---|---|\n|"}  }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" Kinsale (KNSL) | Knight | KNIGHT→ROOK | 40% | Underwriting edge through soft market | LOW | So"}   }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ft-market pricing | Reserve risk | Tech-cost advantage durability |\n| Axon (AXON) | Bishop | BISHOP→ROOK | 40% | International"}          }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" + records/dispatch attach | LOW | Valuation | SBC | Public-safety OS lock-in |\n| Samsara (IOT) | P"}     }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"awn/Knight | PAWN→BISHOP | 30% | FCF inflection with retention | LOW | Competition (Geotab et"}   }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" al.) | SBC dilution | Physical-ops data moat |\n| Tradeweb (TW) | Rook forming | ROOK consolidation | 45% | Rates/"}   }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"credit e-trading share gains | LOW | Incumbent dealer resistance | Fee pressure | Electronification runway |\n| Cava (CAVA) | Pawn | PAWN"}  }
+
+event: ping
+data: {"type": "ping"}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"→KNIGHT | 20% | Unit economics at 2x footprint | MED | Fast-casual saturation | Valuation | Category-"}               }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"creation odds |\n| DUOL (Duolingo) | Knight | KNIGHT→BISHOP | 25% | Monetization beyond language | LOW | AI commoditization of tutoring | Engagement"}       }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" decay | AI as tailwind not threat — unproven |\n| TOST (Toast) | Pawn/D"}        }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ealer | PAWN→ROOK (restaurant rail) | 30% | Payments+SaaS profitability at scale | LOW-MED | Payments marg"}    }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"in competition | Churn in SMB | Vertical-rail economics |\n| RKLB (Rocket Lab) | Pawn | PAWN→KNIGHT"} }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" | 15–20% | Neutron flight success | HIGH | Binary launch risk | Dilution | Space-infra vs launch narrative |"}          }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"\n\nAll US early-capture probabilities are structural estimates; `LIVE VALIDATION REQUIRED` on every milestone status as of 2026.\n\n---\n\n## 11. Houses,"}      }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" Tables, Dealers, Chips and Structural Rails\n\n**India Top 5:**\n\n| Name | Role | Pricing Power Source | Switching Cost | Data/Access Control | Recurring Economics |\n|---|---|"}         }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"---|---|---|---|\n| CDSL | HOUSE | Regulated duopoly fee schedule | Statutory custody | Full demat records | Issuer + account ann"}               }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"uity |\n| CAMS | HOUSE | Duopoly RTA; long contracts | Migration pain for AMCs | Investor transaction data | AUM-linked fees |\n| I"}           }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"EX | HOUSE (regulatory overhang) | Exchange liquidity | Liquidity gravity | Price-discovery data | Transaction fees |\n| BSE | TABLE | Der"}              }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ivatives franchise | Moderate | Listing + market data | Transaction + listing fees |\n| MCX | HOUSE | Commodity-derivatives monopoly | Liquidity gravity | Benchmark pr"}    }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ices | Transaction fees |\n\n**US Top 5:**\n\n| Name | Role | Pricing Power Source | Switching Cost | Data/Access Control | Recurring Economics |\n|---|---|---|---|---|---|\n| ICE | HOUSE | Clearing m"}               }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"andate + liquidity | Very high | Settlement + mortgage data | Fees + subscriptions |\n| SPGI | HOUSE | Ratings duopoly; index licensing | Regulat"}       }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ory/benchmark lock-in | Benchmarks, CUSIP-adjacent data | Ratings + index + data subs |\n|"}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" Visa | CHIP | Network ubiquity | Merchant/issuer dual lock | Transaction graph | Per-transaction toll |\n| CME | HOUSE |"} }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" Futures liquidity monopoly by product | Margin/clearing netting | Benchmark rates/derivatives data"}         }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" | Transaction + data fees |\n| FICO | HOUSE | Score embedded in lending regulation/workflow | Underwriting-model lock | Score stand"}              }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ard | License + per-pull fees |\n\nAll get paid regardless of which visible player wins.\n\n---\n\n## 12. Combined India + US Top 20\n\n| Rank | Ticker | Country | UC | MVP | Conf | "}    }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ThesisQ | RedTeam | Moat | PermImp | Why It Survived Cross-Country Comparison | Action |\n|---|---|---|---|---|---|---|---|---|---|---|---|\n| 1 | CDSL | IN | SR | 88 |"}        }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" 62 | 9 | 8 | 9 | 2 | Statutory rail + secular financialization; strongest moat-to-growth combination | HIGH-CONVICTION RESEARCH CANDIDAT"}             }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"E |\n| 2 | SPGI | US | QC | 87 | 62 | 9 | 8 | 9 | 2 | Global toll with elite cash conversion | HIG"}          }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"H-CONVICTION RESEARCH CANDIDATE |\n| 3 | ICE | US | SR | 86 | 62 | 9 | 8 | 9 | 2 | Multi-rail house; mortgage optionality un"}    }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"priced (unverified) | HIGH-CONVICTION RESEARCH CANDIDATE |\n| 4 | CPRT | US | QC | 85 | 60 | 9 | 8 | 8 | 2 | Physical-"}         }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"network moat + elite allocation, net cash | HIGH-CONVICTION RESEARCH CANDIDATE |\n| 5 | HDFCBANK | IN | BC | 84 | 60 | 8 | 8 | 8 | 2 | Sc"}             }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ale franchise with normalization runway | HIGH-CONVICTION RESEARCH CANDIDATE |\n| 6 | CDNS | US | SR | 84 | 58 | 9 | 8 | 9 | 2 | Every"}    }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" chip pays the design toll | HIGH-CONVICTION RESEARCH CANDIDATE |\n| 7 | BAJFINANCE | IN | QC | 83 | 58 | 8 | 7 | 7 | 4 | India credit deepening with"}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" proven engine | HIGH-CONVICTION RESEARCH CANDIDATE |\n| 8 | TDG | US | QC | 83 | 58 | 8 | 8 | 9 | 3 | Sole-source pricing +"}              }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" allocation discipline | HIGH-CONVICTION RESEARCH CANDIDATE |\n| 9 | V | US | SR | 83 | 60 | 8 | 7 | 9 | 2 | Chip role; regulation"}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" is the honest risk | RESEARCH DEEPER |\n| 10 | CAMS | IN | SR | 82 | 60 | 8 | 8 | 8 | 2 | AUM toll duopoly | H"}             }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"IGH-CONVICTION RESEARCH CANDIDATE |\n| 11 | MCO | US | QC | 82 | 58 | 8 | 8 | 9 | 2 | Ratings duopoly twin | RESEARCH DEEPER |\n|"}              }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" 12 | TRENT | IN | GR | 81 | 55 | 8 | 7 | 7 | 3 | Best-in-country retail execution | RESEARCH DEEPER |\n| 13 | KNSL | US | GR | 80 | 55"}     }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" | 8 | 7 | 7 | 3 | Underwriting + growth without tech-disruption risk | RESEARCH DEEPER |\n| 14 | WM | US | DF | "}               }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"80 | 60 | 8 | 8 | 8 | 2 | Landfill scarcity annuity | WATCHLIST |\n| 15 | ITC | IN | VA | 79 | 58 | 7 | 7 | 7 | 3 | C"}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ash + value with governance simplification | RESEARCH DEEPER |\n| 16 | ICICIBANK | IN | BC | 79 | 58 | 8 | 7 | 7 | 2 | Execution-quality bank | RESEARCH"}     }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" DEEPER |\n| 17 | VRTX | US | GR | 79 | 54 | 8 | 7 | 8 | 3 | Monopoly + pipeline optionality | RESEARCH DEEPER |\n| 18 | POLYCAB | IN | QC | "}               }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"78 | 55 | 7 | 7 | 7 | 3 | Power-capex rail with brand | RESEARCH DEEPER |\n| 19 | KLAC | US | CY | 78 | 54 | 8 | 7 | 8 | 3 "}      }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"| Process-control intensity rising | WAIT FOR ENTRY |\n| 20 | BHARTIARTL | IN | QC | 77 | 56 | 8 | 7 | 7 | 3 | ARPU-repair oligopoly | RESEARCH DE"}         }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"EPER |\n\nIndia 9 / US 11 — near parity, earned not defaulted.\n\n---\n\n## 13. Best Risk-Adjusted Research Ideas"}      }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"\n\n**India:** 1) CDSL 2) HDFC Bank 3) CAMS 4) ICICI Bank 5) ITC — each combines high c"}               }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ash conversion, low permanent-impairment risk, sovereign survival, and red-team survival. Common caveat: entry valuation unverified.\n\n**US:** 1) SPGI 2) ICE 3"}          }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":") CPRT 4) WM 5) PGR — toll/annuity economics, elite or strong allocation, low impairment risk. Common caveat: quality is"}  }
+
+event: ping
+data: {"type": "ping"}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" well-known; pot odds depend on unverified multiples.\n\n---\n\n## 14. High Upside — High Mine Density\n\n**India (5):**\n\n| Name | Upside Path | Milestones | Capital Req |"}   }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" Dilution Risk | Causal Weak Point | PermImp | Why Research-Worthy |\n|---|---|---|---|---|---|---|---|\n| Kaynes | OSAT + EMS scale |"}          }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" Backend revenue at margin | HIGH | MED-HIGH | Cash conversion | MODERATE | Rail optionality |\n| Data Patterns | Defence-electronics plat"}  }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"form wins | Export orders | LOW-MED | LOW | Order lumpiness | MODERATE | Real IP |\n| Netweb | Domestic AI infra | Sustained AI orders | MED | M"}        }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ED | Import dependence | MODERATE | Policy pull |\n| One97 (Paytm) | Monetization of payment scale | Sustained profitability | L"}        }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"OW | LOW (post-raise) | Regulatory dependence | MODERATE-HIGH | Scale asset if converted |\n| Anant Raj | Data-center conversion | DC le"}        }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ases signed | HIGH | MED | Execution | MODERATE | Land arbitrage |\n\n**US (5):**\n\n| Name | Upside Path | Milestones | Capital Req | Dilution Ris"}    }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"k | Causal Weak Point | PermImp | Why Research-Worthy |\n|---|---|---|---|---|---|---|---|\n| RKLB | Neutron + space systems | Successful Neutron flights | HI"}             }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"GH | HIGH | Binary launch | HIGH | Space-infra optionality |\n| TOST | Restaurant rail | FCF at scale | LOW-MED | MED ("}          }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"SBC) | Payments-margin competition | MODERATE | Vertical rail |\n| IOT (Samsara) | Physical-ops data platform | FCF + retention | LOW | MED (SBC) |"}         }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" Competition | MODERATE | Data moat forming |\n| CAVA | Category creation | Unit economics at 2x stores | MED | LOW | Saturation | MODERATE | Fast-casual playbook |\n| Intel | Fo"}           }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"undry turnaround | External foundry wins | VERY HIGH | MED | Execution + capital intensity | HIGH | Asymmetric if foundry works — D"}           }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ATA INSUFFICIENT on 2026 status |\n\n---\n\n## 15. Queen-Priced Pawns\n\nLive multiples not supplied — structural valuation-risk discussion"} }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" only.\n\n- **Palantir-type AI platform names (US):** thesis implicitly requires becoming the enterprise AI operating layer with"}               }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" sustained 30%+ growth AND margin expansion AND no competitive commoditization. Historically priced for queen; ev"}      }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"idence is knight-level. `LIVE VALIDATION REQUIRED` on current multiple.\n- **Indian defence/railway small caps broadly:** many priced as if every"} }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" order-book rupee converts to durable high-margin cash — implicitly requiring flawless execution, no working-capital drag, and"}     }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" perpetual government budget growth.\n- **Indian EMS at premium multiples (Dixon/Kaynes tier):** implicitly requires margin struct"}        }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ure migrating from assembly (2–4%) toward component/design economics — a promotion not"}            }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" yet evidenced in cash flow.\n- **US high-growth software with heavy SBC:** any name where the"}             }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" thesis requires both growth persistence AND SBC normalization is paying queen price for two simultaneous promotions."}      }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"\n- **Trent:** superb pawn-to-bishop execution, but if priced for dec"}               }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ades of flawless rollout, promotion is prepaid. `LIVE VALIDATION REQUIRED`.\n\n---\n\n## 16. False-Pattern / Fundamental Trap Audit\n\n- **\"Next Nvidia\" log"}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ic:** any AI-adjacent hardware assembler (India: Netweb; US: various) — being in the supply chain "}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"≠ owning the toll. Classify: NARRATIVE COPY.\n- **Growth without cash conversion:** Indian EMS names — order books ≠ owner earnings; working capital eats"}        }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" reported growth. Classify: STRUCTURAL RISK, verify per name.\n- **Low multiple masking decline:** PSU banks and legacy US telecom at peak-cycle ear"}   }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"nings or secular decline. Classify: VALUE TRAP CANDIDATES.\n- **Peak-cycle earnings as normalized:** shipping (ZIM on pas"}        }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ted watchlist — explicit warning: container-rate earnings are ultra-short half-life), metals, E&P.\n- **High ROE via"}             }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" leverage:** NBFCs and TDG — decompose ROE before crediting quality.\n- **Buybacks offsetting dilution:** common in US software; check net share count"}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":", not gross buyback dollars. `LIVE VALIDATION REQUIRED` per name.\n- **Government-order narratives with WC stress:** Indian railway/defence small caps.\n- **Plat"}     }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"form dependence mistaken for sovereignty:** app-store-dependent consumer apps; hyperscaler-dependent AI startups.\n- **Dividend yield funded by weak balance sheets"}    }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":":** high-yield US telecom/REIT edges.\n- **Survivorship analogies:** \"India's Amazon/Tesla\" claims — GAMBLER'S FALL"}              }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ACY, rejected throughout.\n\n---\n\n## 17. What The Market May Be Missing\n\n**India (evidence quality: MODEL ANALYTICAL INFERENC"}    }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"E, live confirmation required):**\n1. **Underpriced sovereignty of registrars/depositories (CAMS/CDSL):** treated as market"}  }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"-cycle proxies, but the annuity (non-transaction) revenue share may be structurally rising — making them less cyclical than pri"}       }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ced.\n2. **Overestimated promotion probability across the EMS cohort:** the market may be paying rail pr"}              }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ices for assembly economics in the entire cohort while only 1–2 names will earn the promotion.\n3. **Misunderstood regulatory ris"} }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"k at IEX:** market-coupling fear may be binary-priced; if coupling implementation preserves exchange fee pools, the impairment case"}             }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" weakens. Could be a false negative. `LIVE VALIDATION REQUIRED`.\n\n**US:**\n1. **ICE mortgage optionality as a false negative:** if rate norm"}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"alization revives mortgage volumes, a currently discounted segment becomes a growth engine — cyclicality misread as impairment.\n2. **Cop"}     }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"art's long-arc risk underweighted by bulls:** ADAS-driven accident-frequency decline is a genuine slow-burn impairment vector the market may be "}            }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ignoring during strong quarters — hidden permanent-impairment risk on multi-decade horizon.\n3. **FICO regulatory risk possibly overweighted O"} }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"R underweighted:** the score's embeddedness in securitization workflow is a stronger moat than headlines imply, but political pricing sc"}      }
+
+event: ping
+data: {"type": "ping"}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"rutiny is a real fat-tail. Requires live 2026 regulatory evidence.\n\n---\n\n## 18. Portfolio Thesis / Redundancy Audit"}            }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"\n\nFrom the pasted open-positions context only (REPO-OPEN / BROKER-UNVERIFIED):\n\n| Ticker | Repo Status | Core Thesis | Causal Dependency | Structural Edge | Redundancy With New Candid"}    }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ates | Main Falsifier | Human Review Note |\n|---|---|---|---|---|---|---|---|\n| UNG | OPEN, chaos flag, repo PnL −21.9%, current "}              }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"12.5 vs stop 13.0 | Natgas inventory-draw chaos | Weather/inventory | NONE (commodity ETF, decaying vehicle) | Overlaps"}          }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" Cheniere/Williams candidates | Already breached: pasted current_price (12.5) is BELOW pasted stop (13.0) — stop-discipline breach flag; HUMAN REVIEW REQUIRED"}               }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" | Contango decay makes UNG a poor long-hold vehicle; time-in-trade 5d with −"}   }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"22% suggests thesis damage |\n| FCG | EXIT_PENDING, −4.0% | Natgas equity chaos | Gas prices | Di"}           }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"versified producer basket | Same factor as UNG — REDUNDANT EXPOSURE | Gas price breakdown | Exit already pending per repo; no"}           }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" action claimed by this report |\n| TLT | OPEN, +1.05% | Long-duration rally | Rate cuts / disinflation | None"}               }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" (duration beta) | Conflicts partially with RATE-sensitive candidates (Cholamandalam, Prologis express"}             }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" similar rate bet) | Inflation reacceleration | Note: TLT (rates fall) and TIP (breakevens rise) can partially offset |"}             }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"\n| TIP | OPEN, +6.67%, current 112 vs take_profit 110 | Breakeven-curve rally | Inflation expectations | None | — | Dis"}       }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"inflation surprise | Pasted current_price (112) EXCEEDS pasted take_profit (110) — target-breach flag; HUMAN REVIEW REQUIRED |\n\n**Portfolio-"}  }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"level observations:** (a) Two of four positions are correlated natgas expressions — factor concentration; (b) two positions show rule-boundary breaches within the pasted data itself (U"}          }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"NG below stop, TIP above target) — flagged for human review only, no action taken or claimed; (c) new candidates Cheniere/Williams/TPL would be REDUNDANT EXP"} }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"OSURE; the market-infrastructure candidates (CDSL, SPGI, ICE) are DIVERSIFYING EXPOSURE relative to the current book. Signal-ledger watchlist names"}            }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" GLD/RTX/ZIM noted; ZIM carries a peak-cycle earnings trap warning (§16).\n\n---\n\n## 19. Causal"}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" Chain / Invalidation Map\n\n| Ticker | Input | Mechanism | Economic Conversion | Cash-Flow Path | Reinvestment | Weakest Link | Invalidation | PermImp | Fresh Evidence Needed |\n|---|---|---|---|---"}               }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"|---|---|---|---|---|\n| CDSL | Financialization | Demat growth | Annuity + txn fees | ~Zero incremental cost | Dividends (limited reinvest"}              }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" need) | Regulated pricing | Fee cut >30% | LOW | Latest fee circulars, account adds |\n| SPGI | Debt/index grow"}  }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"th | Ratings/index toll | Oligopoly pricing | 90%+ incremental margin | Buybacks + data M&A | Issuance cycle |"}              }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" Structural issuance decline | LOW | Issuance data, private-credit share |\n| ICE | Market activity + mortgage digitization | Clearing + workflow f"}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ees | Recurring subscriptions | High FCF | Deleverage + buybacks | Mortgage inflection | No inflection through rate cycle | LOW | M"}      }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ortgage segment results |\n| CPRT | Vehicle complexity | Total-loss frequency | Auction fees both sides | Net-cash FCF | Land purchases | Acc"}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ident-frequency arc | Frequency declines | LOW-MOD | Total-loss ratio trends |\n| BAJFINANCE | Credit deepening | Cross-sell data eng"}     }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ine | High-ROE AUM | Earnings retained | Book compounding | Credit cycle | ROE <18% structural | MOD | Latest credit cost"}      }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"s |\n| TRENT | Value-fashion demand | Format economics | Store-level ROIC | Self-funded rollout | New stores | F"}      }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ashion risk | Cohort productivity decline | LOW-MOD | Same-store data |\n| CAMS | MF AUM growth | RTA duopoly | bps on AUM | High"}           }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" margin FCF | Dividends + adjacencies | AMC insourcing | Top-5 AMC exits | LOW | Contract renewals |\n| CDNS | Design complexity | EDA se"}            }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"at lock-in | Subscription pricing | High FCF | Buybacks + tuck-ins | AI toolchain disruption | Seat displacement | LOW | AI-EDA competit"}           }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ive evidence |\n| TDG | Aircraft installed base | Sole-source parts | Aftermarket pricing | High FCF | M&A + special dividends | Leverage +"}             }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" regulation | Pricing intervention | MOD | Regulatory posture |\n| Kaynes | PLI policy | EMS→OSAT build | Margin scale"}            }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"-up | Currently weak | Capex heavy | Cash conversion | No FCF by scale | MOD | Latest WC/FCF data |\n\n---\n\n## 20."}      }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" Freshness / Why-Today Audit\n\n| Candidate | Classification |\n|---|---|\n| All 30 primary candidates (India + US) | STRUCTURAL / NO VERIFIED FRES"}       }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"H TRIGGER |\n| IEX (regulatory coupling), Vertex (pipeline), Intel (foundry) | LIVE VALIDATION REQUIRED — event status unknown |\n| Momentum segment |"}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" LIVE VALIDATION REQUIRED |\n| Portfolio rule-breach flags (UNG, TIP) | VERIFIED FROM SUPPLIED CONTEXT (pasted repo data"}        }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" only — not broker truth) |\n\nNo candidate in this report has a verified today-specific entry trigger. `DISCOVERY UNDERPOWERED BUT NOT SKIPPED."}              }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"`\n\n---\n\n## 21. Red-Team Integrity Audit\n\nCandidates with MVP ≥ 85:\n\n| Ticker | Initial | Final | Conf | Strongest Bear Case | Weakest Link | Red-Team Result | Rev"}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ision | Final Action |\n|---|---|---|---|---|---|---|---|---|\n| CDSL | 90 | 88 | 62 | Regulator controls pricing; transaction revenue cyclical; valuation likely"} }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" rich | Regulated fee-setting | SURVIVED WITH MATERIAL CONDITIONS | −2 for regulatory pricing dependence | HIGH-CONVICTION RESEARCH CANDI"}          }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"DATE |\n| SPGI | 88 | 87 | 62 | Private credit disintermediates rated issuance; multi-year issuance droughts happen | Issuance cyclicality | SURVIVED | −1 |"}       }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" HIGH-CONVICTION RESEARCH CANDIDATE |\n| ICE | 87 | 86 | 62 | Acquisition leverage; mortgage bet unproven through full cycle | Mortg"}     }
+
+event: ping
+data: {"type": "ping"}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"age inflection | SURVIVED WITH MATERIAL CONDITIONS | −1 | HIGH-CONVICTION RESEARCH CANDIDATE |\n| CPRT | 87 | 85 | 60 | ADAS reduces sal"}        }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"vage volumes over decades; insurer bargaining power rising | Long-run frequency arc | SURVIVED WITH MATERIAL CONDITIONS | −2 | HIGH-CONVICTION RESEARCH CANDIDAT"}              }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"E |\n| HDFCBANK | 84 | 84 | 60 | Deposit war structurally compresses NIM; size caps growth | Deposit-"}          }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"cost trajectory | SURVIVED | NO REVISION | HIGH-CONVICTION RESEARCH CANDIDATE |\n\n---\n\n## 22. Capital Allocation Audit\n\nPrecise current met"}     }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"rics not supplied — grades are structural, based on historical patterns; `LIVE VALIDATION REQUIRED`.\n\n| Ticker | Cash Conversion | Reinvest Runway | Incremental Return"} }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" Quality | Debt/Dilution | Buyback/Dividend Quality | Acquisition Discipline | Grade | Main Concern |\n|---|---|---|---|---|---|---|---|---|\n| CDSL | EXCELL"} }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ENT | LIMITED (returns via dividends) | HIGH but capped | NONE | STRONG dividends | N/A | STRONG | Little to reinvest into |\n| SPGI |"}          }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" EXCELLENT | MODERATE (data/index) | HIGH | MODERATE | STRONG buybacks | MIXED (large deals) | STRONG | Deal-size risk |\n| ICE | EXCEL"}            }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"LENT | MODERATE | HIGH | ELEVATED post-deals | ADEQUATE | MIXED-STRONG | STRONG | Leverage cadence |\n| CPRT"}       }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" | EXCELLENT | MODERATE (land, intl) | HIGH | NET CASH | Retention-heavy | DISCIPLINED | ELITE | Cash hoard ef"} }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ficiency |\n| TDG | STRONG | HIGH (M&A pipeline) | VERY HIGH | HIGH LEVERAGE | Special dividends | ELITE | STRONG | Leverage in shock |\n| BAJFINANCE | N"}  }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"/A (lender) | HIGH | HIGH historical | Leverage inherent | Modest dividends | ORGANIC | STRONG | Cycle discipline |\n|"}           }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" TRENT | GOOD | HIGH (store rollout) | HIGH | LOW | Retention-heavy | ORGANIC | STRONG | Rollout pace discipline |\n| Kaynes | WEA"}       }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"K | HIGH but unproven | UNPROVEN | Dilution history | None | ORGANIC+C"}             }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"APEX | MIXED | Capex without FCF |\n| ITC | STRONG | MODERATE | MIXED (FMCG history"}     }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":") | NONE | STRONG dividends | IMPROVING | ADEQUATE-STRONG | FMCG return dilution |\n| AXON | MODERATE (SBC dr"}              }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ag) | HIGH | HIGH | SBC dilution | WEAK (SBC offset) | ADEQUATE | MIXED | SBC vs per-share value"}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" |\n\n---\n\n## 23. Permanent-Impairment Board\n\n| Ticker | Thesis | Impairment Mechanism | Prob Class | Severity | De-Risking Evidence Needed | Action |"}               }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"\n|---|---|---|---|---|---|---|\n| IEX (IN) | Power-ex"}   }
+
+event: content_block_stop
+data: {"type":"content_block_stop","index":1        }
+
+event: message_delta
+data: {"type":"message_delta","delta":{"stop_reason":"max_tokens","stop_sequence":null,"stop_details":null},"usage":{"input_tokens":22946,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":32000,"output_tokens_details":{"thinking_tokens":1621}}              }
+
+event: message_stop
+data: {"type":"message_stop"         }

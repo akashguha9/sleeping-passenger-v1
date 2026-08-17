@@ -1,0 +1,19 @@
+﻿MISTRAL API REQUEST FAILED
+
+Date:
+2026-08-10
+
+Provider:
+Mistral AI
+
+Model:
+mistral-medium-3-5
+
+Endpoint:
+https://api.mistral.ai/v1/chat/completions
+
+Exception:
+The remote server returned an error: (401) Unauthorized.
+
+API error details:
+
