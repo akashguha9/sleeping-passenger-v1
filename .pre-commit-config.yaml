@@ -9,7 +9,10 @@
 
 repos:
   - repo: https://github.com/gitleaks/gitleaks
-    rev: v8.18.4
+    # Keep >= 8.24 so the hook honors the extended-rule
+    # [[rules.allowlists]] syntax in .gitleaks.toml (matches the
+    # 8.24.x scanner used in CI).
+    rev: v8.24.3
     hooks:
       - id: gitleaks
         # Scan staged content for AWS keys, GCP creds, OAuth tokens,
