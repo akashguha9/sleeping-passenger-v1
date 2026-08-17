@@ -34,6 +34,21 @@ try:
 except ModuleNotFoundError:  # pragma: no cover
     from runtime_common import REPO_ROOT, repo_relative
 
+try:
+    from scripts.runtime_contracts import (
+        PositionIntegrityState,
+        TruthOrigin,
+        coerce_position_state,
+        coerce_truth_origin,
+    )
+except ModuleNotFoundError:  # pragma: no cover
+    from runtime_contracts import (  # type: ignore[no-redef]
+        PositionIntegrityState,
+        TruthOrigin,
+        coerce_position_state,
+        coerce_truth_origin,
+    )
+
 
 DEFAULT_CURATED_PATH = REPO_ROOT / "moltbook" / "open_positions.json"
 DEFAULT_RUNTIME_PATH = REPO_ROOT / "runtime" / "paper_positions.json"
@@ -347,6 +362,82 @@ def format_position_truth_summary(summary: dict[str, Any]) -> list[str]:
     return lines
 
 
+def resolve_position_integrity_contract(
+    summary: dict[str, Any],
+    truth_origin: Any = None,
+) -> dict[str, Any]:
+    """Map a position-truth summary onto the canonical contract states.
+
+    The legacy resolver emits states like CLEAN / DIVERGED /
+    MISSING_CANONICAL. This helper translates them into the canonical
+    ``PositionIntegrityState`` enum and applies a single critical rule:
+
+        ``MATCHED`` is not enough if truth_origin is seeded/demo.
+        In that case the canonical state remains ``UNKNOWN`` because no
+        external check has occurred. ``RECONCILED`` requires explicit
+        evidence — either a non-seeded truth_origin or a runtime
+        ``reconciliation_evidence`` flag on the summary.
+    """
+
+    raw_state = str(summary.get("position_integrity_state") or "UNKNOWN").upper()
+    severity = str(summary.get("divergence_severity") or "").upper()
+
+    if raw_state == "CLEAN":
+        canonical = PositionIntegrityState.MATCHED
+    elif raw_state == "DIVERGED":
+        canonical = PositionIntegrityState.DIVERGED
+    elif raw_state in {"MISSING_CANONICAL", "MISSING_SOURCE"}:
+        canonical = PositionIntegrityState.MISSING_SOURCE
+    else:
+        canonical = coerce_position_state(raw_state)
+
+    truth_origin_enum = coerce_truth_origin(truth_origin)
+    has_reconciliation_evidence = bool(summary.get("reconciliation_evidence"))
+
+    rationale_bits: list[str] = []
+    if canonical == PositionIntegrityState.MATCHED and truth_origin_enum in {
+        TruthOrigin.SEEDED,
+        TruthOrigin.DEMO,
+    }:
+        rationale_bits.append(
+            "MATCHED downgraded to UNKNOWN because truth_origin is "
+            f"{truth_origin_enum.value} (no external check performed)"
+        )
+        canonical = PositionIntegrityState.UNKNOWN
+    elif canonical == PositionIntegrityState.MATCHED and has_reconciliation_evidence:
+        rationale_bits.append(
+            "MATCHED + reconciliation_evidence → RECONCILED"
+        )
+        canonical = PositionIntegrityState.RECONCILED
+
+    if severity in {"CRITICAL", "HIGH"} and canonical not in {
+        PositionIntegrityState.DIVERGED,
+        PositionIntegrityState.MISSING_SOURCE,
+    }:
+        rationale_bits.append(
+            f"divergence_severity={severity} forces DIVERGED"
+        )
+        canonical = PositionIntegrityState.DIVERGED
+
+    return {
+        "canonical_position_integrity_state": canonical.value,
+        "raw_position_integrity_state": raw_state,
+        "truth_origin": truth_origin_enum.value,
+        "is_clean": canonical
+        in {PositionIntegrityState.MATCHED, PositionIntegrityState.RECONCILED},
+        "blocks_capital": canonical
+        in {
+            PositionIntegrityState.DIVERGED,
+            PositionIntegrityState.UNKNOWN,
+            PositionIntegrityState.MISSING_SOURCE,
+            PositionIntegrityState.STALE_SOURCE,
+            PositionIntegrityState.QUANTITY_MISMATCH,
+            PositionIntegrityState.PRICE_MISMATCH,
+        },
+        "rationale": "; ".join(rationale_bits) if rationale_bits else "",
+    }
+
+
 __all__ = [
     "DEFAULT_CURATED_PATH",
     "DEFAULT_RUNTIME_PATH",
@@ -354,4 +445,5 @@ __all__ = [
     "build_position_truth_summary",
     "format_position_truth_summary",
     "get_canonical_position_path",
+    "resolve_position_integrity_contract",
 ]
